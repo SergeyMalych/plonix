@@ -4,7 +4,9 @@
 
 Plonix captures everything your browser does, learns the real shape of the target as you explore it, and lets you search, replay and prove what you find, from a GUI, a terminal, or an AI agent.
 
-> **Status: early development.** The core engine (proxy, traffic store, search, adaptive scope, local API) and the `plonix` CLI work today and are covered by tests. The Mac app and the MCP server are next. See [Roadmap](#roadmap).
+![The Plonix window: live traffic with an adaptive-scope suggestion and the request inspector](docs/images/plonix-window.png)
+
+> **Status: early development.** The core engine (proxy, traffic store, search, adaptive scope, local API), the `plonix` CLI and the Plonix window (`plonix ui`) work today and are covered by tests. The native Mac app and the MCP server are next. See [Roadmap](#roadmap).
 
 ---
 
