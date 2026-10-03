@@ -29,7 +29,7 @@ pub fn traffic_line(it: &Value) -> String {
     let src = if it["source"] == "replay" { " ↻" } else { "" };
     format!(
         "{:>6}  {:<7} {:>3}  {}  {:>8}  {:<16} {}{}",
-        it["id"],
+        it["id"].as_i64().unwrap_or(0),
         it["method"].as_str().unwrap_or(""),
         status,
         scope,
@@ -169,4 +169,36 @@ pub fn human_size(n: i64) -> String {
         n if n < 1024 * 1024 => format!("{:.1} KB", n as f64 / 1024.0),
         n => format!("{:.1} MB", n as f64 / 1024.0 / 1024.0),
     }
+}
+
+/// Engine status (as returned by `/api/status`).
+pub fn status(v: &Value, ca_path: &str) -> String {
+    let fp = v["ca_fingerprint"].as_str().unwrap_or("");
+    let pending = v["pending_suggestions"].as_i64().unwrap_or(0);
+    let pending = if pending > 0 { format!(", {pending} suggestion(s) to review (`plonix scope`)") } else { String::new() };
+    format!(
+        "Plonix engine running (pid {})\n  Project    {}\n  Proxy      {}\n  API        {}\n  Captured   {} exchange(s)\n  Scope      {} rule(s){}\n  CA         {}  (SHA-256 {}…)\n",
+        v["pid"],
+        v["project"].as_str().unwrap_or(""),
+        v["proxy"].as_str().unwrap_or(""),
+        v["api"].as_str().unwrap_or(""),
+        v["exchanges"],
+        v["scope_rules"],
+        pending,
+        ca_path,
+        clip(fp, 24).trim_end_matches('…'),
+    )
+}
+
+pub fn hosts(items: &[Value]) -> String {
+    let mut out = String::new();
+    for h in items {
+        let scope = match h["scope"].as_str() {
+            Some("accepted") => "in",
+            Some("rejected") => "out",
+            _ => "?",
+        };
+        out.push_str(&format!("{:>7}  {:<5}  {}\n", h["requests"].as_i64().unwrap_or(0), scope, h["host"].as_str().unwrap_or("")));
+    }
+    out
 }
