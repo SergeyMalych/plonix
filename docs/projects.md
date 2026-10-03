@@ -17,7 +17,7 @@ A project is a folder. Plonix creates new ones in `~/Plonix/<name>` unless you c
 
 Projects that an earlier Plonix kept as `~/.plonix/projects/<name>.db` move into a folder of their own (`~/.plonix/projects/<name>/`) the first time they are opened by name.
 
-A local folder works best. Captured traffic changes constantly, which syncs poorly, so Plonix warns about folders inside iCloud Drive, Dropbox and other cloud storage.
+A local folder works best. Captured traffic changes constantly, which syncs poorly, so Plonix warns about folders that a cloud storage service syncs.
 
 ## Sessions
 

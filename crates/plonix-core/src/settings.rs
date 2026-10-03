@@ -381,7 +381,7 @@ fn proxy_section() -> Section {
         .field(
             Field::list("passthrough_hosts", "Never decrypt these hosts", &[])
                 .group("HTTPS")
-                .placeholder("*.apple.com")
+                .placeholder("*.pinned.example")
                 .help("One host per line; *.example.com includes subdomains. Use it for apps that pin certificates."),
         )
         .field(
@@ -556,7 +556,7 @@ pub fn describe(home: &Home, project: Option<&Map<String, Value>>) -> Value {
 /// growing database is a bad idea.
 pub fn synced_folder_warning(path: &Path) -> Option<&'static str> {
     let p = path.to_string_lossy();
-    if p.contains("/Library/Mobile Documents/") || p.contains("/Library/CloudStorage/") || p.contains("/Dropbox/") {
+    if p.contains("/Library/Mobile Documents/") || p.contains("/Library/CloudStorage/") {
         Some("This folder is synced to the cloud. Captured traffic changes constantly, which syncs poorly; a local folder works best.")
     } else {
         None
