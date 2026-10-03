@@ -27,7 +27,7 @@ use engine_ctl::{DEFAULT_API_PORT, DEFAULT_PROXY_PORT, StartOptions};
 const EXAMPLES: &str = "\
 Get started:
   plonix open example.com          start capturing, open a browser at the target and the Plonix window
-  plonix ui                        open the Plonix window (traffic, repeater, scope, map, findings)
+  plonix ui                        open the Plonix window (Traffic, Lens, Bench, Scope, Map, Findings)
   plonix search host:example.com status:5xx
   plonix show 42
   plonix scope                     review domains Plonix thinks belong in scope
@@ -84,7 +84,7 @@ enum Cmd {
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
-    /// Show one request and its response
+    /// Show one request and its response (the Lens, in the terminal)
     Show {
         /// Exchange id (the first column of `plonix search`)
         id: i64,
@@ -92,7 +92,7 @@ enum Cmd {
         #[arg(long)]
         full: bool,
     },
-    /// Re-send a captured request, optionally modified (accepted hosts only)
+    /// Re-send a captured request, optionally modified (a Bench send; accepted hosts only)
     Replay(ReplayArgs),
     /// Review and change scope
     Scope {

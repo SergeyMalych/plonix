@@ -228,7 +228,7 @@ function cycleTheme() {
 
 const VIEWS = {
   traffic: { label: 'Traffic', ico: '⇅', render: renderTraffic },
-  repeater: { label: 'Repeater', ico: '⎇', render: renderRepeater },
+  bench: { label: 'Bench', ico: '⎇', render: renderBench },
   scope: { label: 'Scope', ico: '◉', render: renderScope },
   map: { label: 'Map', ico: '⊞', render: renderMap },
   findings: { label: 'Findings', ico: '⚑', render: renderFindings },
@@ -331,7 +331,7 @@ function updateChrome() {
   $('#sc-rej').textContent = rules.filter((r) => r.decision === 'rejected').length;
   $('#sc-pend').textContent = (S.scope.suggestions || []).length;
   $('#ct-findings').textContent = S.findingsCount || '';
-  $('#ct-repeater').textContent = R.tabs.length || '';
+  $('#ct-bench').textContent = R.tabs.length || '';
 }
 
 /* ---------- live updates ---------- */
@@ -364,7 +364,7 @@ async function loadScope() {
   } catch (_) {}
   updateChrome();
   if (S.view === 'traffic') renderBanner();
-  if (S.view === 'repeater') renderScopeHint();
+  if (S.view === 'bench') renderScopeHint();
 }
 
 /** Same rule as the engine: the most specific matching rule decides. */
@@ -652,7 +652,7 @@ function drawRows(freshAbove) {
         'data-id': ex.id,
         class: [ex.id === T.sel ? 'sel' : '', ex.in_scope ? '' : 'out', ex.id > freshAbove ? 'fresh' : ''].join(' ').trim(),
         onclick: () => openInspector(ex.id),
-        ondblclick: () => sendToRepeater(ex.id),
+        ondblclick: () => sendToBench(ex.id),
       },
       h('td', { class: 'num', text: ex.id }),
       h('td', null, h('span', { class: 'meth m-' + ex.method, text: ex.method })),
@@ -691,7 +691,7 @@ async function openInspector(id) {
     return;
   }
   if (T.sel !== id || !$('#inspslot')) return;
-  const insp = h('div', { class: 'inspector', id: 'inspector' });
+  const insp = h('div', { class: 'inspector', id: 'inspector', 'aria-label': 'Lens' });
   if (T.inspH) insp.style.height = T.inspH + 'px';
   const enc = header(ex.resp_headers, 'content-encoding');
   const isJson = /json/.test(header(ex.resp_headers, 'content-type') || '');
@@ -712,6 +712,7 @@ async function openInspector(id) {
     h(
       'div',
       { class: 'insp-head' },
+      h('span', { class: 'lens', text: 'Lens', title: 'Lens: the selected request and response' }),
       h('span', { class: 'meth m-' + ex.method, text: ex.method }),
       h('span', { class: 'ip', text: ex.url, title: ex.url }),
       h(
@@ -722,7 +723,7 @@ async function openInspector(id) {
         h('span', { text: fmtSize(b64len(ex.resp_body)) }),
         h('span', { class: 'tag ' + scopeTag(decide(ex.host)), text: scopeLabel(decide(ex.host)) }),
       ),
-      h('button', { class: 'btn sm primary', text: 'Send to Repeater', title: 'Edit and re-send (double-click a row)', onclick: () => sendToRepeater(id) }),
+      h('button', { class: 'btn sm primary', text: 'Send to Bench', title: 'Edit and re-send on the Bench (b, or double-click a row)', onclick: () => sendToBench(id) }),
       h('button', { class: 'btn sm', text: 'New finding', onclick: () => newFinding([id], `${ex.method} ${ex.path}`) }),
       h('button', { class: 'iconbtn', text: '✕', title: 'Close (Esc)', onclick: closeInspector }),
     ),
@@ -831,20 +832,20 @@ function showExchange(id) {
 }
 
 /* ======================================================================
-   Repeater
+   Bench
    ====================================================================== */
 
 const R = { tabs: [], active: 0, mode: 'response' };
-(function loadRepeater() {
-  const saved = store('plonix.repeater');
+(function loadBench() {
+  const saved = store('plonix.bench');
   if (saved && Array.isArray(saved.tabs)) {
     R.tabs = saved.tabs;
     R.active = Math.min(saved.active || 0, Math.max(0, R.tabs.length - 1));
   }
 })();
-function saveRepeater() {
+function saveBench() {
   const tabs = R.tabs.map((t) => ({ ...t, error: undefined, picks: [] }));
-  store('plonix.repeater', { tabs: tabs.slice(-30), active: R.active });
+  store('plonix.bench', { tabs: tabs.slice(-30), active: R.active });
 }
 const tabNo = () => (R.counter = (R.counter || R.tabs.length) + 1);
 
@@ -853,7 +854,7 @@ function rawFromExchange(ex) {
   return head + '\n\n' + (ex.req_text != null ? ex.req_text : '');
 }
 
-async function sendToRepeater(id) {
+async function sendToBench(id) {
   let ex;
   try {
     ex = await getExchange(id);
@@ -873,15 +874,15 @@ async function sendToRepeater(id) {
     picks: [],
   });
   R.active = R.tabs.length - 1;
-  saveRepeater();
-  go('repeater', true);
+  saveBench();
+  go('bench', true);
 }
 
 function newBlankTab() {
   R.tabs.push({ name: 'Request ' + tabNo(), method: 'GET', url: 'https://', raw: 'Accept: */*\nUser-Agent: Plonix\n\n', bodyB64: null, history: [], cur: null, picks: [] });
   R.active = R.tabs.length - 1;
-  saveRepeater();
-  renderRepeater($('#main'));
+  saveBench();
+  renderBench($('#main'));
 }
 
 /** Splits the editor text into headers and body. */
@@ -909,8 +910,8 @@ function hostOf(url) {
   }
 }
 
-function renderRepeater(main) {
-  if (S.view !== 'repeater') return;
+function renderBench(main) {
+  if (S.view !== 'bench') return;
   const tab = R.tabs[R.active];
   const tabs = h(
     'div',
@@ -918,7 +919,7 @@ function renderRepeater(main) {
     R.tabs.map((t, i) =>
       h(
         'div',
-        { class: 'rtab' + (i === R.active ? ' on' : ''), title: t.url, onclick: () => ((R.active = i), saveRepeater(), renderRepeater(main)) },
+        { class: 'rtab' + (i === R.active ? ' on' : ''), title: t.url, onclick: () => ((R.active = i), saveBench(), renderBench(main)) },
         h('span', { class: 'nm', text: t.name }),
         h('button', {
           class: 'x',
@@ -928,8 +929,8 @@ function renderRepeater(main) {
             e.stopPropagation();
             R.tabs.splice(i, 1);
             R.active = Math.max(0, Math.min(R.active, R.tabs.length - 1));
-            saveRepeater();
-            renderRepeater(main);
+            saveBench();
+            renderBench(main);
             updateChrome();
           },
         }),
@@ -940,7 +941,7 @@ function renderRepeater(main) {
   const view = h(
     'div',
     { class: 'view' },
-    h('div', { class: 'toolbar' }, h('h2', { text: 'Repeater' }), h('span', { class: 'hint', text: 'Edit a request, send it, branch it, compare responses. Sends only reach in-scope hosts.' })),
+    h('div', { class: 'toolbar' }, h('h2', { text: 'Bench' }), h('span', { class: 'hint', text: 'Each tab is an experiment: edit a request, send it, branch it, compare responses. Sends only reach in-scope hosts.' })),
     tabs,
   );
   clear(main, view);
@@ -955,7 +956,7 @@ function renderRepeater(main) {
           { class: 'empty' },
           h('h3', { text: 'No requests yet' }),
           'Pick a request in Traffic and press ',
-          h('b', { text: 'Send to Repeater' }),
+          h('b', { text: 'Send to Bench' }),
           ' (or double-click it), or start a ',
           h('button', { class: 'link', text: 'blank request', onclick: newBlankTab }),
           '.',
@@ -965,13 +966,13 @@ function renderRepeater(main) {
     return;
   }
 
-  const method = h('input', { class: 'method', value: tab.method, spellcheck: 'false', list: 'methods', oninput: () => ((tab.method = method.value.toUpperCase()), saveRepeater()) });
+  const method = h('input', { class: 'method', value: tab.method, spellcheck: 'false', list: 'methods', oninput: () => ((tab.method = method.value.toUpperCase()), saveBench()) });
   const url = h('input', {
     value: tab.url,
     spellcheck: 'false',
     oninput: () => {
       tab.url = url.value;
-      saveRepeater();
+      saveBench();
       renderScopeHint();
     },
     onkeydown: (e) => e.key === 'Enter' && !e.metaKey && !e.ctrlKey && send(),
@@ -979,7 +980,7 @@ function renderRepeater(main) {
   const editor = h('textarea', {
     value: tab.raw,
     spellcheck: 'false',
-    oninput: () => ((tab.raw = editor.value), saveRepeater()),
+    oninput: () => ((tab.raw = editor.value), saveBench()),
     onkeydown: (e) => {
       if (e.key === 'Tab') {
         e.preventDefault();
@@ -1021,8 +1022,8 @@ function renderRepeater(main) {
       tab.error = { code: e.code, message: e.message, host: hostOf(tab.url) };
       tab.cur = null;
     }
-    saveRepeater();
-    renderRepeater(main);
+    saveBench();
+    renderBench(main);
   };
   R.send = send;
 
@@ -1044,7 +1045,7 @@ function renderRepeater(main) {
   );
   view.append(body);
   renderScopeHint();
-  drawRepeaterResponse(tab, respCol);
+  drawBenchResponse(tab, respCol);
   drawCompare(tab);
 }
 
@@ -1078,7 +1079,7 @@ function renderScopeHint() {
   );
 }
 
-async function drawRepeaterResponse(tab, col) {
+async function drawBenchResponse(tab, col) {
   const label = (extra) => h('div', { class: 'lbl' }, 'Response', extra);
   if (tab.error) {
     const blocked = tab.error.code === 'out_of_scope';
@@ -1107,7 +1108,7 @@ async function drawRepeaterResponse(tab, col) {
         { class: 'r' },
         enc ? h('span', { class: 'decodetag', text: 'decoded · ' + enc }) : null,
         ' ',
-        isJson ? h('button', { class: 'link', text: pretty ? 'raw' : 'pretty', onclick: () => ((tab.pretty = !pretty), drawRepeaterResponse(tab, col)) }) : null,
+        isJson ? h('button', { class: 'link', text: pretty ? 'raw' : 'pretty', onclick: () => ((tab.pretty = !pretty), drawBenchResponse(tab, col)) }) : null,
         ' ',
         h('span', { class: statusClass(ex.status), text: ex.status == null ? 'no response' : ex.status }),
         ` · ${ex.duration_ms} ms · ${fmtSize(b64len(ex.resp_body))} · #${ex.id}`,
@@ -1126,8 +1127,8 @@ function historyPanel(tab, main) {
         onclick: () => {
           tab.cur = e.id;
           tab.error = null;
-          saveRepeater();
-          renderRepeater(main);
+          saveBench();
+          renderBench(main);
         },
       },
       h('input', {
@@ -1138,7 +1139,7 @@ function historyPanel(tab, main) {
           ev.stopPropagation();
           tab.picks = (tab.picks || []).filter((x) => x !== e.id);
           if (ev.target.checked) tab.picks = [...tab.picks, e.id].slice(-2);
-          renderRepeater(main);
+          renderBench(main);
         },
       }),
       h('span', { class: 'hid', text: '#' + e.id }),
@@ -1152,8 +1153,8 @@ function historyPanel(tab, main) {
         onclick: (ev) => {
           ev.stopPropagation();
           Object.assign(tab, { method: e.req.method, url: e.req.url, raw: e.req.raw, cur: e.id, error: null });
-          saveRepeater();
-          renderRepeater(main);
+          saveBench();
+          renderBench(main);
         },
       }),
       h('button', {
@@ -1164,8 +1165,8 @@ function historyPanel(tab, main) {
           ev.stopPropagation();
           R.tabs.push({ name: tab.name.replace(/ ⎇\d+$/, '') + ' ⎇' + tabNo(), from: e.id, method: e.req.method, url: e.req.url, raw: e.req.raw, bodyB64: tab.bodyB64, history: [e], cur: e.id, picks: [] });
           R.active = R.tabs.length - 1;
-          saveRepeater();
-          renderRepeater(main);
+          saveBench();
+          renderBench(main);
         },
       }),
       h('button', {
@@ -1201,7 +1202,7 @@ function historyPanel(tab, main) {
 function compareLatest(tab, main) {
   if ((tab.picks || []).length !== 2) tab.picks = tab.history.slice(0, 2).map((e) => e.id).reverse();
   R.scrollToCompare = true;
-  renderRepeater(main);
+  renderBench(main);
 }
 
 async function drawCompare(tab) {
@@ -1245,7 +1246,7 @@ async function drawCompare(tab) {
         'div',
         { class: 'cvh' },
         `Compare #${a.id} ↔ #${b.id}`,
-        h('span', { class: 'r' }, seg, h('button', { class: 'btn sm', text: 'Close', onclick: () => ((tab.picks = []), renderRepeater($('#main'))) })),
+        h('span', { class: 'r' }, seg, h('button', { class: 'btn sm', text: 'Close', onclick: () => ((tab.picks = []), renderBench($('#main'))) })),
       ),
       h('div', { class: 'cmpsum', text: changed ? `${changed} line${changed === 1 ? '' : 's'} differ in the ${R.mode}.` : `The ${R.mode}s are identical.` }),
       h('div', { class: 'cmpcols' }, h('div', { class: 'cc' }, head(a), left), h('div', { class: 'cc' }, head(b), right)),
@@ -1609,7 +1610,7 @@ async function loadFindings() {
   if (!list.length) {
     return clear(
       box,
-      h('div', { class: 'card' }, h('div', { class: 'empty' }, h('h3', { text: 'No findings yet' }), 'Open a request in Traffic or Repeater and choose ', h('b', { text: 'New finding' }), ' to record what you found with the request as evidence.')),
+      h('div', { class: 'card' }, h('div', { class: 'empty' }, h('h3', { text: 'No findings yet' }), 'Open a request in Traffic or on the Bench and choose ', h('b', { text: 'New finding' }), ' to record what you found with the request as evidence.')),
     );
   }
   list.sort((a, b) => (SEV_ORDER[a.severity] ?? 9) - (SEV_ORDER[b.severity] ?? 9) || b.created_at - a.created_at);
@@ -1675,7 +1676,7 @@ document.addEventListener('keydown', (e) => {
     if ($('.modal')) return closeModal();
     if (S.view === 'traffic' && !typing) return closeInspector();
   }
-  if (S.view === 'repeater' && e.key === 'Enter' && (e.metaKey || e.ctrlKey) && R.send) {
+  if (S.view === 'bench' && e.key === 'Enter' && (e.metaKey || e.ctrlKey) && R.send) {
     e.preventDefault();
     return R.send();
   }
@@ -1698,7 +1699,7 @@ document.addEventListener('keydown', (e) => {
   } else if (e.key === 'ArrowUp' || e.key === 'k') {
     e.preventDefault();
     selectRow(-1);
-  } else if (e.key === 'r' && T.sel) sendToRepeater(T.sel);
+  } else if (e.key === 'b' && T.sel) sendToBench(T.sel);
 });
 
 boot();
