@@ -157,13 +157,14 @@ code, .mono { font-family: var(--mono); }
 .tag.pend { background: var(--accent-soft); color: var(--accent); }
 .mime { color: var(--fg-3); font-size: 11px; }
 
-/* inspector */
+/* lens (request inspector pane) */
 .splitter { flex: 0 0 auto; height: 5px; cursor: row-resize; background: var(--line); border-top: 2px solid var(--surface); border-bottom: 2px solid var(--surface); }
 .splitter:hover { background: var(--accent); }
 .inspector { flex: 0 0 auto; height: 48%; min-height: 160px; display: flex; flex-direction: column; background: var(--surface-2); }
 .insp-head { display: flex; align-items: center; gap: 10px; padding: 7px 14px; border-bottom: 1px solid var(--line-2); flex-wrap: wrap; }
 .insp-head .ip { font-family: var(--mono); font-size: 12px; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 .insp-head .meta { display: flex; gap: 12px; color: var(--fg-3); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.insp-head .lens { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3); }
 .split { flex: 1; display: grid; grid-template-columns: 1fr 1fr; min-height: 0; }
 .col { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .col + .col { border-left: 1px solid var(--line-2); }
@@ -176,7 +177,7 @@ pre.raw { margin: 0; flex: 1; overflow: auto; padding: 4px 12px 12px; font-famil
 .hl-h { color: var(--accent); font-weight: 650; } .hl-k { color: var(--violet); } .hl-note { color: var(--fg-3); font-style: italic; }
 .decodetag { font-size: 9.5px; color: var(--fg-3); border: 1px solid var(--line-2); border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
 
-/* repeater */
+/* bench */
 .rtabs { display: flex; align-items: center; gap: 2px; padding: 6px 10px 0; border-bottom: 1px solid var(--line); background: var(--chrome-2); overflow-x: auto; flex: 0 0 auto; }
 .rtab { display: flex; align-items: center; gap: 6px; border: 1px solid transparent; border-bottom: 0; background: transparent; border-radius: 7px 7px 0 0; padding: 6px 8px 6px 11px; font-size: 12px; color: var(--fg-2); white-space: nowrap; max-width: 240px; }
 .rtab .nm { overflow: hidden; text-overflow: ellipsis; }

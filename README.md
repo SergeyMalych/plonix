@@ -4,7 +4,7 @@
 
 Plonix captures everything your browser does, learns the real shape of the target as you explore it, and lets you search, replay and prove what you find, from a GUI, a terminal, or an AI agent.
 
-![The Plonix window: live traffic with an adaptive-scope suggestion and the request inspector](docs/images/plonix-window.png)
+![The Plonix window: live traffic with an adaptive-scope suggestion and the Lens showing a request and its response](docs/images/plonix-window.png)
 
 > **Status: early development.** The core engine (proxy, traffic store, search, adaptive scope, local API), the `plonix` CLI and the Plonix window (`plonix ui`) work today and are covered by tests. The native Mac app and the MCP server are next. See [Roadmap](#roadmap).
 
@@ -18,7 +18,7 @@ Most of a web assessment is the same loop: capture traffic, figure out what the 
 | --- | --- |
 | A tool you can afford on every machine | Free and open source. No Pro tier holding back the good parts. |
 | Large projects that stay responsive | A Rust engine with one SQLite database per project. Search over captured traffic stays quick as projects grow. |
-| Something you can see and click | The Plonix window: live traffic, a repeater with branching and side-by-side compare, adaptive scope, a site map and findings. A native macOS app is planned on the same engine. |
+| Something you can see and click | The Plonix window: live traffic, the Bench for branching and comparing requests, adaptive scope, a map of the target and findings. A native macOS app is planned on the same engine. |
 | Scope that matches reality | Adaptive scope learns related domains as you browse and shows the evidence for each one. |
 | Filters you can type | A small query language: `host:api.acme.com method:POST status:5xx -logout`. |
 | Automation in any language | Everything goes through a local HTTP API. Use curl, Python, Go, or whatever you already script in. |
@@ -32,6 +32,20 @@ Most of a web assessment is the same loop: capture traffic, figure out what the 
 - **User-friendly first.** From download to captured traffic in under a minute is a release requirement.
 - **Programmable everywhere.** GUI, CLI and MCP are equal clients of the same local API. Anything you can click, you can script.
 - **AI-native.** Agents get first-class, scoped access to the research environment, and they follow the same scope rules you do.
+
+## Tools
+
+Plonix has a handful of tools, each with its own name. They are the same in the window, the CLI and the docs.
+
+| Tool | What it does | From the terminal |
+|---|---|---|
+| **Traffic** | Every request and response that passes through the proxy, live, with the search language | `plonix search`, `plonix watch` |
+| **Lens** | The selected request and its response, decoded and pretty-printed | `plonix show <id>` |
+| **Bench** | Where you experiment: edit a request, send it, branch it and compare responses side by side. Each tab is one experiment | `plonix replay <id>` |
+| **Scope** | Adaptive scope: the domains Plonix thinks belong to your target, with the evidence, to accept or reject | `plonix scope` |
+| **Map** | Hosts, the technologies behind them and their endpoints and parameters | `plonix hosts`, `plonix tech` |
+| **Findings** | What you found, with the requests that prove it attached as evidence | the window, or `/api/findings` |
+| **Rules** and the **Store** | Community rule packs that teach Plonix to recognise technologies | `plonix rules`, `plonix store` |
 
 ## What works today
 
@@ -85,8 +99,8 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 
 ### The Plonix window
 - `plonix ui` (and `plonix open`) opens a fast, keyboard-friendly UI in your browser, served by the engine itself. No install, no build step, light and dark.
-- **Traffic:** a live-updating request list with the search language, filter chips and an inline request/response viewer that decodes gzip/brotli and pretty-prints JSON. A banner surfaces each new domain adaptive scope suggests, with its evidence and one-click accept or reject.
-- **Repeater:** edit any request and send it, keep a history per tab, restore or branch any earlier send into a new tab, and compare two sends side by side (response or request diff). Sends go through the engine's scope enforcement: out-of-scope hosts are refused, and you can accept the host right there.
+- **Traffic:** a live-updating request list with the search language, filter chips and the **Lens**, an inline request/response viewer that decodes gzip/brotli and pretty-prints JSON. A banner surfaces each new domain adaptive scope suggests, with its evidence and one-click accept or reject.
+- **Bench:** edit any request and send it (press `b` or double-click a row in Traffic), keep a history per tab, restore or branch any earlier send into a new tab, and compare two sends side by side (response or request diff). Sends go through the engine's scope enforcement: out-of-scope hosts are refused, and you can accept the host right there.
 - **Scope:** every suggested domain with its evidence, accept (with or without subdomains) or reject, and the rule list.
 - **Map:** hosts with their scope state, detected technologies with the evidence behind them, and endpoints with statuses and parameters.
 - **Findings:** record a finding from any request, with the requests that prove it linked as evidence.
@@ -237,14 +251,14 @@ docs/             detection rules, extension design
 - [x] `plonix` CLI: search, inspect, watch, replay and manage scope from the terminal
 - [x] `plonix open <target>`: one command from nothing to captured traffic, in a pre-configured browser
 - [x] Technology detection from community rule packs, with a store (`plonix tech`, `plonix rules`, `plonix store`)
-- [x] The Plonix window (`plonix ui`): live traffic, repeater with branch and compare, adaptive scope review, map with technologies, findings
+- [x] The Plonix window (`plonix ui`): live traffic, the Bench with branch and compare, adaptive scope review, map with technologies, findings
 
 **Coming**
 - [ ] Built-in MCP server and `plonix connect claude`, so Claude Code and other agents can work with live traffic, scope and findings, always inside accepted scope
 - [ ] Native macOS app on the same engine, adding an Agents screen once MCP lands
 - [ ] Sandboxed WebAssembly extensions with a closed capability list that can never bypass scope ([design](docs/extensions.md))
 
-Deliberately out of scope: an automated scanner and a token sequencer. Plonix stays small on purpose.
+Deliberately out of scope: automated vulnerability scanning and token-randomness analysis. Plonix stays small on purpose.
 
 ## Contributing
 
