@@ -3,6 +3,9 @@
 //! Bound to loopback, requires `Authorization: Bearer <token>` (token in
 //! `$PLONIX_HOME/api-token`) and a loopback `Host` header, so that web pages
 //! cannot drive it through the browser (CSRF / DNS rebinding).
+//!
+//! The same address also serves the web UI (see [`crate::ui`]): its static
+//! files need no token, and the page obtains one through a launch code.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -21,6 +24,7 @@ use crate::engine::{Engine, ReplayRequest, SendError, SendRequest};
 use crate::model::{Exchange, NewFinding, SEVERITIES};
 use crate::query;
 use crate::scope::Decision;
+use crate::ui::{self, LaunchCodes};
 
 #[derive(Clone)]
 struct AppState {
@@ -28,11 +32,18 @@ struct AppState {
     token: String,
     api_addr: SocketAddr,
     proxy_addr: SocketAddr,
+    launch_codes: Arc<LaunchCodes>,
 }
 
 pub fn router(engine: Arc<Engine>, token: String, api_addr: SocketAddr, proxy_addr: SocketAddr) -> Router {
-    let state = AppState { engine, token, api_addr, proxy_addr };
+    let state = AppState { engine, token, api_addr, proxy_addr, launch_codes: Arc::default() };
     Router::new()
+        .route("/", get(ui::index))
+        .route("/ui/app.js", get(ui::app_js))
+        .route("/ui/app.css", get(ui::app_css))
+        .route("/ui/icon.svg", get(ui::icon))
+        .route("/ui/session", post(ui_session))
+        .route("/api/ui/launch", post(ui_launch))
         .route("/api/status", get(status))
         .route("/api/traffic", get(traffic))
         .route("/api/traffic/{id}", get(exchange))
@@ -61,6 +72,10 @@ async fn guard(State(s): State<AppState>, req: Request, next: Next) -> Response 
     if !host_ok {
         return err(StatusCode::FORBIDDEN, "bad_host", "requests must target the loopback API address");
     }
+    // The UI's static files and the launch-code exchange carry no token.
+    if !req.uri().path().starts_with("/api/") {
+        return next.run(req).await;
+    }
     let auth = req.headers().get("authorization").and_then(|h| h.to_str().ok()).unwrap_or("");
     let ok = auth.strip_prefix("Bearer ").is_some_and(|t| constant_eq(t.trim().as_bytes(), s.token.as_bytes()));
     if !ok {
@@ -83,6 +98,48 @@ fn internal(e: anyhow::Error) -> Response {
 
 fn initiator(h: &HeaderMap) -> String {
     h.get("x-plonix-client").and_then(|v| v.to_str().ok()).unwrap_or("api").chars().take(32).collect()
+}
+
+/// Issues a one-time code that opens the web UI already signed in.
+async fn ui_launch(State(s): State<AppState>) -> Response {
+    match s.launch_codes.issue() {
+        Ok(code) => Json(json!({
+            "url": format!("http://{}/#code={code}", s.api_addr),
+            "code": code,
+            "expires_in": ui::CODE_TTL.as_secs(),
+        }))
+        .into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct SessionBody {
+    code: String,
+}
+
+/// Trades a launch code for the API token. Only the UI's own origin may ask:
+/// the JSON body forces a CORS preflight that other origins cannot pass, and
+/// a present `Origin` must be this address.
+async fn ui_session(State(s): State<AppState>, headers: HeaderMap, Json(b): Json<SessionBody>) -> Response {
+    if let Some(origin) = headers.get("origin").and_then(|o| o.to_str().ok()) {
+        let host = origin.strip_prefix("http://").unwrap_or("");
+        let ok = host.rsplit_once(':').is_some_and(|(h, p)| {
+            p.parse::<u16>().ok() == Some(s.api_addr.port()) && matches!(h, "127.0.0.1" | "localhost" | "[::1]")
+        });
+        if !ok {
+            return err(StatusCode::FORBIDDEN, "bad_origin", "the UI session must be requested by the Plonix UI");
+        }
+    }
+    if s.launch_codes.redeem(b.code.trim()) {
+        Json(json!({ "token": s.token })).into_response()
+    } else {
+        err(
+            StatusCode::UNAUTHORIZED,
+            "bad_code",
+            "this link has expired or was already used; run `plonix ui` to open Plonix again",
+        )
+    }
 }
 
 async fn status(State(s): State<AppState>) -> Response {

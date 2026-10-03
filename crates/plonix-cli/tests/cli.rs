@@ -22,7 +22,8 @@ impl Plonix {
 
     fn cmd(&self, args: &[&str]) -> Command {
         let mut c = Command::new(BIN);
-        c.env("PLONIX_HOME", self.home.path()).env_remove("PLONIX_BROWSER").args(args);
+        // Never open a real browser window from tests.
+        c.env("PLONIX_HOME", self.home.path()).env_remove("PLONIX_BROWSER").env("PLONIX_UI_BROWSER", "true").args(args);
         for (k, v) in &self.env {
             c.env(k, v);
         }
@@ -257,8 +258,13 @@ fn capture_search_show_scope_and_replay() {
 }
 
 fn fake_browser(dir: &Path) -> PathBuf {
-    let script = dir.join("fake-chrome");
-    let log = dir.join("browser-args.txt");
+    fake_program(dir, "fake-chrome", "browser-args.txt")
+}
+
+/// A stand-in for a program that records its arguments, one per line.
+fn fake_program(dir: &Path, name: &str, log: &str) -> PathBuf {
+    let script = dir.join(name);
+    let log = dir.join(log);
     std::fs::write(&script, format!("#!/bin/sh\nfor a in \"$@\"; do echo \"$a\"; done > '{}'\n", log.display())).unwrap();
     #[cfg(unix)]
     {
@@ -285,6 +291,8 @@ fn open_starts_everything_and_launches_the_browser_through_the_proxy() {
     let bin = tempfile::tempdir().unwrap();
     let browser = fake_browser(bin.path());
     p.env.push(("PLONIX_BROWSER".into(), browser.display().to_string()));
+    let window = fake_program(bin.path(), "fake-default-browser", "ui-args.txt");
+    p.env.push(("PLONIX_UI_BROWSER".into(), window.display().to_string()));
     let target = serve_target();
 
     let r = p.run(&["open", &format!("127.0.0.1:{target}/app"), "--no-watch", "--port", "0", "--api-port", "0"]);
@@ -303,6 +311,16 @@ fn open_starts_everything_and_launches_the_browser_through_the_proxy() {
     assert!(args.contains(&format!("--user-data-dir={}", p.home.path().join("browser").display()).as_str()), "{args:?}");
     assert!(args.iter().any(|a| a.starts_with("--ignore-certificate-errors-spki-list=") && a.len() > 40), "{args:?}");
     assert_eq!(args.last().unwrap(), &format!("http://127.0.0.1:{target}/app"));
+
+    // The Plonix window opens in the default browser with a one-time link.
+    assert!(out.contains("✓ Window"), "{out}");
+    let link = read_when_ready(&bin.path().join("ui-args.txt")).trim().to_string();
+    let api = api_base(&p);
+    assert!(link.starts_with(&format!("{api}/#code=")), "{link}");
+    let code = link.rsplit_once("#code=").unwrap().1;
+    let token = std::fs::read_to_string(p.home.path().join("api-token")).unwrap();
+    assert_eq!(redeem(&api, code).unwrap()["token"], token.trim());
+    assert_eq!(redeem(&api, code).unwrap_err(), 401, "a link works only once");
 
     // What the browser would do: load the target through the proxy.
     via_proxy(&proxy, &format!("http://127.0.0.1:{target}/app"), &[]);
@@ -324,6 +342,60 @@ fn open_starts_everything_and_launches_the_browser_through_the_proxy() {
     assert_eq!(v["scope"], serde_json::Value::Null);
 
     assert_eq!(p.run(&["open", "ftp://x"]).code(), 1);
+}
+
+fn api_base(p: &Plonix) -> String {
+    let v: serde_json::Value = serde_json::from_str(&p.run(&["status", "--json"]).stdout()).unwrap();
+    format!("http://{}", v["status"]["api"].as_str().unwrap())
+}
+
+/// Trades a UI launch code for the API token, as the page does.
+fn redeem(api: &str, code: &str) -> Result<serde_json::Value, u16> {
+    match ureq::post(&format!("{api}/ui/session")).send_json(serde_json::json!({ "code": code })) {
+        Ok(r) => Ok(r.into_json().unwrap()),
+        Err(ureq::Error::Status(s, _)) => Err(s),
+        Err(e) => panic!("{e}"),
+    }
+}
+
+#[test]
+fn ui_serves_the_window_and_signs_in_with_a_one_time_link() {
+    let p = Plonix::new();
+    let r = p.run(&["ui", "--no-open", "--json", "--port", "0", "--api-port", "0"]);
+    let v: serde_json::Value = serde_json::from_str(&r.ok().stdout()).unwrap();
+    assert_eq!(v["engine_started"], true);
+    assert_eq!(v["opened"], false);
+    let api = api_base(&p);
+    let link = v["url"].as_str().unwrap();
+    assert!(link.starts_with(&format!("{api}/#code=")), "{link}");
+
+    // The page and its assets load without a token, locked down by CSP.
+    let page = ureq::get(&format!("{api}/")).call().unwrap();
+    let csp = page.header("content-security-policy").unwrap().to_string();
+    assert!(csp.contains("script-src 'self'") && csp.contains("frame-ancestors 'none'"), "{csp}");
+    assert!(page.into_string().unwrap().contains("/ui/app.js"));
+    for asset in ["/ui/app.js", "/ui/app.css", "/ui/icon.svg"] {
+        assert_eq!(ureq::get(&format!("{api}{asset}")).call().unwrap().status(), 200, "{asset}");
+    }
+    // The API itself still needs the token.
+    match ureq::get(&format!("{api}/api/status")).call() {
+        Err(ureq::Error::Status(401, _)) => {}
+        other => panic!("expected 401, got {other:?}"),
+    }
+
+    // Other origins cannot redeem a link; a wrong code gets nothing.
+    let code = link.rsplit_once("#code=").unwrap().1;
+    let foreign = ureq::post(&format!("{api}/ui/session")).set("Origin", "https://evil.example").send_json(serde_json::json!({ "code": code }));
+    assert!(matches!(foreign, Err(ureq::Error::Status(403, _))), "{foreign:?}");
+    assert_eq!(redeem(&api, "0000").unwrap_err(), 401);
+    let token = redeem(&api, code).unwrap()["token"].as_str().unwrap().to_string();
+    let status = ureq::get(&format!("{api}/api/status")).set("Authorization", &format!("Bearer {token}")).call().unwrap();
+    assert_eq!(status.status(), 200);
+
+    // Text mode prints the link when not opening it; a running engine is reused.
+    let out = p.run(&["ui", "--no-open"]).ok().stdout();
+    assert!(out.contains(&format!("{api}/#code=")), "{out}");
+    assert!(!out.contains("engine started"), "{out}");
 }
 
 #[test]
