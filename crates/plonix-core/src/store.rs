@@ -72,6 +72,10 @@ CREATE TABLE IF NOT EXISTS findings (
     exchange_ids TEXT NOT NULL,
     created_by TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS view_state (
+    view TEXT PRIMARY KEY,
+    state TEXT NOT NULL
+);
 "#;
 
 pub struct Store {
@@ -248,8 +252,8 @@ impl Store {
         let mut stmt = conn.prepare("SELECT host, method, status, mime, source, path FROM exchanges ORDER BY id DESC LIMIT ?1")?;
         let mut rows = stmt.query([Facets::SAMPLE as i64])?;
         let mut f = Facets::default();
-        let (mut methods, mut statuses, mut kinds, mut hosts, mut paths) =
-            (BTreeMap::new(), BTreeMap::new(), BTreeMap::new(), BTreeMap::new(), BTreeMap::new());
+        let (mut methods, mut statuses, mut kinds, mut hosts, mut paths, mut other_hosts) =
+            (BTreeMap::new(), BTreeMap::new(), BTreeMap::new(), BTreeMap::new(), BTreeMap::new(), BTreeMap::new());
         let mut scope_cache: BTreeMap<String, bool> = BTreeMap::new();
         while let Some(r) = rows.next()? {
             let host: String = r.get(0)?;
@@ -281,6 +285,7 @@ impl Store {
                 *hosts.entry(host).or_insert(0) += 1;
             } else {
                 f.out_of_scope += 1;
+                *other_hosts.entry(host).or_insert(0) += 1;
             }
         }
         f.methods = ranked(methods);
@@ -288,7 +293,27 @@ impl Store {
         f.kinds = ranked(kinds);
         f.hosts = ranked(hosts);
         f.paths = ranked(paths);
+        f.other_hosts = ranked(other_hosts);
+        f.other_hosts.truncate(20);
         Ok(f)
+    }
+
+    // ---- saved view state -------------------------------------------------
+
+    /// Saved UI state of a view (e.g. its active filters), as JSON.
+    pub fn view_state(&self, view: &str) -> Result<Option<serde_json::Value>> {
+        let conn = self.conn.lock().unwrap();
+        let raw: Option<String> =
+            conn.query_row("SELECT state FROM view_state WHERE view = ?1", [view], |r| r.get(0)).optional()?;
+        Ok(raw.and_then(|r| serde_json::from_str(&r).ok()))
+    }
+
+    pub fn set_view_state(&self, view: &str, state: &serde_json::Value) -> Result<()> {
+        self.conn.lock().unwrap().execute(
+            "INSERT INTO view_state (view, state) VALUES (?1, ?2) ON CONFLICT(view) DO UPDATE SET state = excluded.state",
+            params![view, serde_json::to_string(state)?],
+        )?;
+        Ok(())
     }
 
     /// Endpoints seen on a host, with numeric/UUID path segments folded into `{id}`.
@@ -674,6 +699,53 @@ mod tests {
         let (page, total) = s.search(&Query::parse("").unwrap(), &rules, 2, 1).unwrap();
         assert_eq!((page.len(), total), (2, 4));
         assert!(page[0].id > page[1].id, "newest first");
+    }
+
+    #[test]
+    fn include_and_exclude_filters() {
+        let s = Store::open_in_memory().unwrap();
+        let rules = seeded(&s);
+        let with_type = |host: &str, path: &str, status: u16, ct: &str| {
+            let mut ex = sample(host, "GET", path, status, "");
+            ex.resp_headers = vec![("Content-Type".into(), ct.into())];
+            ex
+        };
+        s.insert_exchange(&with_type("www.example.com", "/", 200, "text/html")).unwrap();
+        s.insert_exchange(&with_type("www.example.com", "/app.JS", 200, "application/javascript")).unwrap();
+        s.insert_exchange(&with_type("www.example.com", "/logo", 200, "image/png")).unwrap();
+        s.insert_exchange(&with_type("www.example.com", "/fonts/a.woff2", 304, "")).unwrap();
+        s.insert_exchange(&with_type("api.example.com", "/api/me", 302, "application/json")).unwrap();
+        s.insert_exchange(&with_type("tracker.ads.net", "/collect", 204, "")).unwrap();
+        let mut failed = sample("api.example.com", "POST", "/api/upload", 0, "");
+        failed.status = None;
+        failed.resp_headers.clear();
+        s.insert_exchange(&failed).unwrap();
+
+        let run = |q: &str| -> Vec<String> {
+            let (rows, _) = s.search(&Query::parse(q).unwrap(), &rules, 50, 0).unwrap();
+            let mut v: Vec<String> = rows.into_iter().map(|r| r.path).collect();
+            v.sort();
+            v
+        };
+        assert_eq!(run("-kind:static"), vec!["/", "/api/me", "/api/upload", "/collect"]);
+        assert_eq!(run("kind:static"), vec!["/app.JS", "/fonts/a.woff2", "/logo"]);
+        assert_eq!(run("ext:js,woff2"), vec!["/app.JS", "/fonts/a.woff2"]);
+        assert_eq!(run("status:2xx,3xx -host:www.example.com"), vec!["/api/me", "/collect"]);
+        assert_eq!(run("-host:www.example.com,tracker.ads.net"), vec!["/api/me", "/api/upload"]);
+        // Excluding a status class keeps requests that got no response.
+        assert_eq!(run("host:api.example.com -status:3xx"), vec!["/api/upload"]);
+        assert_eq!(run("host:api.example.com -mime:json"), vec!["/api/upload"]);
+        assert_eq!(s.facets(&rules).unwrap().other_hosts, vec![Count { value: "tracker.ads.net".into(), count: 1 }]);
+    }
+
+    #[test]
+    fn view_state_roundtrip() {
+        let s = Store::open_in_memory().unwrap();
+        assert_eq!(s.view_state("traffic").unwrap(), None);
+        let v = serde_json::json!({ "filters": [{ "term": "kind:static", "mode": "exclude" }] });
+        s.set_view_state("traffic", &v).unwrap();
+        s.set_view_state("traffic", &v).unwrap();
+        assert_eq!(s.view_state("traffic").unwrap(), Some(v));
     }
 
     #[test]

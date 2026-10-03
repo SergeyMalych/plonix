@@ -75,7 +75,7 @@ enum Cmd {
     /// Search captured traffic, newest first
     #[command(
         visible_alias = "s",
-        after_help = "Filters: host:example.com  method:POST  status:404|5xx|none  path:/api  mime:json\n         scope:in|out  source:proxy|replay  \"quoted phrase\"  -negated  free text\nPut options such as -n before the query: everything after the first term is search text."
+        after_help = "Filters: host:example.com  method:POST  status:404|5xx|none  path:/api  mime:json  ext:js\n         kind:static  scope:in|out  source:proxy|replay  \"quoted phrase\"  free text\nInclude and exclude: a term shows only what matches, -term hides it; commas match any value:\n  plonix search status:4xx,5xx -kind:static -host:cdn.example.com\nPut options such as -n before the query: everything after the first term is search text."
     )]
     Search(SearchArgs),
     /// Print new traffic as it is captured (Ctrl-C to stop)

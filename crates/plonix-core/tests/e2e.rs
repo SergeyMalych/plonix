@@ -362,6 +362,19 @@ async fn api_requires_token_and_loopback_host() {
         assert_eq!(r.status(), 201);
         let (_, findings) = call(ureq::get(&format!("{base}/api/findings")).set("Authorization", &auth));
         assert_eq!(findings[0]["title"], "Reflected header");
+
+        // Saved view state: the Traffic filters.
+        let (code, empty) = call(ureq::get(&format!("{base}/api/views/traffic")).set("Authorization", &auth));
+        assert_eq!((code, empty), (200, serde_json::json!({})));
+        let state = serde_json::json!({ "filters": [{ "term": "kind:static", "mode": "exclude" }], "text": "" });
+        let r = ureq::put(&format!("{base}/api/views/traffic")).set("Authorization", &auth).send_json(state.clone()).unwrap();
+        assert_eq!(r.status(), 200);
+        assert_eq!(call(ureq::get(&format!("{base}/api/views/traffic")).set("Authorization", &auth)).1, state);
+        assert_eq!(call(ureq::get(&format!("{base}/api/views/bad%20name")).set("Authorization", &auth)).0, 400);
+        let bad = ureq::put(&format!("{base}/api/views/traffic")).set("Authorization", &auth).send_json(serde_json::json!([1]));
+        assert!(matches!(bad, Err(ureq::Error::Status(400, _))));
+        let (_, hidden) = call(ureq::get(&format!("{base}/api/traffic?q=-kind:static%20-status:2xx,3xx")).set("Authorization", &auth));
+        assert_eq!(hidden["total"], 0, "{hidden}");
     })
     .await
     .unwrap();
