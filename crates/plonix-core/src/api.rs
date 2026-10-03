@@ -11,7 +11,7 @@
 //! files need no token, and the page obtains one through a launch code.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -22,7 +22,8 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::access::{self, AgentActivity, AgentMode, Caller};
+use crate::access::{self, AgentActivity, AgentMode, AgentSettings, Caller, Group};
+use crate::ask::{self, AskError, AskRequest};
 use crate::browser;
 use crate::codec;
 use crate::engine::{Engine, ReplayRequest, SendError, SendRequest};
@@ -38,6 +39,7 @@ struct AppState {
     token: String,
     agent_token: String,
     agents: Arc<AgentActivity>,
+    agent_settings: Arc<RwLock<AgentSettings>>,
     api_addr: SocketAddr,
     proxy_addr: SocketAddr,
     launch_codes: Arc<LaunchCodes>,
@@ -58,6 +60,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, proxy_a
         token: tokens.user,
         agent_token: tokens.agent,
         agents: Arc::default(),
+        agent_settings: Arc::new(RwLock::new(AgentSettings::load(&home))),
         api_addr,
         proxy_addr,
         launch_codes: Arc::default(),
@@ -93,6 +96,9 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, proxy_a
         .route("/api/scan/suggest/{host}", get(scan_suggest))
         .route("/api/scan", post(scan_run))
         .route("/api/agents", get(agents))
+        .route("/api/agents/settings", get(agent_settings).put(put_agent_settings))
+        .route("/api/agents/ask", post(agent_ask))
+        .route("/api/agents/launch", post(agent_launch))
         .route("/api/shutdown", post(shutdown))
         .layer(middleware::from_fn_with_state(state.clone(), guard))
         .with_state(state)
@@ -122,19 +128,30 @@ async fn guard(State(s): State<AppState>, req: Request, next: Next) -> Response 
     if caller == Caller::Agent {
         let mode = AgentMode::current();
         let (method, path) = (req.method().as_str().to_string(), req.uri().path().to_string());
-        let allowed = access::allowed(mode, &method, &path);
-        s.agents.record(&initiator(req.headers()), &method, &path, !allowed);
-        if !allowed {
-            return err(
-                StatusCode::FORBIDDEN,
-                "agent_not_allowed",
-                "agents have read-only access: they can read traffic, the map, scope and findings, but not send requests or change anything",
-            );
+        let checked = access::check(mode, &s.agent_settings.read().unwrap(), &method, &path);
+        s.agents.record(&initiator(req.headers()), &method, &path, checked.is_err());
+        if let Err(refusal) = checked {
+            return err(StatusCode::FORBIDDEN, refusal.code(), refusal.message());
         }
     }
     let mut req = req;
     req.extensions_mut().insert(caller);
     next.run(req).await
+}
+
+type MaybeCaller = Option<axum::Extension<Caller>>;
+
+/// Whether this request comes from an agent that may only see in-scope hosts.
+fn agent_in_scope_only(s: &AppState, caller: &MaybeCaller) -> bool {
+    caller.as_ref().is_some_and(|c| c.0 == Caller::Agent) && s.agent_settings.read().unwrap().in_scope_only()
+}
+
+fn outside_agent_data() -> Response {
+    err(
+        StatusCode::FORBIDDEN,
+        "outside_agent_data",
+        "this host is not in scope, and the user lets agents see in-scope traffic only (Agents screen)",
+    )
 }
 
 fn constant_eq(a: &[u8], b: &[u8]) -> bool {
@@ -227,8 +244,9 @@ fn default_limit() -> usize {
     100
 }
 
-async fn traffic(State(s): State<AppState>, Query(p): Query<TrafficParams>) -> Response {
-    let q = match query::Query::parse(&p.q) {
+async fn traffic(State(s): State<AppState>, caller: MaybeCaller, Query(p): Query<TrafficParams>) -> Response {
+    let q = if agent_in_scope_only(&s, &caller) { format!("{} scope:in", p.q) } else { p.q };
+    let q = match query::Query::parse(&q) {
         Ok(q) => q,
         Err(e) => return err(StatusCode::BAD_REQUEST, "bad_query", &e.to_string()),
     };
@@ -259,10 +277,13 @@ pub fn view(ex: Exchange, in_scope: bool) -> ExchangeView {
     }
 }
 
-async fn exchange(State(s): State<AppState>, Path(id): Path<i64>) -> Response {
+async fn exchange(State(s): State<AppState>, caller: MaybeCaller, Path(id): Path<i64>) -> Response {
     match s.engine.store.get_exchange(id) {
         Ok(Some(ex)) => {
             let in_scope = s.engine.rules().in_scope(&ex.host);
+            if !in_scope && agent_in_scope_only(&s, &caller) {
+                return outside_agent_data();
+            }
             Json(view(ex, in_scope)).into_response()
         }
         Ok(None) => err(StatusCode::NOT_FOUND, "not_found", &format!("exchange {id} not found")),
@@ -271,7 +292,13 @@ async fn exchange(State(s): State<AppState>, Path(id): Path<i64>) -> Response {
 }
 
 /// What stands out in one exchange: tokens to decode, personal data, secrets.
-async fn insights(State(s): State<AppState>, Path(id): Path<i64>) -> Response {
+async fn insights(State(s): State<AppState>, caller: MaybeCaller, Path(id): Path<i64>) -> Response {
+    if agent_in_scope_only(&s, &caller)
+        && let Ok(Some(ex)) = s.engine.store.get_exchange(id)
+        && !s.engine.rules().in_scope(&ex.host)
+    {
+        return outside_agent_data();
+    }
     let engine = s.engine.clone();
     let found = tokio::task::spawn_blocking(move || {
         engine.store.get_exchange(id).map(|ex| ex.map(|ex| crate::insight::analyze(&ex, crate::insight::detectors())))
@@ -314,9 +341,14 @@ fn valid_view(view: &str) -> bool {
     !view.is_empty() && view.len() <= 40 && view.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
-async fn hosts(State(s): State<AppState>) -> Response {
+async fn hosts(State(s): State<AppState>, caller: MaybeCaller) -> Response {
     match s.engine.store.hosts(&s.engine.rules()) {
-        Ok(h) => Json(h).into_response(),
+        Ok(mut h) => {
+            if agent_in_scope_only(&s, &caller) {
+                h.retain(|h| h.scope == Decision::Accepted);
+            }
+            Json(h).into_response()
+        }
         Err(e) => internal(e),
     }
 }
@@ -330,23 +362,35 @@ async fn facets(State(s): State<AppState>) -> Response {
     }
 }
 
-async fn endpoints(State(s): State<AppState>, Path(host): Path<String>) -> Response {
+async fn endpoints(State(s): State<AppState>, caller: MaybeCaller, Path(host): Path<String>) -> Response {
+    if agent_in_scope_only(&s, &caller) && !s.engine.rules().in_scope(&host) {
+        return outside_agent_data();
+    }
     match s.engine.store.endpoints(&host) {
         Ok(e) => Json(e).into_response(),
         Err(e) => internal(e),
     }
 }
 
-async fn tech_all(State(s): State<AppState>) -> Response {
+async fn tech_all(State(s): State<AppState>, caller: MaybeCaller) -> Response {
     let engine = s.engine.clone();
     match tokio::task::spawn_blocking(move || engine.detect_all()).await {
-        Ok(Ok(hosts)) => Json(hosts).into_response(),
+        Ok(Ok(mut hosts)) => {
+            if agent_in_scope_only(&s, &caller) {
+                let rules = s.engine.rules();
+                hosts.retain(|h| rules.in_scope(&h.host));
+            }
+            Json(hosts).into_response()
+        }
         Ok(Err(e)) => internal(e),
         Err(e) => internal(e.into()),
     }
 }
 
-async fn tech_host(State(s): State<AppState>, Path(host): Path<String>) -> Response {
+async fn tech_host(State(s): State<AppState>, caller: MaybeCaller, Path(host): Path<String>) -> Response {
+    if agent_in_scope_only(&s, &caller) && !s.engine.rules().in_scope(&host) {
+        return outside_agent_data();
+    }
     let engine = s.engine.clone();
     let h = host.clone();
     match tokio::task::spawn_blocking(move || engine.detect_host(&h)).await {
@@ -530,11 +574,14 @@ async fn add_finding(State(s): State<AppState>, headers: HeaderMap, Json(f): Jso
 }
 
 /// The agent access policy and which agents have connected.
-async fn agents(State(s): State<AppState>, caller: Option<axum::Extension<Caller>>) -> Response {
+async fn agents(State(s): State<AppState>, caller: MaybeCaller) -> Response {
     let mode = AgentMode::current();
+    let settings = s.agent_settings.read().unwrap().clone();
     let mut v = json!({
         "mode": mode,
-        "capabilities": access::capabilities(mode),
+        "enabled": settings.enabled,
+        "data": settings.data,
+        "capabilities": access::effective(mode, &settings),
         "not_allowed": access::not_allowed(mode),
         "connect": {
             "command": "plonix connect claude",
@@ -546,6 +593,57 @@ async fn agents(State(s): State<AppState>, caller: Option<axum::Extension<Caller
         v["clients"] = json!(s.agents.clients());
     }
     Json(v).into_response()
+}
+
+async fn agent_settings(State(s): State<AppState>) -> Response {
+    let settings = s.agent_settings.read().unwrap().clone();
+    let groups: Vec<Value> = Group::SWITCHABLE.iter().map(|(g, label)| json!({ "group": g, "label": label, "on": settings.group_on(*g) })).collect();
+    Json(json!({ "settings": settings, "groups": groups, "budgets": AgentSettings::BUDGETS })).into_response()
+}
+
+/// Changes agent access. Agents cannot reach this route (it is in no mode's
+/// capabilities), so only the user changes what agents may see.
+async fn put_agent_settings(State(s): State<AppState>, Json(new): Json<AgentSettings>) -> Response {
+    let new = new.sanitized();
+    if let Err(e) = new.save(&s.home) {
+        return internal(e);
+    }
+    *s.agent_settings.write().unwrap() = new;
+    agent_settings(State(s)).await
+}
+
+/// Builds the context for "Ask Claude Code" about one request, finding or host.
+async fn agent_ask(State(s): State<AppState>, Json(req): Json<AskRequest>) -> Response {
+    let settings = s.agent_settings.read().unwrap().clone();
+    if !settings.enabled {
+        return err(StatusCode::FORBIDDEN, "agents_disabled", "agent access is turned off in the Agents screen");
+    }
+    let engine = s.engine.clone();
+    match tokio::task::spawn_blocking(move || ask::build(&engine, &req, &settings)).await {
+        Ok(Ok(bundle)) => Json(bundle).into_response(),
+        Ok(Err(AskError::NotFound(what))) => err(StatusCode::NOT_FOUND, "not_found", &format!("{what} not found")),
+        Ok(Err(AskError::Other(e))) => internal(e),
+        Err(e) => internal(e.into()),
+    }
+}
+
+#[derive(Deserialize)]
+struct LaunchBody {
+    prompt: String,
+}
+
+/// Opens Claude Code in Terminal with the prompt the user reviewed.
+async fn agent_launch(State(s): State<AppState>, Json(b): Json<LaunchBody>) -> Response {
+    if b.prompt.trim().is_empty() {
+        return err(StatusCode::BAD_REQUEST, "bad_request", "the prompt is empty");
+    }
+    let home = s.home.clone();
+    match tokio::task::spawn_blocking(move || ask::launch_in_terminal(&home, &b.prompt)).await {
+        Ok(Ok(_)) => Json(json!({ "ok": true })).into_response(),
+        Ok(Err(e)) if format!("{e:#}").starts_with("unsupported") => err(StatusCode::NOT_IMPLEMENTED, "unsupported", &format!("{e:#}")),
+        Ok(Err(e)) => internal(e),
+        Err(e) => internal(e.into()),
+    }
 }
 
 async fn shutdown(State(s): State<AppState>) -> Response {

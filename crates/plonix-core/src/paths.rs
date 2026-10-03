@@ -5,6 +5,7 @@
 //! ├── ca.pem / ca.key        local certificate authority (trust once)
 //! ├── api-token              bearer token for the local API (0600)
 //! ├── agent-token            read-only token for AI agents (0600)
+//! ├── agents.json            what agents may see (Agents screen)
 //! ├── engine.json            address of the running engine, written on start
 //! ├── logs/engine.log
 //! ├── browser/               profile for the pre-configured browser
@@ -55,6 +56,10 @@ impl Home {
     /// Token for AI agents, limited to what [`crate::access`] allows.
     pub fn agent_token(&self) -> PathBuf {
         self.root.join("agent-token")
+    }
+    /// The user's agent access settings, see [`crate::access::AgentSettings`].
+    pub fn agent_settings(&self) -> PathBuf {
+        self.root.join("agents.json")
     }
     pub fn engine_file(&self) -> PathBuf {
         self.root.join("engine.json")

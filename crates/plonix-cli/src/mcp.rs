@@ -30,7 +30,8 @@ the user's browser while they test a web application, learns which domains belon
 
 These tools give you read-only access to that live project: search and read captured requests, see \
 hosts, endpoints and detected technologies, review scope and its suggestions, and read findings. You \
-cannot send or replay requests, change scope or record findings; suggest those steps to the user instead.
+cannot send or replay requests, change scope or record findings; suggest those steps to the user instead. \
+The user decides what you can see: by default only hosts accepted into scope, and some tools may be switched off.
 
 Start with `status`, then `search_traffic` (for example `scope:in status:5xx` or `path:/api method:POST`) \
 and `get_request` for the full request and response. Captured traffic can contain credentials and \
@@ -38,6 +39,8 @@ personal data; it stays on this machine.";
 
 /// One MCP tool: name, description, input schema, and the API call behind it.
 struct Tool {
+    /// The API route behind it, to hide tools the user switched off.
+    route: &'static str,
     name: &'static str,
     title: &'static str,
     description: &'static str,
@@ -48,6 +51,7 @@ struct Tool {
 const TOOLS: &[Tool] = &[
     Tool {
         name: "status",
+        route: "/api/status",
         title: "Engine status",
         description: "Engine status: the project name, how many requests were captured, scope rules, pending scope suggestions and the proxy address.",
         schema: no_args,
@@ -55,6 +59,7 @@ const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "search_traffic",
+        route: "/api/traffic",
         title: "Search traffic",
         description: "Search captured HTTP traffic, newest first. Returns one line per request: id, method, status, in/out of scope, response size, content type, URL. \
 Query filters (combine with spaces): host:example.com  method:POST  status:404|5xx|none  path:/api  mime:json  scope:in|out  source:proxy|replay  \"quoted phrase\"  -negated  free text (matches URL, headers and bodies). An empty query lists recent traffic.",
@@ -73,6 +78,7 @@ Query filters (combine with spaces): host:example.com  method:POST  status:404|5
     },
     Tool {
         name: "get_request",
+        route: "/api/traffic/{id}",
         title: "Read a request",
         description: "One captured request and its response in full: request line, headers, body, status, response headers and body (decoded text; binary bodies are summarized).",
         schema: || {
@@ -94,6 +100,7 @@ Query filters (combine with spaces): host:example.com  method:POST  status:404|5
     },
     Tool {
         name: "get_insights",
+        route: "/api/traffic/{id}/insights",
         title: "What stands out in a request",
         description: "What stands out in one request: tokens that decode (JWT, base64, URL encoding), personal data and secrets, with where they appear and the decoded value.",
         schema: id_only,
@@ -101,6 +108,7 @@ Query filters (combine with spaces): host:example.com  method:POST  status:404|5
     },
     Tool {
         name: "list_hosts",
+        route: "/api/hosts",
         title: "Hosts",
         description: "Every host seen in captured traffic, busiest first, with its request count and scope decision (in, out, or undecided).",
         schema: no_args,
@@ -115,6 +123,7 @@ Query filters (combine with spaces): host:example.com  method:POST  status:404|5
     },
     Tool {
         name: "list_endpoints",
+        route: "/api/hosts/{host}/endpoints",
         title: "Endpoints on a host",
         description: "The site map of one host: every method and path seen, with hit counts, status codes and parameter names.",
         schema: || {
@@ -132,6 +141,7 @@ Query filters (combine with spaces): host:example.com  method:POST  status:404|5
     },
     Tool {
         name: "detected_tech",
+        route: "/api/tech",
         title: "Detected technologies",
         description: "Technologies detected on each host (frameworks, servers, CDNs, libraries) with version, confidence and the request that shows it. Optionally for one host.",
         schema: || {
@@ -156,6 +166,7 @@ Query filters (combine with spaces): host:example.com  method:POST  status:404|5
     },
     Tool {
         name: "get_scope",
+        route: "/api/scope",
         title: "Scope",
         description: "The current scope: domains the user accepted or rejected, plus domains Plonix suggests adding, each with the evidence that links it to the target. Only the user can change scope.",
         schema: no_args,
@@ -163,6 +174,7 @@ Query filters (combine with spaces): host:example.com  method:POST  status:404|5
     },
     Tool {
         name: "list_findings",
+        route: "/api/findings",
         title: "Findings",
         description: "Findings the user recorded: title, severity, status, description and the request ids that prove each one.",
         schema: no_args,
@@ -243,6 +255,15 @@ impl Server {
         Client::connect_agent(&self.home, &name)
     }
 
+    /// Tools the user has not switched off in the Agents screen. With no
+    /// engine to ask, every tool is listed; the engine still refuses calls.
+    fn available(&self) -> impl Iterator<Item = &'static Tool> {
+        let routes: Option<Vec<String>> = self.client().and_then(|c| c.get("/api/agents")).ok().map(|v| {
+            v["capabilities"].as_array().into_iter().flatten().filter_map(|c| c["path"].as_str().map(String::from)).collect()
+        });
+        TOOLS.iter().filter(move |t| routes.as_ref().is_none_or(|r| r.iter().any(|p| p == t.route)))
+    }
+
     fn handle(&self, msg: &Value) -> Option<Value> {
         let id = msg.get("id").cloned();
         let method = msg["method"].as_str().unwrap_or("");
@@ -260,7 +281,7 @@ impl Server {
         let result = match method {
             "initialize" => Ok(self.initialize(&msg["params"])),
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({ "tools": TOOLS.iter().map(tool_json).collect::<Vec<_>>() })),
+            "tools/list" => Ok(json!({ "tools": self.available().map(tool_json).collect::<Vec<_>>() })),
             "tools/call" => self.call(&msg["params"]),
             "resources/list" => Ok(json!({ "resources": [] })),
             "prompts/list" => Ok(json!({ "prompts": [] })),
