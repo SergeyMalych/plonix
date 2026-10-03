@@ -10,6 +10,8 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod updates;
+
 use std::net::{SocketAddr, TcpListener};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -77,10 +79,16 @@ fn main() {
         .init();
 
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(EngineSlot::default())
+        .manage(updates::Updates::new())
         .menu(build_menu)
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
+            if updates::on_menu_event(app, id) {
+                return;
+            }
             let script = if id == "open-target" {
                 Some(OPEN_TARGET_SCRIPT)
             } else if id == "toggle-sidebar" {
@@ -107,6 +115,7 @@ fn main() {
                 .build()?;
             let handle = app.handle().clone();
             std::thread::Builder::new().name("plonix-connect".into()).spawn(move || connect_window(handle))?;
+            updates::start(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -271,10 +280,11 @@ fn open_externally(url: &str) {
     }
 }
 
-/// The platform's standard menu, plus File › Open Target… and the Plonix
-/// screens in View.
+/// The platform's standard menu, plus the update items, File › Open Target…
+/// and the Plonix screens in View.
 fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let menu = Menu::default(app)?;
+    add_update_items(app, &menu)?;
     let open = MenuItem::with_id(app, "open-target", "Open Target…", true, Some("CmdOrCtrl+O"))?;
     let file = find_or_add_submenu(app, &menu, "File", 1)?;
     file.prepend_items(&[&open, &PredefinedMenuItem::separator(app)?])?;
@@ -295,6 +305,27 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     }
     view.prepend_items(&refs)?;
     Ok(menu)
+}
+
+/// Check for Updates… and its automatic-check choices go right under About
+/// in the app menu on macOS, and in Help elsewhere.
+fn add_update_items(app: &AppHandle, menu: &Menu<Wry>) -> tauri::Result<()> {
+    let (check_now, auto) = updates::menu_items(app)?;
+    let sep = PredefinedMenuItem::separator(app)?;
+    if cfg!(target_os = "macos")
+        && let Some(MenuItemKind::Submenu(app_menu)) = menu.items()?.into_iter().next()
+    {
+        // The app menu starts with About Plonix.
+        let at = 1.min(app_menu.items()?.len());
+        app_menu.insert_items(&[&sep, &check_now, &auto], at)?;
+        return Ok(());
+    }
+    let help = find_or_add_submenu(app, menu, "Help", usize::MAX)?;
+    if !help.items()?.is_empty() {
+        help.append(&sep)?;
+    }
+    help.append_items(&[&check_now, &auto])?;
+    Ok(())
 }
 
 fn find_or_add_submenu(app: &AppHandle, menu: &Menu<Wry>, title: &str, position: usize) -> tauri::Result<Submenu<Wry>> {
