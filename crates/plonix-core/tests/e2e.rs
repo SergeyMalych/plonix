@@ -375,3 +375,50 @@ async fn proxy_serves_ca_certificate_page() {
     assert!(page.contains(&r.engine.ca.fingerprint()));
     assert_eq!(r.engine.store.count().unwrap(), 0, "local pages are not recorded");
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn api_opens_the_capture_browser() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().join("home") };
+    let r = start(&home, None).await;
+
+    // A stand-in browser that records how it was launched.
+    let args_file = dir.path().join("args.txt");
+    let fake = dir.path().join("fake-chrome");
+    std::fs::write(&fake, format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n", args_file.display())).unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // SAFETY: no other test in this binary reads or writes the environment.
+    unsafe { std::env::set_var("PLONIX_BROWSER", &fake) };
+
+    let base = format!("http://{}", r.api_addr);
+    let auth = format!("Bearer {}", r.token);
+    let (bad, opened) = tokio::task::spawn_blocking(move || {
+        let post = |body: serde_json::Value| match ureq::post(&format!("{base}/api/browser/open")).set("Authorization", &auth).send_json(body) {
+            Ok(r) => (r.status(), r.into_json::<serde_json::Value>().unwrap()),
+            Err(ureq::Error::Status(c, r)) => (c, r.into_json::<serde_json::Value>().unwrap()),
+            Err(e) => panic!("{e}"),
+        };
+        (post(serde_json::json!({ "target": "ftp://shop.test" })), post(serde_json::json!({ "target": "shop.test/login" })))
+    })
+    .await
+    .unwrap();
+    assert_eq!((bad.0, bad.1["code"].as_str()), (400, Some("bad_target")));
+    assert_eq!(opened.0, 200, "{}", opened.1);
+    assert_eq!(opened.1["url"], "https://shop.test/login");
+    assert_eq!(opened.1["browser"], "fake-chrome");
+    assert_eq!(r.engine.rules().decide("app.shop.test"), Decision::Accepted);
+
+    let mut args = String::new();
+    for _ in 0..200 {
+        args = std::fs::read_to_string(&args_file).unwrap_or_default();
+        if args.ends_with("https://shop.test/login\n") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(args.contains(&format!("--proxy-server=http://{}", r.proxy_addr)), "{args}");
+    assert!(args.contains(&format!("--ignore-certificate-errors-spki-list={}", r.engine.ca.spki_sha256())), "{args}");
+    assert!(args.ends_with("https://shop.test/login\n"), "{args}");
+}

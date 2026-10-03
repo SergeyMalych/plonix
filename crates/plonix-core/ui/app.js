@@ -80,6 +80,7 @@ class ApiError extends Error {
 
 const S = {
   token: null,
+  railCollapsed: store('plonix.rail') === 'collapsed',
   status: null,
   engineUp: true,
   view: 'traffic',
@@ -199,11 +200,15 @@ function showLock(message) {
         'div',
         { class: 'mcard' },
         h('img', { src: '/ui/icon.svg', alt: '' }),
-        h('h1', { text: 'Open Plonix from your terminal' }),
+        h('h1', { text: IN_APP ? 'Reopen Plonix' : 'Open Plonix from your terminal' }),
         message ? h('p', { text: message }) : null,
-        h('p', { text: 'For your safety this page only opens through a one-time link. Run:' }),
-        h('pre', { text: 'plonix ui' }),
-        h('p', { class: 'muted', text: 'or `plonix open <target>` to start capturing and open this window in one step.' }),
+        IN_APP
+          ? h('p', { text: 'Quit Plonix and open it again to reconnect to the capture engine.' })
+          : [
+              h('p', { text: 'For your safety this page only opens through a one-time link. Run:' }),
+              h('pre', { text: 'plonix ui' }),
+              h('p', { class: 'muted', text: 'or `plonix open <target>` to start capturing and open this window in one step.' }),
+            ],
       ),
     ),
   );
@@ -234,19 +239,21 @@ const VIEWS = {
   findings: { label: 'Findings', ico: '⚑', render: renderFindings },
 };
 
+const IN_APP = !!window.__PLONIX_APP__;
+
 function renderShell() {
   const nav = h('div', { class: 'nav' });
-  for (const [key, v] of Object.entries(VIEWS)) {
+  Object.entries(VIEWS).forEach(([key, v], i) => {
     nav.append(
       h(
         'button',
-        { 'data-v': key, title: v.label, onclick: () => go(key) },
+        { 'data-v': key, title: `${v.label}  (${IN_APP ? '⌘' : ''}${i + 1})`, onclick: () => go(key) },
         h('span', { class: 'ico', text: v.ico }),
         h('span', { class: 'nl', text: v.label }),
         h('span', { class: 'ct', id: 'ct-' + key }),
       ),
     );
-  }
+  });
   clear(
     $('#app'),
     h(
@@ -265,17 +272,21 @@ function renderShell() {
       { class: 'body' },
       h(
         'nav',
-        { class: 'rail' },
-        h('div', { class: 'navsec', text: 'Workspace' }),
+        { class: 'rail' + (S.railCollapsed ? ' collapsed' : ''), id: 'rail' },
+        h(
+          'button',
+          { class: 'opentarget', title: `Open a target in the capture browser${IN_APP ? '  (⌘O)' : ''}`, onclick: openTarget },
+          h('span', { class: 'ico', text: '+' }),
+          h('span', { class: 'nl', text: 'Open target' }),
+        ),
         nav,
+        h('div', { class: 'railsecs', id: 'railsecs' }),
         h('div', { class: 'spacer' }),
         h(
-          'div',
-          { class: 'scopecard', title: 'Open scope', onclick: () => go('scope') },
-          h('div', { class: 'h' }, h('i', { text: '◉' }), 'Adaptive scope'),
-          h('div', { class: 'row' }, 'In scope', h('b', { id: 'sc-in' })),
-          h('div', { class: 'row' }, 'Suggested', h('b', { id: 'sc-pend' })),
-          h('div', { class: 'row' }, 'Rejected', h('b', { id: 'sc-rej' })),
+          'button',
+          { class: 'railtoggle', id: 'railtoggle', onclick: toggleSidebar },
+          h('span', { class: 'ico', text: '⇤' }),
+          h('span', { class: 'nl', text: 'Collapse' }),
         ),
       ),
       h('section', { class: 'main', id: 'main' }),
@@ -289,9 +300,109 @@ function renderShell() {
       h('div', { class: 'seg' }, 'Plonix', h('b', { id: 'f-ver' })),
     ),
   );
+  updateToggle();
   updateChrome();
   loadScope();
+  loadFacets();
   go(S.view, true);
+}
+
+function toggleSidebar() {
+  S.railCollapsed = !S.railCollapsed;
+  store('plonix.rail', S.railCollapsed ? 'collapsed' : null);
+  const rail = $('#rail');
+  if (rail) rail.classList.toggle('collapsed', S.railCollapsed);
+  updateToggle();
+}
+
+function updateToggle() {
+  const b = $('#railtoggle');
+  if (!b) return;
+  b.title = (S.railCollapsed ? 'Show the sidebar' : 'Collapse the sidebar') + (IN_APP ? '  (⌃⌘S)' : '  (\\)');
+  b.querySelector('.ico').textContent = S.railCollapsed ? '⇥' : '⇤';
+}
+
+/** Sidebar shortcuts: scope decisions waiting on you, and the hosts you are testing. */
+function renderRail() {
+  const box = $('#railsecs');
+  if (!box) return;
+  const secs = [];
+  const pending = (S.scope.suggestions || []).slice(0, 4);
+  if (pending.length) {
+    secs.push(
+      h('div', { class: 'navsec', text: 'Scope suggestions' }),
+      pending.map((sg) =>
+        h(
+          'div',
+          { class: 'railrow sugg-row', title: `${sg.domain}: seen in ${sg.requests || 0} requests. Accept it into scope, or keep it out.` },
+          h('button', { class: 'rl', text: sg.domain, onclick: () => go('scope') }),
+          h('button', { class: 'mini ok', text: '✓', title: 'Accept ' + sg.domain + ' and subdomains', onclick: () => decideDomain('accept', sg.domain, true) }),
+          h('button', { class: 'mini no', text: '✗', title: 'Keep ' + sg.domain + ' out of scope', onclick: () => decideDomain('reject', sg.domain, true) }),
+        ),
+      ),
+    );
+  }
+  const hosts = ((S.facets && S.facets.hosts) || []).slice(0, 6);
+  secs.push(h('div', { class: 'navsec', text: 'In scope' }));
+  if (hosts.length) {
+    secs.push(
+      hosts.map((x) =>
+        h(
+          'button',
+          { class: 'railrow hostlink', title: 'Show traffic for ' + x.value, onclick: () => setQuery('host:' + x.value) },
+          h('span', { class: 'rl', text: x.value }),
+          h('span', { class: 'ct', text: x.count }),
+        ),
+      ),
+    );
+  } else {
+    const rules = (S.scope.rules || []).filter((r) => r.decision === 'accepted');
+    secs.push(
+      rules.length
+        ? rules.slice(0, 6).map((r) => h('div', { class: 'railrow muted' }, h('span', { class: 'rl', text: (r.include_subdomains ? '*.' : '') + r.pattern })))
+        : h('div', { class: 'railnote', text: 'Open a target to start. Its domain goes into scope, and related domains are suggested as you browse.' }),
+    );
+  }
+  clear(box, secs);
+}
+
+/** Opens a target in the capture browser: an isolated browser that routes through Plonix. */
+function openTarget() {
+  const input = h('input', { placeholder: 'example.com', spellcheck: 'false', autocomplete: 'off', value: store('plonix.lastTarget') || '' });
+  const go = async () => {
+    const target = input.value.trim();
+    if (!target) return input.focus();
+    btn.disabled = true;
+    m.err.textContent = '';
+    const r = await launchTarget(target);
+    btn.disabled = false;
+    if (r.ok) closeModal();
+    else m.err.textContent = r.message;
+  };
+  input.addEventListener('keydown', (e) => e.key === 'Enter' && go());
+  const btn = h('button', { class: 'btn primary', text: 'Open', onclick: go });
+  const m = modal(
+    'Open a target',
+    [
+      h('label', null, 'Site or URL', input),
+      h('p', { class: 'muted mnote', text: 'Opens a separate browser that captures through Plonix and trusts its certificate. The domain and its subdomains go into scope.' }),
+    ],
+    [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), btn],
+  );
+  input.select();
+}
+
+async function launchTarget(target) {
+  try {
+    const r = await api('/api/browser/open', { method: 'POST', body: { target } });
+    store('plonix.lastTarget', target);
+    toast(`Opened ${r.url} in ${r.browser}. Browse the site; requests appear in Traffic.`, 'ok');
+    await loadScope();
+    if (S.view !== 'traffic') go('traffic');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e.message };
+  }
 }
 
 function go(view, force) {
@@ -315,7 +426,7 @@ function updateChrome() {
   clear(
     $('#enginetxt'),
     S.engineUp ? 'capturing' : 'engine stopped',
-    h('span', { class: 'full', text: S.engineUp ? ' · proxy ' + st.proxy : ' · run plonix ui' }),
+    h('span', { class: 'full', text: S.engineUp ? ' · proxy ' + st.proxy : IN_APP ? ' · reopen Plonix' : ' · run plonix ui' }),
   );
   $('#f-proxy').textContent = st.proxy;
   $('#f-ca').textContent = (st.ca_fingerprint || '').slice(0, 23) + '…';
@@ -327,9 +438,7 @@ function updateChrome() {
   pend.textContent = pending || '';
   pend.classList.toggle('hot', pending > 0);
   const rules = S.scope.rules || [];
-  $('#sc-in').textContent = rules.filter((r) => r.decision === 'accepted').length;
-  $('#sc-rej').textContent = rules.filter((r) => r.decision === 'rejected').length;
-  $('#sc-pend').textContent = (S.scope.suggestions || []).length;
+  $('#ct-scope').title = rules.filter((r) => r.decision === 'accepted').length + ' in scope, ' + pending + ' suggested';
   $('#ct-findings').textContent = S.findingsCount || '';
   $('#ct-bench').textContent = R.tabs.length || '';
 }
@@ -346,6 +455,7 @@ async function poll() {
     S.engineUp = true;
     if (wasDown || st.exchanges !== prev.exchanges || st.pending_suggestions !== prev.pending_suggestions || st.scope_rules !== prev.scope_rules) {
       await loadScope();
+      loadFacets();
       if (S.view === 'traffic') T.refresh && T.refresh();
       if (S.view === 'scope') renderScopeBody();
       if (S.view === 'map' && st.exchanges !== prev.exchanges) M.dirty = true;
@@ -358,11 +468,26 @@ async function poll() {
   S.pollTimer = setTimeout(poll, S.engineUp ? 1200 : 3000);
 }
 
+/** What the captured traffic contains; drives the suggested filters and the sidebar. */
+async function loadFacets() {
+  if (S.facetsBusy) return;
+  S.facetsBusy = true;
+  try {
+    S.facets = await api('/api/traffic/facets');
+  } catch (_) {
+  } finally {
+    S.facetsBusy = false;
+  }
+  renderRail();
+  renderChips();
+}
+
 async function loadScope() {
   try {
     S.scope = await api('/api/scope');
   } catch (_) {}
   updateChrome();
+  renderRail();
   if (S.view === 'traffic') renderBanner();
   if (S.view === 'bench') renderScopeHint();
 }
@@ -460,7 +585,6 @@ function rawPre({ lines, body }) {
    ====================================================================== */
 
 const T = { q: store('plonix.q') || '', items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: null };
-const CHIPS = ['scope:in', 'scope:out', 'method:POST', 'status:4xx', 'status:5xx', 'mime:json', 'source:replay', '-mime:image', '-mime:css', '-mime:font'];
 
 function renderTraffic(main) {
   const input = h('input', {
@@ -555,30 +679,79 @@ function renderTraffic(main) {
   if (T.sel) openInspector(T.sel);
 }
 
+/**
+ * Filters worth one click, built from what was actually captured: only values
+ * that occur, and only filters that narrow the list.
+ */
+function suggestedFilters(f) {
+  const out = [];
+  const n = (f && f.sampled) || 0;
+  if (!n) return out;
+  const count = (list, v) => ((list || []).find((c) => c.value === v) || {}).count || 0;
+  const add = (term, label, c, kind, of = n) => c > 0 && c < of && out.push({ term, label, count: c, kind: kind || '' });
+  if (f.in_scope && f.out_of_scope) add('scope:in', 'In scope', f.in_scope, 'scope');
+  add('status:5xx', 'Server errors', count(f.statuses, '5xx'), 'bad');
+  add('status:4xx', 'Client errors', count(f.statuses, '4xx'), 'warn');
+  add('status:none', 'No response', count(f.statuses, 'none'), 'bad');
+  for (const m of f.methods || []) if (!['GET', 'HEAD', 'OPTIONS'].includes(m.value)) add('method:' + m.value, m.value, m.count, 'method');
+  add('mime:json', 'JSON', count(f.kinds, 'json'));
+  add('mime:xml', 'XML', count(f.kinds, 'xml'));
+  for (const p of (f.paths || []).slice(0, 3)) if (p.count >= 2) add('path:' + p.value, p.value + '/…', p.count, 'path', f.in_scope + f.out_of_scope);
+  if ((f.hosts || []).length > 1) for (const x of f.hosts.slice(0, 2)) add('host:' + x.value, x.value, x.count, 'host');
+  add('source:replay', 'Sent from Bench', f.replays, 'replay');
+  // Static files are noise when hunting: one chip hides whichever kinds occur.
+  const noise = ['image', 'css', 'font', 'javascript'].filter((k) => count(f.kinds, k));
+  const noisy = noise.reduce((a, k) => a + count(f.kinds, k), 0);
+  add(noise.map((k) => '-mime:' + k).join(' '), 'Hide static files', noisy, 'neg');
+  return out;
+}
+
 function renderChips() {
   const box = $('#chips');
   if (!box) return;
   const terms = T.q.split(/\s+/).filter(Boolean);
+  const chips = suggestedFilters(S.facets);
+  // A filter in the search box stays visible so it can be switched off.
+  const isOn = (c) => c.term.split(' ').every((t) => terms.includes(t));
+  for (const t of terms) {
+    if (/^-?\w+:/.test(t) && !chips.some((c) => c.term.split(' ').includes(t))) chips.unshift({ term: t, label: t, count: null, kind: 'active' });
+  }
+  if (!chips.length) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
   clear(
     box,
-    CHIPS.map((c) =>
-      h('button', {
-        class: 'chip' + (terms.includes(c) ? ' on' : ''),
-        text: c,
-        onclick: () => toggleTerm(c),
-      }),
+    h('span', { class: 'chipslbl', text: 'Filters' }),
+    chips.map((c) =>
+      h(
+        'button',
+        {
+          class: 'chip k-' + c.kind + (isOn(c) ? ' on' : ''),
+          title: 'Search ' + c.term,
+          onclick: () => toggleTerm(c.term),
+        },
+        h('span', { text: c.label }),
+        c.count == null ? null : h('span', { class: 'n', text: c.count }),
+      ),
     ),
   );
 }
 
+/** Adds or removes filter terms (several, space separated, toggle together). */
 function toggleTerm(term) {
   let terms = T.q.split(/\s+/).filter(Boolean);
-  const key = term.replace(/^-/, '').split(':')[0] + ':';
-  if (terms.includes(term)) terms = terms.filter((t) => t !== term);
+  const group = term.split(' ');
+  if (group.every((t) => terms.includes(t))) terms = terms.filter((t) => !group.includes(t));
   else {
-    // One value per positive field (scope:in replaces scope:out).
-    if (!term.startsWith('-')) terms = terms.filter((t) => !t.startsWith(key));
-    terms.push(term);
+    for (const t of group) {
+      if (terms.includes(t)) continue;
+      // One value per positive field (scope:in replaces scope:out).
+      const key = t.replace(/^-/, '').split(':')[0] + ':';
+      if (!t.startsWith('-')) terms = terms.filter((x) => !x.startsWith(key));
+      terms.push(t);
+    }
   }
   T.q = terms.join(' ');
   $('#q').value = T.q;
@@ -621,6 +794,29 @@ async function refreshTraffic(userAction) {
   drawRows(userAction ? Infinity : prevMax);
 }
 
+function emptyTraffic(st) {
+  const input = h('input', { placeholder: 'example.com', spellcheck: 'false', autocomplete: 'off', value: store('plonix.lastTarget') || '' });
+  const err = h('div', { class: 'qerr' });
+  const open = async () => {
+    if (!input.value.trim()) return input.focus();
+    btn.disabled = true;
+    const r = await launchTarget(input.value.trim());
+    btn.disabled = false;
+    err.textContent = r.ok ? '' : r.message;
+  };
+  input.addEventListener('keydown', (e) => e.key === 'Enter' && open());
+  const btn = h('button', { class: 'btn primary', text: 'Open in capture browser', onclick: open });
+  return h(
+    'div',
+    { class: 'empty' },
+    h('h3', { text: 'Start capturing' }),
+    'Type the site you are testing. Plonix opens a browser that captures through it, and requests appear here live.',
+    h('div', { class: 'starter' }, input, btn),
+    err,
+    h('div', { class: 'muted small' }, 'Or point any browser at the proxy ', h('code', { text: st.proxy || '' }), '.'),
+  );
+}
+
 function drawRows(freshAbove) {
   const tbody = $('#rows');
   if (!tbody) return;
@@ -628,18 +824,7 @@ function drawRows(freshAbove) {
     const st = S.status || {};
     const msg = T.q.trim()
       ? h('div', { class: 'empty' }, h('h3', { text: 'No traffic matches this search' }), 'Try removing a filter.')
-      : h(
-          'div',
-          { class: 'empty' },
-          h('h3', { text: 'Waiting for traffic' }),
-          'Browse your target in the Plonix browser and requests appear here live.',
-          h('br'),
-          'Start one with ',
-          h('code', { text: 'plonix open example.com' }),
-          ', or point any browser at the proxy ',
-          h('code', { text: st.proxy || '' }),
-          '.',
-        );
+      : emptyTraffic(st);
     clear(tbody, h('tr', null, h('td', { colspan: 9, style: { height: 'auto', whiteSpace: 'normal' } }, msg)));
     return;
   }
@@ -1195,7 +1380,7 @@ function historyPanel(tab, main) {
         h('button', { class: 'btn sm', text: picks.length === 2 ? 'Compare ✓' : `Compare (${picks.length}/2)`, disabled: tab.history.length < 2, onclick: () => compareLatest(tab, main) }),
       ),
     ),
-    rows.length ? rows : h('div', { class: 'histrow muted', text: 'No sends yet.' }),
+    h('div', { class: 'histrows' }, rows.length ? rows : h('div', { class: 'histrow muted', text: 'No sends yet.' })),
   );
 }
 
@@ -1689,6 +1874,7 @@ document.addEventListener('keydown', (e) => {
   }
   const keys = Object.keys(VIEWS);
   if (/^[1-5]$/.test(e.key)) return go(keys[Number(e.key) - 1]);
+  if (e.key === '\\') return toggleSidebar();
   if (S.view !== 'traffic') return;
   if (e.key === '/') {
     e.preventDefault();
@@ -1701,5 +1887,12 @@ document.addEventListener('keydown', (e) => {
     selectRow(-1);
   } else if (e.key === 'b' && T.sel) sendToBench(T.sel);
 });
+
+// Entry points for the Plonix app's menu bar.
+window.plonix = {
+  go: (view) => S.token && $('#main') && go(view),
+  openTarget: () => S.token && $('#main') && openTarget(),
+  toggleSidebar: () => S.token && $('#main') && toggleSidebar(),
+};
 
 boot();

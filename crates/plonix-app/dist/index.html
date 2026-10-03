@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Plonix</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f5f5f7; --fg: #1d1d1f; --muted: #6e6e73; --err: #c0392b; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1c1c1e; --fg: #f5f5f7; --muted: #98989d; --err: #ff6b5e; } }
+  html, body { height: 100%; margin: 0; }
+  body { display: grid; place-items: center; background: var(--bg); color: var(--fg);
+         font: 13px -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; -webkit-user-select: none; user-select: none; }
+  .card { text-align: center; max-width: 460px; padding: 24px; }
+  .logo { width: 64px; height: 64px; border-radius: 14px; margin: 0 auto 16px; display: grid; place-items: center;
+          background: linear-gradient(135deg, #4b55d6, #7a44c6); color: #fff; font: 700 34px -apple-system, Helvetica, sans-serif; }
+  h1 { font-size: 17px; font-weight: 600; margin: 0 0 6px; }
+  p { color: var(--muted); margin: 0; line-height: 1.5; }
+  #err { display: none; color: var(--err); white-space: pre-wrap; text-align: left; margin-top: 14px;
+         font: 12px ui-monospace, Menlo, monospace; -webkit-user-select: text; user-select: text; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">P</div>
+  <h1 id="title">Starting Plonix…</h1>
+  <p id="sub">Starting the capture engine.</p>
+  <div id="err"></div>
+</div>
+<script>
+  window.plonixError = function (message) {
+    document.getElementById('title').textContent = 'Plonix could not start';
+    document.getElementById('sub').textContent = 'Quit and open Plonix again. If this keeps happening, the details below help.';
+    var el = document.getElementById('err');
+    el.textContent = message;
+    el.style.display = 'block';
+  };
+</script>
+</body>
+</html>

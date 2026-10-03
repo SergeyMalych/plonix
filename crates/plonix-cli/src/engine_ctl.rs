@@ -164,19 +164,7 @@ fn log_excerpt(path: &Path, from: u64) -> String {
 /// Puts the engine in its own process group so Ctrl-C in the terminal that
 /// started it does not stop capture.
 fn detach(cmd: &mut Command) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
-    }
-    #[cfg(not(unix))]
-    let _ = cmd;
-}
-
-pub fn spawn_detached(cmd: &mut Command) -> std::io::Result<std::process::Child> {
-    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-    detach(cmd);
-    cmd.spawn()
+    plonix_core::browser::detach(cmd);
 }
 
 #[cfg(test)]

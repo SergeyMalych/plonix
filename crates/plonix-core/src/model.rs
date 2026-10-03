@@ -113,6 +113,36 @@ pub struct ExchangeSummary {
     pub in_scope: bool,
 }
 
+/// What the captured traffic contains, for suggesting filters that matter.
+/// Every list is sorted busiest first and only holds values that occur.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Facets {
+    /// Exchanges looked at (the most recent ones, up to [`Facets::SAMPLE`]).
+    pub sampled: i64,
+    pub in_scope: i64,
+    pub out_of_scope: i64,
+    pub methods: Vec<Count>,
+    /// `2xx`..`5xx`, and `none` for requests that got no response.
+    pub statuses: Vec<Count>,
+    /// Response kinds: json, html, javascript, xml, css, image, font, text.
+    pub kinds: Vec<Count>,
+    /// In-scope hosts.
+    pub hosts: Vec<Count>,
+    /// First path segments of in-scope traffic, e.g. `/api`.
+    pub paths: Vec<Count>,
+    pub replays: i64,
+}
+
+impl Facets {
+    pub const SAMPLE: usize = 50_000;
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Count {
+    pub value: String,
+    pub count: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostSummary {
     pub host: String,
