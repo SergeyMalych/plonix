@@ -26,7 +26,8 @@ use engine_ctl::{DEFAULT_API_PORT, DEFAULT_PROXY_PORT, StartOptions};
 
 const EXAMPLES: &str = "\
 Get started:
-  plonix open example.com          start capturing and open a browser at the target
+  plonix open example.com          start capturing, open a browser at the target and the Plonix window
+  plonix ui                        open the Plonix window (traffic, repeater, scope, map, findings)
   plonix search host:example.com status:5xx
   plonix show 42
   plonix scope                     review domains Plonix thinks belong in scope
@@ -63,6 +64,8 @@ struct Cli {
 enum Cmd {
     /// Start capturing and open a browser at the target, in one step
     Open(OpenArgs),
+    /// Open the Plonix window in your browser (starts the engine if needed)
+    Ui(UiArgs),
     /// Start the engine (proxy + API) in the background
     Start(StartArgs),
     /// Stop the engine
@@ -130,12 +133,27 @@ struct OpenArgs {
     /// Do not add the target to scope
     #[arg(long)]
     no_scope: bool,
-    /// Start the engine but do not open a browser
+    /// Start the engine but do not open a browser or the Plonix window
     #[arg(long)]
     no_browser: bool,
+    /// Do not open the Plonix window
+    #[arg(long)]
+    no_ui: bool,
     /// Return right away instead of printing traffic as it arrives
     #[arg(long)]
     no_watch: bool,
+    #[command(flatten)]
+    engine: EngineFlags,
+}
+
+#[derive(Args)]
+struct UiArgs {
+    /// Print the sign-in link instead of opening it
+    #[arg(long)]
+    no_open: bool,
+    /// Project to record into if the engine is not running yet
+    #[arg(long, short, default_value = "default")]
+    project: String,
     #[command(flatten)]
     engine: EngineFlags,
 }
@@ -291,6 +309,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
     let ctx = Ctx { home: Home::resolve(cli.home.as_deref())?, json: cli.json };
     match cli.command {
         Cmd::Open(a) => open_cmd(&ctx, a)?,
+        Cmd::Ui(a) => ui_cmd(&ctx, a)?,
         Cmd::Start(a) => start_cmd(&ctx, a)?,
         Cmd::Stop => {
             if engine_ctl::stop(&ctx.home)? {
@@ -619,6 +638,16 @@ fn open_cmd(ctx: &Ctx, a: OpenArgs) -> Result<()> {
         }
     }
 
+    let mut ui_url = Value::Null;
+    if !a.no_ui && !a.no_browser {
+        let url = ui_link(&c.client)?;
+        match open::open_url(&url) {
+            Ok(()) => say("Window", &format!("http://{}  (opened in your default browser)", c.status["api"].as_str().unwrap_or(""))),
+            Err(e) => say("Window", &format!("could not open it ({e}); run `plonix ui`")),
+        }
+        ui_url = Value::from(url);
+    }
+
     if ctx.json {
         return ctx.print_json(&json!({
             "target": target.url,
@@ -630,6 +659,7 @@ fn open_cmd(ctx: &Ctx, a: OpenArgs) -> Result<()> {
             "ca_created": first_run,
             "scope": scope_rule,
             "browser": browser_json,
+            "ui": ui_url,
         }));
     }
 
@@ -646,6 +676,33 @@ fn open_cmd(ctx: &Ctx, a: OpenArgs) -> Result<()> {
         watch(&c.client, "", false)?;
     } else {
         println!("\nCapturing. Browse the site, then: plonix search host:{}", target.host);
+    }
+    Ok(())
+}
+
+/// A one-time link that opens the Plonix window signed in.
+fn ui_link(c: &Client) -> Result<String> {
+    let v = c.post("/api/ui/launch", json!({}))?;
+    v["url"].as_str().map(String::from).context("the engine did not return a UI link")
+}
+
+fn ui_cmd(ctx: &Ctx, a: UiArgs) -> Result<()> {
+    let (c, started) = engine_ctl::start(&ctx.home, &start_options(&a.project, &a.engine))?;
+    let url = ui_link(&c.client)?;
+    let opened = !a.no_open && open::open_url(&url).is_ok();
+    if ctx.json {
+        return ctx.print_json(&json!({ "url": url, "opened": opened, "engine_started": started, "status": c.status }));
+    }
+    if started {
+        println!("Plonix engine started (project {}).", c.status["project"].as_str().unwrap_or(""));
+    }
+    if opened {
+        println!("Opened the Plonix window: {}", c.status["api"].as_str().unwrap_or(""));
+    } else {
+        println!("Open this link in your browser (it works once, for {} seconds):\n\n  {url}", plonix_core::ui::CODE_TTL.as_secs());
+    }
+    if c.status["exchanges"].as_i64() == Some(0) {
+        println!("\nNothing captured yet. Start with `plonix open <target>`, or point a browser at the proxy {}.", c.status["proxy"].as_str().unwrap_or(""));
     }
     Ok(())
 }

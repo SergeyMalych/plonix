@@ -185,6 +185,30 @@ pub fn launch(home: &Home, browser: &Browser, proxy: &str, spki: &str, url: &str
     Ok(args)
 }
 
+/// Opens a URL in the user's default browser (not the capture browser, so the
+/// Plonix window's own requests are never captured).
+pub fn open_url(url: &str) -> Result<()> {
+    if let Some(exe) = std::env::var_os("PLONIX_UI_BROWSER").filter(|v| !v.is_empty()) {
+        crate::engine_ctl::spawn_detached(Command::new(exe).arg(url))?;
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    let mut cmd = Command::new("open");
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = Command::new("cmd");
+        c.args(["/C", "start", ""]);
+        c
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let mut cmd = Command::new("xdg-open");
+    let status = cmd.arg(url).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status()?;
+    if !status.success() {
+        bail!("{status}");
+    }
+    Ok(())
+}
+
 /// One-time guidance for trusting the CA outside the Plonix browser.
 pub fn trust_guidance(home: &Home) -> String {
     format!(

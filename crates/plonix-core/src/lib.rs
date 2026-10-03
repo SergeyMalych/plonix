@@ -18,6 +18,7 @@ pub mod registry;
 pub mod rulepack;
 pub mod scope;
 pub mod store;
+pub mod ui;
 pub mod upstream;
 
 

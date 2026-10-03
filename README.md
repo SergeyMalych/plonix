@@ -4,7 +4,9 @@
 
 Plonix captures everything your browser does, learns the real shape of the target as you explore it, and lets you search, replay and prove what you find, from a GUI, a terminal, or an AI agent.
 
-> **Status: early development.** The core engine (proxy, traffic store, search, adaptive scope, local API) and the `plonix` CLI work today and are covered by tests. The Mac app and the MCP server are next. See [Roadmap](#roadmap).
+![The Plonix window: live traffic with an adaptive-scope suggestion and the request inspector](docs/images/plonix-window.png)
+
+> **Status: early development.** The core engine (proxy, traffic store, search, adaptive scope, local API), the `plonix` CLI and the Plonix window (`plonix ui`) work today and are covered by tests. The native Mac app and the MCP server are next. See [Roadmap](#roadmap).
 
 ---
 
@@ -16,7 +18,7 @@ Most of a web assessment is the same loop: capture traffic, figure out what the 
 | --- | --- |
 | A tool you can afford on every machine | Free and open source. No Pro tier holding back the good parts. |
 | Large projects that stay responsive | A Rust engine with one SQLite database per project. Search over captured traffic stays quick as projects grow. |
-| Something that feels at home on a Mac | A native macOS app is the planned front end, built on the same engine. |
+| Something you can see and click | The Plonix window: live traffic, a repeater with branching and side-by-side compare, adaptive scope, a site map and findings. A native macOS app is planned on the same engine. |
 | Scope that matches reality | Adaptive scope learns related domains as you browse and shows the evidence for each one. |
 | Filters you can type | A small query language: `host:api.acme.com method:POST status:5xx -logout`. |
 | Automation in any language | Everything goes through a local HTTP API. Use curl, Python, Go, or whatever you already script in. |
@@ -81,6 +83,15 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - Detection is driven by declarative **rule packs** that anyone can write and share. Install them from a file, a URL or the **store**, a JSON index hosted anywhere. New rules apply to traffic you already captured.
 - Packs are untrusted data: strictly validated, linear-time patterns only, pinned by SHA-256 and re-verified on load. They can't run code, reach the network or touch scope. See [docs/detection-rules.md](docs/detection-rules.md) and the extension design in [docs/extensions.md](docs/extensions.md).
 
+### The Plonix window
+- `plonix ui` (and `plonix open`) opens a fast, keyboard-friendly UI in your browser, served by the engine itself. No install, no build step, light and dark.
+- **Traffic:** a live-updating request list with the search language, filter chips and an inline request/response viewer that decodes gzip/brotli and pretty-prints JSON. A banner surfaces each new domain adaptive scope suggests, with its evidence and one-click accept or reject.
+- **Repeater:** edit any request and send it, keep a history per tab, restore or branch any earlier send into a new tab, and compare two sends side by side (response or request diff). Sends go through the engine's scope enforcement: out-of-scope hosts are refused, and you can accept the host right there.
+- **Scope:** every suggested domain with its evidence, accept (with or without subdomains) or reject, and the rule list.
+- **Map:** hosts with their scope state, detected technologies with the evidence behind them, and endpoints with statuses and parameters.
+- **Findings:** record a finding from any request, with the requests that prove it linked as evidence.
+- The page signs in through a one-time link that `plonix ui` creates, so the API token never appears in a URL. It is locked down with a strict Content-Security-Policy, and captured content is only ever rendered as text.
+
 ### Local API
 - An HTTP API on loopback only, protected by a bearer token stored at `~/.plonix/api-token` (mode `0600`).
 - Requests must target the loopback address, which keeps web pages in your browser from reaching it.
@@ -101,7 +112,7 @@ cargo install --path crates/plonix-cli    # installs the `plonix` command
 plonix open example.com
 ```
 
-That one command creates your local certificate authority (first run only), starts the engine in the background, puts `example.com` and its subdomains in scope, and opens a browser at the target with capture running:
+That one command creates your local certificate authority (first run only), starts the engine in the background, puts `example.com` and its subdomains in scope, opens a browser at the target with capture running, and opens the Plonix window next to it:
 
 ```text
 Plonix · https://example.com/
@@ -110,6 +121,7 @@ Plonix · https://example.com/
   ✓ Proxy        127.0.0.1:8080  (started, project example.com)
   ✓ Scope        example.com (+ subdomains)  (more domains are suggested as you browse)
   ✓ Browser      Google Chrome (isolated profile, trusts Plonix)
+  ✓ Window       http://127.0.0.1:8090  (opened in your default browser)
 
 Capturing. Browse the site; requests appear below. Ctrl-C stops watching, capture keeps running.
 ```
@@ -117,6 +129,8 @@ Capturing. Browse the site; requests appear below. Ctrl-C stops watching, captur
 The browser is Chrome, Brave, Edge or Chromium with its own isolated profile. It routes through the proxy and trusts the Plonix certificate on its own, so HTTPS works with nothing to install. Firefox is used when no Chromium-based browser is found. Set `PLONIX_BROWSER` to pick a specific browser.
 
 To capture HTTPS from other apps too (Safari, curl, your everyday browser), trust the certificate once with `plonix ca trust`. It is added to your login keychain, and macOS asks you to confirm.
+
+Browse the site and watch requests arrive in the Plonix window. Closed it? `plonix ui` opens it again (and starts the engine if it is not running). `plonix ui --no-open` prints the one-time link instead, and `plonix open --no-ui` skips the window.
 
 ### Working from the terminal
 
@@ -167,6 +181,8 @@ The API listens on port 8090 when it is free; `plonix status` shows the actual a
 
 | Method | Path | What it does |
 | --- | --- | --- |
+| GET | `/` | The Plonix window (static page; signs in with a one-time link) |
+| POST | `/api/ui/launch` | Create a one-time link that opens the window signed in |
 | GET | `/api/status` | Engine, project and CA info, counts |
 | GET | `/api/traffic?q=&limit=&offset=` | Search captured traffic |
 | GET | `/api/traffic/{id}` | One exchange, with decoded bodies |
@@ -203,6 +219,7 @@ The engine is a headless background process. Every front end talks to it the sam
 ```text
 crates/
 ├── plonix-core   engine: proxy, CA, store, search, scope, detection, rule packs, store index, local API
+│   └── ui/       the Plonix window: plain HTML, CSS and JavaScript embedded in the binary
 └── plonix-cli    the `plonix` command: engine control, onboarding, search, scope, replay, rules, store
 store/            community store: index.json and rule packs
 docs/             detection rules, extension design
@@ -220,12 +237,11 @@ docs/             detection rules, extension design
 - [x] `plonix` CLI: search, inspect, watch, replay and manage scope from the terminal
 - [x] `plonix open <target>`: one command from nothing to captured traffic, in a pre-configured browser
 - [x] Technology detection from community rule packs, with a store (`plonix tech`, `plonix rules`, `plonix store`)
+- [x] The Plonix window (`plonix ui`): live traffic, repeater with branch and compare, adaptive scope review, map with technologies, findings
 
 **Coming**
 - [ ] Built-in MCP server and `plonix connect claude`, so Claude Code and other agents can work with live traffic, scope and findings, always inside accepted scope
-- [ ] Native macOS app with five screens: Traffic, Map, Experiments, Findings, Agents. Decoding and diffing happen inline.
-- [ ] Experiments: branch and compare request variants
-- [ ] Findings that stay linked to the exchanges that prove them
+- [ ] Native macOS app on the same engine, adding an Agents screen once MCP lands
 - [ ] Sandboxed WebAssembly extensions with a closed capability list that can never bypass scope ([design](docs/extensions.md))
 
 Deliberately out of scope: an automated scanner and a token sequencer. Plonix stays small on purpose.
