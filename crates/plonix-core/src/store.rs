@@ -381,6 +381,47 @@ impl Store {
         Ok(())
     }
 
+    /// Exchanges to these hosts, not counting the `keep` ids.
+    pub fn count_for_hosts(&self, hosts: &[String], keep: &BTreeSet<i64>) -> Result<i64> {
+        let conn = self.conn.lock().unwrap();
+        let mut n = 0;
+        for h in hosts {
+            n += conn.query_row("SELECT count(*) FROM exchanges WHERE host = ?1", [h], |r| r.get::<_, i64>(0))?;
+            for id in keep {
+                n -= conn.query_row("SELECT count(*) FROM exchanges WHERE host = ?1 AND id = ?2", params![h, id], |r| r.get::<_, i64>(0))?;
+            }
+        }
+        Ok(n)
+    }
+
+    /// Deletes exchanges to these hosts (and their search index and scope
+    /// evidence), except the `keep` ids. Returns how many were deleted.
+    pub fn delete_for_hosts(&self, hosts: &[String], keep: &BTreeSet<i64>) -> Result<i64> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute_batch("CREATE TEMP TABLE IF NOT EXISTS doomed (id INTEGER PRIMARY KEY); DELETE FROM doomed;")?;
+        for h in hosts {
+            tx.execute("INSERT OR IGNORE INTO doomed SELECT id FROM exchanges WHERE host = ?1", [h])?;
+        }
+        for id in keep {
+            tx.execute("DELETE FROM doomed WHERE id = ?1", [id])?;
+        }
+        let n = tx.execute("DELETE FROM exchanges WHERE id IN (SELECT id FROM doomed)", [])?;
+        tx.execute("DELETE FROM exchanges_fts WHERE rowid IN (SELECT id FROM doomed)", [])?;
+        tx.execute("DELETE FROM evidence WHERE exchange_id IN (SELECT id FROM doomed)", [])?;
+        tx.execute("DELETE FROM doomed", [])?;
+        tx.commit()?;
+        Ok(n as i64)
+    }
+
+    /// Rewrites the database without free space, so deleted traffic is
+    /// gone from the file (and from the search index and write-ahead log).
+    pub fn compact(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch("INSERT INTO exchanges_fts(exchanges_fts) VALUES('optimize'); VACUUM; PRAGMA wal_checkpoint(TRUNCATE);")?;
+        Ok(())
+    }
+
     /// Forgets derived scope state so it can be rebuilt by a rescan.
     pub fn clear_analysis(&self) -> Result<()> {
         self.conn.lock().unwrap().execute_batch("DELETE FROM evidence; DELETE FROM session_tokens;")?;

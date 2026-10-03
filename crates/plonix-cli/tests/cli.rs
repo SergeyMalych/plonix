@@ -308,7 +308,9 @@ fn open_starts_everything_and_launches_the_browser_through_the_proxy() {
     let args = read_when_ready(&bin.path().join("browser-args.txt"));
     let args: Vec<&str> = args.lines().collect();
     assert!(args.contains(&format!("--proxy-server=http://{proxy}").as_str()), "{args:?}");
-    assert!(args.contains(&format!("--user-data-dir={}", p.home.path().join("browser").display()).as_str()), "{args:?}");
+    // Each project has its own capture-browser profile, in its folder.
+    let profile = std::fs::canonicalize(p.home.path().join("projects/127.0.0.1")).unwrap().join("browser");
+    assert!(args.contains(&format!("--user-data-dir={}", profile.display()).as_str()), "{args:?}");
     assert!(args.iter().any(|a| a.starts_with("--ignore-certificate-errors-spki-list=") && a.len() > 40), "{args:?}");
     assert_eq!(args.last().unwrap(), &format!("http://127.0.0.1:{target}/app"));
 

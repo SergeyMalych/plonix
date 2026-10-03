@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use plonix_core::paths::Home;
+use plonix_core::paths::{EngineInfo, Home};
 use serde_json::Value;
 
 pub struct Client {
@@ -14,6 +14,16 @@ pub struct Client {
 }
 
 pub const NOT_RUNNING: &str = "The Plonix engine is not running. Start it with `plonix start` (or `plonix open <target>`).";
+
+/// Which session commands talk to: `-p`/`$PLONIX_PROJECT` when given, else
+/// the current session (the one opened last).
+pub fn engine_info(home: &Home, project: Option<&str>) -> Option<EngineInfo> {
+    let selector = project.map(str::to_string).or_else(|| std::env::var("PLONIX_PROJECT").ok().filter(|p| !p.trim().is_empty()));
+    match selector {
+        Some(sel) => plonix_core::session::find(home, &sel),
+        None => home.read_engine_info(),
+    }
+}
 
 /// An error reported by the engine, with its machine-readable code
 /// (`out_of_scope`, `not_found`, `bad_query`...).
@@ -44,9 +54,20 @@ impl std::fmt::Display for NotRunning {
 impl std::error::Error for NotRunning {}
 
 impl Client {
-    /// Connects to the engine described by `$PLONIX_HOME/engine.json`.
-    pub fn connect(home: &Home, initiator: &str) -> Result<Self> {
-        let info = home.read_engine_info().ok_or_else(|| anyhow!(NotRunning))?;
+    /// Connects to the session for `project`, if given, else the current one
+    /// (or the one `$PLONIX_PROJECT` names).
+    pub fn connect_project(home: &Home, project: Option<&str>, initiator: &str) -> Result<Self> {
+        match engine_info(home, project) {
+            Some(info) => Self::to(home, &info, initiator),
+            None => match project {
+                Some(p) => Err(anyhow!(NotRunning).context(format!("project '{p}' is not open"))),
+                None => Err(anyhow!(NotRunning)),
+            },
+        }
+    }
+
+    /// Connects to a specific session.
+    pub fn to(home: &Home, info: &EngineInfo, initiator: &str) -> Result<Self> {
         let token = std::fs::read_to_string(home.api_token()).map_err(|_| anyhow!(NotRunning))?;
         let client = Self {
             base: info.api.trim_end_matches('/').to_string(),

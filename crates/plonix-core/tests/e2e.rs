@@ -102,6 +102,7 @@ impl rustls::server::ResolvesServerCert for Fixed {
 async fn start(home: &Home, extra_root: Option<CertificateDer<'static>>) -> Running {
     home.ensure().unwrap();
     let ca = Arc::new(CertAuthority::load_or_create(home).unwrap());
+    std::fs::create_dir_all(home.root.join("projects")).unwrap();
     let store = Store::open(&home.project_db("test")).unwrap();
     let upstream = Upstream::new(false, extra_root.into_iter().collect()).unwrap();
     let engine = Engine::new("test", store, ca, upstream).unwrap();

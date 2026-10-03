@@ -18,7 +18,10 @@ use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
 const INDEX_HTML: &str = include_str!("../ui/index.html");
+const LAUNCHER_HTML: &str = include_str!("../ui/launcher.html");
 const APP_JS: &str = include_str!("../ui/app.js");
+const LAUNCHER_JS: &str = include_str!("../ui/launcher.js");
+const SETTINGS_JS: &str = include_str!("../ui/settings.js");
 const APP_CSS: &str = include_str!("../ui/app.css");
 const ICON_SVG: &str = include_str!("../ui/icon.svg");
 
@@ -57,7 +60,8 @@ impl LaunchCodes {
     }
 }
 
-fn asset(content_type: &'static str, body: &'static str) -> Response {
+fn asset(content_type: &'static str, body: impl Into<String>) -> Response {
+    let body: String = body.into();
     let mut r = (StatusCode::OK, body).into_response();
     let h = r.headers_mut();
     h.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
@@ -69,8 +73,25 @@ fn asset(content_type: &'static str, body: &'static str) -> Response {
     r
 }
 
-pub async fn index() -> Response {
-    asset("text/html; charset=utf-8", INDEX_HTML)
+/// The project window. Its project id is in a meta tag, so state the page
+/// keeps in the browser stays with the project even if another project
+/// later gets the same address.
+pub async fn index(project_id: String) -> Response {
+    let id: String = project_id.chars().filter(char::is_ascii_alphanumeric).collect();
+    asset("text/html; charset=utf-8", INDEX_HTML.replace("{{PROJECT_ID}}", &id))
+}
+
+/// The Start screen.
+pub async fn launcher() -> Response {
+    asset("text/html; charset=utf-8", LAUNCHER_HTML)
+}
+
+pub async fn launcher_js() -> Response {
+    asset("text/javascript; charset=utf-8", LAUNCHER_JS)
+}
+
+pub async fn settings_js() -> Response {
+    asset("text/javascript; charset=utf-8", SETTINGS_JS)
 }
 
 pub async fn app_js() -> Response {

@@ -22,12 +22,16 @@ use plonix_core::paths::Home;
 use serde_json::{Value, json};
 
 use client::{ApiError, Client, NotRunning, encode};
-use engine_ctl::{DEFAULT_API_PORT, DEFAULT_PROXY_PORT, StartOptions};
+use engine_ctl::StartOptions;
 
 const EXAMPLES: &str = "\
 Get started:
   plonix open example.com          start capturing, open a browser at the target and the Plonix window
   plonix ui                        open the Plonix window (Traffic, Lens, Bench, Scope, Map, Findings)
+  plonix launcher                  the Start screen in your browser: pick, create and open projects
+  plonix start -p shop             open another project; each project runs in a session of its own
+  plonix sessions                  projects open right now, with their proxy ports
+  plonix -p shop search status:5xx -p picks the project any command talks to
   plonix search host:example.com status:5xx
   plonix show 42
   plonix scope                     review domains Plonix thinks belong in scope
@@ -56,6 +60,10 @@ struct Cli {
     #[arg(long, global = true)]
     json: bool,
 
+    /// Project (name, id or folder) to start or talk to [default: $PLONIX_PROJECT, else the current session]
+    #[arg(long, short = 'p', global = true, value_name = "PROJECT")]
+    project: Option<String>,
+
     #[command(subcommand)]
     command: Cmd,
 }
@@ -68,10 +76,27 @@ enum Cmd {
     Ui(UiArgs),
     /// Start the engine (proxy + API) in the background
     Start(StartArgs),
-    /// Stop the engine
-    Stop,
+    /// Close a project's session (the current one, or -p)
+    Stop {
+        /// Close every open project
+        #[arg(long)]
+        all: bool,
+    },
     /// Show whether the engine is running and what it has captured
     Status,
+    /// Projects open right now, each with its own proxy
+    Sessions,
+    /// List, create and locate projects
+    Projects {
+        #[command(subcommand)]
+        cmd: Option<ProjectsCmd>,
+    },
+    /// Open the Start screen in your browser: pick, create and open projects
+    Launcher {
+        /// Print the sign-in link instead of opening it
+        #[arg(long)]
+        no_open: bool,
+    },
     /// Search captured traffic, newest first
     #[command(
         visible_alias = "s",
@@ -121,15 +146,35 @@ enum Cmd {
     /// Run the engine in the foreground (used by `plonix start`)
     #[command(hide = true)]
     Engine(EngineArgs),
+    /// Run the Start screen in the foreground (used by `plonix launcher`)
+    #[command(hide = true)]
+    Hub {
+        #[arg(long)]
+        port: Option<u16>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProjectsCmd {
+    /// Known projects and their folders (the default)
+    List,
+    /// Create a project
+    New {
+        name: String,
+        /// The folder the project folder goes in [default: ~/Plonix]
+        #[arg(long, value_name = "DIR")]
+        location: Option<PathBuf>,
+    },
+    /// Print a project's folder
+    Path { project: String },
+    /// Remove a project from the list (its folder is kept)
+    Forget { project: String },
 }
 
 #[derive(Args)]
 struct OpenArgs {
     /// Host name or URL, e.g. example.com or http://localhost:3000
     target: String,
-    /// Project to record into (default: the target's host name)
-    #[arg(long, short)]
-    project: Option<String>,
     /// Do not add the target to scope
     #[arg(long)]
     no_scope: bool,
@@ -151,30 +196,24 @@ struct UiArgs {
     /// Print the sign-in link instead of opening it
     #[arg(long)]
     no_open: bool,
-    /// Project to record into if the engine is not running yet
-    #[arg(long, short, default_value = "default")]
-    project: String,
     #[command(flatten)]
     engine: EngineFlags,
 }
 
 #[derive(Args)]
 struct StartArgs {
-    /// Project to record into
-    #[arg(long, short, default_value = "default")]
-    project: String,
     #[command(flatten)]
     engine: EngineFlags,
 }
 
 #[derive(Args, Clone)]
 struct EngineFlags {
-    /// Proxy port (another free port is used if it is taken)
-    #[arg(long, default_value_t = DEFAULT_PROXY_PORT)]
-    port: u16,
-    /// Local API port (another free port is used if it is taken)
-    #[arg(long, default_value_t = DEFAULT_API_PORT)]
-    api_port: u16,
+    /// Proxy port for this session [default: the project's setting, 8080]; a taken port moves to the next free one
+    #[arg(long)]
+    port: Option<u16>,
+    /// Local API port [default: the project's last one, else 8090, else any free port]
+    #[arg(long)]
+    api_port: Option<u16>,
     /// Accept invalid upstream certificates (self-signed staging hosts)
     #[arg(long)]
     insecure_upstream: bool,
@@ -182,12 +221,10 @@ struct EngineFlags {
 
 #[derive(Args)]
 struct EngineArgs {
-    #[arg(long, default_value = "default")]
-    project: String,
-    #[arg(long, default_value_t = DEFAULT_PROXY_PORT)]
-    proxy_port: u16,
-    #[arg(long, default_value_t = DEFAULT_API_PORT)]
-    api_port: u16,
+    #[arg(long)]
+    proxy_port: Option<u16>,
+    #[arg(long)]
+    api_port: Option<u16>,
     #[arg(long)]
     insecure_upstream: bool,
 }
@@ -292,11 +329,12 @@ fn exit_code(e: &anyhow::Error) -> u8 {
 struct Ctx {
     home: Home,
     json: bool,
+    project: Option<String>,
 }
 
 impl Ctx {
     fn client(&self) -> Result<Client> {
-        Client::connect(&self.home, "cli")
+        Client::connect_project(&self.home, self.project.as_deref(), "cli")
     }
 
     fn print_json(&self, v: &Value) -> Result<()> {
@@ -306,19 +344,18 @@ impl Ctx {
 }
 
 fn run(cli: Cli) -> Result<ExitCode> {
-    let ctx = Ctx { home: Home::resolve(cli.home.as_deref())?, json: cli.json };
+    let project = cli.project.or_else(|| std::env::var("PLONIX_PROJECT").ok()).filter(|p| !p.trim().is_empty());
+    let ctx = Ctx { home: Home::resolve(cli.home.as_deref())?, json: cli.json, project };
     match cli.command {
         Cmd::Open(a) => open_cmd(&ctx, a)?,
         Cmd::Ui(a) => ui_cmd(&ctx, a)?,
         Cmd::Start(a) => start_cmd(&ctx, a)?,
-        Cmd::Stop => {
-            if engine_ctl::stop(&ctx.home)? {
-                println!("Plonix engine stopped. Captured traffic is kept.");
-            } else {
-                println!("Plonix engine is not running.");
-            }
-        }
+        Cmd::Stop { all } => stop_cmd(&ctx, all)?,
         Cmd::Status => return status_cmd(&ctx),
+        Cmd::Sessions => sessions_cmd(&ctx)?,
+        Cmd::Projects { cmd } => projects_cmd(&ctx, cmd.unwrap_or(ProjectsCmd::List))?,
+        Cmd::Launcher { no_open } => launcher_cmd(&ctx, no_open)?,
+        Cmd::Hub { port } => hub_foreground(&ctx, port)?,
         Cmd::Search(a) => search_cmd(&ctx, a)?,
         Cmd::Watch { query } => {
             let c = ctx.client()?;
@@ -355,7 +392,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Cmd::Engine(a) => engine_ctl::run_foreground(
             ctx.home.clone(),
             &StartOptions {
-                project: engine_ctl::project_name(&a.project),
+                project: ctx.project.clone(),
                 proxy_port: a.proxy_port,
                 api_port: a.api_port,
                 insecure_upstream: a.insecure_upstream,
@@ -365,35 +402,148 @@ fn run(cli: Cli) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn start_options(project: &str, f: &EngineFlags) -> StartOptions {
-    StartOptions {
-        project: engine_ctl::project_name(project),
-        proxy_port: f.port,
-        api_port: f.api_port,
-        insecure_upstream: f.insecure_upstream,
-    }
+fn start_options(project: Option<String>, f: &EngineFlags) -> StartOptions {
+    StartOptions { project, proxy_port: f.port, api_port: f.api_port, insecure_upstream: f.insecure_upstream }
 }
 
 fn start_cmd(ctx: &Ctx, a: StartArgs) -> Result<()> {
-    let opts = start_options(&a.project, &a.engine);
+    let opts = start_options(ctx.project.clone(), &a.engine);
     let (c, started) = engine_ctl::start(&ctx.home, &opts)?;
-    let running_project = c.status["project"].as_str().unwrap_or("");
-    if !started && running_project != opts.project && opts.project != "default" {
-        bail!(
-            "the engine is already running with project '{running_project}'. Stop it first with `plonix stop`."
-        );
-    }
     if ctx.json {
         return ctx.print_json(&json!({ "started": started, "status": c.status }));
     }
     println!("{}", if started { "Plonix engine started." } else { "Plonix engine is already running." });
     print!("{}", render::status(&c.status, &open::tilde(&ctx.home.ca_cert())));
+    let others = plonix_core::session::running(&ctx.home).len().saturating_sub(1);
+    if others > 0 {
+        println!("\n{others} other project(s) open as well; see `plonix sessions`.");
+    }
     println!("\nNext: `plonix open <target>` opens a browser that captures through the proxy.");
     Ok(())
 }
 
+fn stop_cmd(ctx: &Ctx, all: bool) -> Result<()> {
+    let stopped = if all { engine_ctl::stop_all(&ctx.home)? } else { engine_ctl::stop(&ctx.home, ctx.project.as_deref())?.into_iter().collect() };
+    if ctx.json {
+        return ctx.print_json(&json!({ "stopped": stopped.iter().map(|s| &s["project"]).collect::<Vec<_>>() }));
+    }
+    if stopped.is_empty() {
+        match &ctx.project {
+            Some(p) if !all => println!("Project '{p}' is not open."),
+            _ => println!("Plonix engine is not running."),
+        }
+    }
+    for s in &stopped {
+        println!("Plonix engine stopped (project {}). Captured traffic is kept.", s["project"].as_str().unwrap_or(""));
+    }
+    let left = plonix_core::session::running(&ctx.home);
+    if !all && !left.is_empty() {
+        println!("Still open: {}.", left.iter().map(|i| i.project.as_str()).collect::<Vec<_>>().join(", "));
+    }
+    Ok(())
+}
+
+fn sessions_cmd(ctx: &Ctx) -> Result<()> {
+    let list = plonix_core::session::running(&ctx.home);
+    let current = ctx.home.read_engine_info().map(|i| i.project_id).unwrap_or_default();
+    if ctx.json {
+        return ctx.print_json(&json!(list));
+    }
+    if list.is_empty() {
+        println!("No project is open. Start one with `plonix start -p <name>` or `plonix open <target>`.");
+        return Ok(());
+    }
+    println!("  {:<24} {:<21} API", "PROJECT", "PROXY");
+    for i in &list {
+        let mark = if i.project_id == current { "*" } else { " " };
+        println!("{mark} {}", engine_ctl::describe(i));
+    }
+    println!("\n* the current session: commands without -p talk to it.");
+    Ok(())
+}
+
+fn projects_cmd(ctx: &Ctx, cmd: ProjectsCmd) -> Result<()> {
+    use plonix_core::project;
+    match cmd {
+        ProjectsCmd::List => {
+            let list = project::listings(&ctx.home);
+            if ctx.json {
+                return ctx.print_json(&json!(list));
+            }
+            if list.is_empty() {
+                println!("No projects yet. Create one with `plonix projects new <name>` or `plonix open <target>`.");
+                println!("New projects go in {}.", open::tilde(&ctx.home.default_projects_dir()));
+                return Ok(());
+            }
+            for l in &list {
+                let state = if !l.available { "missing" } else if l.open { "open" } else { "" };
+                println!("{:<24} {:<8} {}", l.entry.name, state, open::tilde(&l.entry.path));
+            }
+        }
+        ProjectsCmd::New { name, location } => {
+            let parent = location.map(|l| project::expand_tilde(&l)).unwrap_or_else(|| ctx.home.default_projects_dir());
+            let p = project::Project::create(&parent.join(project::slug(&name)), &name)?;
+            project::remember(&ctx.home, &p, false)?;
+            if ctx.json {
+                return ctx.print_json(&json!({ "id": p.id(), "name": p.name(), "path": p.dir }));
+            }
+            println!("Created project '{}' in {}.\nOpen it with `plonix start -p \"{}\"`.", p.name(), open::tilde(&p.dir), p.name());
+        }
+        ProjectsCmd::Path { project: sel } => {
+            let entry = project::list(&ctx.home)
+                .into_iter()
+                .find(|e| e.id == sel || e.name.eq_ignore_ascii_case(&sel))
+                .with_context(|| format!("no project named '{sel}' (see `plonix projects`)"))?;
+            println!("{}", entry.path.display());
+        }
+        ProjectsCmd::Forget { project: sel } => {
+            let entry = project::list(&ctx.home)
+                .into_iter()
+                .find(|e| e.id == sel || e.name.eq_ignore_ascii_case(&sel))
+                .with_context(|| format!("no project named '{sel}' (see `plonix projects`)"))?;
+            if plonix_core::session::find(&ctx.home, &entry.id).is_some() {
+                bail!("'{}' is open; close it first with `plonix stop -p \"{}\"`", entry.name, entry.name);
+            }
+            project::forget(&ctx.home, &entry.id)?;
+            println!("Removed '{}' from the list. Its folder is still at {}.", entry.name, open::tilde(&entry.path));
+        }
+    }
+    Ok(())
+}
+
+/// Opens the Start screen, starting it in the background if needed.
+fn launcher_cmd(ctx: &Ctx, no_open: bool) -> Result<()> {
+    let url = engine_ctl::launcher_url(&ctx.home)?;
+    let opened = !no_open && open::open_url(&url).is_ok();
+    if ctx.json {
+        return ctx.print_json(&json!({ "url": url, "opened": opened }));
+    }
+    if opened {
+        println!("Opened the Plonix Start screen in your browser.");
+    } else {
+        println!("Open this link in your browser (it works once, for {} seconds):\n\n  {url}", plonix_core::ui::CODE_TTL.as_secs());
+    }
+    Ok(())
+}
+
+fn hub_foreground(ctx: &Ctx, port: Option<u16>) -> Result<()> {
+    engine_ctl::init_logging();
+    let home = ctx.home.clone();
+    tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(async move {
+        let hub = plonix_core::hub::start(&home, port).await?;
+        hub.announce()?;
+        println!("Plonix Start screen at {}", hub.url());
+        tokio::select! {
+            _ = hub.stopped() => {}
+            _ = tokio::signal::ctrl_c() => {}
+        }
+        hub.shutdown().await;
+        Ok(())
+    })
+}
+
 fn status_cmd(ctx: &Ctx) -> Result<ExitCode> {
-    let running = engine_ctl::running(&ctx.home, "cli");
+    let running = engine_ctl::running(&ctx.home, ctx.project.as_deref(), "cli");
     match &running {
         Some(c) if ctx.json => ctx.print_json(&json!({ "running": true, "status": c.status }))?,
         Some(c) => print!("{}", render::status(&c.status, &open::tilde(&ctx.home.ca_cert()))),
@@ -586,8 +736,9 @@ fn open_cmd(ctx: &Ctx, a: OpenArgs) -> Result<()> {
     ctx.home.ensure()?;
     let ca = CertAuthority::load_or_create(&ctx.home)?;
 
-    let project = a.project.clone().unwrap_or_else(|| target.host.clone());
-    let (c, started) = engine_ctl::start(&ctx.home, &start_options(&project, &a.engine))?;
+    // Without -p: the current session, else a project named after the target.
+    let project = ctx.project.clone().or_else(|| engine_ctl::running(&ctx.home, None, "cli").is_none().then(|| target.host.clone()));
+    let (c, started) = engine_ctl::start(&ctx.home, &start_options(project, &a.engine))?;
     let proxy = c.status["proxy"].as_str().unwrap_or("").to_string();
     let running_project = c.status["project"].as_str().unwrap_or("").to_string();
 
@@ -618,7 +769,9 @@ fn open_cmd(ctx: &Ctx, a: OpenArgs) -> Result<()> {
     } else {
         match open::detect() {
             Some(b) => {
-                let args = open::launch(&ctx.home, &b, &proxy, &ca.spki_sha256(), &target.url)?;
+                let project_dir = c.status["project_dir"].as_str().map(PathBuf::from);
+                let profile = plonix_core::browser::profile_dir(&ctx.home, project_dir.as_deref());
+                let args = open::launch(&profile, &b, &proxy, &ca.spki_sha256(), &target.url)?;
                 needs_trust = b.kind == open::Kind::Firefox;
                 let how = if needs_trust { "isolated profile" } else { "isolated profile, trusts Plonix" };
                 say("Browser", &format!("{} ({how})", b.name));
@@ -687,7 +840,7 @@ fn ui_link(c: &Client) -> Result<String> {
 }
 
 fn ui_cmd(ctx: &Ctx, a: UiArgs) -> Result<()> {
-    let (c, started) = engine_ctl::start(&ctx.home, &start_options(&a.project, &a.engine))?;
+    let (c, started) = engine_ctl::start(&ctx.home, &start_options(ctx.project.clone(), &a.engine))?;
     let url = ui_link(&c.client)?;
     let opened = !a.no_open && open::open_url(&url).is_ok();
     if ctx.json {

@@ -58,6 +58,13 @@ const header = (headers, name) => {
   return hit ? hit[1] : null;
 };
 
+/* State kept in the browser for one project (search, Bench tabs, last
+ * target) is keyed by the project's id, so it stays with the project even
+ * when another project later opens at the same address. */
+const PROJECT_ID = (document.querySelector('meta[name="plonix-project"]') || {}).content || '';
+const pkey = (key) => (PROJECT_ID && !PROJECT_ID.includes('{') ? `${key}@${PROJECT_ID}` : key);
+const pstore = (key, value) => store(pkey(key), value);
+
 function store(key, value) {
   try {
     if (value === undefined) return JSON.parse(localStorage.getItem(key));
@@ -71,10 +78,11 @@ function store(key, value) {
 /* ---------- API ---------- */
 
 class ApiError extends Error {
-  constructor(status, code, message) {
+  constructor(status, code, message, data) {
     super(message);
     this.status = status;
     this.code = code;
+    this.problems = data && data.problems;
   }
 }
 
@@ -111,7 +119,7 @@ async function api(path, { method = 'GET', body } = {}) {
     signOut();
     throw new ApiError(401, 'unauthorized', 'Signed out');
   }
-  if (!resp.ok) throw new ApiError(resp.status, (data && data.code) || 'error', (data && data.error) || resp.statusText);
+  if (!resp.ok) throw new ApiError(resp.status, (data && data.code) || 'error', (data && data.error) || resp.statusText, data);
   return data;
 }
 
@@ -237,6 +245,7 @@ const VIEWS = {
   scope: { label: 'Scope', ico: '◉', render: renderScope },
   map: { label: 'Map', ico: '⊞', render: renderMap },
   findings: { label: 'Findings', ico: '⚑', render: renderFindings },
+  settings: { label: 'Settings', ico: '⚙', render: renderSettings, footer: true },
 };
 
 const IN_APP = !!window.__PLONIX_APP__;
@@ -244,6 +253,7 @@ const IN_APP = !!window.__PLONIX_APP__;
 function renderShell() {
   const nav = h('div', { class: 'nav' });
   Object.entries(VIEWS).forEach(([key, v], i) => {
+    if (v.footer) return;
     nav.append(
       h(
         'button',
@@ -282,6 +292,16 @@ function renderShell() {
         nav,
         h('div', { class: 'railsecs', id: 'railsecs' }),
         h('div', { class: 'spacer' }),
+        h(
+          'div',
+          { class: 'nav navfoot' },
+          h(
+            'button',
+            { 'data-v': 'settings', title: `Settings: proxy, storage and more${IN_APP ? '  (⌘,)' : ''}`, onclick: () => go('settings') },
+            h('span', { class: 'ico', text: '⚙' }),
+            h('span', { class: 'nl', text: 'Settings' }),
+          ),
+        ),
         h(
           'button',
           { class: 'railtoggle', id: 'railtoggle', onclick: toggleSidebar },
@@ -368,7 +388,7 @@ function renderRail() {
 
 /** Opens a target in the capture browser: an isolated browser that routes through Plonix. */
 function openTarget() {
-  const input = h('input', { placeholder: 'example.com', spellcheck: 'false', autocomplete: 'off', value: store('plonix.lastTarget') || '' });
+  const input = h('input', { placeholder: 'example.com', spellcheck: 'false', autocomplete: 'off', value: pstore('plonix.lastTarget') || '' });
   const go = async () => {
     const target = input.value.trim();
     if (!target) return input.focus();
@@ -395,7 +415,7 @@ function openTarget() {
 async function launchTarget(target) {
   try {
     const r = await api('/api/browser/open', { method: 'POST', body: { target } });
-    store('plonix.lastTarget', target);
+    pstore('plonix.lastTarget', target);
     toast(`Opened ${r.url} in ${r.browser}. Browse the site; requests appear in Traffic.`, 'ok');
     await loadScope();
     if (S.view !== 'traffic') go('traffic');
@@ -420,6 +440,7 @@ function updateChrome() {
   const st = S.status;
   if (!st || !$('#engine')) return;
   $('#proj').textContent = '· ' + st.project;
+  $('#proj').title = st.project_dir ? 'Project folder: ' + st.project_dir : '';
   document.title = 'Plonix · ' + st.project;
   const eng = $('#engine');
   eng.classList.toggle('down', !S.engineUp);
@@ -584,7 +605,7 @@ function rawPre({ lines, body }) {
    Traffic
    ====================================================================== */
 
-const T = { q: store('plonix.q') || '', items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: null };
+const T = { q: pstore('plonix.q') || '', items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: null };
 
 function renderTraffic(main) {
   const input = h('input', {
@@ -769,7 +790,7 @@ async function refreshTraffic(userAction) {
   if (!userAction && !T.live) return;
   if (S.view !== 'traffic') return;
   const seq = (T.seq = (T.seq || 0) + 1);
-  store('plonix.q', T.q);
+  pstore('plonix.q', T.q);
   let data;
   try {
     data = await api('/api/traffic?limit=500&q=' + encodeURIComponent(T.q));
@@ -795,7 +816,7 @@ async function refreshTraffic(userAction) {
 }
 
 function emptyTraffic(st) {
-  const input = h('input', { placeholder: 'example.com', spellcheck: 'false', autocomplete: 'off', value: store('plonix.lastTarget') || '' });
+  const input = h('input', { placeholder: 'example.com', spellcheck: 'false', autocomplete: 'off', value: pstore('plonix.lastTarget') || '' });
   const err = h('div', { class: 'qerr' });
   const open = async () => {
     if (!input.value.trim()) return input.focus();
@@ -1160,7 +1181,7 @@ function showExchange(id) {
 
 const R = { tabs: [], active: 0, mode: 'response' };
 (function loadBench() {
-  const saved = store('plonix.bench');
+  const saved = pstore('plonix.bench');
   if (saved && Array.isArray(saved.tabs)) {
     R.tabs = saved.tabs;
     R.active = Math.min(saved.active || 0, Math.max(0, R.tabs.length - 1));
@@ -1168,7 +1189,7 @@ const R = { tabs: [], active: 0, mode: 'response' };
 })();
 function saveBench() {
   const tabs = R.tabs.map((t) => ({ ...t, error: undefined, picks: [] }));
-  store('plonix.bench', { tabs: tabs.slice(-30), active: R.active });
+  pstore('plonix.bench', { tabs: tabs.slice(-30), active: R.active });
 }
 const tabNo = () => (R.counter = (R.counter || R.tabs.length) + 1);
 
@@ -2013,7 +2034,7 @@ document.addEventListener('keydown', (e) => {
     }
     return;
   }
-  const keys = Object.keys(VIEWS);
+  const keys = Object.keys(VIEWS).filter((k) => !VIEWS[k].footer);
   if (/^[1-5]$/.test(e.key)) return go(keys[Number(e.key) - 1]);
   if (e.key === '\\') return toggleSidebar();
   if (S.view !== 'traffic') return;
@@ -2028,6 +2049,99 @@ document.addEventListener('keydown', (e) => {
     selectRow(-1);
   } else if (e.key === 'b' && T.sel) sendToBench(T.sel);
 });
+
+/* ---------- settings ---------- */
+
+async function renderSettings(main) {
+  const box = h('div', { class: 'view settingsview' }, h('div', { class: 'empty', text: 'Loading settings…' }));
+  main.append(box);
+  let data;
+  try {
+    data = await api('/api/settings');
+  } catch (e) {
+    clear(box, h('div', { class: 'empty', text: e.message }));
+    return;
+  }
+  if (S.view !== 'settings') return;
+  PlonixSettings.render(box, data, {
+    select: S.settingsSection || 'proxy',
+    onSelect: (id) => (S.settingsSection = id),
+    save: async (section, values) => {
+      const r = await api('/api/settings/' + section, { method: 'PUT', body: { values } });
+      if (section === 'proxy') {
+        S.status = await api('/api/status');
+        updateChrome();
+        r.message = 'Saved and applied. The proxy listens on ' + r.proxy + '.';
+      }
+      return r;
+    },
+    extra: (section, el) => {
+      if (section.id === 'proxy') el.append(proxyPanel());
+      if (section.id === 'storage') el.append(storagePanel());
+    },
+  });
+}
+
+function proxyPanel() {
+  const st = S.status || {};
+  return h(
+    'div',
+    { class: 'spanel' },
+    h('h4', { text: 'Listening now' }),
+    h('p', null, 'This project\'s proxy is at ', h('b', { class: 'mono', text: st.proxy || '…' }), '. Other open projects have proxies of their own.'),
+    h('p', null, 'Devices that should capture through it need the Plonix certificate, from ', h('span', { class: 'mono', text: 'http://' + (st.proxy || '') + '/ca.pem' }), ' through the proxy.'),
+  );
+}
+
+function storagePanel() {
+  const panel = h('div', { class: 'spanel' }, h('h4', { text: 'Out-of-scope traffic' }), h('p', { text: 'Counting…' }));
+  api('/api/storage')
+    .then((s) => {
+      const st = s.stats;
+      const rows = [
+        h('h4', { text: 'Out-of-scope traffic' }),
+        h('p', { text: `${st.out_of_scope} of ${st.total} captured request(s) are to hosts that are not in scope.` }),
+      ];
+      if (s.last_prune) {
+        const r = s.last_prune;
+        rows.push(h('p', { class: 'muted', text: r.skipped ? `Last time: ${r.skipped}.` : `Last time (${fmtDate(r.at)}): deleted ${r.removed}, kept ${r.kept}.` }));
+      }
+      if (!st.in_scope_rules) rows.push(h('p', { class: 'muted', text: 'Nothing is in scope yet, so nothing would be deleted.' }));
+      const btn = h('button', { class: 'btn danger', text: 'Delete Out-of-Scope Traffic Now…', disabled: !st.in_scope_rules || !st.out_of_scope, onclick: () => confirmPrune(st) });
+      rows.push(h('div', { class: 'row' }, btn));
+      clear(panel, rows);
+    })
+    .catch((e) => clear(panel, h('p', { text: e.message })));
+  return panel;
+}
+
+function confirmPrune(st) {
+  const m = modal(
+    'Delete out-of-scope traffic?',
+    [
+      h('p', { text: `This permanently deletes ${st.out_of_scope} request(s) to hosts that are not in scope, then compacts the project file. Requests that findings point to are kept.` }),
+      h('p', { class: 'muted', text: 'Scope suggestions that relied on that traffic go away too.' }),
+    ],
+    [
+      h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }),
+      h('button', {
+        class: 'btn primary',
+        text: 'Delete',
+        onclick: async () => {
+          try {
+            const r = await api('/api/storage/prune', { method: 'POST', body: { confirm: true } });
+            closeModal();
+            toast(r.skipped ? r.skipped : `Deleted ${r.removed} request(s). ${r.kept} kept.`, 'ok');
+            exCache.clear();
+            go('settings', true);
+          } catch (e) {
+            m.err.textContent = e.message;
+          }
+        },
+      }),
+    ],
+  );
+}
 
 // Entry points for the Plonix app's menu bar.
 window.plonix = {
