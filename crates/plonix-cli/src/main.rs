@@ -11,6 +11,7 @@ mod engine_ctl;
 mod mcp;
 mod open;
 mod render;
+mod scan;
 
 use std::io::{BufRead, IsTerminal, Write};
 use std::path::PathBuf;
@@ -108,6 +109,11 @@ enum Cmd {
     Tech {
         /// Only this host
         host: Option<String>,
+    },
+    /// Scan: suggest a profile, list the catalog, run an active scan
+    Scan {
+        #[command(subcommand)]
+        cmd: scan::ScanCmd,
     },
     /// Detection rule packs: list, add from a file or URL, remove, check
     Rules {
@@ -359,6 +365,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
             }
         }
         Cmd::Tech { host } => community::tech_cmd(&ctx, host)?,
+        Cmd::Scan { cmd } => scan::scan_cmd(&ctx, cmd)?,
         Cmd::Rules { cmd } => community::rules_cmd(&ctx, cmd.unwrap_or(community::RulesCmd::List))?,
         Cmd::Store(a) => community::store_cmd(&ctx, a)?,
         Cmd::Connect { cmd } => connect::connect_cmd(&ctx, cmd)?,

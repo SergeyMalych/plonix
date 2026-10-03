@@ -73,6 +73,8 @@ const READ_ONLY: &[Capability] = &[
     Capability { method: "GET", path: "/api/tech/{host}", what: "Technologies detected on each host" },
     Capability { method: "GET", path: "/api/scope", what: "Scope rules and suggested domains" },
     Capability { method: "GET", path: "/api/findings", what: "Recorded findings" },
+    Capability { method: "GET", path: "/api/scan/catalog", what: "Available scan detectors and tactics" },
+    Capability { method: "GET", path: "/api/scan/suggest/{host}", what: "Suggested scan profile for a host (read-only advice)" },
     Capability { method: "GET", path: "/api/agents", what: "This access policy" },
 ];
 
@@ -184,6 +186,8 @@ mod tests {
             ("GET", "/api/tech/example.com"),
             ("GET", "/api/scope"),
             ("GET", "/api/findings"),
+            ("GET", "/api/scan/catalog"),
+            ("GET", "/api/scan/suggest/example.com"),
             ("GET", "/api/agents"),
         ] {
             assert!(allowed(m, method, path), "{method} {path} should be allowed");
@@ -196,6 +200,7 @@ mod tests {
         for (method, path) in [
             ("POST", "/api/send"),
             ("POST", "/api/replay"),
+            ("POST", "/api/scan"),
             ("POST", "/api/scope/accept"),
             ("POST", "/api/scope/reject"),
             ("POST", "/api/scope/remove"),

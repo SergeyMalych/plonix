@@ -89,6 +89,9 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, proxy_a
         .route("/api/send", post(send))
         .route("/api/replay", post(replay))
         .route("/api/findings", get(findings).post(add_finding))
+        .route("/api/scan/catalog", get(scan_catalog))
+        .route("/api/scan/suggest/{host}", get(scan_suggest))
+        .route("/api/scan", post(scan_run))
         .route("/api/agents", get(agents))
         .route("/api/shutdown", post(shutdown))
         .layer(middleware::from_fn_with_state(state.clone(), guard))
@@ -350,6 +353,32 @@ async fn tech_host(State(s): State<AppState>, Path(host): Path<String>) -> Respo
         Ok(Ok(tech)) => Json(json!({ "host": host.to_ascii_lowercase(), "tech": tech })).into_response(),
         Ok(Err(e)) => internal(e),
         Err(e) => internal(e.into()),
+    }
+}
+
+async fn scan_catalog(State(s): State<AppState>) -> Response {
+    let engine = s.engine.clone();
+    match tokio::task::spawn_blocking(move || engine.scan_catalog().describe()).await {
+        Ok(view) => Json(view).into_response(),
+        Err(e) => internal(e.into()),
+    }
+}
+
+async fn scan_suggest(State(s): State<AppState>, Path(host): Path<String>) -> Response {
+    let engine = s.engine.clone();
+    match tokio::task::spawn_blocking(move || engine.scan_suggest(&host)).await {
+        Ok(Ok(suggestion)) => Json(suggestion).into_response(),
+        Ok(Err(e)) => internal(e),
+        Err(e) => internal(e.into()),
+    }
+}
+
+async fn scan_run(State(s): State<AppState>, headers: HeaderMap, Json(req): Json<crate::scan::ScanRequest>) -> Response {
+    match s.engine.scan(req, &initiator(&headers)).await {
+        Ok(report) => Json(report).into_response(),
+        Err(e @ SendError::OutOfScope { .. }) => err(StatusCode::FORBIDDEN, "out_of_scope", &e.to_string()),
+        Err(SendError::Other(e)) => internal(e),
+        Err(e) => err(StatusCode::BAD_REQUEST, "bad_request", &e.to_string()),
     }
 }
 
