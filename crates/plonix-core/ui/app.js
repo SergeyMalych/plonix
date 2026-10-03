@@ -329,10 +329,11 @@ function renderRail() {
   const box = $('#railsecs');
   if (!box) return;
   const secs = [];
-  const pending = (S.scope.suggestions || []).slice(0, 4);
+  const waiting = stillPending(S.scope.suggestions);
+  const pending = waiting.slice(0, 4);
   if (pending.length) {
     secs.push(
-      h('button', { class: 'navsec navlink', title: 'Review them on the Scope screen', onclick: () => go('scope') }, 'Scope suggestions', h('span', { class: 'qn', text: (S.scope.suggestions || []).length })),
+      h('button', { class: 'navsec navlink', title: 'Review them on the Scope screen', onclick: () => go('scope') }, 'Scope suggestions', h('span', { class: 'qn', text: waiting.length })),
       pending.map((sg) =>
         h(
           'div',
@@ -435,7 +436,7 @@ function updateChrome() {
   $('#f-cap').textContent = st.exchanges;
   $('#f-ver').textContent = st.version;
   $('#ct-traffic').textContent = st.exchanges || '';
-  const pending = (S.scope.suggestions || []).length;
+  const pending = stillPending(S.scope.suggestions).length;
   const pend = $('#ct-scope');
   pend.textContent = pending || '';
   pend.classList.toggle('hot', pending > 0);
@@ -1482,7 +1483,7 @@ const EV = {
 function renderBanner() {
   const slot = $('#bannerslot');
   if (!slot) return;
-  const all = S.scope.suggestions || [];
+  const all = stillPending(S.scope.suggestions);
   const fresh = all.filter((s) => !(T.hidden || []).includes(s.domain));
   if (!all.length || !fresh.length) return clear(slot);
   const queue = all.filter((s) => !(T.skipped || []).includes(s.domain));
@@ -1511,6 +1512,15 @@ function renderBanner() {
 /** The host a suggestion is about: `*.example.com` is about example.com. */
 const suggestionBase = (domain) => domain.replace(/^\*\./, '');
 
+/**
+ * Suggestions still waiting on a decision. The engine already drops a
+ * suggestion once a rule covers it, but a rule added elsewhere can land a
+ * moment before the next scope refresh, so we also hide anything the current
+ * rules already decide. A domain that is part of an existing rule never
+ * prompts again.
+ */
+const stillPending = (sugg) => (sugg || []).filter((s) => decide(suggestionBase(s.domain)) === 'unknown');
+
 /** The three choices for one suggestion: this host only, with subdomains, or reject. */
 function scopeButtons(s, size, after) {
   const base = suggestionBase(s.domain);
@@ -1525,7 +1535,7 @@ function scopeButtons(s, size, after) {
 
 /** Accepts (each host only) or rejects every pending suggestion, after asking. */
 function decideAll(action) {
-  const list = (S.scope.suggestions || []).slice();
+  const list = stillPending(S.scope.suggestions);
   if (!list.length) return;
   const accept = action === 'accept';
   const run = async () => {
@@ -2100,7 +2110,7 @@ function renderScopeBody() {
     }
   };
   domain.addEventListener('keydown', (e) => e.key === 'Enter' && add('accept'));
-  const sugg = S.scope.suggestions || [];
+  const sugg = stillPending(S.scope.suggestions);
   const rules = (S.scope.rules || []).slice().sort((x, y) => x.decision.localeCompare(y.decision) || x.pattern.localeCompare(y.pattern));
   clear(
     box,
