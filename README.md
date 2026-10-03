@@ -1,0 +1,206 @@
+# Plonix
+
+**The open-source web security workbench for macOS. Fast, native, and scriptable from day one.**
+
+Plonix captures everything your browser does, learns the real shape of the target as you explore it, and lets you search, replay and prove what you find, from a GUI, a terminal, or an AI agent.
+
+> **Status: early development.** The core engine (proxy, traffic store, search, adaptive scope, local API) works today and is covered by tests. The CLI, the Mac app and the MCP server are next. See [Roadmap](#roadmap).
+
+---
+
+## Why Plonix
+
+Most of a web assessment is the same loop: capture traffic, figure out what the app actually is, poke at the interesting parts, and write up what's real. The tools for that loop have grown heavy. Plonix keeps the loop and drops the weight.
+
+| You want | Plonix gives you |
+| --- | --- |
+| A tool you can afford on every machine | Free and open source. No Pro tier holding back the good parts. |
+| Large projects that stay responsive | A Rust engine with one SQLite database per project. Search over captured traffic stays quick as projects grow. |
+| Something that feels at home on a Mac | A native macOS app is the planned front end, built on the same engine. |
+| Scope that matches reality | Adaptive scope learns related domains as you browse and shows the evidence for each one. |
+| Filters you can type | A small query language: `host:api.acme.com method:POST status:5xx -logout`. |
+| Automation in any language | Everything goes through a local HTTP API. Use curl, Python, Go, or whatever you already script in. |
+| An AI teammate that can see your project | Built-in MCP (planned) so agents such as Claude Code work with live traffic, scope and findings. |
+
+## Principles
+
+- **Fast.** A native Rust core. Projects with lots of traffic stay quick to search.
+- **Native.** Built for macOS, not ported to it.
+- **Minimal by design.** A few workflows done well: capture, discover, investigate, experiment, validate. No feature you'll never open.
+- **User-friendly first.** From download to captured traffic in under a minute is a release requirement.
+- **Programmable everywhere.** GUI, CLI and MCP are equal clients of the same local API. Anything you can click, you can script.
+- **AI-native.** Agents get first-class, scoped access to the research environment, and they follow the same scope rules you do.
+
+## What works today
+
+### Intercepting proxy with a local CA
+- HTTP and HTTPS interception. Plonix creates its own certificate authority on first run and mints per-host certificates on the fly.
+- Trust the CA once (`~/.plonix/ca.pem`) and every HTTPS site you visit through the proxy is captured.
+- Compressed bodies (gzip, deflate, brotli) are decoded for display and search.
+
+### Full traffic capture
+- Every request and response is recorded into a per-project SQLite database, in scope or not, so nothing you browsed is lost.
+- Hosts and the endpoints seen on each host are listed for a quick map of the target.
+
+### Fast search with filters
+Field filters narrow by metadata, and anything else is full-text matched (case-insensitive) against URLs, headers and decoded bodies. Prefix any term with `-` to negate it.
+
+```text
+host:example.com          host or any subdomain (globs: host:*.cdn.*)
+method:POST               HTTP method
+status:404  status:5xx    exact code, class, or status:none for no response
+path:/api                 path prefix (globs: path:*admin*)
+mime:json                 substring of the response content type
+scope:in  scope:out       in or out of the current scope
+source:proxy              captured traffic, or source:replay for sent requests
+"set-cookie: sid"         quoted phrase
+passw -logout             plain full-text terms
+```
+
+### Adaptive scope
+Static whitelists assume you already know every domain an app uses. You don't. You find out by using it. Plonix records everything, then suggests domains to bring into scope, each backed by evidence:
+
+| Evidence | Example |
+| --- | --- |
+| Called from an in-scope page | `Referer` or `Origin` points at an in-scope host |
+| Redirect | An in-scope host redirects here (`Location:`) |
+| Linked | Referenced in an in-scope page or its `Content-Security-Policy` |
+| Shares a session | Receives a session token that an in-scope host issued |
+| Shares a certificate | Appears in the TLS certificate SANs of an in-scope host, or the reverse |
+
+You accept or reject each suggestion (`*.example.com` covers all subdomains). Accepting a domain re-analyzes past traffic, so new suggestions surface right away.
+
+**Enforcement is built in.** Every active request, whether a replay, a crafted request, or one from an agent, passes a single choke point. If the target host isn't accepted, it is refused. Passive capture keeps recording everything.
+
+### Replay and send
+- Replay any captured exchange with a different method, path, headers or body.
+- Send new requests from scratch. Results are stored alongside captured traffic and tagged with who sent them.
+
+### Local API
+- An HTTP API on loopback only, protected by a bearer token stored at `~/.plonix/api-token` (mode `0600`).
+- Requests must target the loopback address, which keeps web pages in your browser from reaching it.
+
+## Quickstart
+
+Requirements: Rust (stable, edition 2024) and a C toolchain. On macOS, `xcode-select --install` is enough. SQLite is bundled.
+
+```sh
+git clone https://github.com/SergeyMalych/plonix.git
+cd plonix
+cargo build --release
+cargo test --workspace     # unit tests plus end-to-end proxy and scope tests
+```
+
+The `plonix` command isn't wired up yet, so for now you start the engine from a few lines of Rust that call `plonix_core`:
+
+```rust
+use plonix_core::{engine, paths::Home, EngineConfig};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    engine::run(EngineConfig {
+        home: Home::resolve(None)?,              // $PLONIX_HOME or ~/.plonix
+        project: "acme".into(),                  // ~/.plonix/projects/acme.db
+        proxy_addr: "127.0.0.1:8080".parse()?,
+        proxy_port_fallback: true,
+        api_addr: "127.0.0.1:8090".parse()?,
+        insecure_upstream: false,
+    })
+    .await
+}
+```
+
+Then capture traffic through the proxy:
+
+```sh
+curl -x http://127.0.0.1:8080 --cacert ~/.plonix/ca.pem https://example.com/
+```
+
+Point a browser at the same proxy and trust `~/.plonix/ca.pem` to capture a real session.
+
+Explore what you captured through the API:
+
+```sh
+TOKEN=$(cat ~/.plonix/api-token)
+API=http://127.0.0.1:8090/api
+
+curl -H "Authorization: Bearer $TOKEN" "$API/status"
+curl -H "Authorization: Bearer $TOKEN" -G "$API/traffic" --data-urlencode 'q=host:example.com status:2xx'
+curl -H "Authorization: Bearer $TOKEN" "$API/scope"     # rules plus suggestions with evidence
+
+curl -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     -d '{"domain":"*.example.com"}' "$API/scope/accept"
+```
+
+### API at a glance
+
+| Method | Path | What it does |
+| --- | --- | --- |
+| GET | `/api/status` | Engine, project and CA info, counts |
+| GET | `/api/traffic?q=&limit=&offset=` | Search captured traffic |
+| GET | `/api/traffic/{id}` | One exchange, with decoded bodies |
+| GET | `/api/hosts` | Hosts seen |
+| GET | `/api/hosts/{host}/endpoints` | Endpoints seen on a host |
+| GET | `/api/scope` | Scope rules and pending suggestions |
+| POST | `/api/scope/accept` · `reject` · `remove` | Decide on a domain |
+| POST | `/api/send` | Send a new request (in-scope hosts only) |
+| POST | `/api/replay` | Replay a captured exchange, optionally modified |
+| GET / POST | `/api/findings` | List or record findings |
+| POST | `/api/shutdown` | Stop the engine |
+
+## Architecture
+
+```text
+        GUI        CLI        MCP          equal clients
+          \         |         /
+           └──── Local API ──┘             loopback + token
+                    │
+               Core Engine                 Rust, headless
+        ┌───────────┼───────────┐
+     Traffic    Discovery    Findings
+     (proxy,    (adaptive     (validated,
+      store,     scope)        reproducible)
+      search)
+```
+
+The engine is a headless background process. Every front end talks to it the same way, so the Mac app, your shell scripts and your AI agent always see the same project.
+
+```text
+crates/
+├── plonix-core   engine: proxy, CA, store, search, scope, upstream, local API
+└── plonix-cli    the `plonix` command (in progress)
+```
+
+## Roadmap
+
+**Built**
+- [x] Intercepting HTTP/HTTPS proxy with local CA
+- [x] Traffic capture into SQLite, decoded bodies
+- [x] Search language with field filters
+- [x] Adaptive scope v1: suggestions with evidence, accept/reject, enforcement
+- [x] Replay and send
+- [x] Token-authenticated, loopback-only local API
+
+**Coming**
+- [ ] `plonix` CLI: search, inspect, replay and manage scope from the terminal
+- [ ] `plonix open <target>`: first-run onboarding. Type a target, trust the certificate once, and a pre-configured browser opens with capture running.
+- [ ] Built-in MCP server and `plonix connect claude`, so Claude Code and other agents can work with live traffic, scope and findings, always inside accepted scope
+- [ ] Native macOS app with five screens: Traffic, Map, Experiments, Findings, Agents. Decoding and diffing happen inline.
+- [ ] Experiments: branch and compare request variants
+- [ ] Findings that stay linked to the exchanges that prove them
+
+Deliberately out of scope: an automated scanner and a token sequencer. Plonix stays small on purpose.
+
+## Contributing
+
+Plonix is early, and this is a good time to shape it. Issues and discussions about workflows, pain points and design are as valuable as code.
+
+1. Open an issue describing the problem or idea before large changes.
+2. Keep pull requests focused, and include tests for engine behavior.
+3. Run `cargo fmt`, `cargo clippy --workspace` and `cargo test --workspace` before pushing.
+
+Use Plonix only against systems you are authorized to test.
+
+## License
+
+To be announced.
