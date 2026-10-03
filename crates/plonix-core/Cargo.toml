@@ -1,0 +1,37 @@
+[package]
+name = "plonix-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+axum = "0.8.9"
+base64 = "0.23.1"
+brotli = "9.0.0"
+bytes = "1.12.1"
+flate2 = "1.1.10"
+http = "1.5.0"
+http-body-util = "0.1.5"
+hyper = { version = "1.11.1", features = ["http1", "server", "client"] }
+hyper-util = { version = "0.1.21", features = ["tokio"] }
+rcgen = { version = "0.14.10", features = ["x509-parser", "pem", "ring"] }
+regex = "1.13.1"
+ring = "0.17.14"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-native-certs = "0.8.4"
+rustls-pki-types = "1.15.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+thiserror = "2.0.21"
+time = "0.3.55"
+tokio = { version = "1.53.2", features = ["full"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12", "logging"] }
+tracing = "0.1.44"
+webpki-roots = "1.0.9"
+x509-parser = "0.18.1"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+ureq = { version = "2", default-features = false, features = ["json"] }
