@@ -46,7 +46,10 @@ const METHODS: &[&str] = &["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPT
 /// Scan packs shipped with Plonix, so detectors and a few benign checks work
 /// before anything is installed. Kept to relevance logic and clearly
 /// non-destructive checks.
-pub const BUILTIN: &[(&str, &str)] = &[("baseline", include_str!("../../../store/scanpacks/baseline.json"))];
+pub const BUILTIN: &[(&str, &str)] = &[
+    ("baseline", include_str!("../../../store/scanpacks/baseline.json")),
+    ("probes", include_str!("../../../store/scanpacks/probes.json")),
+];
 
 /// How serious a finding from a tactic is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,6 +154,11 @@ pub struct ExpectDef {
 pub struct CheckDef {
     #[serde(default = "get_method")]
     pub method: String,
+    /// A fixed path to probe on the target host, e.g. `/.well-known/security.txt`.
+    /// Mutually exclusive with `inject`: a tactic either probes a fixed path
+    /// once per host, or mutates discovered endpoints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
     #[serde(default)]
     pub inject: InjectDef,
     /// A small, fixed set of payload tokens from the pack.
@@ -265,6 +273,51 @@ pub struct ScanSuggestion {
     pub skipped: usize,
 }
 
+/// What a user asks for when starting an active scan. The host must already
+/// be accepted into scope; the runner refuses otherwise.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ScanRequest {
+    pub host: String,
+    /// Explicit tactic ids to run. Empty means every applicable tactic the
+    /// profile would recommend (non-intrusive, plus intrusive only when
+    /// `include_intrusive` is set).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tactics: Vec<String>,
+    /// Allow intrusive tactics. Off by default.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub include_intrusive: bool,
+    /// A ceiling on how many requests the scan may send.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_requests: Option<usize>,
+}
+
+/// A finding a scan recorded.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanFindingRef {
+    pub id: i64,
+    pub title: String,
+    pub severity: Severity,
+}
+
+/// The outcome of an active scan.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanReport {
+    pub host: String,
+    pub signals: Vec<ActiveSignal>,
+    /// Ids of the tactics that actually ran.
+    pub tactics_run: Vec<String>,
+    /// How many requests the scan sent (all through the scope choke point).
+    pub requests_sent: usize,
+    pub findings: Vec<ScanFindingRef>,
+    /// Human-readable notes (e.g. a budget was reached).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+}
+
+/// The default ceiling on requests a single scan may send, so a scan is always
+/// bounded even if a pack is broad.
+pub const DEFAULT_REQUEST_BUDGET: usize = 500;
+
 /// The compiled set of detectors and tactics from all loaded scan packs.
 #[derive(Debug, Default, Clone)]
 pub struct Catalog {
@@ -272,7 +325,62 @@ pub struct Catalog {
     pub tactics: Vec<Tactic>,
 }
 
+/// A serializable summary of a detector, for the catalog view.
+#[derive(Debug, Clone, Serialize)]
+pub struct DetectorInfo {
+    pub id: String,
+    pub signal: String,
+    pub description: String,
+    pub pack: String,
+}
+
+/// A serializable summary of a tactic, for the catalog view.
+#[derive(Debug, Clone, Serialize)]
+pub struct TacticInfo {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub requires: Vec<String>,
+    pub severity: Severity,
+    pub intrusiveness: Intrusiveness,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub variant: String,
+    pub pack: String,
+}
+
+/// The whole catalog, described for a client (the Scans UI, an advising agent).
+#[derive(Debug, Clone, Serialize)]
+pub struct CatalogView {
+    pub detectors: Vec<DetectorInfo>,
+    pub tactics: Vec<TacticInfo>,
+}
+
 impl Catalog {
+    /// A serializable description of every detector and tactic.
+    pub fn describe(&self) -> CatalogView {
+        CatalogView {
+            detectors: self
+                .detectors
+                .iter()
+                .map(|d| DetectorInfo { id: d.def.id.clone(), signal: d.def.signal.clone(), description: d.def.description.clone(), pack: d.pack.clone() })
+                .collect(),
+            tactics: self
+                .tactics
+                .iter()
+                .map(|t| TacticInfo {
+                    id: t.def.id.clone(),
+                    title: t.def.title.clone(),
+                    description: t.def.description.clone(),
+                    requires: t.def.requires.clone(),
+                    severity: t.def.severity,
+                    intrusiveness: t.def.intrusiveness,
+                    variant: t.def.variant.clone(),
+                    pack: t.pack.clone(),
+                })
+                .collect(),
+        }
+    }
+
     /// Signals active for a target, from its detected technologies and
     /// captured exchanges. Pure: reads only what it is given.
     pub fn signals(&self, tech: &[Detection], exchanges: &[Exchange]) -> Vec<ActiveSignal> {
@@ -410,6 +518,15 @@ pub fn compile_tactic(def: TacticDef, pack: &str) -> Result<Tactic, String> {
             return Err(format!("check.payloads[{i}]: longer than {MAX_PAYLOAD_LEN} bytes"));
         }
     }
+    let injecting = !matches!(def.check.inject.location, InjectLocation::None);
+    if let Some(p) = &def.check.path {
+        if injecting {
+            return Err("check: set either `path` (probe a fixed path) or `inject` (mutate endpoints), not both".into());
+        }
+        if !p.starts_with('/') || p.len() > 1024 || p.bytes().any(|b| b.is_ascii_whitespace() || b.is_ascii_control()) {
+            return Err("check.path: an absolute path (starting with `/`), up to 1024 bytes, no whitespace".into());
+        }
+    }
     match def.check.inject.location {
         InjectLocation::Query | InjectLocation::Header => {
             let name = def
@@ -425,9 +542,7 @@ pub fn compile_tactic(def: TacticDef, pack: &str) -> Result<Tactic, String> {
         }
         InjectLocation::None | InjectLocation::PathSuffix => {}
     }
-    if matches!(def.check.inject.location, InjectLocation::Query | InjectLocation::Header | InjectLocation::PathSuffix)
-        && def.check.payloads.is_empty()
-    {
+    if injecting && def.check.payloads.is_empty() {
         return Err("check.payloads: an injection location needs at least one payload".into());
     }
     let e = &def.check.expect;
@@ -496,6 +611,133 @@ pub fn builtin_catalog() -> Catalog {
         cat.tactics.append(&mut t);
     }
     cat
+}
+
+/// A target the runner can aim a tactic at: a discovered endpoint on a host.
+#[derive(Debug, Clone)]
+pub struct ScanTarget {
+    pub method: String,
+    pub path: String,
+}
+
+/// One concrete request a tactic wants sent, already resolved against a host
+/// and target. The runner hands `url` straight to the engine's `send`, so the
+/// engine's scope check still applies — this struct grants no reach of its own.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlannedRequest {
+    pub method: String,
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+    /// The payload this request carries, for the reflection check and evidence.
+    pub payload: Option<String>,
+}
+
+/// A finding a tactic produced, ready to record once a person's scan recorded it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FindingDraft {
+    pub title: String,
+    pub severity: Severity,
+    pub description: String,
+    pub exchange_id: i64,
+}
+
+fn encode_component(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+impl Tactic {
+    /// The concrete requests this tactic makes against one host. For a
+    /// fixed-path tactic, `target` is ignored and one request is planned. For
+    /// an injecting tactic, one request per payload is planned against the
+    /// discovered `target` (none planned if there is no target to mutate).
+    /// Every URL still goes through the engine's scope check when sent.
+    pub fn plan(&self, scheme: &str, host: &str, target: Option<&ScanTarget>) -> Vec<PlannedRequest> {
+        let base = format!("{scheme}://{host}");
+        let method = self.def.check.method.to_ascii_uppercase();
+        if let Some(path) = &self.def.check.path {
+            return vec![PlannedRequest { method, url: format!("{base}{path}"), headers: vec![], payload: None }];
+        }
+        let Some(t) = target else { return vec![] };
+        let path = if t.path.starts_with('/') { t.path.clone() } else { format!("/{}", t.path) };
+        match self.def.check.inject.location {
+            InjectLocation::None => {
+                vec![PlannedRequest { method, url: format!("{base}{path}"), headers: vec![], payload: None }]
+            }
+            InjectLocation::PathSuffix => self
+                .def
+                .check
+                .payloads
+                .iter()
+                .map(|p| PlannedRequest { method: method.clone(), url: format!("{base}{path}{}", encode_component(p)), headers: vec![], payload: Some(p.clone()) })
+                .collect(),
+            InjectLocation::Query => {
+                let name = self.def.check.inject.name.as_deref().unwrap_or("q");
+                self.def
+                    .check
+                    .payloads
+                    .iter()
+                    .map(|p| PlannedRequest {
+                        method: method.clone(),
+                        url: format!("{base}{path}?{}={}", encode_component(name), encode_component(p)),
+                        headers: vec![],
+                        payload: Some(p.clone()),
+                    })
+                    .collect()
+            }
+            InjectLocation::Header => {
+                let name = self.def.check.inject.name.clone().unwrap_or_default();
+                self.def
+                    .check
+                    .payloads
+                    .iter()
+                    .map(|p| PlannedRequest { method: method.clone(), url: format!("{base}{path}"), headers: vec![(name.clone(), p.clone())], payload: Some(p.clone()) })
+                    .collect()
+            }
+        }
+    }
+
+    /// Judges a response. Every expectation the tactic set must hold (AND),
+    /// to keep false positives down. Returns a finding draft when it fires.
+    pub fn evaluate(&self, req: &PlannedRequest, status: Option<u16>, resp_headers: &[(String, String)], resp_body: &[u8]) -> Option<FindingDraft> {
+        let e = &self.def.check.expect;
+        if !e.status.is_empty() && !status.is_some_and(|s| e.status.contains(&s)) {
+            return None;
+        }
+        let text = crate::codec::body_text(&resp_headers.to_vec(), resp_body).unwrap_or_default();
+        if let Some(re) = &self.body_re {
+            if !re.is_match(&text) {
+                return None;
+            }
+        }
+        if e.reflects_payload {
+            match &req.payload {
+                Some(p) if !p.is_empty() && text.contains(p.as_str()) => {}
+                _ => return None,
+            }
+        }
+        let mut description = self.def.description.clone();
+        if let Some(p) = &req.payload {
+            if !description.is_empty() {
+                description.push_str("\n\n");
+            }
+            description.push_str(&format!("Payload: {}", clean(p, 200)));
+        }
+        if !self.def.remediation.is_empty() {
+            if !description.is_empty() {
+                description.push_str("\n\n");
+            }
+            description.push_str(&format!("Remediation: {}", self.def.remediation));
+        }
+        Some(FindingDraft { title: self.def.title.clone(), severity: self.def.severity, description, exchange_id: 0 })
+    }
 }
 
 fn build_regex(p: &str) -> Result<Regex, String> {
@@ -582,7 +824,7 @@ mod tests {
                 severity: Severity::Medium,
                 intrusiveness: intr,
                 variant: String::new(),
-                check: CheckDef { method: "GET".into(), inject: InjectDef::default(), payloads: vec![], expect: ExpectDef { status: vec![200], ..Default::default() } },
+                check: CheckDef { method: "GET".into(), path: None, inject: InjectDef::default(), payloads: vec![], expect: ExpectDef { status: vec![200], ..Default::default() } },
                 remediation: String::new(),
             },
             "baseline",
@@ -673,6 +915,7 @@ mod tests {
             variant: String::new(),
             check: CheckDef {
                 method: "GET".into(),
+                path: None,
                 inject: InjectDef { location: InjectLocation::Query, name: None },
                 payloads: vec![],
                 expect: ExpectDef { reflects_payload: true, ..Default::default() },
@@ -696,7 +939,7 @@ mod tests {
             severity: Severity::Low,
             intrusiveness: Intrusiveness::Safe,
             variant: String::new(),
-            check: CheckDef { method: "GET".into(), inject: InjectDef::default(), payloads: vec![], expect: ExpectDef::default() },
+            check: CheckDef { method: "GET".into(), path: None, inject: InjectDef::default(), payloads: vec![], expect: ExpectDef::default() },
             remediation: String::new(),
         };
         assert!(compile_tactic(def, "p").is_err());
@@ -719,9 +962,133 @@ mod tests {
     }
 
     #[test]
+    fn builtin_tactics_have_their_gating_signals() {
+        let cat = builtin_catalog();
+        assert!(cat.tactics.iter().any(|t| t.def.id == "exposed-git-config"));
+        assert!(cat.tactics.iter().any(|t| t.def.id == "reflected-parameter"));
+        // Every signal a built-in tactic gates on is emitted by a built-in detector.
+        assert!(cat.unmet_requirements().is_empty(), "built-in tactics gate on signals no built-in detector emits: {:?}", cat.unmet_requirements());
+    }
+
+    #[test]
     fn unknown_fields_are_rejected() {
         let json = br#"{"plonix_scanpack":1,"name":"x","version":"0.1.0","description":"d","author":"a","detectors":[{"id":"d","signal":"s","surprise":true,"tech":["php"]}]}"#;
         assert!(parse_pack(json, "test").is_err());
+    }
+
+    fn tactic_with_check(check: CheckDef, intr: Intrusiveness) -> Tactic {
+        compile_tactic(
+            TacticDef {
+                id: "t".into(),
+                title: "Test finding".into(),
+                description: "desc".into(),
+                requires: vec!["web".into()],
+                severity: Severity::Medium,
+                intrusiveness: intr,
+                variant: String::new(),
+                check,
+                remediation: String::new(),
+            },
+            "p",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn fixed_path_plans_one_request_per_host() {
+        let t = tactic_with_check(
+            CheckDef { method: "GET".into(), path: Some("/.well-known/security.txt".into()), inject: InjectDef::default(), payloads: vec![], expect: ExpectDef { status: vec![200], ..Default::default() } },
+            Intrusiveness::Safe,
+        );
+        let reqs = t.plan("https", "example.com", None);
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].url, "https://example.com/.well-known/security.txt");
+        assert_eq!(reqs[0].payload, None);
+    }
+
+    #[test]
+    fn query_injection_plans_one_request_per_payload_and_encodes() {
+        let t = tactic_with_check(
+            CheckDef {
+                method: "GET".into(),
+                path: None,
+                inject: InjectDef { location: InjectLocation::Query, name: Some("q".into()) },
+                payloads: vec!["a b".into(), "x&y".into()],
+                expect: ExpectDef { reflects_payload: true, ..Default::default() },
+            },
+            Intrusiveness::Active,
+        );
+        let reqs = t.plan("https", "h", Some(&ScanTarget { method: "GET".into(), path: "/search".into() }));
+        assert_eq!(reqs.len(), 2);
+        assert_eq!(reqs[0].url, "https://h/search?q=a%20b");
+        assert_eq!(reqs[1].url, "https://h/search?q=x%26y");
+        assert_eq!(reqs[0].payload.as_deref(), Some("a b"));
+    }
+
+    #[test]
+    fn injecting_tactic_plans_nothing_without_a_target() {
+        let t = tactic_with_check(
+            CheckDef { method: "GET".into(), path: None, inject: InjectDef { location: InjectLocation::PathSuffix, name: None }, payloads: vec!["~".into()], expect: ExpectDef { status: vec![200], ..Default::default() } },
+            Intrusiveness::Active,
+        );
+        assert!(t.plan("https", "h", None).is_empty());
+    }
+
+    #[test]
+    fn path_and_inject_are_mutually_exclusive() {
+        let def = TacticDef {
+            id: "t".into(),
+            title: "x".into(),
+            description: String::new(),
+            requires: vec!["web".into()],
+            severity: Severity::Low,
+            intrusiveness: Intrusiveness::Safe,
+            variant: String::new(),
+            check: CheckDef {
+                method: "GET".into(),
+                path: Some("/x".into()),
+                inject: InjectDef { location: InjectLocation::Query, name: Some("q".into()) },
+                payloads: vec!["p".into()],
+                expect: ExpectDef { status: vec![200], ..Default::default() },
+            },
+            remediation: String::new(),
+        };
+        assert!(compile_tactic(def, "p").is_err());
+    }
+
+    #[test]
+    fn evaluate_requires_every_expectation() {
+        let t = tactic_with_check(
+            CheckDef {
+                method: "GET".into(),
+                path: None,
+                inject: InjectDef { location: InjectLocation::Query, name: Some("q".into()) },
+                payloads: vec!["<xyz>".into()],
+                expect: ExpectDef { status: vec![200], body: Some("error".into()), reflects_payload: true },
+            },
+            Intrusiveness::Active,
+        );
+        let req = PlannedRequest { method: "GET".into(), url: "https://h/s?q=%3Cxyz%3E".into(), headers: vec![], payload: Some("<xyz>".into()) };
+        let hdr = vec![("content-type".to_string(), "text/html".to_string())];
+        // All three hold: status 200, body has "error", payload reflected.
+        assert!(t.evaluate(&req, Some(200), &hdr, b"<h1>error</h1> echo <xyz>").is_some());
+        // Wrong status.
+        assert!(t.evaluate(&req, Some(404), &hdr, b"<h1>error</h1> <xyz>").is_none());
+        // Body regex misses.
+        assert!(t.evaluate(&req, Some(200), &hdr, b"ok <xyz>").is_none());
+        // Payload not reflected.
+        assert!(t.evaluate(&req, Some(200), &hdr, b"<h1>error</h1>").is_none());
+    }
+
+    #[test]
+    fn evaluate_status_only_fires_on_match() {
+        let t = tactic_with_check(
+            CheckDef { method: "GET".into(), path: Some("/.well-known/security.txt".into()), inject: InjectDef::default(), payloads: vec![], expect: ExpectDef { status: vec![200], ..Default::default() } },
+            Intrusiveness::Safe,
+        );
+        let req = PlannedRequest { method: "GET".into(), url: "https://h/.well-known/security.txt".into(), headers: vec![], payload: None };
+        assert!(t.evaluate(&req, Some(200), &[], b"Contact: mailto:x").is_some());
+        assert!(t.evaluate(&req, Some(404), &[], b"not found").is_none());
     }
 
     #[test]

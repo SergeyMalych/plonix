@@ -1,0 +1,68 @@
+{
+  "plonix_scanpack": 1,
+  "name": "probes",
+  "version": "0.1.0",
+  "description": "Benign, non-destructive checks: single safe requests that flag a real exposure only when it is actually present.",
+  "author": "Plonix",
+  "license": "Apache-2.0",
+  "tactics": [
+    {
+      "id": "exposed-git-config",
+      "title": "Exposed .git/config",
+      "description": "The version-control directory is reachable over HTTP, which can leak source code and history.",
+      "requires": ["web"],
+      "severity": "high",
+      "intrusiveness": "safe",
+      "remediation": "Block access to the .git directory at the web server or move the working tree out of the web root.",
+      "check": {
+        "method": "GET",
+        "path": "/.git/config",
+        "expect": { "status": [200], "body": "\\[core\\]|repositoryformatversion" }
+      }
+    },
+    {
+      "id": "exposed-dotenv",
+      "title": "Exposed .env file",
+      "description": "An environment file is reachable over HTTP and may contain secrets.",
+      "requires": ["web"],
+      "severity": "high",
+      "intrusiveness": "safe",
+      "remediation": "Serve application files only; deny access to dotfiles and move secrets out of the web root.",
+      "check": {
+        "method": "GET",
+        "path": "/.env",
+        "expect": { "status": [200], "body": "(?m)^[A-Z][A-Z0-9_]+=" }
+      }
+    },
+    {
+      "id": "apache-server-status",
+      "title": "Apache server-status exposed",
+      "description": "The server-status page is reachable and discloses request and client information.",
+      "requires": ["web"],
+      "severity": "medium",
+      "intrusiveness": "safe",
+      "remediation": "Restrict mod_status to localhost or trusted networks.",
+      "check": {
+        "method": "GET",
+        "path": "/server-status",
+        "expect": { "status": [200], "body": "Apache Server Status" }
+      }
+    },
+    {
+      "id": "reflected-parameter",
+      "title": "Parameter reflected in response",
+      "description": "A request parameter is echoed back in the response body. Reflection is not itself a vulnerability, but it is where output-encoding issues show up, so the endpoint is worth reviewing. The probe value is a harmless marker.",
+      "requires": ["web"],
+      "severity": "low",
+      "intrusiveness": "active",
+      "variant": "marker",
+      "remediation": "Contextually encode any user input that is written into a response.",
+      "check": {
+        "method": "GET",
+        "inject": { "location": "query", "name": "plxprobe" },
+        "payloads": ["plx9134marker"],
+        "expect": { "reflects_payload": true }
+      }
+    }
+  ]
+}
