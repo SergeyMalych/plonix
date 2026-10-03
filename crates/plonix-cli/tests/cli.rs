@@ -333,3 +333,205 @@ fn ca_command_works_without_an_engine() {
     assert!(out.contains("SHA-256") && out.contains("ca.pem"), "{out}");
     assert!(p.run(&["ca", "pem"]).ok().stdout().starts_with("-----BEGIN CERTIFICATE-----"));
 }
+
+// ---- detection rules and the store ------------------------------------------
+
+type Handler = dyn Fn(&str) -> (u16, Vec<(String, String)>, Vec<u8>) + Send + Sync;
+
+/// A tiny HTTP server that answers GETs from `handler(path)`.
+fn serve(handler: std::sync::Arc<Handler>) -> u16 {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in l.incoming().flatten() {
+            let handler = handler.clone();
+            std::thread::spawn(move || {
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut first = String::new();
+                if reader.read_line(&mut first).unwrap_or(0) == 0 {
+                    return;
+                }
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                }
+                let path = first.split_whitespace().nth(1).unwrap_or("/").to_string();
+                let path = path.split_once("://").map(|(_, rest)| rest.find('/').map(|i| &rest[i..]).unwrap_or("/").to_string()).unwrap_or(path);
+                let (status, headers, body) = handler(&path);
+                let mut resp = format!("HTTP/1.1 {status} X\r\ncontent-length: {}\r\nconnection: close\r\n", body.len());
+                for (k, v) in headers {
+                    resp.push_str(&format!("{k}: {v}\r\n"));
+                }
+                resp.push_str("\r\n");
+                let mut s = stream;
+                let _ = s.write_all(resp.as_bytes());
+                let _ = s.write_all(&body);
+            });
+        }
+    });
+    port
+}
+
+fn sha256(data: &[u8]) -> String {
+    plonix_core::rulepack::sha256_hex(data)
+}
+
+const ACME_PACK: &str = r#"{
+  "plonix_pack": 1, "name": "acme-internal", "version": "1.0.0",
+  "description": "Acme's in-house gateway", "author": "acme red team",
+  "rules": [
+    {"id": "acme-gateway", "name": "Acme Gateway", "category": "load-balancer",
+     "conditions": [{"header": "X-Acme-Gateway", "regex": "^v([\\d.]+)", "version": "$1"}]}
+  ]
+}"#;
+
+#[test]
+fn rules_check_add_list_remove() {
+    let p = Plonix::new();
+    let dir = tempfile::tempdir().unwrap();
+    let pack = dir.path().join("acme.json");
+    std::fs::write(&pack, ACME_PACK).unwrap();
+    let pack = pack.to_str().unwrap();
+
+    let out = p.run(&["rules", "check", pack]).ok().stdout();
+    assert!(out.contains("acme-internal 1.0.0 is valid: 1 rules"), "{out}");
+    assert!(out.contains(&sha256(ACME_PACK.as_bytes())), "{out}");
+
+    let bad = dir.path().join("bad.json");
+    std::fs::write(&bad, ACME_PACK.replace("load-balancer", "rootkit").replace("\"$1\"", "\"$7\"")).unwrap();
+    let r = p.run(&["rules", "check", bad.to_str().unwrap()]);
+    assert_eq!(r.code(), 1);
+    assert!(r.stderr().contains("category: `rootkit`"), "{}", r.stderr());
+
+    // Built-in packs are there before anything is installed.
+    let out = p.run(&["rules"]).ok().stdout();
+    assert!(out.contains("web-servers") && out.contains("built-in"), "{out}");
+
+    let r = p.run(&["rules", "add", pack, "--sha256", &"0".repeat(64)]);
+    assert_eq!(r.code(), 1);
+    assert!(r.stderr().contains("checksum mismatch"), "{}", r.stderr());
+    assert!(!p.run(&["rules"]).ok().stdout().contains("acme-internal"));
+
+    let out = p.run(&["rules", "add", pack]).ok().stdout();
+    assert!(out.contains("Installed acme-internal 1.0.0: 1 rules by acme red team."), "{out}");
+    let out = p.run(&["rules", "list"]).ok().stdout();
+    assert!(out.contains("acme-internal") && out.contains("acme.json"), "{out}");
+
+    assert!(p.run(&["rules", "add", "http://example.com/pack.json"]).stderr().contains("https"));
+    assert_eq!(p.run(&["rules", "remove", "web-servers"]).code(), 1);
+    assert!(p.run(&["rules", "remove", "acme-internal"]).ok().stdout().contains("Removed acme-internal."));
+    assert!(!p.run(&["rules"]).ok().stdout().contains("acme-internal"));
+}
+
+#[test]
+fn store_installs_only_verified_packs() {
+    let p = Plonix::new();
+    let pack_bytes = std::sync::Arc::new(std::sync::Mutex::new(ACME_PACK.as_bytes().to_vec()));
+    let index = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let make_index = |version: &str, sha: &str| {
+        format!(
+            r#"{{"plonix_index":1,"name":"Test store","packages":[
+                {{"name":"acme-internal","kind":"rules","version":"{version}","description":"Acme gateway rules","author":"acme","url":"packs/acme.json","sha256":"{sha}"}},
+                {{"name":"web-servers","kind":"rules","version":"1.0.0","description":"Built in","author":"plonix","url":"packs/ws.json","sha256":"{}"}},
+                {{"name":"jwt-workbench","kind":"extension","version":"0.1.0","description":"Needs the sandbox","author":"x","url":"ext/jwt.json","sha256":"{}"}}]}}"#,
+            "1".repeat(64),
+            "2".repeat(64)
+        )
+    };
+    *index.lock().unwrap() = make_index("1.0.0", &sha256(ACME_PACK.as_bytes()));
+    let (pb, ix) = (pack_bytes.clone(), index.clone());
+    let port = serve(std::sync::Arc::new(move |path: &str| match path {
+        "/store/index.json" => (200, vec![], ix.lock().unwrap().clone().into_bytes()),
+        "/store/packs/acme.json" => (200, vec![], pb.lock().unwrap().clone()),
+        _ => (404, vec![], vec![]),
+    }));
+    let url = format!("http://127.0.0.1:{port}/store/index.json");
+
+    let out = p.run(&["store", "--index", &url]).ok().stdout();
+    assert!(out.contains("Test store"), "{out}");
+    for (name, status) in [("acme-internal", "available"), ("web-servers", "built-in"), ("jwt-workbench", "needs runtime")] {
+        let line = out.lines().find(|l| l.starts_with(name)).unwrap_or_else(|| panic!("{name} missing:\n{out}"));
+        assert!(line.contains(status), "{line}");
+    }
+
+    let r = p.run(&["store", "install", "jwt-workbench", "--index", &url]);
+    assert_eq!(r.code(), 1);
+    assert!(r.stderr().contains("sandboxed extension runtime"), "{}", r.stderr());
+
+    // A tampered download is refused and nothing is installed.
+    *pack_bytes.lock().unwrap() = ACME_PACK.replace("Acme Gateway", "Evil Gateway").into_bytes();
+    let r = p.run(&["store", "install", "acme-internal", "--index", &url]);
+    assert_eq!(r.code(), 1);
+    assert!(r.stderr().contains("checksum mismatch"), "{}", r.stderr());
+    assert!(!p.run(&["rules"]).ok().stdout().contains("acme-internal"));
+
+    *pack_bytes.lock().unwrap() = ACME_PACK.as_bytes().to_vec();
+    let out = p.run(&["store", "install", "acme-internal", "--index", &url]).ok().stdout();
+    assert!(out.contains("Installed acme-internal 1.0.0 (1 rules, sha256 verified)."), "{out}");
+    assert!(p.run(&["store", "update", "--index", &url]).ok().stdout().contains("up to date"));
+
+    // A new version in the store shows up as an update.
+    let v2 = ACME_PACK.replace("1.0.0", "1.1.0");
+    *pack_bytes.lock().unwrap() = v2.clone().into_bytes();
+    *index.lock().unwrap() = make_index("1.1.0", &sha256(v2.as_bytes()));
+    let out = p.run(&["store", "list", "acme", "--index", &url]).ok().stdout();
+    assert!(out.contains("update 1.0.0→1.1.0"), "{out}");
+    let out = p.run(&["store", "update", "--index", &url]).ok().stdout();
+    assert!(out.contains("Updated acme-internal 1.0.0 → 1.1.0"), "{out}");
+}
+
+#[test]
+fn repository_store_index_installs_from_disk() {
+    let p = Plonix::new();
+    let index = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../store/index.json");
+    let index = index.to_str().unwrap();
+    let out = p.run(&["store", "--index", index]).ok().stdout();
+    assert!(out.contains("admin-panels") && out.contains("available"), "{out}");
+    let out = p.run(&["store", "install", "admin-panels", "--index", index]).ok().stdout();
+    assert!(out.contains("Installed admin-panels"), "{out}");
+}
+
+#[test]
+fn tech_detects_from_captured_traffic() {
+    let p = Plonix::new();
+    let target = serve(std::sync::Arc::new(|path: &str| {
+        let mut h = vec![
+            ("Server".to_string(), "nginx/1.25.3".to_string()),
+            ("X-Powered-By".to_string(), "PHP/8.2.12".to_string()),
+            ("X-Acme-Gateway".to_string(), "v3.4".to_string()),
+            ("Content-Type".to_string(), "text/html".to_string()),
+        ];
+        if path == "/" {
+            h.push(("Set-Cookie".to_string(), "wordpress_test_cookie=WP+Cookie+check; path=/".to_string()));
+        }
+        (200, h, br#"<html><head><meta name="generator" content="WordPress 6.4.2"></head></html>"#.to_vec())
+    }));
+    let proxy = p.start();
+    via_proxy(&proxy, &format!("http://localhost:{target}/"), &[]);
+    via_proxy(&proxy, &format!("http://localhost:{target}/wp-json/wp/v2/posts"), &[]);
+    p.search_until("host:localhost", 2);
+
+    let out = p.run(&["tech"]).ok().stdout();
+    for want in ["web-server     nginx 1.25.3", "language       PHP 8.2.12", "cms            WordPress 6.4.2"] {
+        assert!(out.contains(want), "missing `{want}`:\n{out}");
+    }
+    assert!(!out.contains("Acme Gateway"));
+
+    // Rules installed later apply to traffic that was already captured.
+    let dir = tempfile::tempdir().unwrap();
+    let pack = dir.path().join("acme.json");
+    std::fs::write(&pack, ACME_PACK).unwrap();
+    p.run(&["rules", "add", pack.to_str().unwrap()]).ok();
+    let out = p.run(&["tech", "localhost"]).ok().stdout();
+    assert!(out.contains("Acme Gateway 3.4"), "{out}");
+
+    let v: serde_json::Value = serde_json::from_str(&p.run(&["tech", "--json"]).ok().stdout()).unwrap();
+    let tech = v[0]["tech"].as_array().unwrap();
+    let one: serde_json::Value = serde_json::from_str(&p.run(&["tech", "--json", "localhost"]).ok().stdout()).unwrap();
+    assert_eq!(one["host"], "localhost");
+    let wp = tech.iter().find(|t| t["id"] == "wordpress").unwrap();
+    assert_eq!(wp["version"], "6.4.2");
+    assert!(wp["exchange_id"].as_i64().is_some());
+}

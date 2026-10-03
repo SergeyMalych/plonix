@@ -7,11 +7,15 @@
 pub mod api;
 pub mod ca;
 pub mod codec;
+pub mod detect;
 pub mod engine;
+pub mod extension;
 pub mod model;
 pub mod paths;
 pub mod proxy;
 pub mod query;
+pub mod registry;
+pub mod rulepack;
 pub mod scope;
 pub mod store;
 pub mod upstream;

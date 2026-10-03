@@ -12,8 +12,10 @@ use tokio::net::TcpListener;
 use tokio::sync::{Notify, mpsc};
 
 use crate::ca::CertAuthority;
+use crate::detect::{self, Detection, Detector, HostTech};
 use crate::model::{Exchange, Headers, Source, now_ms};
 use crate::paths::{EngineInfo, Home};
+use crate::rulepack::{Library, PackInfo};
 use crate::scope::{self, Decision, Rule, ScopeRules};
 use crate::store::Store;
 use crate::upstream::{OutboundRequest, Upstream};
@@ -30,6 +32,24 @@ pub struct Engine {
     /// response is always analyzed before requests that follow it.
     recorder: mpsc::UnboundedSender<Exchange>,
     recorder_rx: Mutex<Option<mpsc::UnboundedReceiver<Exchange>>>,
+    detection: Mutex<DetectionState>,
+}
+
+/// Detection rules currently in effect. Reloaded when installed packs change
+/// (`plonix rules add/remove` while the engine runs).
+#[derive(Default)]
+struct DetectionState {
+    library: Option<Library>,
+    loaded_stamp: Option<Option<std::time::SystemTime>>,
+    rules: Arc<LoadedRules>,
+}
+
+#[derive(Debug, Default)]
+pub struct LoadedRules {
+    pub detector: Detector,
+    pub packs: Vec<PackInfo>,
+    /// Packs that were skipped, and why.
+    pub problems: Vec<String>,
 }
 
 /// An active request sent by the engine on behalf of a user or an agent.
@@ -95,11 +115,56 @@ impl Engine {
             rules: RwLock::new(rules),
             started_at: now_ms(),
             shutdown: Notify::new(),
+            detection: Mutex::new(DetectionState::default()),
         }))
     }
 
     pub fn rules(&self) -> ScopeRules {
         self.rules.read().unwrap().clone()
+    }
+
+    /// Loads installed rule packs from this library (built-in packs are
+    /// always loaded).
+    pub fn set_rule_library(&self, library: Library) {
+        let mut d = self.detection.lock().unwrap();
+        d.library = Some(library);
+        d.loaded_stamp = None;
+    }
+
+    /// The detection rules in effect, reloading them if packs changed.
+    pub fn detection_rules(&self) -> Arc<LoadedRules> {
+        let mut d = self.detection.lock().unwrap();
+        let stamp = d.library.as_ref().and_then(Library::stamp);
+        if d.loaded_stamp != Some(stamp) {
+            let loaded = match &d.library {
+                Some(lib) => lib.load(),
+                None => Library::at(std::path::Path::new("/nonexistent")).load(),
+            };
+            for p in &loaded.problems {
+                tracing::warn!("detection rules: {p}");
+            }
+            d.rules = Arc::new(LoadedRules {
+                detector: loaded.detector(),
+                packs: loaded.packs.into_iter().map(|(_, info)| info).collect(),
+                problems: loaded.problems,
+            });
+            d.loaded_stamp = Some(stamp);
+        }
+        d.rules.clone()
+    }
+
+    /// Technologies detected on one host. Runs over already-captured
+    /// traffic, so newly installed rules apply to everything seen so far.
+    pub fn detect_host(&self, host: &str) -> Result<Vec<Detection>> {
+        let rules = self.detection_rules();
+        let exchanges = self.store.exchanges_for_host(host, detect::HOST_SAMPLE)?;
+        Ok(rules.detector.detect(&exchanges))
+    }
+
+    /// Technologies on every host, busiest host first.
+    pub fn detect_all(&self) -> Result<Vec<HostTech>> {
+        let hosts = self.store.hosts(&self.rules())?;
+        hosts.into_iter().take(1000).map(|h| Ok(HostTech { tech: self.detect_host(&h.host)?, host: h.host })).collect()
     }
 
     /// Queues a captured exchange for recording (see [`Engine::start_recorder`]).
@@ -325,6 +390,7 @@ pub async fn start(config: &EngineConfig) -> Result<Running> {
     let store = Store::open(&config.home.project_db(&config.project))?;
     let upstream = Upstream::new(config.insecure_upstream, vec![])?;
     let engine = Engine::new(&config.project, store, ca, upstream)?;
+    engine.set_rule_library(Library::new(&config.home));
     start_with(engine, config).await
 }
 
