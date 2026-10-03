@@ -88,10 +88,11 @@ impl ScopeRules {
         match domain.strip_prefix("*.") {
             Some(base) => {
                 let base = normalize_host(base);
-                // A wildcard is decided only by a subdomain-covering rule.
+                // A wildcard is decided by a subdomain-covering rule, or by a
+                // rule for its base domain alone ("only example.com").
                 self.rules
                     .iter()
-                    .filter(|r| r.include_subdomains && (base == r.pattern || is_subdomain_of(&base, &r.pattern)))
+                    .filter(|r| base == r.pattern || (r.include_subdomains && is_subdomain_of(&base, &r.pattern)))
                     .max_by_key(|r| r.pattern.len())
                     .map(|r| r.decision)
                     .unwrap_or(Decision::Unknown)
@@ -468,6 +469,20 @@ mod tests {
         assert!(san_covers("*.example.com", "a.example.com"));
         assert!(!san_covers("*.example.com", "a.b.example.com"));
         assert!(!san_covers("*.example.com", "example.com"));
+    }
+
+    #[test]
+    fn wildcard_suggestions_are_decided_by_their_base_domain() {
+        let mut r = ScopeRules::default();
+        assert_eq!(r.decide_domain("*.cdn.net"), Decision::Unknown);
+        // Accepting only cdn.net settles the *.cdn.net suggestion without
+        // bringing its subdomains into scope.
+        r.rules.push(rule("cdn.net", false, Decision::Accepted));
+        assert_eq!(r.decide_domain("*.cdn.net"), Decision::Accepted);
+        assert_eq!(r.decide("a.cdn.net"), Decision::Unknown);
+        // A subdomain-covering rule further up still decides it.
+        let r = ScopeRules { rules: vec![rule("net", true, Decision::Rejected)] };
+        assert_eq!(r.decide_domain("*.cdn.net"), Decision::Rejected);
     }
 
     #[test]

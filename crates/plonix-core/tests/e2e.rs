@@ -380,6 +380,74 @@ async fn api_requires_token_and_loopback_host() {
     .unwrap();
 }
 
+/// Agents sign in with their own token and can only read: everything that
+/// sends traffic or changes the project is refused by the engine itself.
+#[tokio::test]
+async fn agent_token_is_read_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let up = serve_http().await;
+    let r = start(&home, None).await;
+    via_proxy(r.proxy_addr, &format!("http://localhost:{}/", up.port()), &[]).await;
+    wait_for_count(&r.engine, 1).await;
+    assert_ne!(r.agent_token, r.token);
+    assert_eq!(std::fs::read_to_string(home.agent_token()).unwrap().trim(), r.agent_token);
+    let base = format!("http://{}", r.api_addr);
+    let (user, agent) = (format!("Bearer {}", r.token), format!("Bearer {}", r.agent_token));
+    let port = up.port();
+
+    tokio::task::spawn_blocking(move || {
+        let status = |r: Result<ureq::Response, ureq::Error>| match r {
+            Ok(r) => (r.status(), r.into_json::<serde_json::Value>().unwrap()),
+            Err(ureq::Error::Status(c, r)) => (c, r.into_json::<serde_json::Value>().unwrap()),
+            Err(e) => panic!("{e}"),
+        };
+        let get = |path: &str, auth: &str| status(ureq::get(&format!("{base}{path}")).set("Authorization", auth).set("X-Plonix-Client", "test-agent").call());
+        let post = |path: &str, auth: &str, body: serde_json::Value| {
+            status(ureq::post(&format!("{base}{path}")).set("Authorization", auth).set("X-Plonix-Client", "test-agent").send_json(body))
+        };
+
+        for path in ["/api/status", "/api/traffic?q=welcome", "/api/traffic/1", "/api/traffic/1/insights", "/api/hosts", "/api/tech", "/api/scope", "/api/findings"] {
+            assert_eq!(get(path, &agent).0, 200, "agent should read {path}");
+        }
+        let (_, ex) = get("/api/traffic/1", &agent);
+        assert!(ex["resp_text"].as_str().unwrap().contains("welcome home"));
+
+        // Even with the host in scope, an agent cannot send, replay or change anything.
+        post("/api/scope/accept", &user, serde_json::json!({ "domain": "localhost" }));
+        let refused = [
+            ("/api/send", serde_json::json!({ "method": "GET", "url": format!("http://localhost:{port}/echo") })),
+            ("/api/replay", serde_json::json!({ "id": 1 })),
+            ("/api/scope/accept", serde_json::json!({ "domain": "evil.test" })),
+            ("/api/scope/remove", serde_json::json!({ "domain": "localhost" })),
+            ("/api/findings", serde_json::json!({ "title": "x", "severity": "low" })),
+            ("/api/ui/launch", serde_json::json!({})),
+            ("/api/browser/open", serde_json::json!({ "target": "example.com" })),
+            ("/api/shutdown", serde_json::json!({})),
+        ];
+        for (path, body) in refused {
+            let (code, body) = post(path, &agent, body);
+            assert_eq!((code, body["code"].as_str()), (403, Some("agent_not_allowed")), "{path}");
+        }
+        let (_, scope) = get("/api/scope", &user);
+        assert_eq!(scope["rules"].as_array().unwrap().len(), 1, "scope unchanged: {scope}");
+        assert_eq!(get("/api/status", &user).1["exchanges"], 1, "nothing was sent");
+        assert!(get("/api/findings", &user).1.as_array().unwrap().is_empty());
+
+        // The user sees the policy and who connected; the agent sees only the policy.
+        let (_, a) = get("/api/agents", &user);
+        assert_eq!(a["mode"], "read-only");
+        let c = &a["clients"][0];
+        assert_eq!(c["name"], "test-agent");
+        assert_eq!(c["refused"], 8);
+        let (_, a) = get("/api/agents", &agent);
+        assert!(a["clients"].is_null() && a["capabilities"].is_array());
+    })
+    .await
+    .unwrap();
+    r.engine.shutdown.notify_waiters();
+}
+
 #[tokio::test]
 async fn proxy_serves_ca_certificate_page() {
     let dir = tempfile::tempdir().unwrap();

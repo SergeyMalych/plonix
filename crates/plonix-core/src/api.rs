@@ -4,6 +4,9 @@
 //! `$PLONIX_HOME/api-token`) and a loopback `Host` header, so that web pages
 //! cannot drive it through the browser (CSRF / DNS rebinding).
 //!
+//! AI agents use a second token, `$PLONIX_HOME/agent-token`, and can only
+//! call the routes their mode allows (see [`crate::access`]).
+//!
 //! The same address also serves the web UI (see [`crate::ui`]): its static
 //! files need no token, and the page obtains one through a launch code.
 
@@ -19,6 +22,7 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::access::{self, AgentActivity, AgentMode, Caller};
 use crate::browser;
 use crate::codec;
 use crate::engine::{Engine, ReplayRequest, SendError, SendRequest};
@@ -32,14 +36,33 @@ use crate::ui::{self, LaunchCodes};
 struct AppState {
     engine: Arc<Engine>,
     token: String,
+    agent_token: String,
+    agents: Arc<AgentActivity>,
     api_addr: SocketAddr,
     proxy_addr: SocketAddr,
     launch_codes: Arc<LaunchCodes>,
     home: Home,
 }
 
-pub fn router(engine: Arc<Engine>, token: String, api_addr: SocketAddr, proxy_addr: SocketAddr, home: Home) -> Router {
-    let state = AppState { engine, token, api_addr, proxy_addr, launch_codes: Arc::default(), home };
+/// Bearer tokens the API accepts.
+pub struct Tokens {
+    /// The user's own clients: full access.
+    pub user: String,
+    /// AI agents: limited to [`AgentMode::current`].
+    pub agent: String,
+}
+
+pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, proxy_addr: SocketAddr, home: Home) -> Router {
+    let state = AppState {
+        engine,
+        token: tokens.user,
+        agent_token: tokens.agent,
+        agents: Arc::default(),
+        api_addr,
+        proxy_addr,
+        launch_codes: Arc::default(),
+        home,
+    };
     Router::new()
         .route("/", get(ui::index))
         .route("/ui/app.js", get(ui::app_js))
@@ -66,6 +89,7 @@ pub fn router(engine: Arc<Engine>, token: String, api_addr: SocketAddr, proxy_ad
         .route("/api/send", post(send))
         .route("/api/replay", post(replay))
         .route("/api/findings", get(findings).post(add_finding))
+        .route("/api/agents", get(agents))
         .route("/api/shutdown", post(shutdown))
         .layer(middleware::from_fn_with_state(state.clone(), guard))
         .with_state(state)
@@ -84,10 +108,29 @@ async fn guard(State(s): State<AppState>, req: Request, next: Next) -> Response 
         return next.run(req).await;
     }
     let auth = req.headers().get("authorization").and_then(|h| h.to_str().ok()).unwrap_or("");
-    let ok = auth.strip_prefix("Bearer ").is_some_and(|t| constant_eq(t.trim().as_bytes(), s.token.as_bytes()));
-    if !ok {
+    let given = auth.strip_prefix("Bearer ").map(|t| t.trim().as_bytes()).unwrap_or_default();
+    let caller = if !given.is_empty() && constant_eq(given, s.token.as_bytes()) {
+        Caller::User
+    } else if !given.is_empty() && constant_eq(given, s.agent_token.as_bytes()) {
+        Caller::Agent
+    } else {
         return err(StatusCode::UNAUTHORIZED, "unauthorized", "missing or wrong API token (see $PLONIX_HOME/api-token)");
+    };
+    if caller == Caller::Agent {
+        let mode = AgentMode::current();
+        let (method, path) = (req.method().as_str().to_string(), req.uri().path().to_string());
+        let allowed = access::allowed(mode, &method, &path);
+        s.agents.record(&initiator(req.headers()), &method, &path, !allowed);
+        if !allowed {
+            return err(
+                StatusCode::FORBIDDEN,
+                "agent_not_allowed",
+                "agents have read-only access: they can read traffic, the map, scope and findings, but not send requests or change anything",
+            );
+        }
     }
+    let mut req = req;
+    req.extensions_mut().insert(caller);
     next.run(req).await
 }
 
@@ -455,6 +498,25 @@ async fn add_finding(State(s): State<AppState>, headers: HeaderMap, Json(f): Jso
         Ok(f) => (StatusCode::CREATED, Json(f)).into_response(),
         Err(e) => internal(e),
     }
+}
+
+/// The agent access policy and which agents have connected.
+async fn agents(State(s): State<AppState>, caller: Option<axum::Extension<Caller>>) -> Response {
+    let mode = AgentMode::current();
+    let mut v = json!({
+        "mode": mode,
+        "capabilities": access::capabilities(mode),
+        "not_allowed": access::not_allowed(mode),
+        "connect": {
+            "command": "plonix connect claude",
+            "server": { "command": "plonix", "args": ["mcp"] },
+        },
+    });
+    // Only the user sees who else is connected.
+    if caller.is_some_and(|c| c.0 == Caller::User) {
+        v["clients"] = json!(s.agents.clients());
+    }
+    Json(v).into_response()
 }
 
 async fn shutdown(State(s): State<AppState>) -> Response {

@@ -4,6 +4,7 @@
 //! traffic store, adaptive scope and the local API. The GUI, the CLI and the
 //! MCP server are all clients of the same local API.
 
+pub mod access;
 pub mod api;
 pub mod browser;
 pub mod ca;

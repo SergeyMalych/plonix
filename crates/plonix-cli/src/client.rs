@@ -46,8 +46,18 @@ impl std::error::Error for NotRunning {}
 impl Client {
     /// Connects to the engine described by `$PLONIX_HOME/engine.json`.
     pub fn connect(home: &Home, initiator: &str) -> Result<Self> {
+        Self::connect_with(home, &home.api_token(), initiator)
+    }
+
+    /// Connects as an AI agent, with the agent token: the engine only allows
+    /// what agents may do (see `plonix_core::access`).
+    pub fn connect_agent(home: &Home, initiator: &str) -> Result<Self> {
+        Self::connect_with(home, &home.agent_token(), initiator)
+    }
+
+    fn connect_with(home: &Home, token_file: &std::path::Path, initiator: &str) -> Result<Self> {
         let info = home.read_engine_info().ok_or_else(|| anyhow!(NotRunning))?;
-        let token = std::fs::read_to_string(home.api_token()).map_err(|_| anyhow!(NotRunning))?;
+        let token = std::fs::read_to_string(token_file).map_err(|_| anyhow!(NotRunning))?;
         let client = Self {
             base: info.api.trim_end_matches('/').to_string(),
             token: token.trim().to_string(),
