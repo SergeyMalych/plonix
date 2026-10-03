@@ -73,11 +73,34 @@ Set `PLONIX_HOME` in the server's environment if your data is not in `~/.plonix`
 
 Every tool is marked read-only in its MCP annotations.
 
+## Ask Claude Code from the app
+
+The Plonix window has an **Ask Claude** button on a request (the Lens), a finding, a host (the Map) and a scope suggestion. It opens a sheet that:
+
+- writes a question suited to that spot, which you can edit;
+- shows exactly what will be shared, split into named parts (request, response, what Plonix spotted, technologies, endpoints, scope evidence), each with its size, and lets you untick any part;
+- clips each request and response body, and estimates the total size against your limit;
+- warns, and makes you confirm, when the context is larger than your limit, so a huge payload is never sent silently.
+
+**Copy prompt** puts the prompt on your clipboard. **Open in Claude Code** writes the prompt to a private file under `$PLONIX_HOME/claude/` and opens Claude Code in a new Terminal window reading that file, so captured text never goes on a command line. If the Plonix MCP server is connected in that session, Claude Code can follow up with the read-only tools.
+
+## Settings
+
+The **Agents** screen has a Claude Code settings section (`$PLONIX_HOME/agents.json`):
+
+- **On/off.** Turn agent access off and every agent request is refused (`agents_disabled`).
+- **What agents can see.** *In-scope hosts only* (the default) limits traffic, hosts, endpoints and technologies to hosts you accepted into scope; *Everything captured* includes out-of-scope and third-party traffic.
+- **Tools agents get.** Switch off groups of capabilities (captured requests, insights, the map, scope, findings). A switched-off capability is refused (`capability_off`) and its MCP tools disappear from `tools/list`.
+- **Ask Claude.** The context-size limit that triggers the warning, and how far each body is clipped.
+
+Agents can read this policy (to explain a refusal) but can never change it: the settings route is in no mode's capability list.
+
 ## How access is enforced
 
 - `plonix mcp` signs in to the engine's local API with its own token, `~/.plonix/agent-token` (mode `0600`). It never reads the full API token.
 - The engine checks every request made with the agent token against a fixed list of allowed routes (`crates/plonix-core/src/access.rs`). Today that list contains only reads. Anything else (`/api/send`, `/api/replay`, `/api/scope/*`, `POST /api/findings`, `/api/ui/launch`, `/api/browser/open`, `/api/shutdown`) is refused with `403 agent_not_allowed`, and the refusal is shown on the Agents screen.
 - The API stays loopback-only. Plonix never sends captured traffic anywhere; the agent reads it on your machine.
+- The data-scope and capability settings are applied in the same middleware, so an agent sees only what you allow whatever it asks for.
 
 Captured traffic can include passwords, session cookies and API keys. Whatever the agent reads becomes part of its conversation, so connect only agents you trust with that data.
 
