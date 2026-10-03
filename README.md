@@ -4,7 +4,7 @@
 
 Plonix captures everything your browser does, learns the real shape of the target as you explore it, and lets you search, replay and prove what you find, from a GUI, a terminal, or an AI agent.
 
-> **Status: early development.** The core engine (proxy, traffic store, search, adaptive scope, local API) works today and is covered by tests. The CLI, the Mac app and the MCP server are next. See [Roadmap](#roadmap).
+> **Status: early development.** The core engine (proxy, traffic store, search, adaptive scope, local API) and the `plonix` CLI work today and are covered by tests. The Mac app and the MCP server are next. See [Roadmap](#roadmap).
 
 ---
 
@@ -87,38 +87,56 @@ Requirements: Rust (stable, edition 2024) and a C toolchain. On macOS, `xcode-se
 ```sh
 git clone https://github.com/SergeyMalych/plonix.git
 cd plonix
-cargo build --release
-cargo test --workspace     # unit tests plus end-to-end proxy and scope tests
+cargo install --path crates/plonix-cli    # installs the `plonix` command
 ```
 
-The `plonix` command isn't wired up yet, so for now you start the engine from a few lines of Rust that call `plonix_core`:
-
-```rust
-use plonix_core::{engine, paths::Home, EngineConfig};
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    engine::run(EngineConfig {
-        home: Home::resolve(None)?,              // $PLONIX_HOME or ~/.plonix
-        project: "acme".into(),                  // ~/.plonix/projects/acme.db
-        proxy_addr: "127.0.0.1:8080".parse()?,
-        proxy_port_fallback: true,
-        api_addr: "127.0.0.1:8090".parse()?,
-        insecure_upstream: false,
-    })
-    .await
-}
-```
-
-Then capture traffic through the proxy:
+### The first 60 seconds
 
 ```sh
-curl -x http://127.0.0.1:8080 --cacert ~/.plonix/ca.pem https://example.com/
+plonix open example.com
 ```
 
-Point a browser at the same proxy and trust `~/.plonix/ca.pem` to capture a real session.
+That one command creates your local certificate authority (first run only), starts the engine in the background, puts `example.com` and its subdomains in scope, and opens a browser at the target with capture running:
 
-Explore what you captured through the API:
+```text
+Plonix · https://example.com/
+
+  ✓ Certificate  ~/.plonix/ca.pem  (created)
+  ✓ Proxy        127.0.0.1:8080  (started, project example.com)
+  ✓ Scope        example.com (+ subdomains)  (more domains are suggested as you browse)
+  ✓ Browser      Google Chrome (isolated profile, trusts Plonix)
+
+Capturing. Browse the site; requests appear below. Ctrl-C stops watching, capture keeps running.
+```
+
+The browser is Chrome, Brave, Edge or Chromium with its own isolated profile. It routes through the proxy and trusts the Plonix certificate on its own, so HTTPS works with nothing to install. Firefox is used when no Chromium-based browser is found. Set `PLONIX_BROWSER` to pick a specific browser.
+
+To capture HTTPS from other apps too (Safari, curl, your everyday browser), trust the certificate once with `plonix ca trust`. It is added to your login keychain, and macOS asks you to confirm.
+
+### Working from the terminal
+
+```sh
+plonix status                              # is it running, what has it captured
+plonix search host:example.com status:5xx  # newest first; filters below
+plonix show 42                             # one request and its response
+plonix watch scope:in                      # print new traffic as it arrives
+plonix hosts                               # every host seen, busiest first
+
+plonix scope                               # rules, plus suggested domains with evidence
+plonix scope review                        # decide on suggestions one by one
+plonix scope accept '*.example-cdn.com'    # or: reject, remove
+
+plonix replay 42 -H 'Authorization: Bearer other-user' -t '/api/users/2'
+plonix stop                                # captured traffic is kept
+```
+
+Replays only go to accepted hosts. Anything else is refused with exit code 4 and a hint to accept the host first. Every command takes `--json` for scripting. Exit codes are `0` ok, `1` error, `2` bad usage or query, `3` engine not running, `4` refused by scope, `5` not found.
+
+`plonix start` runs the engine without opening a browser (`--project`, `--port`, `--insecure-upstream` for self-signed staging hosts). Data lives in `~/.plonix`, or `$PLONIX_HOME`.
+
+### Using the local API directly
+
+Everything the CLI does goes through the local API, so any language can drive Plonix:
 
 ```sh
 TOKEN=$(cat ~/.plonix/api-token)
@@ -131,6 +149,8 @@ curl -H "Authorization: Bearer $TOKEN" "$API/scope"     # rules plus suggestions
 curl -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
      -d '{"domain":"*.example.com"}' "$API/scope/accept"
 ```
+
+The API listens on port 8090 when it is free; `plonix status` shows the actual address.
 
 ### API at a glance
 
@@ -168,7 +188,7 @@ The engine is a headless background process. Every front end talks to it the sam
 ```text
 crates/
 ├── plonix-core   engine: proxy, CA, store, search, scope, upstream, local API
-└── plonix-cli    the `plonix` command (in progress)
+└── plonix-cli    the `plonix` command: engine control, onboarding, search, scope, replay
 ```
 
 ## Roadmap
@@ -180,10 +200,10 @@ crates/
 - [x] Adaptive scope v1: suggestions with evidence, accept/reject, enforcement
 - [x] Replay and send
 - [x] Token-authenticated, loopback-only local API
+- [x] `plonix` CLI: search, inspect, watch, replay and manage scope from the terminal
+- [x] `plonix open <target>`: one command from nothing to captured traffic, in a pre-configured browser
 
 **Coming**
-- [ ] `plonix` CLI: search, inspect, replay and manage scope from the terminal
-- [ ] `plonix open <target>`: first-run onboarding. Type a target, trust the certificate once, and a pre-configured browser opens with capture running.
 - [ ] Built-in MCP server and `plonix connect claude`, so Claude Code and other agents can work with live traffic, scope and findings, always inside accepted scope
 - [ ] Native macOS app with five screens: Traffic, Map, Experiments, Findings, Agents. Decoding and diffing happen inline.
 - [ ] Experiments: branch and compare request variants
