@@ -51,6 +51,7 @@ pub fn router(engine: Arc<Engine>, token: String, api_addr: SocketAddr, proxy_ad
         .route("/api/traffic", get(traffic))
         .route("/api/traffic/facets", get(facets))
         .route("/api/traffic/{id}", get(exchange))
+        .route("/api/traffic/{id}/insights", get(insights))
         .route("/api/hosts", get(hosts))
         .route("/api/hosts/{host}/endpoints", get(endpoints))
         .route("/api/tech", get(tech_all))
@@ -219,6 +220,21 @@ async fn exchange(State(s): State<AppState>, Path(id): Path<i64>) -> Response {
         }
         Ok(None) => err(StatusCode::NOT_FOUND, "not_found", &format!("exchange {id} not found")),
         Err(e) => internal(e),
+    }
+}
+
+/// What stands out in one exchange: tokens to decode, personal data, secrets.
+async fn insights(State(s): State<AppState>, Path(id): Path<i64>) -> Response {
+    let engine = s.engine.clone();
+    let found = tokio::task::spawn_blocking(move || {
+        engine.store.get_exchange(id).map(|ex| ex.map(|ex| crate::insight::analyze(&ex, crate::insight::detectors())))
+    })
+    .await;
+    match found {
+        Ok(Ok(Some(list))) => Json(list).into_response(),
+        Ok(Ok(None)) => err(StatusCode::NOT_FOUND, "not_found", &format!("exchange {id} not found")),
+        Ok(Err(e)) => internal(e),
+        Err(e) => internal(e.into()),
     }
 }
 

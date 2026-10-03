@@ -890,9 +890,22 @@ async function openInspector(id) {
           h('button', { class: T.pretty ? '' : 'on', text: 'Raw', onclick: () => ((T.pretty = false), drawResp()) }),
         )
       : null;
-    clear(respCol, h('div', { class: 'lbl' }, 'Response', enc ? h('span', { class: 'decodetag', text: 'decoded · ' + enc }) : null, seg), rawPre(responseText(ex, T.pretty)));
+    clear(
+      respCol,
+      h('div', { class: 'lbl' }, 'Response', enc ? h('span', { class: 'decodetag', text: 'decoded · ' + enc }) : null, seg),
+      h('div', { class: 'spotslot' }),
+      rawPre(responseText(ex, T.pretty)),
+    );
+    if (ex.insights) drawInsights(respCol, ex.insights.filter((i) => i.side === 'response'));
   };
   drawResp();
+  const reqCol = h(
+    'div',
+    { class: 'col' },
+    h('div', { class: 'lbl' }, 'Request', h('span', { class: 'r', text: '#' + ex.id + ' · ' + fmtTime(ex.ts) + ' · ' + (ex.initiator || ex.source || 'proxy') })),
+    h('div', { class: 'spotslot' }),
+    rawPre(requestText(ex)),
+  );
   append(insp, [
     h(
       'div',
@@ -912,11 +925,136 @@ async function openInspector(id) {
       h('button', { class: 'btn sm', text: 'New finding', onclick: () => newFinding([id], `${ex.method} ${ex.path}`) }),
       h('button', { class: 'iconbtn', text: '✕', title: 'Close (Esc)', onclick: closeInspector }),
     ),
-    h('div', { class: 'split' }, h('div', { class: 'col' }, h('div', { class: 'lbl' }, 'Request', h('span', { class: 'r', text: '#' + ex.id + ' · ' + fmtTime(ex.ts) + ' · ' + (ex.initiator || ex.source || 'proxy') })), rawPre(requestText(ex))), respCol),
+    h('div', { class: 'split' }, reqCol, respCol),
   ]);
   const splitter = h('div', { class: 'splitter', onmousedown: (e) => startResize(e, insp) });
   clear(slot, splitter, insp);
   slot.style.display = 'contents';
+  loadInsights(ex).then((list) => {
+    if (T.sel !== id || !list) return;
+    drawInsights(reqCol, list.filter((i) => i.side === 'request'));
+    drawInsights(respCol, list.filter((i) => i.side === 'response'));
+  });
+}
+
+/* ---------- insights: what stands out in a request or response ---------- */
+
+async function loadInsights(ex) {
+  if (ex.insights) return ex.insights;
+  try {
+    ex.insights = await api('/api/traffic/' + ex.id + '/insights');
+  } catch (_) {
+    return null;
+  }
+  return ex.insights;
+}
+
+const CAT_TITLE = { secret: 'Exposed secret', decode: 'Decodable value', pii: 'Personal data', info: 'Infrastructure detail' };
+
+/** A row of chips under the Request or Response label, one per thing spotted. */
+function drawInsights(col, list) {
+  const slot = col.querySelector('.spotslot');
+  if (!slot) return;
+  if (!list.length) return clear(slot);
+  const pre = () => col.querySelector('pre.raw');
+  const detail = h('div', { class: 'spotdetail', hidden: true });
+  let open = null;
+  const chips = list.map((ins) => {
+    const chip = h(
+      'button',
+      {
+        class: 'spot c-' + ins.category,
+        title: `${CAT_TITLE[ins.category] || ''} · ${ins.location}${ins.count > 1 ? ` · seen ${ins.count} times` : ''}`,
+        onclick: () => {
+          for (const c of slot.querySelectorAll('.spot')) c.classList.remove('on');
+          unmark(pre());
+          if (open === ins) {
+            open = null;
+            detail.hidden = true;
+            return;
+          }
+          open = ins;
+          chip.classList.add('on');
+          showInsight(detail, ins);
+          markIn(pre(), ins.value);
+        },
+      },
+      h('i'),
+      h('span', { class: 'sl', text: ins.label }),
+      h('span', { class: 'sw', text: shortLocation(ins.location) }),
+      ins.count > 1 ? h('span', { class: 'sn', text: '×' + ins.count }) : null,
+    );
+    return chip;
+  });
+  clear(slot, h('div', { class: 'spots' }, h('span', { class: 'spotlbl', text: 'Spotted' }), chips), detail);
+}
+
+function shortLocation(loc) {
+  return loc.replace(/^(header|cookie|query parameter|form field) /, '').replace(/^(request|response) body ?/, '') || 'body';
+}
+
+function showInsight(box, ins) {
+  box.hidden = false;
+  const actions = [];
+  if (ins.decoded != null) actions.push(h('button', { class: 'btn sm', text: 'Copy decoded', onclick: () => copyText(ins.decoded) }));
+  actions.push(h('button', { class: 'btn sm', text: 'Copy value', onclick: () => copyText(ins.value) }));
+  const needle = ins.value.replace(/"/g, '').slice(0, 120);
+  if (needle.length >= 4) actions.push(h('button', { class: 'btn sm', text: 'Find in traffic', title: 'Search all captured traffic for this value', onclick: () => setQuery('"' + needle + '"') }));
+  clear(
+    box,
+    h(
+      'div',
+      { class: 'sdh' },
+      h('b', { text: ins.label }),
+      h('span', { class: 'muted', text: ' in ' + ins.location + (ins.count > 1 ? ` · seen ${ins.count} times` : '') }),
+      h('span', { class: 'sdact' }, actions),
+    ),
+    ins.notes && ins.notes.length ? h('div', { class: 'sdnotes' }, ins.notes.map((n) => h('span', { class: 'sdnote' + (/^(unsigned|expired|encoded twice|username)/.test(n) ? ' warn' : ''), text: n }))) : null,
+    ins.decoded != null ? [h('div', { class: 'sdk', text: 'Decoded' }), h('pre', { class: 'sdv', text: ins.decoded })] : [h('div', { class: 'sdk', text: 'Value' }), h('pre', { class: 'sdv', text: ins.value.length > 600 ? ins.value.slice(0, 600) + '…' : ins.value })],
+  );
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Copied', 'ok');
+  } catch (_) {
+    toast('Could not copy to the clipboard', 'err');
+  }
+}
+
+/** Highlights every occurrence of `needle` in a rendered request or response. */
+function markIn(pre, needle) {
+  if (!pre || !needle || needle.length < 3) return;
+  const walker = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  let first = null;
+  for (const node of nodes) {
+    const text = node.nodeValue;
+    let at = text.indexOf(needle);
+    if (at < 0) continue;
+    const frag = document.createDocumentFragment();
+    let from = 0;
+    while (at >= 0) {
+      frag.append(text.slice(from, at));
+      const m = h('mark', { class: 'hit', text: needle });
+      first = first || m;
+      frag.append(m);
+      from = at + needle.length;
+      at = text.indexOf(needle, from);
+    }
+    frag.append(text.slice(from));
+    node.replaceWith(frag);
+  }
+  // Scroll only the pane, never the window around it.
+  if (first) pre.scrollTo({ top: Math.max(0, first.offsetTop - pre.clientHeight / 3), behavior: 'smooth' });
+}
+
+function unmark(pre) {
+  if (!pre) return;
+  for (const m of pre.querySelectorAll('mark.hit')) m.replaceWith(m.textContent);
+  pre.normalize();
 }
 
 function startResize(e, insp) {
@@ -1299,8 +1437,11 @@ async function drawBenchResponse(tab, col) {
         ` · ${ex.duration_ms} ms · ${fmtSize(b64len(ex.resp_body))} · #${ex.id}`,
       ),
     ),
+    h('div', { class: 'spotslot' }),
     rawPre(responseText(ex, pretty)),
   );
+  const list = await loadInsights(ex);
+  if (list && col.isConnected) drawInsights(col, list.filter((i) => i.side === 'response'));
 }
 
 function historyPanel(tab, main) {
