@@ -555,6 +555,62 @@ impl Condition {
     }
 }
 
+/// A compiled set of conditions matched against a host's exchanges. Shared
+/// with scan detectors (see `scan.rs`) so a detector reads traffic with
+/// exactly the same grammar, limits and evidence as a detection rule. Like
+/// everything here it only reads already-captured traffic — it cannot send a
+/// request or touch scope.
+#[derive(Debug, Clone)]
+pub struct ConditionSet {
+    conditions: Vec<Condition>,
+    mode: MatchMode,
+}
+
+impl ConditionSet {
+    /// Compiles and validates conditions. `mode` is `Any` (one hit is enough)
+    /// or `All` (every condition must hit somewhere in the traffic).
+    pub fn compile(defs: &[ConditionDef], mode: MatchMode) -> Result<Self, String> {
+        if defs.is_empty() {
+            return Err("at least one condition is required".into());
+        }
+        if defs.len() > MAX_CONDITIONS {
+            return Err(format!("at most {MAX_CONDITIONS} conditions"));
+        }
+        let conditions = defs
+            .iter()
+            .enumerate()
+            .map(|(i, c)| compile_condition(c).map_err(|e| format!("conditions[{i}]: {e}")))
+            .collect::<Result<_, _>>()?;
+        Ok(Self { conditions, mode })
+    }
+
+    fn needs_body(&self) -> bool {
+        self.conditions.iter().any(|c| matches!(c.target, Target::Body))
+    }
+
+    /// If the set matches across `exchanges`, returns one evidence line (with
+    /// the exchange it came from) per condition that hit; otherwise `None`.
+    pub fn evaluate(&self, exchanges: &[Exchange]) -> Option<Vec<(i64, String)>> {
+        let needs_body = self.needs_body();
+        let mut hits: Vec<Option<Hit>> = self.conditions.iter().map(|_| None).collect();
+        for ex in exchanges {
+            let view = View::new(ex, needs_body);
+            for (ci, cond) in self.conditions.iter().enumerate() {
+                if hits[ci].is_none() {
+                    if let Some(hit) = cond.eval(&view) {
+                        hits[ci] = Some(hit);
+                    }
+                }
+            }
+        }
+        let matched = match self.mode {
+            MatchMode::Any => hits.iter().any(Option::is_some),
+            MatchMode::All => hits.iter().all(Option::is_some),
+        };
+        matched.then(|| hits.into_iter().flatten().map(|h| (h.exchange_id, h.evidence)).collect())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
