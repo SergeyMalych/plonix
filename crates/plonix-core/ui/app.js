@@ -331,14 +331,14 @@ function renderRail() {
   const pending = (S.scope.suggestions || []).slice(0, 4);
   if (pending.length) {
     secs.push(
-      h('div', { class: 'navsec', text: 'Scope suggestions' }),
+      h('button', { class: 'navsec navlink', title: 'Review them on the Scope screen', onclick: () => go('scope') }, 'Scope suggestions', h('span', { class: 'qn', text: (S.scope.suggestions || []).length })),
       pending.map((sg) =>
         h(
           'div',
           { class: 'railrow sugg-row', title: `${sg.domain}: seen in ${sg.requests || 0} requests. Accept it into scope, or keep it out.` },
           h('button', { class: 'rl', text: sg.domain, onclick: () => go('scope') }),
-          h('button', { class: 'mini ok', text: '✓', title: 'Accept ' + sg.domain + ' and subdomains', onclick: () => decideDomain('accept', sg.domain, true) }),
-          h('button', { class: 'mini no', text: '✗', title: 'Keep ' + sg.domain + ' out of scope', onclick: () => decideDomain('reject', sg.domain, true) }),
+          h('button', { class: 'mini ok', text: '✓', title: 'Accept ' + suggestionBase(sg.domain) + ' only', onclick: () => decideDomain('accept', suggestionBase(sg.domain), false) }),
+          h('button', { class: 'mini no', text: '✗', title: 'Keep ' + sg.domain + ' out of scope', onclick: () => decideDomain('reject', sg.domain, false) }),
         ),
       ),
     );
@@ -586,7 +586,7 @@ function rawPre({ lines, body }) {
    Traffic
    ====================================================================== */
 
-const T = { q: store('plonix.q') || '', items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: null };
+const T = { q: store('plonix.q') || '', items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: store('plonix.inspH') };
 
 function renderTraffic(main) {
   const input = h('input', {
@@ -927,7 +927,7 @@ async function openInspector(id) {
       h('button', { class: 'btn sm', text: 'New finding', onclick: () => newFinding([id], `${ex.method} ${ex.path}`) }),
       h('button', { class: 'iconbtn', text: '✕', title: 'Close (Esc)', onclick: closeInspector }),
     ),
-    h('div', { class: 'split' }, reqCol, respCol),
+    sideBySide('split', 'lens', reqCol, respCol),
   ]);
   const splitter = h('div', { class: 'splitter', onmousedown: (e) => startResize(e, insp) });
   clear(slot, splitter, insp);
@@ -1059,6 +1059,46 @@ function unmark(pre) {
   pre.normalize();
 }
 
+/**
+ * Request and response side by side, with a divider that drags to resize
+ * them. The split is remembered per place (`lens`, `bench`); double-click
+ * the divider to even it out again.
+ */
+function sideBySide(cls, key, left, right) {
+  const wrap = h('div', { class: cls + ' sbs' });
+  const apply = (pct) => {
+    wrap.style.setProperty('--lw', pct + 'fr');
+    wrap.style.setProperty('--rw', 100 - pct + 'fr');
+  };
+  apply(store('plonix.split.' + key) || 50);
+  const bar = h('div', {
+    class: 'vsplit',
+    title: 'Drag to resize · double-click to reset',
+    ondblclick: () => {
+      apply(50);
+      store('plonix.split.' + key, null);
+    },
+    onmousedown: (e) => {
+      e.preventDefault();
+      const box = wrap.getBoundingClientRect();
+      document.body.classList.add('colresize');
+      const move = (ev) => {
+        const pct = Math.round(Math.max(15, Math.min(85, ((ev.clientX - box.left) / box.width) * 100)));
+        apply(pct);
+        store('plonix.split.' + key, pct);
+      };
+      const up = () => {
+        document.body.classList.remove('colresize');
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    },
+  });
+  return append(wrap, [left, bar, right]);
+}
+
 function startResize(e, insp) {
   e.preventDefault();
   const startY = e.clientY;
@@ -1066,6 +1106,7 @@ function startResize(e, insp) {
   const move = (ev) => {
     T.inspH = Math.max(140, Math.min(window.innerHeight - 220, startH - (ev.clientY - startY)));
     insp.style.height = T.inspH + 'px';
+    store('plonix.inspH', T.inspH);
   };
   const up = () => {
     window.removeEventListener('mousemove', move);
@@ -1095,42 +1136,84 @@ const EV = {
   linked_from: ['🔗', 'Linked from'],
 };
 
+/**
+ * Pending scope decisions, as one slim bar above Traffic: how many are
+ * waiting, the strongest one with its choices, and Accept all / Reject all.
+ * Nothing here needs an answer: Skip moves to the next one, Hide tucks the
+ * bar away until a new domain is suggested. The count stays in the sidebar.
+ */
 function renderBanner() {
   const slot = $('#bannerslot');
   if (!slot) return;
-  const sugg = (S.scope.suggestions || []).filter((s) => !(T.dismissed || []).includes(s.domain));
-  if (!sugg.length) return clear(slot);
-  const s = sugg[0];
-  if (slot.dataset.domain === s.domain && slot.firstChild) return;
-  slot.dataset.domain = s.domain;
+  const all = S.scope.suggestions || [];
+  const fresh = all.filter((s) => !(T.hidden || []).includes(s.domain));
+  if (!all.length || !fresh.length) return clear(slot);
+  const queue = all.filter((s) => !(T.skipped || []).includes(s.domain));
+  const s = queue[0] || all[0];
+  const ev = s.evidence[0];
+  const [ico, label] = (ev && EV[ev.kind]) || ['•', ''];
   clear(
     slot,
     h(
       'div',
-      { class: 'scopebanner' },
+      { class: 'scopequeue' },
+      h('button', { class: 'qcount', title: 'Review every suggestion on the Scope screen', onclick: () => go('scope') }, h('b', { text: all.length }), all.length === 1 ? ' scope decision' : ' scope decisions'),
+      h('span', { class: 'qdom', text: s.domain, title: s.domain }),
+      ev ? h('span', { class: 'qev', title: s.evidence.map((e) => e.summary).join('\n') }, h('i', { text: ico }), ' ', label, ' ', ev.via) : null,
+      h('span', { class: 'qacts' }, scopeButtons(s, 'sm'), all.length > 1 ? h('button', { class: 'btn sm ghost', text: 'Skip', title: 'Decide later; show the next one', onclick: () => ((T.skipped = queue.length > 1 ? [...(T.skipped || []), s.domain] : []), renderBanner()) }) : null),
       h(
-        'div',
-        { class: 'top' },
-        h('span', { class: 'bell', text: '◉' }),
-        h(
-          'div',
-          { class: 'tt' },
-          'A new domain looks like part of your target',
-          h('small', { text: `Seen in ${s.requests} request${s.requests === 1 ? '' : 's'} · score ${s.score}${sugg.length > 1 ? ` · ${sugg.length - 1} more suggestion${sugg.length > 2 ? 's' : ''} waiting` : ''}` }),
-        ),
-        h('span', { class: 'dom', text: s.domain, title: s.domain }),
-      ),
-      evidenceList(s.evidence.slice(0, 4)),
-      h(
-        'div',
-        { class: 'acts' },
-        h('span', { class: 'note', text: 'Accepting lets you replay and send requests to it. Either way, Plonix keeps capturing it passively.' }),
-        h('button', { class: 'btn ghost', text: 'Later', onclick: () => ((T.dismissed = [...(T.dismissed || []), s.domain]), (slot.dataset.domain = ''), renderBanner()) }),
-        h('button', { class: 'btn danger', text: 'Reject', onclick: () => decideDomain('reject', s.domain) }),
-        h('button', { class: 'btn', text: 'Accept with subdomains', onclick: () => decideDomain('accept', s.domain, true) }),
-        h('button', { class: 'btn primary', text: 'Accept ' + s.domain, onclick: () => decideDomain('accept', s.domain) }),
+        'span',
+        { class: 'qall' },
+        all.length > 1 ? [h('button', { class: 'btn sm', text: 'Accept all', onclick: () => decideAll('accept') }), h('button', { class: 'btn sm', text: 'Reject all', onclick: () => decideAll('reject') })] : null,
+        h('button', { class: 'iconbtn', text: '✕', title: 'Hide until a new domain is suggested (they stay on the Scope screen)', onclick: () => ((T.hidden = all.map((x) => x.domain)), renderBanner()) }),
       ),
     ),
+  );
+}
+
+/** The host a suggestion is about: `*.example.com` is about example.com. */
+const suggestionBase = (domain) => domain.replace(/^\*\./, '');
+
+/** The three choices for one suggestion: this host only, with subdomains, or reject. */
+function scopeButtons(s, size, after) {
+  const base = suggestionBase(s.domain);
+  const cls = (extra) => 'btn ' + (size || '') + ' ' + (extra || '');
+  const act = (action, domain, subs) => async () => (await decideDomain(action, domain, subs)) && after && after();
+  return [
+    h('button', { class: cls('danger'), text: 'Reject', title: `Keep ${s.domain} out of scope`, onclick: act('reject', s.domain, false) }),
+    h('button', { class: cls(), text: '+ subdomains', title: `Accept ${base} and every subdomain (*.${base})`, onclick: act('accept', base, true) }),
+    h('button', { class: cls('primary'), text: 'Only ' + base, title: `Accept ${base} only, not its subdomains`, onclick: act('accept', base, false) }),
+  ];
+}
+
+/** Accepts (each host only) or rejects every pending suggestion, after asking. */
+function decideAll(action) {
+  const list = (S.scope.suggestions || []).slice();
+  if (!list.length) return;
+  const accept = action === 'accept';
+  const run = async () => {
+    closeModal();
+    let done = 0;
+    for (const s of list) {
+      const domain = accept ? suggestionBase(s.domain) : s.domain;
+      try {
+        await api('/api/scope/' + action, { method: 'POST', body: { domain, include_subdomains: false } });
+        done++;
+      } catch (e) {
+        toast(e.message, 'err');
+      }
+    }
+    toast(accept ? `✓ ${done} domain${done === 1 ? '' : 's'} accepted into scope` : `✗ ${done} domain${done === 1 ? '' : 's'} kept out of scope`, accept ? 'ok' : '');
+    await loadScope();
+    if (S.view === 'scope') renderScopeBody();
+  };
+  modal(
+    accept ? `Accept all ${list.length} suggested domains?` : `Reject all ${list.length} suggested domains?`,
+    [
+      h('p', { class: 'muted', text: accept ? 'Each host is accepted on its own, without its subdomains. You can change any of them on the Scope screen.' : 'They stay captured, but Bench sends to them are refused. You can change any of them on the Scope screen.' }),
+      h('div', { class: 'alllist' }, list.map((s) => h('div', { class: 'mono', text: accept ? suggestionBase(s.domain) : s.domain }))),
+    ],
+    [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), h('button', { class: 'btn ' + (accept ? 'primary' : 'danger'), text: accept ? 'Accept all' : 'Reject all', onclick: run })],
   );
 }
 
@@ -1363,7 +1446,7 @@ function renderBench(main) {
       h('datalist', { id: 'methods' }, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map((m) => h('option', { value: m }))),
       h('div', { class: 'reqbar' }, method, h('div', { class: 'urlwrap' }, url), sendBtn),
       h('div', { id: 'scopehint' }),
-      h('div', { class: 'rsplit' }, h('div', { class: 'rcol' }, h('div', { class: 'lbl' }, 'Request', binaryNote), editor), respCol),
+      sideBySide('rsplit', 'bench', h('div', { class: 'rcol' }, h('div', { class: 'lbl' }, 'Request', binaryNote), editor), respCol),
       historyPanel(tab, main),
       h('div', { id: 'cmpslot' }),
     ),
@@ -1684,7 +1767,14 @@ function renderScopeBody() {
   const rules = (S.scope.rules || []).slice().sort((x, y) => x.decision.localeCompare(y.decision) || x.pattern.localeCompare(y.pattern));
   clear(
     box,
-    h('div', { class: 'sechead' }, h('h3', { text: `Suggested domains (${sugg.length})` })),
+    h(
+      'div',
+      { class: 'sechead' },
+      h('h3', { text: `Suggested domains (${sugg.length})` }),
+      sugg.length > 1
+        ? h('span', { class: 'shacts' }, h('button', { class: 'btn sm', text: 'Accept all', title: 'Accept every suggested host on its own', onclick: () => decideAll('accept') }), h('button', { class: 'btn sm danger', text: 'Reject all', onclick: () => decideAll('reject') }))
+        : null,
+    ),
     sugg.length
       ? sugg.map((s) =>
           h(
@@ -1699,9 +1789,7 @@ function renderScopeBody() {
                 'span',
                 { class: 'acts' },
                 h('button', { class: 'btn sm', text: 'Traffic', onclick: () => setQuery('host:' + s.domain) }),
-                h('button', { class: 'btn sm danger', text: 'Reject', onclick: async () => (await decideDomain('reject', s.domain)) && renderScopeBody() }),
-                h('button', { class: 'btn sm', text: '+ subdomains', title: 'Accept this domain and all its subdomains', onclick: async () => (await decideDomain('accept', s.domain, true)) && renderScopeBody() }),
-                h('button', { class: 'btn sm primary', text: 'Accept', onclick: async () => (await decideDomain('accept', s.domain)) && renderScopeBody() }),
+                scopeButtons(s, 'sm', renderScopeBody),
               ),
             ),
             evidenceList(s.evidence),
