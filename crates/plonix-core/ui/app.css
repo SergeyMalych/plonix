@@ -337,6 +337,7 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .grid tr:last-child td { border-bottom: 0; }
 .grid tr.click { cursor: pointer; }
 .grid tr.click:hover td { background: var(--surface-2); }
+.grid tr.sel td { background: var(--accent-soft, var(--surface-2)); }
 .muted { color: var(--fg-3); }
 
 /* map */
@@ -592,3 +593,4 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .opt.col { flex-direction: column; gap: 4px; color: var(--fg-2); }
 .opt select { border: 1px solid var(--line-2); background: var(--surface-2); border-radius: 7px; padding: 4px 8px; font-size: 12px; }
 @media (max-width: 900px) { .setgrid { grid-template-columns: 1fr; } .setgrid > div + div { border-left: 0; border-top: 1px solid var(--line-2); } }
+.backbtn { flex: 0 0 auto; white-space: nowrap; }

@@ -430,12 +430,35 @@ async function launchTarget(target) {
 function go(view, force) {
   if (!VIEWS[view]) return;
   if (S.view === view && !force) return;
+  // Going somewhere from the sidebar forgets the way back; leaveTo keeps it.
+  if (!S.keepBack) S.back = null;
+  S.keepBack = false;
+  if (S.view === 'map') saveMapScroll();
   S.view = view;
   if (location.hash !== '#/' + view) history.replaceState(null, '', '#/' + view);
   for (const b of document.querySelectorAll('.nav button')) b.classList.toggle('on', b.dataset.v === view);
   const main = $('#main');
   clear(main);
   VIEWS[view].render(main);
+}
+
+/** Moves to another screen from inside one, remembering where to go back to. */
+function leaveTo(view) {
+  if (S.view !== view && VIEWS[S.view]) S.back = S.view;
+  S.keepBack = true;
+  go(view, true);
+}
+
+function goBack() {
+  const back = S.back;
+  S.back = null;
+  if (back) go(back, true);
+}
+
+/** "← Map": returns to the screen the user came from, exactly as they left it. */
+function backButton() {
+  if (!S.back || !VIEWS[S.back]) return null;
+  return h('button', { class: 'btn sm backbtn', text: '← ' + VIEWS[S.back].label, title: 'Back to ' + VIEWS[S.back].label, onclick: goBack });
 }
 
 function updateChrome() {
@@ -851,6 +874,7 @@ function renderTraffic(main) {
       h(
         'div',
         { class: 'toolbar' },
+        backButton(),
         h('div', { class: 'search', id: 'searchbox' }, h('span', { class: 'mg', text: '⌕' }), input, h('kbd', { text: '/' })),
         h('span', { class: 'count', id: 'tcount' }),
         liveBtn,
@@ -1116,7 +1140,7 @@ async function setQuery(q) {
   T.text = text;
   T.sel = null;
   saveTrafficView();
-  go('traffic', true);
+  leaveTo('traffic');
 }
 
 async function refreshTraffic(userAction) {
@@ -1225,6 +1249,7 @@ function selectRow(delta) {
 async function openInspector(id) {
   T.sel = id;
   for (const tr of document.querySelectorAll('#rows tr')) tr.classList.toggle('sel', Number(tr.dataset.id) === id);
+  for (const tr of document.querySelectorAll('tr[data-ex]')) tr.classList.toggle('sel', Number(tr.dataset.ex) === id);
   const slot = $('#inspslot');
   if (!slot) return;
   let ex;
@@ -1478,7 +1503,7 @@ function closeInspector() {
   T.sel = null;
   const slot = $('#inspslot');
   if (slot) clear(slot);
-  for (const tr of document.querySelectorAll('#rows tr.sel')) tr.classList.remove('sel');
+  for (const tr of document.querySelectorAll('#rows tr.sel, tr[data-ex].sel')) tr.classList.remove('sel');
 }
 
 const scopeTag = (d) => ({ accepted: 'in', rejected: 'rej', unknown: 'out' })[d];
@@ -1592,9 +1617,12 @@ function evidenceList(evidence) {
   );
 }
 
+/** Opens a request in the Lens. Screens with a Lens of their own (Traffic,
+ * Map, Findings) show it in place, so the user never loses their spot. */
 function showExchange(id) {
+  if ($('#inspslot')) return openInspector(id);
   T.sel = id;
-  go('traffic', true);
+  leaveTo('traffic');
 }
 
 /* ======================================================================
@@ -1641,7 +1669,7 @@ async function sendToBench(id) {
   });
   R.active = R.tabs.length - 1;
   saveBench();
-  go('bench', true);
+  leaveTo('bench');
 }
 
 function newBlankTab() {
@@ -1707,7 +1735,7 @@ function renderBench(main) {
   const view = h(
     'div',
     { class: 'view' },
-    h('div', { class: 'toolbar' }, h('h2', { text: 'Bench' }), h('span', { class: 'hint', text: 'Each tab is an experiment: edit a request, send it, branch it, compare responses. Sends only reach in-scope hosts.' })),
+    h('div', { class: 'toolbar' }, backButton(), h('h2', { text: 'Bench' }), h('span', { class: 'hint', text: 'Each tab is an experiment: edit a request, send it, branch it, compare responses. Sends only reach in-scope hosts.' })),
     tabs,
   );
   clear(main, view);
@@ -2214,7 +2242,21 @@ function renderScopeBody() {
    Map: hosts, endpoints, technologies
    ====================================================================== */
 
-const M = { hosts: [], tech: {}, sel: null, dirty: true };
+const M = { hosts: [], tech: {}, sel: null, dirty: true, scroll: null };
+
+function saveMapScroll() {
+  const list = $('#hostlist');
+  const detail = $('#hostdetail');
+  if (list && detail) M.scroll = [list.scrollTop, detail.scrollTop];
+}
+
+function restoreMapScroll() {
+  const list = $('#hostlist');
+  const detail = $('#hostdetail');
+  if (!M.scroll || !list || !detail) return;
+  [list.scrollTop, detail.scrollTop] = M.scroll;
+  M.scroll = null;
+}
 
 function renderMap(main) {
   clear(
@@ -2229,7 +2271,7 @@ function renderMap(main) {
         h('span', { class: 'hint', id: 'rulesinfo', text: 'Hosts, endpoints and parameters learned from traffic, with detected technologies.' }),
         h('button', { class: 'btn sm', text: 'Refresh', onclick: () => loadMap(true) }),
       ),
-      h('div', { class: 'mapwrap' }, h('div', { class: 'hostlist', id: 'hostlist' }), h('div', { class: 'hostdetail', id: 'hostdetail' })),
+      h('div', { class: 'traffic' }, h('div', { class: 'mapwrap' }, h('div', { class: 'hostlist', id: 'hostlist' }), h('div', { class: 'hostdetail', id: 'hostdetail' })), h('div', { id: 'inspslot' })),
     ),
   );
   loadMap(true);
@@ -2244,7 +2286,8 @@ async function loadMap(withTech) {
   M.dirty = false;
   if (!M.sel && M.hosts.length) M.sel = (M.hosts.find((x) => x.scope === 'accepted') || M.hosts[0]).host;
   drawHostList();
-  drawHostDetail();
+  await drawHostDetail();
+  restoreMapScroll();
   if (withTech) {
     api('/api/rules')
       .then((r) => {
@@ -2340,7 +2383,7 @@ async function drawHostDetail() {
         eps.map((e) =>
           h(
             'tr',
-            { class: 'click', title: 'Open a sample request', onclick: () => showExchange(e.sample_id) },
+            { class: 'click' + (T.sel === e.sample_id ? ' sel' : ''), 'data-ex': e.sample_id, title: 'Open a sample request', onclick: () => showExchange(e.sample_id) },
             h('td', null, h('span', { class: 'meth m-' + e.method, text: e.method })),
             h('td', { class: 'mono', text: e.path }),
             h('td', null, e.statuses.map((s) => [h('span', { class: statusClass(s), text: s }), ' '])),
@@ -2364,7 +2407,7 @@ function renderFindings(main) {
       'div',
       { class: 'view' },
       h('div', { class: 'toolbar' }, h('h2', { text: 'Findings' }), h('span', { class: 'hint', text: 'Reproducible issues, each tied to the requests that prove it.' }), h('button', { class: 'btn primary sm', text: 'New finding', onclick: () => newFinding([], '') })),
-      h('div', { class: 'pane' }, h('div', { class: 'stack', id: 'findbody' })),
+      h('div', { class: 'traffic' }, h('div', { class: 'pane' }, h('div', { class: 'stack', id: 'findbody' })), h('div', { id: 'inspslot' })),
     ),
   );
   loadFindings();
@@ -2402,7 +2445,7 @@ async function loadFindings() {
               'div',
               { class: 'fb' },
               f.description || null,
-              f.exchange_ids.length ? h('div', { class: 'evid' }, f.exchange_ids.map((id) => h('button', { text: 'request #' + id, title: 'Open in Traffic', onclick: () => showExchange(id) }))) : null,
+              f.exchange_ids.length ? h('div', { class: 'evid' }, f.exchange_ids.map((id) => h('button', { text: 'request #' + id, title: 'Open in the Lens', onclick: () => showExchange(id) }))) : null,
             )
           : null,
       ),
@@ -2775,7 +2818,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if ($('.popover, .ctxmenu')) return closePopover();
     if ($('.modal')) return closeModal();
-    if (S.view === 'traffic' && !typing) return closeInspector();
+    if ($('#inspector') && !typing) return closeInspector();
   }
   if (S.view === 'bench' && e.key === 'Enter' && (e.metaKey || e.ctrlKey) && R.send) {
     e.preventDefault();
