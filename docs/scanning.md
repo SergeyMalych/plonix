@@ -221,5 +221,12 @@ A new **Scans** screen (⌘7), with a simple left-to-right flow:
   (user-only; agents cannot start scans).
 - CLI: `plonix scan suggest|catalog|run`.
 
-Still to come: crawl and crawl-with-browser discovery, the Scans UI area, and
-installed scan-pack pinning in the store.
+- Crawl (no browser): `Engine::crawl` seeds from the host's captured traffic
+  and a start path, fetches in-scope pages through `engine::send`, extracts
+  links and forms, follows same-host links within a page/depth budget, and
+  never leaves accepted scope or submits a form. API `POST /api/crawl`
+  (user-only); CLI `plonix crawl`.
+
+Still to come: crawl-with-browser (needs a headless browser driver; the plain
+crawl runs meanwhile and the report says so), the Scans UI area, and installed
+scan-pack pinning in the store.
