@@ -237,6 +237,7 @@ const VIEWS = {
   scope: { label: 'Scope', ico: '◉', render: renderScope },
   map: { label: 'Map', ico: '⊞', render: renderMap },
   findings: { label: 'Findings', ico: '⚑', render: renderFindings },
+  agents: { label: 'Agents', ico: '✦', render: renderAgents },
 };
 
 const IN_APP = !!window.__PLONIX_APP__;
@@ -460,6 +461,7 @@ async function poll() {
       if (S.view === 'scope') renderScopeBody();
       if (S.view === 'map' && st.exchanges !== prev.exchanges) M.dirty = true;
     }
+    if (S.view === 'agents' && Date.now() - (S.agentsAt || 0) > 4000) loadAgents();
   } catch (e) {
     if (e.code === 'unauthorized') return;
     S.engineUp = false;
@@ -813,7 +815,7 @@ function emptyTraffic(st) {
     'Type the site you are testing. Plonix opens a browser that captures through it, and requests appear here live.',
     h('div', { class: 'starter' }, input, btn),
     err,
-    h('div', { class: 'muted small' }, 'Or point any browser at the proxy ', h('code', { text: st.proxy || '' }), '.'),
+    h('div', { class: 'muted fine' }, 'Or point any browser at the proxy ', h('code', { text: st.proxy || '' }), '.'),
   );
 }
 
@@ -1993,6 +1995,124 @@ function newFinding(ids, title) {
   });
 }
 
+/* ======================================================================
+   Agents
+   ====================================================================== */
+
+// An agent counts as connected while its MCP server checks in (every 20 s).
+const AGENT_LIVE_MS = 60000;
+
+const EXAMPLE_PROMPTS = [
+  'Use Plonix to find in-scope API endpoints that returned errors, then read the most interesting request and tell me what stands out.',
+  'Using Plonix, list every endpoint on the target that takes an id parameter and group them by host.',
+  'Look at Plonix scope suggestions and explain which ones really belong to the target and why.',
+  'Summarize my Plonix findings and point to the requests that prove each one.',
+];
+
+function renderAgents(main) {
+  clear(
+    main,
+    h(
+      'div',
+      { class: 'view' },
+      h('div', { class: 'toolbar' }, h('h2', { text: 'Agents' }), h('span', { class: 'hint', text: 'Let an AI agent such as Claude Code read this project over MCP. Read-only.' })),
+      h('div', { class: 'pane' }, h('div', { class: 'stack', id: 'agentsbody' }, h('div', { class: 'muted', text: 'Loading…' }))),
+    ),
+  );
+  loadAgents();
+}
+
+async function loadAgents() {
+  let a;
+  try {
+    a = await api('/api/agents');
+  } catch (e) {
+    return toast(e.message, 'err');
+  }
+  S.agentsAt = Date.now();
+  const box = $('#agentsbody');
+  if (!box || S.view !== 'agents') return;
+  const now = Date.now();
+  const clients = a.clients || [];
+  const live = clients.filter((c) => now - c.last_seen < AGENT_LIVE_MS);
+  const ago = (ms) => {
+    const s = Math.max(0, Math.round((now - ms) / 1000));
+    return s < 60 ? 'just now' : s < 3600 ? Math.round(s / 60) + ' min ago' : fmtDate(ms);
+  };
+  const cmd = (a.connect && a.connect.command) || 'plonix connect claude';
+  clear(
+    box,
+    h(
+      'div',
+      { class: 'card agentstatus' },
+      h(
+        'div',
+        { class: 'ah' },
+        h('span', { class: 'adot' + (live.length ? ' on' : '') }),
+        h('b', { text: live.length ? (live.length === 1 ? '1 agent connected' : live.length + ' agents connected') : 'No agent connected' }),
+        h('span', { class: 'mode', text: 'Read-only' }),
+      ),
+      clients.length
+        ? h(
+            'table',
+            { class: 'grid' },
+            h('tr', null, h('th', { text: 'Agent' }), h('th', { text: 'Status' }), h('th', { text: 'Requests' }), h('th', { text: 'Last request' })),
+            clients.map((c) =>
+              h(
+                'tr',
+                null,
+                h('td', { class: 'mono', text: c.name }),
+                h('td', { text: now - c.last_seen < AGENT_LIVE_MS ? 'connected' : 'last seen ' + ago(c.last_seen) }),
+                h('td', { text: c.requests + (c.refused ? ` (${c.refused} refused)` : '') }),
+                h('td', { class: 'mono muted', text: c.last_request }),
+              ),
+            ),
+          )
+        : h('div', { class: 'ab muted', text: 'When an agent starts the Plonix MCP server it shows up here, with every request it makes.' }),
+    ),
+    h('div', { class: 'sechead' }, h('h3', { text: 'Connect Claude Code' })),
+    h(
+      'div',
+      { class: 'card' },
+      h(
+        'div',
+        { class: 'ab' },
+        h('p', null, 'Run this once in a terminal. It adds Plonix to Claude Code for all your projects:'),
+        h('div', { class: 'cmdline' }, h('code', { text: cmd }), h('button', { class: 'btn sm', text: 'Copy', onclick: () => copyText(cmd) })),
+        h(
+          'p',
+          { class: 'muted' },
+          'Any other MCP client can run ',
+          h('code', { text: 'plonix mcp' }),
+          ' as a stdio server. The ',
+          h('code', { text: 'plonix' }),
+          ' command comes from ',
+          h('code', { text: 'cargo install --path crates/plonix-cli' }),
+          '. The agent reads whichever engine is running, including this one.',
+        ),
+      ),
+    ),
+    h('div', { class: 'sechead' }, h('h3', { text: 'What agents can do' })),
+    h(
+      'div',
+      { class: 'card capgrid' },
+      h('div', null, h('div', { class: 'caph ok', text: '✓ Allowed' }), [...new Set((a.capabilities || []).filter((c) => c.path !== '/api/agents').map((c) => c.what))].map((t) => h('div', { class: 'cap', text: t }))),
+      h('div', null, h('div', { class: 'caph no', text: '✗ Not allowed' }), (a.not_allowed || []).map((t) => h('div', { class: 'cap', text: t }))),
+    ),
+    h(
+      'p',
+      { class: 'muted fine' },
+      'The engine enforces this: agents sign in with their own token, and anything outside this list is refused. Captured traffic never leaves this Mac through Plonix, but it can hold passwords and session tokens, so connect only agents you trust.',
+    ),
+    h('div', { class: 'sechead' }, h('h3', { text: 'Try asking' })),
+    h(
+      'div',
+      { class: 'card' },
+      EXAMPLE_PROMPTS.map((p) => h('div', { class: 'prompt' }, h('span', { text: '“' + p + '”' }), h('button', { class: 'btn sm ghost', text: 'Copy', onclick: () => copyText(p) }))),
+    ),
+  );
+}
+
 /* ---------- keyboard ---------- */
 
 document.addEventListener('keydown', (e) => {
@@ -2014,7 +2134,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   const keys = Object.keys(VIEWS);
-  if (/^[1-5]$/.test(e.key)) return go(keys[Number(e.key) - 1]);
+  if (/^[1-6]$/.test(e.key)) return go(keys[Number(e.key) - 1]);
   if (e.key === '\\') return toggleSidebar();
   if (S.view !== 'traffic') return;
   if (e.key === '/') {

@@ -381,6 +381,7 @@ pub struct Running {
     pub proxy_addr: SocketAddr,
     pub api_addr: SocketAddr,
     pub token: String,
+    pub agent_token: String,
 }
 
 /// Binds the proxy and the API and starts serving in the background.
@@ -396,6 +397,7 @@ pub async fn start(config: &EngineConfig) -> Result<Running> {
 
 pub async fn start_with(engine: Arc<Engine>, config: &EngineConfig) -> Result<Running> {
     let token = config.home.load_or_create_token()?;
+    let agent_token = config.home.load_or_create_agent_token()?;
     engine.start_recorder();
     let proxy = match TcpListener::bind(config.proxy_addr).await {
         Ok(l) => l,
@@ -410,14 +412,20 @@ pub async fn start_with(engine: Arc<Engine>, config: &EngineConfig) -> Result<Ru
     let proxy_addr = proxy.local_addr()?;
     let api_addr = api.local_addr()?;
     tokio::spawn(crate::proxy::serve(proxy, engine.clone()));
-    let router = crate::api::router(engine.clone(), token.clone(), api_addr, proxy_addr, config.home.clone());
+    let router = crate::api::router(
+        engine.clone(),
+        crate::api::Tokens { user: token.clone(), agent: agent_token.clone() },
+        api_addr,
+        proxy_addr,
+        config.home.clone(),
+    );
     let shutdown_engine = engine.clone();
     tokio::spawn(async move {
         let _ = axum::serve(api, router)
             .with_graceful_shutdown(async move { shutdown_engine.shutdown.notified().await })
             .await;
     });
-    Ok(Running { engine, proxy_addr, api_addr, token })
+    Ok(Running { engine, proxy_addr, api_addr, token, agent_token })
 }
 
 /// Runs an engine in the foreground until shutdown is requested.
