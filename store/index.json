@@ -1,0 +1,66 @@
+{
+  "plonix_index": 1,
+  "name": "Plonix community store",
+  "packages": [
+    {
+      "name": "web-servers",
+      "kind": "rules",
+      "version": "1.0.0",
+      "description": "Common HTTP servers and application servers, from response headers.",
+      "author": "Plonix contributors",
+      "url": "packs/web-servers.json",
+      "sha256": "7641f527608f9542a2812a8e6f073aa544363191474433249e3426f90253b5e9",
+      "homepage": "https://github.com/SergeyMalych/plonix"
+    },
+    {
+      "name": "frameworks",
+      "kind": "rules",
+      "version": "1.0.0",
+      "description": "Server-side languages and web frameworks, from headers, cookies and markup.",
+      "author": "Plonix contributors",
+      "url": "packs/frameworks.json",
+      "sha256": "ce488c7cfbe087a26522e86e7df3139c4eee2cf2e47beed3a1a15d6d4cc3cbf6",
+      "homepage": "https://github.com/SergeyMalych/plonix"
+    },
+    {
+      "name": "cms",
+      "kind": "rules",
+      "version": "1.0.0",
+      "description": "Content management systems and e-commerce platforms.",
+      "author": "Plonix contributors",
+      "url": "packs/cms.json",
+      "sha256": "f1c0c675357ccb06afca6a4c1d3094e3b97a11eaa924d6b2c00da7f57ef9f95f",
+      "homepage": "https://github.com/SergeyMalych/plonix"
+    },
+    {
+      "name": "edge",
+      "kind": "rules",
+      "version": "1.0.0",
+      "description": "CDNs, WAFs, caches and hosting platforms in front of the application.",
+      "author": "Plonix contributors",
+      "url": "packs/edge.json",
+      "sha256": "46183c48842b6c60681984be55be53e36024fbf4c27500067e63a801161857e1",
+      "homepage": "https://github.com/SergeyMalych/plonix"
+    },
+    {
+      "name": "api-surface",
+      "kind": "rules",
+      "version": "1.0.0",
+      "description": "API styles, API documentation and identity endpoints worth a closer look.",
+      "author": "Plonix contributors",
+      "url": "packs/api-surface.json",
+      "sha256": "97131c1c04d35b36dad4c5ee0d5c19c4b65421ca4f158595bb26f207fbd36bd9",
+      "homepage": "https://github.com/SergeyMalych/plonix"
+    },
+    {
+      "name": "admin-panels",
+      "kind": "rules",
+      "version": "1.0.0",
+      "description": "DevOps tools and admin consoles that are often exposed by mistake.",
+      "author": "Plonix contributors",
+      "url": "packs/admin-panels.json",
+      "sha256": "6900932344af6e9c187928da6e38c29ddcbb6b161112f736405c5de559c51e72",
+      "homepage": "https://github.com/SergeyMalych/plonix"
+    }
+  ]
+}

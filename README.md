@@ -76,6 +76,11 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - Replay any captured exchange with a different method, path, headers or body.
 - Send new requests from scratch. Results are stored alongside captured traffic and tagged with who sent them.
 
+### Technology detection, maintained by the community
+- Plonix recognises what runs behind every host (servers, frameworks, CMSs, CDNs and WAFs, identity providers, exposed admin consoles) and shows the evidence for each detection, down to the exchange.
+- Detection is driven by declarative **rule packs** that anyone can write and share. Install them from a file, a URL or the **store**, a JSON index hosted anywhere. New rules apply to traffic you already captured.
+- Packs are untrusted data: strictly validated, linear-time patterns only, pinned by SHA-256 and re-verified on load. They can't run code, reach the network or touch scope. See [docs/detection-rules.md](docs/detection-rules.md) and the extension design in [docs/extensions.md](docs/extensions.md).
+
 ### Local API
 - An HTTP API on loopback only, protected by a bearer token stored at `~/.plonix/api-token` (mode `0600`).
 - Requests must target the loopback address, which keeps web pages in your browser from reaching it.
@@ -121,12 +126,18 @@ plonix search host:example.com status:5xx  # newest first; filters below
 plonix show 42                             # one request and its response
 plonix watch scope:in                      # print new traffic as it arrives
 plonix hosts                               # every host seen, busiest first
+plonix tech                                # technologies detected on each host, with evidence
 
 plonix scope                               # rules, plus suggested domains with evidence
 plonix scope review                        # decide on suggestions one by one
 plonix scope accept '*.example-cdn.com'    # or: reject, remove
 
 plonix replay 42 -H 'Authorization: Bearer other-user' -t '/api/users/2'
+
+plonix rules                               # detection rule packs in effect
+plonix rules add ./my-pack.json            # or an https:// URL, optionally --sha256
+plonix store                               # browse community packs
+plonix store install admin-panels          # verified against the store's sha256
 plonix stop                                # captured traffic is kept
 ```
 
@@ -161,6 +172,8 @@ The API listens on port 8090 when it is free; `plonix status` shows the actual a
 | GET | `/api/traffic/{id}` | One exchange, with decoded bodies |
 | GET | `/api/hosts` | Hosts seen |
 | GET | `/api/hosts/{host}/endpoints` | Endpoints seen on a host |
+| GET | `/api/tech` · `/api/tech/{host}` | Detected technologies per host, with evidence |
+| GET | `/api/rules` | Detection rule packs in effect |
 | GET | `/api/scope` | Scope rules and pending suggestions |
 | POST | `/api/scope/accept` · `reject` · `remove` | Decide on a domain |
 | POST | `/api/send` | Send a new request (in-scope hosts only) |
@@ -179,16 +192,20 @@ The API listens on port 8090 when it is free; `plonix status` shows the actual a
         ┌───────────┼───────────┐
      Traffic    Discovery    Findings
      (proxy,    (adaptive     (validated,
-      store,     scope)        reproducible)
-      search)
+      store,     scope, tech   reproducible)
+      search)    detection)
+                    ▲
+          rule packs · store       untrusted, declarative, verified
 ```
 
 The engine is a headless background process. Every front end talks to it the same way, so the Mac app, your shell scripts and your AI agent always see the same project.
 
 ```text
 crates/
-├── plonix-core   engine: proxy, CA, store, search, scope, upstream, local API
-└── plonix-cli    the `plonix` command: engine control, onboarding, search, scope, replay
+├── plonix-core   engine: proxy, CA, store, search, scope, detection, rule packs, store index, local API
+└── plonix-cli    the `plonix` command: engine control, onboarding, search, scope, replay, rules, store
+store/            community store: index.json and rule packs
+docs/             detection rules, extension design
 ```
 
 ## Roadmap
@@ -202,12 +219,14 @@ crates/
 - [x] Token-authenticated, loopback-only local API
 - [x] `plonix` CLI: search, inspect, watch, replay and manage scope from the terminal
 - [x] `plonix open <target>`: one command from nothing to captured traffic, in a pre-configured browser
+- [x] Technology detection from community rule packs, with a store (`plonix tech`, `plonix rules`, `plonix store`)
 
 **Coming**
 - [ ] Built-in MCP server and `plonix connect claude`, so Claude Code and other agents can work with live traffic, scope and findings, always inside accepted scope
 - [ ] Native macOS app with five screens: Traffic, Map, Experiments, Findings, Agents. Decoding and diffing happen inline.
 - [ ] Experiments: branch and compare request variants
 - [ ] Findings that stay linked to the exchanges that prove them
+- [ ] Sandboxed WebAssembly extensions with a closed capability list that can never bypass scope ([design](docs/extensions.md))
 
 Deliberately out of scope: an automated scanner and a token sequencer. Plonix stays small on purpose.
 
@@ -218,6 +237,8 @@ Plonix is early, and this is a good time to shape it. Issues and discussions abo
 1. Open an issue describing the problem or idea before large changes.
 2. Keep pull requests focused, and include tests for engine behavior.
 3. Run `cargo fmt`, `cargo clippy --workspace` and `cargo test --workspace` before pushing.
+
+The easiest way to contribute is a **detection rule pack**: no Rust needed. Write one, check it with `plonix rules check`, and open a pull request that adds it to `store/`. See [docs/detection-rules.md](docs/detection-rules.md#contributing-a-pack).
 
 Use Plonix only against systems you are authorized to test.
 

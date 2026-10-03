@@ -5,6 +5,7 @@
 //! another front end over the same `client` and `render` modules.
 
 mod client;
+mod community;
 mod engine_ctl;
 mod open;
 mod render;
@@ -30,6 +31,8 @@ Get started:
   plonix show 42
   plonix scope                     review domains Plonix thinks belong in scope
   plonix replay 42 -H 'X-Debug: 1'
+  plonix tech                      technologies detected on each host
+  plonix store                     community detection rule packs
 
 Exit codes:
   0 ok · 1 error · 2 bad usage or query · 3 engine not running
@@ -95,6 +98,18 @@ enum Cmd {
     },
     /// Hosts seen so far, busiest first
     Hosts,
+    /// Technologies detected on each host (from detection rules)
+    Tech {
+        /// Only this host
+        host: Option<String>,
+    },
+    /// Detection rule packs: list, add from a file or URL, remove, check
+    Rules {
+        #[command(subcommand)]
+        cmd: Option<community::RulesCmd>,
+    },
+    /// Browse and install community rule packs
+    Store(community::StoreArgs),
     /// The local certificate authority
     Ca {
         #[command(subcommand)]
@@ -314,6 +329,9 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 }
             }
         }
+        Cmd::Tech { host } => community::tech_cmd(&ctx, host)?,
+        Cmd::Rules { cmd } => community::rules_cmd(&ctx, cmd.unwrap_or(community::RulesCmd::List))?,
+        Cmd::Store(a) => community::store_cmd(&ctx, a)?,
         Cmd::Ca { cmd } => ca_cmd(&ctx, cmd.unwrap_or(CaCmd::Show))?,
         Cmd::Engine(a) => engine_ctl::run_foreground(
             ctx.home.clone(),

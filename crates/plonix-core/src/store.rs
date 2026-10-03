@@ -173,6 +173,17 @@ impl Store {
         rows.collect::<Result<_, _>>().map_err(Into::into)
     }
 
+    /// A host's most recent exchanges, newest first.
+    pub fn exchanges_for_host(&self, host: &str, limit: usize) -> Result<Vec<Exchange>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, ts, scheme, host, port, method, path, query, req_headers, req_body, status, resp_headers,
+                    resp_body, duration_ms, error, tls_sans, source, initiator FROM exchanges WHERE host = ?1 ORDER BY id DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![host.to_ascii_lowercase(), limit as i64], row_to_exchange)?;
+        rows.collect::<Result<_, _>>().map_err(Into::into)
+    }
+
     pub fn count(&self) -> Result<i64> {
         Ok(self.conn.lock().unwrap().query_row("SELECT count(*) FROM exchanges", [], |r| r.get(0))?)
     }

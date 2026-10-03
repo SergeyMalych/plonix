@@ -38,6 +38,9 @@ pub fn router(engine: Arc<Engine>, token: String, api_addr: SocketAddr, proxy_ad
         .route("/api/traffic/{id}", get(exchange))
         .route("/api/hosts", get(hosts))
         .route("/api/hosts/{host}/endpoints", get(endpoints))
+        .route("/api/tech", get(tech_all))
+        .route("/api/tech/{host}", get(tech_host))
+        .route("/api/rules", get(rule_packs))
         .route("/api/scope", get(scope))
         .route("/api/scope/accept", post(accept))
         .route("/api/scope/reject", post(reject))
@@ -168,6 +171,33 @@ async fn endpoints(State(s): State<AppState>, Path(host): Path<String>) -> Respo
     match s.engine.store.endpoints(&host) {
         Ok(e) => Json(e).into_response(),
         Err(e) => internal(e),
+    }
+}
+
+async fn tech_all(State(s): State<AppState>) -> Response {
+    let engine = s.engine.clone();
+    match tokio::task::spawn_blocking(move || engine.detect_all()).await {
+        Ok(Ok(hosts)) => Json(hosts).into_response(),
+        Ok(Err(e)) => internal(e),
+        Err(e) => internal(e.into()),
+    }
+}
+
+async fn tech_host(State(s): State<AppState>, Path(host): Path<String>) -> Response {
+    let engine = s.engine.clone();
+    let h = host.clone();
+    match tokio::task::spawn_blocking(move || engine.detect_host(&h)).await {
+        Ok(Ok(tech)) => Json(json!({ "host": host.to_ascii_lowercase(), "tech": tech })).into_response(),
+        Ok(Err(e)) => internal(e),
+        Err(e) => internal(e.into()),
+    }
+}
+
+async fn rule_packs(State(s): State<AppState>) -> Response {
+    let engine = s.engine.clone();
+    match tokio::task::spawn_blocking(move || engine.detection_rules()).await {
+        Ok(r) => Json(json!({ "packs": r.packs, "rules": r.detector.rules.len(), "problems": r.problems })).into_response(),
+        Err(e) => internal(e.into()),
     }
 }
 
