@@ -78,6 +78,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, proxy_a
         .route("/api/traffic/facets", get(facets))
         .route("/api/traffic/{id}", get(exchange))
         .route("/api/traffic/{id}/insights", get(insights))
+        .route("/api/views/{view}", get(view_state).put(set_view_state))
         .route("/api/hosts", get(hosts))
         .route("/api/hosts/{host}/endpoints", get(endpoints))
         .route("/api/tech", get(tech_all))
@@ -306,6 +307,35 @@ async fn insights(State(s): State<AppState>, caller: MaybeCaller, Path(id): Path
         Ok(Err(e)) => internal(e),
         Err(e) => internal(e.into()),
     }
+}
+
+/// UI state saved with the project, such as a view's include/exclude filters,
+/// so it survives reloads and is the same in every window.
+async fn view_state(State(s): State<AppState>, Path(view): Path<String>) -> Response {
+    if !valid_view(&view) {
+        return err(StatusCode::BAD_REQUEST, "bad_request", "unknown view name");
+    }
+    match s.engine.store.view_state(&view) {
+        Ok(state) => Json(state.unwrap_or_else(|| json!({}))).into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+async fn set_view_state(State(s): State<AppState>, Path(view): Path<String>, Json(state): Json<Value>) -> Response {
+    if !valid_view(&view) {
+        return err(StatusCode::BAD_REQUEST, "bad_request", "unknown view name");
+    }
+    if !state.is_object() || state.to_string().len() > 64 * 1024 {
+        return err(StatusCode::BAD_REQUEST, "bad_request", "state must be a JSON object under 64 KB");
+    }
+    match s.engine.store.set_view_state(&view, &state) {
+        Ok(()) => Json(state).into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+fn valid_view(view: &str) -> bool {
+    !view.is_empty() && view.len() <= 40 && view.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 async fn hosts(State(s): State<AppState>, caller: MaybeCaller) -> Response {

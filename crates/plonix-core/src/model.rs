@@ -130,6 +130,9 @@ pub struct Facets {
     pub hosts: Vec<Count>,
     /// First path segments of in-scope traffic, e.g. `/api`.
     pub paths: Vec<Count>,
+    /// Busiest out-of-scope hosts (at most 20), the usual candidates to hide.
+    #[serde(default)]
+    pub other_hosts: Vec<Count>,
     pub replays: i64,
 }
 
