@@ -355,7 +355,7 @@ async fn traffic_goes_through_an_upstream_proxy_except_bypassed_hosts() {
         let seen = seen.lock().unwrap();
         assert_eq!(seen.len(), 1);
         assert!(seen[0].starts_with(&format!("GET http://localhost:{}/chained HTTP/1.1", up.port())), "{}", seen[0]);
-        assert!(seen[0].contains("Proxy-Authorization: Basic bWU6cHc="), "{}", seen[0]);
+        assert!(seen[0].lines().any(|l| l.eq_ignore_ascii_case("Proxy-Authorization: Basic bWU6cHc=")), "{}", seen[0]);
     }
     // Bypassed: reached directly.
     let (status, _) = via_proxy(s.proxy_addr(), &format!("http://127.0.0.1:{}/direct", up.port())).await;

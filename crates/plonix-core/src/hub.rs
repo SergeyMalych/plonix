@@ -151,8 +151,9 @@ impl Hub {
 
     /// Closes a project hosted by this hub, or asks the process serving it to.
     pub async fn close(&self, project_id: &str) -> Result<bool> {
-        if let Some(s) = self.hosted.lock().await.get(project_id) {
-            s.engine.request_shutdown();
+        let hosted = self.hosted.lock().await.get(project_id).map(|s| s.engine.clone());
+        if let Some(engine) = hosted {
+            engine.request_shutdown();
             // `finish` runs from the watcher; wait for it so callers see the result.
             for _ in 0..200 {
                 if !self.hosted.lock().await.contains_key(project_id) {

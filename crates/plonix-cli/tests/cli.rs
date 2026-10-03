@@ -69,7 +69,7 @@ impl Plonix {
 
 impl Drop for Plonix {
     fn drop(&mut self) {
-        let _ = self.cmd(&["stop"]).output();
+        let _ = self.cmd(&["stop", "--all"]).output();
     }
 }
 
@@ -608,4 +608,43 @@ fn tech_detects_from_captured_traffic() {
     let wp = tech.iter().find(|t| t["id"] == "wordpress").unwrap();
     assert_eq!(wp["version"], "6.4.2");
     assert!(wp["exchange_id"].as_i64().is_some());
+}
+
+#[test]
+fn two_projects_run_side_by_side() {
+    let p = Plonix::new();
+    let target = serve_target();
+    let made = p.run(&["projects", "new", "Acme"]).ok().stdout();
+    assert!(made.contains("Acme"), "{made}");
+    for name in ["Acme", "Shop"] {
+        let r = p.run(&["-p", name, "start", "--port", "0", "--api-port", "0"]);
+        assert!(r.ok().stdout().contains("Plonix engine started."), "{}", r.stdout());
+    }
+    let proxy_of = |name: &str| -> String {
+        let v: serde_json::Value = serde_json::from_str(&p.run(&["-p", name, "status", "--json"]).ok().stdout()).unwrap();
+        v["status"]["proxy"].as_str().unwrap().to_string()
+    };
+    let (acme, shop) = (proxy_of("Acme"), proxy_of("Shop"));
+    assert_ne!(acme, shop);
+
+    let sessions = p.run(&["sessions"]).ok().stdout();
+    assert!(sessions.contains("Acme") && sessions.contains("Shop") && sessions.contains(&acme) && sessions.contains(&shop), "{sessions}");
+
+    // Traffic through one project's proxy stays in that project.
+    via_proxy(&acme, &format!("http://localhost:{target}/only-acme"), &[]);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !p.run(&["-p", "Acme", "search", "path:/only-acme"]).ok().stdout().contains("/only-acme") {
+        assert!(Instant::now() < deadline, "Acme never recorded its request");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(p.run(&["-p", "Shop", "search"]).ok().stdout().contains("Nothing captured yet"));
+
+    let listed = p.run(&["projects"]).ok().stdout();
+    assert!(listed.contains("Acme") && listed.contains("Shop"), "{listed}");
+
+    p.run(&["-p", "Shop", "stop"]).ok();
+    let sessions = p.run(&["sessions"]).ok().stdout();
+    assert!(sessions.contains("Acme") && !sessions.contains("Shop"), "{sessions}");
+    p.run(&["stop", "--all"]).ok();
+    assert!(!p.run(&["sessions"]).stdout().contains("Acme"));
 }
