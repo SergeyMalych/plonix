@@ -51,7 +51,9 @@ impl Client {
         let client = Self {
             base: info.api.trim_end_matches('/').to_string(),
             token: token.trim().to_string(),
-            agent: ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(2)).timeout(Duration::from_secs(180)).build(),
+            // A fresh connection per request: a POST sent on a pooled connection
+            // the engine has already closed fails instead of being retried.
+            agent: ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(2)).timeout(Duration::from_secs(180)).max_idle_connections(0).build(),
             initiator: initiator.to_string(),
         };
         Ok(client)
