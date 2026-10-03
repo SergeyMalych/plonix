@@ -113,13 +113,14 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - **Scope:** every suggested domain with its evidence, accept (with or without subdomains) or reject, and the rule list.
 - **Map:** hosts with their scope state, detected technologies with the evidence behind them, and endpoints with statuses and parameters.
 - **Findings:** record a finding from any request, with the requests that prove it linked as evidence.
-- **Agents:** which AI agents are connected right now and every request they made, what they are allowed to do, the one command that connects Claude Code, and prompts to try.
+- **Agents:** which AI agents are connected right now and every request they made, a Claude Code settings panel (on/off, in-scope-only or everything, which tools, and the Ask-Claude context limit), the one command that connects Claude Code, and prompts to try.
 - **Suggested filters** come from the traffic you captured: in-scope only, server and client errors, the write methods in use, JSON, the busiest API paths and hosts, requests sent from the Bench, and one chip that hides static files. Each shows how many requests it matches, and a filter only appears when something matches it.
 - The page signs in through a one-time link (the app and `plonix ui` create it), so the API token never appears in a URL. It is locked down with a strict Content-Security-Policy, and captured content is only ever rendered as text.
 
 ### AI agents over MCP
 - `plonix connect claude` adds Plonix to Claude Code as an MCP server. From then on Claude Code can search your captured traffic, read requests and responses, see hosts, endpoints and detected technologies, review scope suggestions and read findings, on the live project.
 - Access is **read-only and enforced by the engine**: agents sign in with their own token (`~/.plonix/agent-token`), and anything but reading (sending or replaying requests, changing scope, recording findings) is refused.
+- **Ask Claude Code** buttons on a request, finding, host or scope suggestion hand Claude Code just that spot's context as a prompt you review first. Plonix clips the bodies, shows what will be shared, and warns before sending more than your context limit.
 - Any other MCP client can run `plonix mcp` as a stdio server. Captured data stays on your machine. See [docs/agents.md](docs/agents.md).
 
 ```sh
@@ -252,6 +253,8 @@ The API listens on port 8090 when it is free; `plonix status` shows the actual a
 | POST | `/api/replay` | Replay a captured exchange, optionally modified |
 | GET / POST | `/api/findings` | List or record findings |
 | GET | `/api/agents` | What agents may do, and which agents are connected |
+| GET / PUT | `/api/agents/settings` | Read or change agent access (user only) |
+| POST | `/api/agents/ask` | Build the context for "Ask Claude Code" about a request, finding or host |
 | POST | `/api/shutdown` | Stop the engine |
 
 ## Architecture

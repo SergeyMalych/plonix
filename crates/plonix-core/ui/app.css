@@ -421,3 +421,43 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .navlink:hover { color: var(--fg); }
 .navlink .qn { margin-left: auto; background: var(--accent); color: #fff; border-radius: 10px; padding: 0 6px; font-size: 10px; letter-spacing: 0; }
 .alllist { max-height: 220px; overflow: auto; border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 10px; margin-top: 8px; font-size: 12px; line-height: 1.7; background: var(--surface-2); }
+
+/* ask Claude Code */
+.askbtn .askico { color: var(--violet); }
+.mcard.wide { width: min(720px, 100%); max-height: 92vh; display: flex; flex-direction: column; }
+.mcard.wide .mb { overflow: auto; min-height: 0; }
+.mcard textarea.askq { min-height: 64px; }
+.askhead { display: flex; align-items: center; font-size: 11.5px; font-weight: 600; color: var(--fg-2); }
+.mcard label.askclip { margin-left: auto; flex-direction: row; align-items: center; gap: 6px; font-weight: 500; }
+.mcard label.askclip select { padding: 3px 6px; font-size: 11.5px; }
+.askparts { border: 1px solid var(--line-2); border-radius: 9px; overflow: hidden; }
+.askpart { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--line-2); }
+.askpart:last-child { border-bottom: 0; }
+.askpart.off .pl { color: var(--fg-3); text-decoration: line-through; }
+.mcard .askpart label { flex-direction: row; align-items: center; gap: 8px; flex: 1; min-width: 0; font-weight: 500; font-size: 12.5px; color: var(--fg); }
+.mcard .askpart input { padding: 0; }
+.askpart .pl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.askpart .pt { margin-left: auto; font-size: 11px; color: var(--fg-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.askpart .clipped { font-size: 10px; color: var(--warn); background: var(--warn-soft); border-radius: 5px; padding: 0 5px; }
+.askpre { flex-basis: 100%; margin: 4px 0 2px; max-height: 220px; overflow: auto; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 7px; padding: 8px 10px; font-family: var(--mono); font-size: 11px; white-space: pre-wrap; word-break: break-all; }
+.askmeter { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--fg-2); }
+.askmeter .bar { flex: 0 0 160px; height: 6px; border-radius: 3px; background: var(--line-2); overflow: hidden; }
+.askmeter .bar i { display: block; height: 100%; background: var(--ok); }
+.askmeter .bar.over i { background: var(--crit); }
+.askwarn { background: var(--crit-soft); color: var(--fg); border: 1px solid var(--crit); border-radius: 8px; padding: 9px 11px; font-size: 12px; line-height: 1.5; }
+.mcard .askwarn label { display: inline-flex; flex-direction: row; align-items: center; gap: 4px; font-size: 12px; color: var(--crit); }
+.mcard .askwarn input { padding: 0; }
+/* claude code settings */
+.setrow { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line-2); }
+.setrow .mode { margin-left: auto; font-size: 11px; font-weight: 650; color: var(--ok); background: var(--ok-soft); border-radius: 6px; padding: 2px 8px; }
+.switch { display: flex; align-items: center; gap: 9px; font-weight: 600; color: var(--fg); }
+.setgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.setgrid > div { padding: 10px 14px 12px; }
+.setgrid > div + div { border-left: 1px solid var(--line-2); }
+.setgrid.disabled { opacity: .5; }
+.setgrid .caph { color: var(--fg-2); }
+.opt { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; color: var(--fg); padding: 4px 0; }
+.opt small { display: block; color: var(--fg-3); font-size: 11.5px; }
+.opt.col { flex-direction: column; gap: 4px; color: var(--fg-2); }
+.opt select { border: 1px solid var(--line-2); background: var(--surface-2); border-radius: 7px; padding: 4px 8px; font-size: 12px; }
+@media (max-width: 900px) { .setgrid { grid-template-columns: 1fr; } .setgrid > div + div { border-left: 0; border-top: 1px solid var(--line-2); } }

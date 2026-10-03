@@ -305,6 +305,7 @@ function renderShell() {
   updateChrome();
   loadScope();
   loadFacets();
+  loadAgentSettings();
   go(S.view, true);
 }
 
@@ -925,6 +926,7 @@ async function openInspector(id) {
       ),
       h('button', { class: 'btn sm primary', text: 'Send to Bench', title: 'Edit and re-send on the Bench (b, or double-click a row)', onclick: () => sendToBench(id) }),
       h('button', { class: 'btn sm', text: 'New finding', onclick: () => newFinding([id], `${ex.method} ${ex.path}`) }),
+      askButton({ kind: 'request', id }),
       h('button', { class: 'iconbtn', text: '✕', title: 'Close (Esc)', onclick: closeInspector }),
     ),
     sideBySide('split', 'lens', reqCol, respCol),
@@ -1788,6 +1790,7 @@ function renderScopeBody() {
               h(
                 'span',
                 { class: 'acts' },
+                askButton({ kind: 'host', host: suggestionBase(s.domain) }, 'Ask whether this host belongs to your target'),
                 h('button', { class: 'btn sm', text: 'Traffic', onclick: () => setQuery('host:' + s.domain) }),
                 scopeButtons(s, 'sm', renderScopeBody),
               ),
@@ -1951,6 +1954,7 @@ async function drawHostDetail() {
       h('span', { class: 'hint' }),
       d !== 'accepted' ? h('button', { class: 'btn sm', text: 'Accept into scope', onclick: async () => (await decideDomain('accept', host)) && (await loadMap()) }) : null,
       h('button', { class: 'btn sm', text: 'Show traffic', onclick: () => setQuery('host:' + host) }),
+      askButton({ kind: 'host', host }),
     ),
     h('div', { class: 'lbl', style: { padding: '12px 12px 0' }, text: `Technologies (${tech.tech.length})` }),
     tech.tech.length
@@ -2036,7 +2040,7 @@ async function loadFindings() {
       h(
         'div',
         { class: 'card finding' },
-        h('div', { class: 'fh' }, h('span', { class: 'sev ' + f.severity, text: f.severity }), h('span', { class: 'ft', text: f.title }), h('span', { class: 'fmeta', text: `#${f.id} · ${f.status} · by ${f.created_by} · ${fmtDate(f.created_at)}` })),
+        h('div', { class: 'fh' }, h('span', { class: 'sev ' + f.severity, text: f.severity }), h('span', { class: 'ft', text: f.title }), h('span', { class: 'fmeta', text: `#${f.id} · ${f.status} · by ${f.created_by} · ${fmtDate(f.created_at)}` }), askButton({ kind: 'finding', id: f.id })),
         f.description || f.exchange_ids.length
           ? h(
               'div',
@@ -2128,6 +2132,10 @@ async function loadAgents() {
     return s < 60 ? 'just now' : s < 3600 ? Math.round(s / 60) + ' min ago' : fmtDate(ms);
   };
   const cmd = (a.connect && a.connect.command) || 'plonix connect claude';
+  // The settings card keeps its own state across the status refreshes.
+  let settingsCard = $('#agentsettings');
+  const fresh = !settingsCard;
+  if (fresh) settingsCard = h('div', { class: 'card', id: 'agentsettings' });
   clear(
     box,
     h(
@@ -2158,6 +2166,8 @@ async function loadAgents() {
           )
         : h('div', { class: 'ab muted', text: 'When an agent starts the Plonix MCP server it shows up here, with every request it makes.' }),
     ),
+    h('div', { class: 'sechead' }, h('h3', { text: 'Claude Code settings' })),
+    settingsCard,
     h('div', { class: 'sechead' }, h('h3', { text: 'Connect Claude Code' })),
     h(
       'div',
@@ -2197,6 +2207,206 @@ async function loadAgents() {
       'div',
       { class: 'card' },
       EXAMPLE_PROMPTS.map((p) => h('div', { class: 'prompt' }, h('span', { text: '“' + p + '”' }), h('button', { class: 'btn sm ghost', text: 'Copy', onclick: () => copyText(p) }))),
+    ),
+  );
+  if (fresh) renderAgentSettings(settingsCard);
+}
+
+/* ======================================================================
+   Ask Claude Code: hand the agent the context for one spot in the app
+   ====================================================================== */
+
+async function loadAgentSettings() {
+  try {
+    S.agentSettings = await api('/api/agents/settings');
+  } catch (_) {
+    S.agentSettings = null;
+  }
+  for (const b of document.querySelectorAll('.askbtn')) b.hidden = !agentsOn();
+}
+
+const agentsOn = () => !S.agentSettings || S.agentSettings.settings.enabled;
+
+/** A small "Ask Claude" button for a request, finding or host. */
+function askButton(subject, title) {
+  return h('button', {
+    class: 'btn sm askbtn',
+    hidden: !agentsOn(),
+    title: title || 'Ask Claude Code about this, with just this context',
+    onclick: (e) => {
+      e.stopPropagation();
+      askClaude(subject);
+    },
+  }, h('span', { class: 'askico', text: '✦' }), ' Ask Claude');
+}
+
+const fmtTok = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n));
+
+/**
+ * The Ask sheet: shows exactly what will be shared and how big it is, lets
+ * the user edit the question, drop parts and shorten bodies, and asks for
+ * an explicit confirmation when it is larger than their limit.
+ */
+async function askClaude(subject) {
+  const st = { exclude: [], question: null, max: null, bundle: null, confirmBig: false };
+  const q = h('textarea', { class: 'askq', rows: 3 });
+  const partsBox = h('div', { class: 'askparts' });
+  const meter = h('div', { class: 'askmeter' });
+  const warn = h('div', { class: 'askwarn', hidden: true });
+  const clipSel = h('select', { title: 'Each request and response body is clipped to this length' }, [1000, 2000, 4000, 8000, 16000, 50000].map((n) => h('option', { value: n, text: fmtTok(n) + ' chars' })));
+  const copyBtn = h('button', { class: 'btn', text: 'Copy prompt' });
+  const openBtn = h('button', { class: 'btn primary', text: 'Open in Claude Code' });
+  let timer;
+  const rebuild = async () => {
+    try {
+      st.bundle = await api('/api/agents/ask', { method: 'POST', body: { ...subject, question: st.question, exclude: st.exclude, max_body_chars: st.max } });
+    } catch (e) {
+      m.err.textContent = e.message;
+      return;
+    }
+    m.err.textContent = '';
+    draw();
+  };
+  const later = () => {
+    clearTimeout(timer);
+    timer = setTimeout(rebuild, 350);
+  };
+  const draw = () => {
+    const b = st.bundle;
+    if (st.question == null) q.value = b.question;
+    clipSel.value = String(b.max_body_chars);
+    if (![...clipSel.options].some((o) => o.value === String(b.max_body_chars))) clipSel.append(h('option', { value: b.max_body_chars, text: fmtTok(b.max_body_chars) + ' chars', selected: true }));
+    clear(
+      partsBox,
+      b.parts.map((p) => {
+        const box = h('input', {
+          type: 'checkbox',
+          checked: p.included,
+          onchange: () => {
+            st.exclude = box.checked ? st.exclude.filter((x) => x !== p.id) : [...st.exclude, p.id];
+            st.confirmBig = false;
+            rebuild();
+          },
+        });
+        const pre = h('pre', { class: 'askpre', hidden: true, text: p.text });
+        return h(
+          'div',
+          { class: 'askpart' + (p.included ? '' : ' off') },
+          h('label', null, box, h('span', { class: 'pl', text: p.label }), p.clipped ? h('span', { class: 'clipped', text: 'clipped' }) : null, h('span', { class: 'pt', text: '~' + fmtTok(p.tokens) + ' tokens' })),
+          h('button', { class: 'link', text: 'preview', onclick: () => (pre.hidden = !pre.hidden) }),
+          pre,
+        );
+      }),
+    );
+    const pct = Math.min(100, Math.round((b.tokens / b.budget) * 100));
+    clear(meter, h('div', { class: 'bar' + (b.over_budget ? ' over' : '') }, h('i', { style: { width: pct + '%' } })), h('span', { text: `~${fmtTok(b.tokens)} of your ${fmtTok(b.budget)}-token limit` }));
+    warn.hidden = !b.over_budget;
+    if (b.over_budget) {
+      const ok = h('input', { type: 'checkbox', checked: st.confirmBig, onchange: () => ((st.confirmBig = ok.checked), sync()) });
+      clear(
+        warn,
+        h('b', { text: `This is about ${fmtTok(b.tokens)} tokens, over your limit of ${fmtTok(b.budget)}.` }),
+        ' A large context makes answers slower and less focused. Untick parts or shorten the bodies, or ',
+        h('label', null, ok, ' send it anyway'),
+        '. The limit is in Agents → Claude Code.',
+      );
+    }
+    sync();
+  };
+  const sync = () => {
+    const blocked = !st.bundle || (st.bundle.over_budget && !st.confirmBig);
+    openBtn.disabled = blocked;
+    copyBtn.disabled = blocked;
+  };
+  q.addEventListener('input', () => {
+    st.question = q.value;
+    later();
+  });
+  clipSel.addEventListener('change', () => {
+    st.max = Number(clipSel.value);
+    st.confirmBig = false;
+    rebuild();
+  });
+  copyBtn.onclick = async () => {
+    await copyText(st.bundle.prompt);
+    closeModal();
+  };
+  openBtn.onclick = async () => {
+    try {
+      await api('/api/agents/launch', { method: 'POST', body: { prompt: st.bundle.prompt } });
+      closeModal();
+      toast('Opened Claude Code in Terminal', 'ok');
+    } catch (e) {
+      if (e.code === 'unsupported') {
+        await copyText(st.bundle.prompt);
+        m.err.textContent = 'Opening a terminal works on macOS only. The prompt is on your clipboard: paste it into Claude Code.';
+      } else m.err.textContent = e.message;
+    }
+  };
+  const m = modal(
+    'Ask Claude Code',
+    [
+      h('label', null, 'Your question', q),
+      h('div', { class: 'askhead' }, h('span', { text: 'What Claude Code gets' }), h('label', { class: 'askclip' }, 'Bodies up to ', clipSel)),
+      partsBox,
+      meter,
+      warn,
+      h('p', { class: 'muted fine', text: 'Only what is ticked is sent, straight from this Mac to Claude Code. It may include passwords or session tokens from captured traffic.' }),
+    ],
+    [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), copyBtn, openBtn],
+  );
+  m.el.querySelector('.mcard').classList.add('wide');
+  await rebuild();
+}
+
+/** Claude Code settings: on or off, what it may see, and how much context to hand over. */
+async function renderAgentSettings(box) {
+  let cfg;
+  try {
+    cfg = await api('/api/agents/settings');
+  } catch (e) {
+    return clear(box, h('div', { class: 'ab rerr', text: e.message }));
+  }
+  S.agentSettings = cfg;
+  const st = cfg.settings;
+  const save = async (patch) => {
+    try {
+      S.agentSettings = await api('/api/agents/settings', { method: 'PUT', body: { ...S.agentSettings.settings, ...patch } });
+      toast('Saved', 'ok');
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+    for (const b of document.querySelectorAll('.askbtn')) b.hidden = !agentsOn();
+    renderAgentSettings(box);
+  };
+  const on = h('input', { type: 'checkbox', checked: st.enabled, onchange: () => save({ enabled: on.checked }) });
+  const radio = (value, label, note) =>
+    h('label', { class: 'opt' }, h('input', { type: 'radio', name: 'agentdata', checked: st.data === value, disabled: !st.enabled, onchange: () => save({ data: value }) }), h('span', null, h('b', { text: label }), h('small', { text: note })));
+  const budget = h('select', { disabled: !st.enabled, onchange: () => save({ context_budget: Number(budget.value) }) }, cfg.budgets.map((n) => h('option', { value: n, text: `${fmtTok(n)} tokens`, selected: n === st.context_budget })));
+  const clip = h('select', { disabled: !st.enabled, onchange: () => save({ max_body_chars: Number(clip.value) }) }, [1000, 2000, 4000, 8000, 16000].map((n) => h('option', { value: n, text: `${fmtTok(n)} characters`, selected: n === st.max_body_chars })));
+  clear(
+    box,
+    h('div', { class: 'ab setrow' }, h('label', { class: 'switch' }, on, h('span', { text: st.enabled ? 'Claude Code and other agents can read this project' : 'Agent access is off: every agent request is refused' })), h('span', { class: 'mode', text: 'Read-only' })),
+    h(
+      'div',
+      { class: 'setgrid' + (st.enabled ? '' : ' disabled') },
+      h('div', null, h('div', { class: 'caph', text: 'What agents can see' }), radio('in_scope', 'In-scope hosts only', 'Requests, hosts and technologies for hosts you accepted into scope'), radio('all', 'Everything captured', 'Also third-party and out-of-scope traffic')),
+      h(
+        'div',
+        null,
+        h('div', { class: 'caph', text: 'Tools agents get' }),
+        cfg.groups.map((g) => {
+          const c = h('input', { type: 'checkbox', checked: g.on, disabled: !st.enabled, onchange: () => save({ off: c.checked ? st.off.filter((x) => x !== g.group) : [...st.off, g.group] }) });
+          return h('label', { class: 'opt' }, c, h('span', { text: g.label }));
+        }),
+      ),
+      h(
+        'div',
+        null,
+        h('div', { class: 'caph', text: 'Ask Claude' }),
+        h('label', { class: 'opt col' }, h('span', { text: 'Warn me before sending more than' }), budget),
+        h('label', { class: 'opt col' }, h('span', { text: 'Clip each request and response body to' }), clip),
+      ),
     ),
   );
 }
