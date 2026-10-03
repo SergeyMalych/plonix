@@ -16,6 +16,7 @@ use crate::detect::{self, Detection, Detector, HostTech};
 use crate::model::{Exchange, Headers, Source, now_ms};
 use crate::paths::{EngineInfo, Home};
 use crate::rulepack::{Library, PackInfo};
+use crate::scan;
 use crate::scope::{self, Decision, Rule, ScopeRules};
 use crate::store::Store;
 use crate::upstream::{OutboundRequest, Upstream};
@@ -360,6 +361,142 @@ impl Engine {
             initiator,
         )
         .await
+    }
+
+    /// The scan catalog in effect: the built-in detectors and tactics. Installed
+    /// scan packs are merged here once pack pinning is wired (see
+    /// `docs/scanning.md`).
+    pub fn scan_catalog(&self) -> scan::Catalog {
+        scan::builtin_catalog()
+    }
+
+    /// Fingerprints a host from its captured traffic and suggests a scan
+    /// profile. Read-only: sends nothing, so it works for any host.
+    pub fn scan_suggest(&self, host: &str) -> Result<scan::ScanSuggestion> {
+        let host = scope::normalize_host(host);
+        let tech = self.detect_host(&host)?;
+        let exchanges = self.store.exchanges_for_host(&host, detect::HOST_SAMPLE)?;
+        Ok(self.scan_catalog().suggest(&tech, &exchanges))
+    }
+
+    /// Runs an active scan against one accepted host. Every request goes through
+    /// `send`, so the scan can only ever reach a host in accepted scope, and
+    /// each request is recorded like any replay. Findings are recorded against
+    /// the existing Findings store. Never fires on its own — a person starts it.
+    pub async fn scan(&self, req: scan::ScanRequest, initiator: &str) -> Result<scan::ScanReport, SendError> {
+        let host = scope::normalize_host(&req.host);
+        // Scope is enforced again on every send below; this is the early, clear
+        // refusal so a scan never even begins against an un-accepted host.
+        let decision = self.rules().decide(&host);
+        if decision != Decision::Accepted {
+            return Err(SendError::OutOfScope { host, decision: decision.as_str() });
+        }
+
+        let catalog = self.scan_catalog();
+        let tech = self.detect_host(&host).map_err(SendError::Other)?;
+        let exchanges = self.store.exchanges_for_host(&host, detect::HOST_SAMPLE).map_err(SendError::Other)?;
+        let signals = catalog.signals(&tech, &exchanges);
+        let active: std::collections::BTreeSet<String> = signals.iter().map(|s| s.signal.clone()).collect();
+
+        // Which tactics to run: an explicit list, or the applicable ones from
+        // the profile (intrusive only when asked).
+        let selected = catalog.select(&active);
+        let chosen: Vec<&scan::Tactic> = catalog
+            .tactics
+            .iter()
+            .filter(|t| selected.iter().any(|s| s.id == t.def.id))
+            .filter(|t| {
+                if req.tactics.is_empty() {
+                    req.include_intrusive || t.def.intrusiveness.default_on()
+                } else {
+                    req.tactics.iter().any(|id| id == &t.def.id)
+                }
+            })
+            .collect();
+
+        let endpoints = self.store.endpoints(&host).map_err(SendError::Other)?;
+        // Build the authority from captured traffic so a non-default port is
+        // kept; fall back to https:443 for a host with nothing captured yet.
+        let (scheme, port) = exchanges.first().map(|e| (e.scheme.clone(), e.port)).unwrap_or_else(|| ("https".into(), 443));
+        let default_port = (scheme == "https" && port == 443) || (scheme == "http" && port == 80);
+        let authority = if default_port { host.clone() } else { format!("{host}:{port}") };
+        let budget = req.max_requests.unwrap_or(scan::DEFAULT_REQUEST_BUDGET);
+
+        let mut report = scan::ScanReport { host: host.clone(), signals, tactics_run: vec![], requests_sent: 0, findings: vec![], notes: vec![] };
+        let mut budget_hit = false;
+
+        for t in &chosen {
+            // Fixed-path tactics plan once per host; injecting tactics plan
+            // against each discovered endpoint.
+            let targets: Vec<Option<scan::ScanTarget>> = if t.def.check.path.is_some() {
+                vec![None]
+            } else {
+                endpoints.iter().map(|e| Some(scan::ScanTarget { method: e.method.clone(), path: e.path.clone() })).collect()
+            };
+            let mut ran = false;
+            'targets: for target in &targets {
+                for planned in t.plan(&scheme, &authority, target.as_ref()) {
+                    if report.requests_sent >= budget {
+                        budget_hit = true;
+                        break 'targets;
+                    }
+                    ran = true;
+                    report.requests_sent += 1;
+                    let sent = self
+                        .send(
+                            SendRequest { method: planned.method.clone(), url: planned.url.clone(), headers: planned.headers.clone(), body: None, body_base64: None },
+                            initiator,
+                        )
+                        .await;
+                    let ex = match sent {
+                        Ok(ex) => ex,
+                        // A transport error on one request should not abort the
+                        // whole scan; note it and move on.
+                        Err(SendError::OutOfScope { .. }) => continue,
+                        Err(e) => {
+                            report.notes.push(format!("request failed: {}", e));
+                            continue;
+                        }
+                    };
+                    if let Some(mut draft) = t.evaluate(&planned, ex.status, &ex.resp_headers, &ex.resp_body) {
+                        draft.exchange_id = ex.id;
+                        let f = self
+                            .store
+                            .add_finding(
+                                &crate::model::NewFinding {
+                                    title: draft.title.clone(),
+                                    severity: severity_str(draft.severity).to_string(),
+                                    description: draft.description.clone(),
+                                    exchange_ids: vec![ex.id],
+                                },
+                                initiator,
+                            )
+                            .map_err(SendError::Other)?;
+                        report.findings.push(scan::ScanFindingRef { id: f.id, title: f.title, severity: draft.severity });
+                    }
+                }
+            }
+            if ran {
+                report.tactics_run.push(t.def.id.clone());
+            }
+            if budget_hit {
+                break;
+            }
+        }
+        if budget_hit {
+            report.notes.push(format!("request budget of {budget} reached; some tactics may not have run"));
+        }
+        Ok(report)
+    }
+}
+
+fn severity_str(s: scan::Severity) -> &'static str {
+    match s {
+        scan::Severity::Info => "info",
+        scan::Severity::Low => "low",
+        scan::Severity::Medium => "medium",
+        scan::Severity::High => "high",
+        scan::Severity::Critical => "critical",
     }
 }
 
