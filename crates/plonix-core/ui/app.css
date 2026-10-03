@@ -118,6 +118,41 @@ code, .mono { font-family: var(--mono); }
 .chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .chip.on .n { color: var(--accent); }
 .qerr { color: var(--crit); font-size: 11.5px; padding: 6px 14px 0; }
+/* include / exclude filters */
+.addfilter { font-size: 11.5px; font-weight: 600; color: var(--accent); background: transparent; border: 1px dashed var(--line); border-radius: 12px; padding: 2px 9px; }
+.addfilter:hover { border-color: var(--accent); background: var(--accent-soft); }
+.fgroup { display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.fchip { display: inline-flex; align-items: center; border-radius: 12px; border: 1px solid; font-size: 11.5px; overflow: hidden; }
+.fchip button { border: 0; background: transparent; color: inherit; padding: 2px 0; }
+.fchip .fbody { display: inline-flex; align-items: center; gap: 5px; padding-left: 8px; }
+.fchip .fmode { font-weight: 700; width: 8px; text-align: center; }
+.fchip .fk { font-size: 10.5px; opacity: .7; }
+.fchip .fv { font-family: var(--mono); font-size: 11px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fchip .fx { padding: 2px 8px 2px 6px; opacity: .6; font-size: 13px; line-height: 1; }
+.fchip .fx:hover { opacity: 1; }
+.fchip.include { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.fchip.exclude { background: var(--crit-soft); border-color: var(--crit); color: var(--crit); }
+.linkbtn { border: 0; background: transparent; color: var(--fg-2); font-size: 11.5px; padding: 2px 4px; }
+.linkbtn:hover { color: var(--accent); text-decoration: underline; }
+.fsep { width: 1px; height: 16px; background: var(--line); margin: 0 4px; }
+
+/* popover and context menu */
+.popover, .ctxmenu { position: fixed; z-index: 60; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); }
+.popover { width: 340px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.popover .prow { display: flex; gap: 6px; }
+.popover select, .popover input { border: 1px solid var(--line); background: var(--surface-2); border-radius: 6px; padding: 4px 7px; outline: 0; }
+.popover select:focus, .popover input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.popover input { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12px; }
+.popover .pfoot { display: flex; justify-content: flex-end; gap: 6px; }
+.perr { color: var(--crit); font-size: 11.5px; }
+.seg { display: flex; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 7px; padding: 2px; }
+.seg button { flex: 1; border: 0; background: transparent; border-radius: 5px; padding: 3px 8px; font-size: 11.5px; font-weight: 600; color: var(--fg-2); }
+.seg button.on.include { background: var(--accent); color: var(--accent-fg); }
+.seg button.on.exclude { background: var(--crit); color: #fff; }
+.ctxmenu { min-width: 200px; padding: 4px; display: flex; flex-direction: column; }
+.ctxmenu button { text-align: left; border: 0; background: transparent; border-radius: 5px; padding: 4px 10px; font-size: 12px; white-space: nowrap; max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
+.ctxmenu button:hover, .ctxmenu button:focus { background: var(--accent); color: var(--accent-fg); outline: 0; }
+.ctxmenu .msep { height: 1px; background: var(--line-2); margin: 4px 6px; }
 .pane { flex: 1; min-height: 0; overflow: auto; }
 
 /* buttons */
