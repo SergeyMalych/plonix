@@ -107,6 +107,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 ### The Plonix window
 - **Sidebar:** navigation, Open target, the scope suggestions waiting on you (accept or reject in one click) and the hosts in scope with their request counts (click one to filter Traffic). Collapse it to icons with ⌃⌘S, or `\` in a browser.
 - **Traffic:** a live-updating request list with the search language and the **Lens**, an inline request/response viewer that decodes gzip/brotli and pretty-prints JSON. A banner surfaces each new domain adaptive scope suggests, with its evidence and one-click accept or reject.
+- **Spotted in the Lens:** Plonix points out what stands out in a request or response, right above it. JWTs (header and payload decoded, algorithm, expiry; the signature is never claimed valid), Base64, hex and double URL-encoding that decode to readable text, Basic auth credentials, personal data (email addresses, Luhn-valid card numbers), leaked secrets (AWS, Google, GitHub, Slack and Stripe keys, private keys) and internal IP addresses. Click one to highlight it in place and see the decoded value, then copy it or find it across all captured traffic. Nothing is flagged unless it is there, and detection runs locally on traffic you already captured.
 - **Bench:** edit any request and send it (press `b` or double-click a row in Traffic), keep a history per tab, restore or branch any earlier send into a new tab, and compare two sends side by side (response or request diff). Sends go through the engine's scope enforcement: out-of-scope hosts are refused, and you can accept the host right there.
 - **Scope:** every suggested domain with its evidence, accept (with or without subdomains) or reject, and the rule list.
 - **Map:** hosts with their scope state, detected technologies with the evidence behind them, and endpoints with statuses and parameters.
@@ -225,6 +226,7 @@ The API listens on port 8090 when it is free; `plonix status` shows the actual a
 | GET | `/api/traffic?q=&limit=&offset=` | Search captured traffic |
 | GET | `/api/traffic/facets` | What recent traffic contains (methods, status classes, content kinds, in-scope hosts and paths), for suggested filters |
 | GET | `/api/traffic/{id}` | One exchange, with decoded bodies |
+| GET | `/api/traffic/{id}/insights` | What stands out in one exchange: tokens to decode, personal data, secrets |
 | GET | `/api/hosts` | Hosts seen |
 | GET | `/api/hosts/{host}/endpoints` | Endpoints seen on a host |
 | GET | `/api/tech` · `/api/tech/{host}` | Detected technologies per host, with evidence |

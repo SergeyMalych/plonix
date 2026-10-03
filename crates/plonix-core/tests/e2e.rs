@@ -329,6 +329,10 @@ async fn api_requires_token_and_loopback_host() {
         assert_eq!(traffic["total"], 1);
         let (_, ex) = call(ureq::get(&format!("{base}/api/traffic/1")).set("Authorization", &auth));
         assert!(ex["resp_text"].as_str().unwrap().contains("welcome home"));
+        let (code, insights) = call(ureq::get(&format!("{base}/api/traffic/1/insights")).set("Authorization", &auth));
+        assert_eq!(code, 200);
+        assert!(insights.is_array(), "{insights}");
+        assert_eq!(call(ureq::get(&format!("{base}/api/traffic/99/insights")).set("Authorization", &auth)).0, 404);
 
         let send = serde_json::json!({ "method": "GET", "url": format!("http://localhost:{port}/echo") });
         let (code, body) = match ureq::post(&format!("{base}/api/send")).set("Authorization", &auth).send_json(send.clone()) {

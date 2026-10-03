@@ -74,6 +74,7 @@ These hold for every extension, whatever capabilities it has. They're enforced b
 | --- | --- | --- | --- |
 | Rule pack | none (data) | Detect technologies | **Shipped** |
 | Declarative extension | none (data) | Bundle one or more rule packs under one name and version | Manifest implemented; install planned |
+| Lens detector | none (data) | Flag a value in requests and responses: a regex, a label and a category (personal data, secret, decodable, info) | Built-in set shipped; packs planned |
 | WASM extension | WebAssembly sandbox | Passive analysis, finding proposals, scoped requests, per its capabilities | **Designed** (this document) |
 
 The guiding rule: **anything that can be data is data.** Most community contributions (detecting a framework, flagging a header, recognising a token format) should be declarative, because data can be fully validated and can't misbehave. Code is for what data can't express.
@@ -223,6 +224,7 @@ The store is a static JSON index, already implemented for rule packs (`plonix_co
 2. ✅ Store index and client for rule packs (`plonix store list|install|update`).
 3. ✅ Extension manifest and closed capability list, validated and tested.
 4. Declarative extensions: install bundles of rule packs through the same flow.
+   Lens detectors come next in the same format: today's built-in pattern detectors (`crates/plonix-core/src/insight.rs`) are already plain data, so a pack only needs a schema for them. Decoders that need code (JWT, Base64, hex) stay built in.
 5. WASM runtime: Wasmtime with fuel, epoch and memory limits; `analyzer` world with `read-traffic` and `passive-analysis`.
 6. `propose-findings`, then `scoped-requests`, reusing the engine's scope enforcement and recording.
 7. Signed store indexes.
