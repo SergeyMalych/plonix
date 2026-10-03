@@ -1,3 +1,5 @@
+<img src="docs/images/plonix-mark.svg" width="64" height="64" alt="Plonix logo">
+
 # Plonix
 
 **The open-source web security workbench for macOS. Fast, native, and scriptable from day one.**
