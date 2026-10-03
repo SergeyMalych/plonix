@@ -363,9 +363,165 @@ async fn api_requires_token_and_loopback_host() {
         assert_eq!(r.status(), 201);
         let (_, findings) = call(ureq::get(&format!("{base}/api/findings")).set("Authorization", &auth));
         assert_eq!(findings[0]["title"], "Reflected header");
+
+        // Saved view state: the Traffic filters.
+        let (code, empty) = call(ureq::get(&format!("{base}/api/views/traffic")).set("Authorization", &auth));
+        assert_eq!((code, empty), (200, serde_json::json!({})));
+        let state = serde_json::json!({ "filters": [{ "term": "kind:static", "mode": "exclude" }], "text": "" });
+        let r = ureq::put(&format!("{base}/api/views/traffic")).set("Authorization", &auth).send_json(state.clone()).unwrap();
+        assert_eq!(r.status(), 200);
+        assert_eq!(call(ureq::get(&format!("{base}/api/views/traffic")).set("Authorization", &auth)).1, state);
+        assert_eq!(call(ureq::get(&format!("{base}/api/views/bad%20name")).set("Authorization", &auth)).0, 400);
+        let bad = ureq::put(&format!("{base}/api/views/traffic")).set("Authorization", &auth).send_json(serde_json::json!([1]));
+        assert!(matches!(bad, Err(ureq::Error::Status(400, _))));
+        let (_, hidden) = call(ureq::get(&format!("{base}/api/traffic?q=-kind:static%20-status:2xx,3xx")).set("Authorization", &auth));
+        assert_eq!(hidden["total"], 0, "{hidden}");
     })
     .await
     .unwrap();
+}
+
+/// Agents sign in with their own token and can only read: everything that
+/// sends traffic or changes the project is refused by the engine itself.
+#[tokio::test]
+async fn agent_token_is_read_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let up = serve_http().await;
+    let r = start(&home, None).await;
+    via_proxy(r.proxy_addr, &format!("http://localhost:{}/", up.port()), &[]).await;
+    wait_for_count(&r.engine, 1).await;
+    assert_ne!(r.agent_token, r.token);
+    assert_eq!(std::fs::read_to_string(home.agent_token()).unwrap().trim(), r.agent_token);
+    let base = format!("http://{}", r.api_addr);
+    let (user, agent) = (format!("Bearer {}", r.token), format!("Bearer {}", r.agent_token));
+    let port = up.port();
+
+    tokio::task::spawn_blocking(move || {
+        let status = |r: Result<ureq::Response, ureq::Error>| match r {
+            Ok(r) => (r.status(), r.into_json::<serde_json::Value>().unwrap()),
+            Err(ureq::Error::Status(c, r)) => (c, r.into_json::<serde_json::Value>().unwrap()),
+            Err(e) => panic!("{e}"),
+        };
+        let get = |path: &str, auth: &str| status(ureq::get(&format!("{base}{path}")).set("Authorization", auth).set("X-Plonix-Client", "test-agent").call());
+        let post = |path: &str, auth: &str, body: serde_json::Value| {
+            status(ureq::post(&format!("{base}{path}")).set("Authorization", auth).set("X-Plonix-Client", "test-agent").send_json(body))
+        };
+
+        // Agents see in-scope traffic by default, so accept the captured host first.
+        post("/api/scope/accept", &user, serde_json::json!({ "domain": "localhost" }));
+        for path in ["/api/status", "/api/traffic?q=welcome", "/api/traffic/1", "/api/traffic/1/insights", "/api/hosts", "/api/tech", "/api/scope", "/api/findings"] {
+            assert_eq!(get(path, &agent).0, 200, "agent should read {path}");
+        }
+        let (_, ex) = get("/api/traffic/1", &agent);
+        assert!(ex["resp_text"].as_str().unwrap().contains("welcome home"));
+
+        // Even with the host in scope, an agent cannot send, replay or change anything.
+        let refused = [
+            ("/api/send", serde_json::json!({ "method": "GET", "url": format!("http://localhost:{port}/echo") })),
+            ("/api/replay", serde_json::json!({ "id": 1 })),
+            ("/api/scope/accept", serde_json::json!({ "domain": "evil.test" })),
+            ("/api/scope/remove", serde_json::json!({ "domain": "localhost" })),
+            ("/api/findings", serde_json::json!({ "title": "x", "severity": "low" })),
+            ("/api/ui/launch", serde_json::json!({})),
+            ("/api/browser/open", serde_json::json!({ "target": "example.com" })),
+            ("/api/shutdown", serde_json::json!({})),
+        ];
+        for (path, body) in refused {
+            let (code, body) = post(path, &agent, body);
+            assert_eq!((code, body["code"].as_str()), (403, Some("agent_not_allowed")), "{path}");
+        }
+        let (_, scope) = get("/api/scope", &user);
+        assert_eq!(scope["rules"].as_array().unwrap().len(), 1, "scope unchanged: {scope}");
+        assert_eq!(get("/api/status", &user).1["exchanges"], 1, "nothing was sent");
+        assert!(get("/api/findings", &user).1.as_array().unwrap().is_empty());
+
+        // The user sees the policy and who connected; the agent sees only the policy.
+        let (_, a) = get("/api/agents", &user);
+        assert_eq!(a["mode"], "read-only");
+        let c = &a["clients"][0];
+        assert_eq!(c["name"], "test-agent");
+        assert_eq!(c["refused"], 8);
+        let (_, a) = get("/api/agents", &agent);
+        assert!(a["clients"].is_null() && a["capabilities"].is_array());
+    })
+    .await
+    .unwrap();
+    r.engine.shutdown.notify_waiters();
+}
+
+/// The user narrows agent access with settings, and "Ask Claude Code"
+/// bundles just one spot's context, clipped and within the budget.
+#[tokio::test]
+async fn agent_settings_and_ask_context() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let up = serve_http().await;
+    let r = start(&home, None).await;
+    via_proxy(r.proxy_addr, &format!("http://localhost:{}/", up.port()), &[]).await;
+    wait_for_count(&r.engine, 1).await;
+    let base = format!("http://{}", r.api_addr);
+    let (user, agent) = (format!("Bearer {}", r.token), format!("Bearer {}", r.agent_token));
+
+    tokio::task::spawn_blocking(move || {
+        let status = |r: Result<ureq::Response, ureq::Error>| match r {
+            Ok(r) => (r.status(), r.into_json::<serde_json::Value>().unwrap()),
+            Err(ureq::Error::Status(c, r)) => (c, r.into_json::<serde_json::Value>().unwrap()),
+            Err(e) => panic!("{e}"),
+        };
+        let get = |path: &str, auth: &str| status(ureq::get(&format!("{base}{path}")).set("Authorization", auth).call());
+        let put = |path: &str, auth: &str, b: serde_json::Value| {
+            status(ureq::put(&format!("{base}{path}")).set("Authorization", auth).send_json(b))
+        };
+        let post = |path: &str, auth: &str, b: serde_json::Value| {
+            status(ureq::post(&format!("{base}{path}")).set("Authorization", auth).send_json(b))
+        };
+
+        // localhost is not in scope yet: with the default in-scope-only data
+        // scope, the agent cannot see it.
+        assert_eq!(get("/api/traffic/1", &agent).0, 403);
+        assert_eq!(get("/api/traffic/1", &agent).1["code"], "outside_agent_data");
+        assert!(get("/api/hosts", &agent).1.as_array().unwrap().is_empty());
+
+        // AgentSettings uses serde defaults, so a partial body sets the rest.
+        put("/api/agents/settings", &user, serde_json::json!({ "data": "all" }));
+        assert_eq!(get("/api/traffic/1", &agent).0, 200);
+
+        // Agents cannot change their own settings; the route is not theirs.
+        assert_eq!(put("/api/agents/settings", &agent, serde_json::json!({ "enabled": false })).0, 403);
+
+        // Switching off the Traffic group hides those reads but not insights.
+        put("/api/agents/settings", &user, serde_json::json!({ "data": "all", "off": ["traffic"] }));
+        assert_eq!(get("/api/traffic/1", &agent).1["code"], "capability_off");
+        assert_eq!(get("/api/traffic/1/insights", &agent).0, 200);
+        put("/api/agents/settings", &user, serde_json::json!({ "data": "all" }));
+
+        // Ask Claude Code about request #1: a bundle of named parts.
+        let (code, b) = post("/api/agents/ask", &user, serde_json::json!({ "kind": "request", "id": 1 }));
+        assert_eq!(code, 200);
+        assert!(b["prompt"].as_str().unwrap().contains("welcome home"));
+        let ids: Vec<&str> = b["parts"].as_array().unwrap().iter().map(|p| p["id"].as_str().unwrap()).collect();
+        assert!(ids.contains(&"request") && ids.contains(&"response"));
+        assert!(b["tokens"].as_u64().unwrap() > 0 && b["over_budget"] == false);
+
+        // A tiny budget trips the over-budget flag; dropping parts brings it down.
+        put("/api/agents/settings", &user, serde_json::json!({ "data": "all", "context_budget": 500 }));
+        let (_, big) = post("/api/agents/ask", &user, serde_json::json!({ "kind": "request", "id": 1, "max_body_chars": 100000 }));
+        let (_, small) = post("/api/agents/ask", &user, serde_json::json!({ "kind": "request", "id": 1, "exclude": ["response"], "max_body_chars": 200 }));
+        assert!(small["tokens"].as_u64().unwrap() < big["tokens"].as_u64().unwrap());
+        assert!(!small["prompt"].as_str().unwrap().contains("## Response"));
+
+        // Missing subject is a 404.
+        assert_eq!(post("/api/agents/ask", &user, serde_json::json!({ "kind": "request", "id": 999 })).0, 404);
+
+        // Turned off, nothing is readable and Ask is refused.
+        put("/api/agents/settings", &user, serde_json::json!({ "enabled": false }));
+        assert_eq!(get("/api/status", &agent).1["code"], "agents_disabled");
+        assert_eq!(post("/api/agents/ask", &user, serde_json::json!({ "kind": "request", "id": 1 })).0, 403);
+    })
+    .await
+    .unwrap();
+    r.engine.shutdown.notify_waiters();
 }
 
 #[tokio::test]

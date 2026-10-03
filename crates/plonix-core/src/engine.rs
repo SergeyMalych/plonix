@@ -561,6 +561,7 @@ pub struct Running {
     pub proxy_addr: SocketAddr,
     pub api_addr: SocketAddr,
     pub token: String,
+    pub agent_token: String,
 }
 
 /// Starts an engine for a project by name, the way earlier versions did.
@@ -579,16 +580,22 @@ pub async fn start(config: &EngineConfig) -> Result<Running> {
 
 pub async fn start_with(engine: Arc<Engine>, config: &EngineConfig) -> Result<Running> {
     let token = config.home.load_or_create_token()?;
+    let agent_token = config.home.load_or_create_agent_token()?;
     engine.start_recorder();
     let api = TcpListener::bind(config.api_addr).await.with_context(|| format!("binding API to {}", config.api_addr))?;
     let proxy_addr = engine.bind_proxy(config.proxy_addr, config.proxy_port_fallback).await?;
     let api_addr = api.local_addr()?;
-    let router = crate::api::router(engine.clone(), token.clone(), api_addr, config.home.clone());
+    let router = crate::api::router(
+        engine.clone(),
+        crate::api::Tokens { user: token.clone(), agent: agent_token.clone() },
+        api_addr,
+        config.home.clone(),
+    );
     let shutdown_engine = engine.clone();
     tokio::spawn(async move {
         let _ = axum::serve(api, router).with_graceful_shutdown(async move { shutdown_engine.stopped().await }).await;
     });
-    Ok(Running { engine, proxy_addr, api_addr, token })
+    Ok(Running { engine, proxy_addr, api_addr, token, agent_token })
 }
 
 /// Binds `addr`. With `fallback`, a taken port moves to the next free one

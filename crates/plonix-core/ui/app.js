@@ -245,6 +245,7 @@ const VIEWS = {
   scope: { label: 'Scope', ico: '◉', render: renderScope },
   map: { label: 'Map', ico: '⊞', render: renderMap },
   findings: { label: 'Findings', ico: '⚑', render: renderFindings },
+  agents: { label: 'Agents', ico: '✦', render: renderAgents },
   settings: { label: 'Settings', ico: '⚙', render: renderSettings, footer: true },
 };
 
@@ -324,6 +325,7 @@ function renderShell() {
   updateChrome();
   loadScope();
   loadFacets();
+  loadAgentSettings();
   go(S.view, true);
 }
 
@@ -350,14 +352,14 @@ function renderRail() {
   const pending = (S.scope.suggestions || []).slice(0, 4);
   if (pending.length) {
     secs.push(
-      h('div', { class: 'navsec', text: 'Scope suggestions' }),
+      h('button', { class: 'navsec navlink', title: 'Review them on the Scope screen', onclick: () => go('scope') }, 'Scope suggestions', h('span', { class: 'qn', text: (S.scope.suggestions || []).length })),
       pending.map((sg) =>
         h(
           'div',
           { class: 'railrow sugg-row', title: `${sg.domain}: seen in ${sg.requests || 0} requests. Accept it into scope, or keep it out.` },
           h('button', { class: 'rl', text: sg.domain, onclick: () => go('scope') }),
-          h('button', { class: 'mini ok', text: '✓', title: 'Accept ' + sg.domain + ' and subdomains', onclick: () => decideDomain('accept', sg.domain, true) }),
-          h('button', { class: 'mini no', text: '✗', title: 'Keep ' + sg.domain + ' out of scope', onclick: () => decideDomain('reject', sg.domain, true) }),
+          h('button', { class: 'mini ok', text: '✓', title: 'Accept ' + suggestionBase(sg.domain) + ' only', onclick: () => decideDomain('accept', suggestionBase(sg.domain), false) }),
+          h('button', { class: 'mini no', text: '✗', title: 'Keep ' + sg.domain + ' out of scope', onclick: () => decideDomain('reject', sg.domain, false) }),
         ),
       ),
     );
@@ -481,6 +483,7 @@ async function poll() {
       if (S.view === 'scope') renderScopeBody();
       if (S.view === 'map' && st.exchanges !== prev.exchanges) M.dirty = true;
     }
+    if (S.view === 'agents' && Date.now() - (S.agentsAt || 0) > 4000) loadAgents();
   } catch (e) {
     if (e.code === 'unauthorized') return;
     S.engineUp = false;
@@ -605,25 +608,190 @@ function rawPre({ lines, body }) {
    Traffic
    ====================================================================== */
 
-const T = { q: pstore('plonix.q') || '', items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: null };
+const T = { text: '', filters: [], items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: store('plonix.inspH') };
+
+/* ---------- include / exclude filters ----------
+ * The search box holds free text (and accepts the full query syntax). Filters
+ * are terms the user switched on: "include" shows only matching traffic,
+ * "exclude" hides it. Together they make one query, the same one the CLI and
+ * the API take: includes of one field match any value (status:2xx,3xx),
+ * excludes are prefixed with "-".
+ */
+const FILTER_FIELDS = {
+  host: 'Host',
+  path: 'Path',
+  ext: 'Extension',
+  method: 'Method',
+  status: 'Status',
+  mime: 'Content type',
+  kind: 'Kind',
+  scope: 'Scope',
+  source: 'Source',
+  text: 'Text',
+};
+const FIELD_RE = /^(-?)(host|method|status|path|mime|scope|source|ext|kind):(.+)$/i;
+
+const fieldOf = (term) => (FIELD_RE.exec(term) || [])[2]?.toLowerCase() || 'text';
+const valueOf = (term) => (fieldOf(term) === 'text' ? term.replace(/^"|"$/g, '') : term.slice(term.indexOf(':') + 1));
+
+/** Splits a typed query into its terms, keeping quoted phrases together. */
+function tokens(q) {
+  return (q.match(/-?(?:[^\s"]*"[^"]*"?[^\s"]*|[^\s"]+)/g) || []).filter((t) => t && t !== '-');
+}
+
+/** Field terms of a typed query as filters (one per comma separated value), and the rest. */
+function liftFilters(q) {
+  const filters = [];
+  const rest = [];
+  for (const tok of tokens(q)) {
+    const m = FIELD_RE.exec(tok);
+    if (!m) {
+      rest.push(tok);
+      continue;
+    }
+    const mode = m[1] ? 'exclude' : 'include';
+    for (const v of m[3].replace(/^"|"$/g, '').split(',')) if (v.trim()) filters.push({ term: m[2].toLowerCase() + ':' + v.trim(), mode });
+  }
+  return { filters, text: rest.join(' ') };
+}
+
+/** The query the filters and the search box make together. */
+function fullQuery() {
+  const parts = [];
+  for (const mode of ['include', 'exclude']) {
+    const groups = new Map();
+    for (const f of T.filters.filter((x) => x.mode === mode)) {
+      const field = fieldOf(f.term);
+      if (field === 'text') {
+        parts.push((mode === 'exclude' ? '-' : '') + f.term);
+        continue;
+      }
+      if (!groups.has(field)) groups.set(field, []);
+      groups.get(field).push(valueOf(f.term));
+    }
+    for (const [field, values] of groups) parts.push((mode === 'exclude' ? '-' : '') + field + ':' + values.join(','));
+  }
+  if (T.text.trim()) parts.push(T.text.trim());
+  return parts.join(' ');
+}
+
+function filterLabel(term) {
+  const field = fieldOf(term);
+  const v = valueOf(term);
+  const named = {
+    'kind:static': 'Static files',
+    'scope:in': 'In scope',
+    'scope:out': 'Out of scope',
+    'source:replay': 'Sent from Bench',
+    'source:proxy': 'Captured',
+    'status:none': 'No response',
+  }[term.toLowerCase()];
+  if (named) return { key: '', value: named };
+  if (field === 'text') return { key: '', value: '“' + v + '”' };
+  if (field === 'ext') return { key: 'ext', value: '.' + v.replace(/^\./, '') };
+  if (field === 'mime') return { key: 'type', value: v };
+  return { key: field, value: v };
+}
+
+/** Adds a filter; the same term in the other mode is switched over. */
+function addFilter(term, mode) {
+  const i = T.filters.findIndex((f) => f.term.toLowerCase() === term.toLowerCase());
+  if (i >= 0) T.filters[i].mode = mode;
+  else T.filters.push({ term, mode });
+  filtersChanged();
+}
+
+function removeFilter(term) {
+  T.filters = T.filters.filter((f) => f.term !== term);
+  filtersChanged();
+}
+
+function flipFilter(term) {
+  const f = T.filters.find((x) => x.term === term);
+  if (f) f.mode = f.mode === 'include' ? 'exclude' : 'include';
+  filtersChanged();
+}
+
+function clearFilters() {
+  T.filters = [];
+  filtersChanged();
+}
+
+function filtersChanged() {
+  renderChips();
+  saveTrafficView();
+  if (T.refresh) T.refresh(true);
+}
+
+/** Saved with the project in the engine, so filters survive reloads and match in every window. */
+function saveTrafficView() {
+  clearTimeout(T.saveT);
+  T.saveT = setTimeout(() => {
+    api('/api/views/traffic', { method: 'PUT', body: { filters: T.filters, text: T.text } }).catch(() => {});
+  }, 300);
+}
+
+async function loadTrafficView() {
+  if (T.viewLoaded) return;
+  try {
+    const v = await api('/api/views/traffic');
+    T.viewLoaded = true;
+    if (Array.isArray(v.filters)) {
+      T.filters = v.filters.filter((f) => f && typeof f.term === 'string' && (f.mode === 'include' || f.mode === 'exclude'));
+      T.text = typeof v.text === 'string' ? v.text : '';
+    } else {
+      // Searches typed before filters existed: their field terms become filters.
+      const old = store('plonix.q');
+      if (old) {
+        Object.assign(T, liftFilters(old));
+        store('plonix.q', null);
+        saveTrafficView();
+      }
+    }
+  } catch (_) {
+    /* engine unreachable: start without saved filters */
+  }
+}
+
+/** Moves field terms typed in the search box into filters. */
+function liftTyped() {
+  const input = $('#q');
+  if (!input) return;
+  const { filters, text } = liftFilters(input.value);
+  if (!filters.length) return;
+  for (const f of filters) {
+    const i = T.filters.findIndex((x) => x.term.toLowerCase() === f.term.toLowerCase());
+    if (i >= 0) T.filters[i].mode = f.mode;
+    else T.filters.push(f);
+  }
+  T.text = text;
+  input.value = text;
+  filtersChanged();
+}
 
 function renderTraffic(main) {
   const input = h('input', {
     id: 'q',
-    value: T.q,
-    placeholder: 'Search: host:example.com method:POST status:5xx path:/api mime:json scope:in, or any text',
+    value: T.text,
+    placeholder: 'Search any text, or type a filter: host:example.com -kind:static status:4xx,5xx',
     spellcheck: 'false',
     autocomplete: 'off',
     oninput: () => {
-      T.q = input.value;
+      T.text = input.value;
       clearTimeout(T.qt);
-      T.qt = setTimeout(() => T.refresh(true), 220);
-      renderChips();
+      T.qt = setTimeout(() => {
+        saveTrafficView();
+        T.refresh(true);
+      }, 220);
     },
     onkeydown: (e) => {
-      if (e.key === 'Enter') T.refresh(true);
+      if (e.key === 'Enter') {
+        liftTyped();
+        T.refresh(true);
+      }
       if (e.key === 'Escape') input.blur();
     },
+    onblur: () => liftTyped(),
   });
   const liveBtn = h('button', {
     class: 'live iconbtn',
@@ -696,93 +864,258 @@ function renderTraffic(main) {
   renderChips();
   renderBanner();
   T.refresh = refreshTraffic;
-  T.refresh(true);
+  loadTrafficView().then(() => {
+    if (S.view !== 'traffic' || !input.isConnected) return;
+    input.value = T.text;
+    renderChips();
+    T.refresh(true);
+  });
   if (T.sel) openInspector(T.sel);
 }
 
 /**
  * Filters worth one click, built from what was actually captured: only values
- * that occur, and only filters that narrow the list.
+ * that occur, and only filters that narrow the list. Each has a natural mode:
+ * errors are worth showing alone, static files and third parties worth hiding.
  */
 function suggestedFilters(f) {
   const out = [];
   const n = (f && f.sampled) || 0;
   if (!n) return out;
   const count = (list, v) => ((list || []).find((c) => c.value === v) || {}).count || 0;
-  const add = (term, label, c, kind, of = n) => c > 0 && c < of && out.push({ term, label, count: c, kind: kind || '' });
-  if (f.in_scope && f.out_of_scope) add('scope:in', 'In scope', f.in_scope, 'scope');
-  add('status:5xx', 'Server errors', count(f.statuses, '5xx'), 'bad');
-  add('status:4xx', 'Client errors', count(f.statuses, '4xx'), 'warn');
-  add('status:none', 'No response', count(f.statuses, 'none'), 'bad');
-  for (const m of f.methods || []) if (!['GET', 'HEAD', 'OPTIONS'].includes(m.value)) add('method:' + m.value, m.value, m.count, 'method');
-  add('mime:json', 'JSON', count(f.kinds, 'json'));
-  add('mime:xml', 'XML', count(f.kinds, 'xml'));
-  for (const p of (f.paths || []).slice(0, 3)) if (p.count >= 2) add('path:' + p.value, p.value + '/…', p.count, 'path', f.in_scope + f.out_of_scope);
-  if ((f.hosts || []).length > 1) for (const x of f.hosts.slice(0, 2)) add('host:' + x.value, x.value, x.count, 'host');
-  add('source:replay', 'Sent from Bench', f.replays, 'replay');
-  // Static files are noise when hunting: one chip hides whichever kinds occur.
-  const noise = ['image', 'css', 'font', 'javascript'].filter((k) => count(f.kinds, k));
-  const noisy = noise.reduce((a, k) => a + count(f.kinds, k), 0);
-  add(noise.map((k) => '-mime:' + k).join(' '), 'Hide static files', noisy, 'neg');
+  const add = (term, label, c, mode, kind, of = n) => c > 0 && c < of && out.push({ term, label, count: c, mode, kind: kind || '' });
+  // Static files are noise when hunting.
+  const statics = ['image', 'css', 'font', 'javascript'].reduce((a, k) => a + count(f.kinds, k), 0);
+  add('kind:static', 'Hide static files', statics, 'exclude', 'neg');
+  if (f.in_scope && f.out_of_scope) add('scope:in', 'In scope', f.in_scope, 'include', 'scope');
+  add('status:5xx', 'Server errors', count(f.statuses, '5xx'), 'include', 'bad');
+  add('status:4xx', 'Client errors', count(f.statuses, '4xx'), 'include', 'warn');
+  add('status:none', 'No response', count(f.statuses, 'none'), 'include', 'bad');
+  for (const m of f.methods || []) if (!['GET', 'HEAD', 'OPTIONS'].includes(m.value)) add('method:' + m.value, m.value, m.count, 'include', 'method');
+  add('mime:json', 'JSON', count(f.kinds, 'json'), 'include');
+  add('mime:xml', 'XML', count(f.kinds, 'xml'), 'include');
+  for (const p of (f.paths || []).slice(0, 3)) if (p.count >= 2) add('path:' + p.value, p.value + '/…', p.count, 'include', 'path', f.in_scope + f.out_of_scope);
+  if ((f.hosts || []).length > 1) for (const x of f.hosts.slice(0, 2)) add('host:' + x.value, x.value, x.count, 'include', 'host');
+  // The busiest third-party hosts (analytics, CDNs) are the usual ones to hide.
+  for (const x of (f.other_hosts || []).slice(0, 2)) if (x.count >= 3) add('host:' + x.value, 'Hide ' + x.value, x.count, 'exclude', 'host neg');
+  add('source:replay', 'Sent from Bench', f.replays, 'include', 'replay');
   return out;
+}
+
+function filterChip(f) {
+  const { key, value } = filterLabel(f.term);
+  const other = f.mode === 'include' ? 'hide it instead' : 'show only it instead';
+  return h(
+    'span',
+    { class: 'fchip ' + f.mode, title: (f.mode === 'include' ? '-' : '') + f.term },
+    h(
+      'button',
+      { class: 'fbody', title: 'Click to ' + other, onclick: () => flipFilter(f.term) },
+      h('span', { class: 'fmode', text: f.mode === 'include' ? '+' : '−' }),
+      key ? h('span', { class: 'fk', text: key }) : null,
+      h('span', { class: 'fv', text: value }),
+    ),
+    h('button', { class: 'fx', title: 'Remove this filter', 'aria-label': 'Remove filter ' + f.term, text: '×', onclick: () => removeFilter(f.term) }),
+  );
 }
 
 function renderChips() {
   const box = $('#chips');
   if (!box) return;
-  const terms = T.q.split(/\s+/).filter(Boolean);
-  const chips = suggestedFilters(S.facets);
-  // A filter in the search box stays visible so it can be switched off.
-  const isOn = (c) => c.term.split(' ').every((t) => terms.includes(t));
-  for (const t of terms) {
-    if (/^-?\w+:/.test(t) && !chips.some((c) => c.term.split(' ').includes(t))) chips.unshift({ term: t, label: t, count: null, kind: 'active' });
-  }
-  if (!chips.length) {
-    box.hidden = true;
-    return;
-  }
-  box.hidden = false;
+  const active = (term) => T.filters.some((f) => f.term.toLowerCase() === term.toLowerCase());
+  const sugg = suggestedFilters(S.facets).filter((c) => !active(c.term));
+  const inc = T.filters.filter((f) => f.mode === 'include');
+  const exc = T.filters.filter((f) => f.mode === 'exclude');
+  const q = fullQuery();
   clear(
     box,
-    h('span', { class: 'chipslbl', text: 'Filters' }),
-    chips.map((c) =>
+    h('button', { class: 'addfilter', id: 'addfilter', title: 'Add an include or exclude filter', onclick: (e) => openFilterBuilder(e.currentTarget) }, '+ Filter'),
+    inc.length ? h('span', { class: 'fgroup' }, h('span', { class: 'chipslbl', text: 'Show only' }), inc.map(filterChip)) : null,
+    exc.length ? h('span', { class: 'fgroup' }, h('span', { class: 'chipslbl', text: 'Hide' }), exc.map(filterChip)) : null,
+    T.filters.length
+      ? [
+          h('button', { class: 'linkbtn', text: 'Clear', title: 'Remove all filters', onclick: clearFilters }),
+          h('button', {
+            class: 'linkbtn',
+            text: 'Copy query',
+            title: 'Copy as a search query for the CLI or the API:\n' + q,
+            onclick: () => copyText(fullQuery()),
+          }),
+        ]
+      : null,
+    sugg.length ? h('span', { class: 'fsep' }) : null,
+    sugg.map((c) =>
       h(
         'button',
         {
-          class: 'chip k-' + c.kind + (isOn(c) ? ' on' : ''),
-          title: 'Search ' + c.term,
-          onclick: () => toggleTerm(c.term),
+          class: 'chip k-' + c.kind.split(' ').join(' k-'),
+          title: (c.mode === 'include' ? 'Show only: ' : 'Hide: ') + c.term,
+          onclick: () => addFilter(c.term, c.mode),
         },
         h('span', { text: c.label }),
-        c.count == null ? null : h('span', { class: 'n', text: c.count }),
+        h('span', { class: 'n', text: c.count }),
       ),
     ),
   );
 }
 
-/** Adds or removes filter terms (several, space separated, toggle together). */
-function toggleTerm(term) {
-  let terms = T.q.split(/\s+/).filter(Boolean);
-  const group = term.split(' ');
-  if (group.every((t) => terms.includes(t))) terms = terms.filter((t) => !group.includes(t));
-  else {
-    for (const t of group) {
-      if (terms.includes(t)) continue;
-      // One value per positive field (scope:in replaces scope:out).
-      const key = t.replace(/^-/, '').split(':')[0] + ':';
-      if (!t.startsWith('-')) terms = terms.filter((x) => !x.startsWith(key));
-      terms.push(t);
-    }
+/** Values to offer for a field, from what was captured. */
+function fieldValues(field) {
+  const f = S.facets || {};
+  const vals = (list) => (list || []).map((c) => c.value);
+  switch (field) {
+    case 'host':
+      return [...vals(f.hosts), ...vals(f.other_hosts)];
+    case 'path':
+      return vals(f.paths);
+    case 'method':
+      return vals(f.methods);
+    case 'status':
+      return [...vals(f.statuses).filter((s) => s !== 'other'), '200', '301', '302', '401', '403', '404', '500'];
+    case 'mime':
+      return vals(f.kinds);
+    case 'ext':
+      return ['js', 'css', 'png', 'svg', 'woff2', 'map', 'json', 'html', 'php'];
+    case 'kind':
+      return ['static'];
+    case 'scope':
+      return ['in', 'out'];
+    case 'source':
+      return ['proxy', 'replay'];
+    default:
+      return [];
   }
-  T.q = terms.join(' ');
-  $('#q').value = T.q;
-  renderChips();
-  T.refresh(true);
 }
 
-function setQuery(q) {
-  T.q = q;
+/** A small popover to build one include or exclude filter. */
+function openFilterBuilder(anchor, preset = {}) {
+  closePopover();
+  let mode = preset.mode || 'include';
+  const field = h(
+    'select',
+    { 'aria-label': 'Field' },
+    Object.entries(FILTER_FIELDS).map(([k, label]) => h('option', { value: k, text: label })),
+  );
+  field.value = preset.field || 'host';
+  const list = h('datalist', { id: 'fvals' });
+  const value = h('input', { list: 'fvals', placeholder: 'value', spellcheck: 'false', autocomplete: 'off', value: preset.value || '' });
+  const err = h('div', { class: 'perr', hidden: true });
+  const seg = h('div', { class: 'seg' });
+  const drawSeg = () =>
+    clear(
+      seg,
+      ['include', 'exclude'].map((m) =>
+        h('button', { class: mode === m ? 'on ' + m : m, text: m === 'include' ? 'Show only' : 'Hide', onclick: () => ((mode = m), drawSeg()) }),
+      ),
+    );
+  const fillValues = () => {
+    clear(list, fieldValues(field.value).map((v) => h('option', { value: v })));
+    value.placeholder = { host: 'example.com or *.cdn.*', path: '/api', ext: 'js', status: '4xx or 404', mime: 'json', text: 'any text' }[field.value] || 'value';
+  };
+  field.onchange = () => {
+    fillValues();
+    value.value = field.value === 'kind' ? 'static' : '';
+    value.focus();
+  };
+  const add = async () => {
+    const v = value.value.trim();
+    if (!v) return value.focus();
+    const term = field.value === 'text' ? (/\s/.test(v) ? '"' + v.replace(/"/g, '') + '"' : v) : field.value + ':' + v.replace(/\s+/g, '');
+    try {
+      await api('/api/traffic?limit=0&q=' + encodeURIComponent(term));
+    } catch (e) {
+      err.hidden = false;
+      err.textContent = e.message;
+      return;
+    }
+    closePopover();
+    // "status:4xx,5xx" typed in the box makes one chip per value.
+    for (const one of field.value === 'text' ? [term] : v.split(',').filter((x) => x.trim()).map((x) => field.value + ':' + x.trim())) addFilter(one, mode);
+  };
+  value.addEventListener('keydown', (e) => e.key === 'Enter' && add());
+  drawSeg();
+  fillValues();
+  const pop = h(
+    'div',
+    { class: 'popover', role: 'dialog', 'aria-label': 'Add filter' },
+    seg,
+    h('div', { class: 'prow' }, field, value, list),
+    err,
+    h('div', { class: 'pfoot' }, h('button', { class: 'btn sm', text: 'Cancel', onclick: closePopover }), h('button', { class: 'btn sm primary', text: 'Add filter', onclick: add })),
+  );
+  showPopover(pop, anchor.getBoundingClientRect());
+  value.focus();
+}
+
+function showPopover(pop, rect) {
+  document.body.append(pop);
+  const w = pop.offsetWidth;
+  pop.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - w - 8)) + 'px';
+  pop.style.top = Math.min(rect.bottom + 6, window.innerHeight - pop.offsetHeight - 8) + 'px';
+  setTimeout(() => document.addEventListener('mousedown', T.popOutside = (e) => !pop.contains(e.target) && closePopover()), 0);
+  pop.addEventListener('keydown', (e) => e.key === 'Escape' && (e.stopPropagation(), closePopover()));
+}
+
+function closePopover() {
+  for (const p of document.querySelectorAll('.popover, .ctxmenu')) p.remove();
+  if (T.popOutside) document.removeEventListener('mousedown', T.popOutside);
+  T.popOutside = null;
+}
+
+/** Right-click on a row: show only or hide what it has. */
+function rowMenu(e, ex) {
+  e.preventDefault();
+  closePopover();
+  const seg = ((ex.path || '/').match(/^\/[^/?]+/) || [])[0];
+  const ext = ((ex.path || '').match(/\.([a-z0-9]{1,6})$/i) || [])[1];
+  const cls = ex.status == null ? 'none' : Math.floor(ex.status / 100) + 'xx';
+  const kind = ex.mime ? (ex.mime.match(/json|html|javascript|xml|css|image|font/) || [])[0] : null;
+  const both = (term, what) => [
+    { label: 'Show only ' + what, run: () => addFilter(term, 'include') },
+    { label: 'Hide ' + what, run: () => addFilter(term, 'exclude') },
+  ];
+  const groups = [
+    both('host:' + ex.host, ex.host),
+    seg && seg !== ex.path ? both('path:' + seg, seg + '/…') : both('path:' + ex.path, ex.path),
+    both('status:' + cls, cls === 'none' ? 'no response' : cls + ' responses'),
+    kind ? both('mime:' + kind, kind.toUpperCase() + ' responses') : null,
+    ext ? both('ext:' + ext.toLowerCase(), '.' + ext.toLowerCase() + ' files') : null,
+    both('method:' + ex.method, ex.method + ' requests'),
+  ].filter(Boolean);
+  const menu = h(
+    'div',
+    { class: 'ctxmenu', role: 'menu' },
+    groups.map((g, i) => [
+      i ? h('div', { class: 'msep' }) : null,
+      g.map((it) =>
+        h('button', {
+          role: 'menuitem',
+          text: it.label,
+          onclick: () => {
+            closePopover();
+            it.run();
+          },
+        }),
+      ),
+    ]),
+  );
+  showPopover(menu, { left: e.clientX, bottom: e.clientY - 6 });
+}
+
+/** Opens Traffic searching for `q`: its field terms replace filters on the same fields, excludes stay. */
+async function setQuery(q) {
+  await loadTrafficView();
+  const { filters, text } = liftFilters(q);
+  const fields = new Set(filters.map((f) => fieldOf(f.term)));
+  T.filters = T.filters.filter((f) => f.mode === 'exclude' || !fields.has(fieldOf(f.term)));
+  for (const f of filters) {
+    const i = T.filters.findIndex((x) => x.term.toLowerCase() === f.term.toLowerCase());
+    if (i >= 0) T.filters.splice(i, 1);
+    T.filters.push(f);
+  }
+  T.text = text;
   T.sel = null;
+  saveTrafficView();
   go('traffic', true);
 }
 
@@ -790,10 +1123,9 @@ async function refreshTraffic(userAction) {
   if (!userAction && !T.live) return;
   if (S.view !== 'traffic') return;
   const seq = (T.seq = (T.seq || 0) + 1);
-  pstore('plonix.q', T.q);
   let data;
   try {
-    data = await api('/api/traffic?limit=500&q=' + encodeURIComponent(T.q));
+    data = await api('/api/traffic?limit=500&q=' + encodeURIComponent(fullQuery()));
   } catch (e) {
     if (seq !== T.seq) return;
     if (e.code === 'bad_query') {
@@ -834,7 +1166,7 @@ function emptyTraffic(st) {
     'Type the site you are testing. Plonix opens a browser that captures through it, and requests appear here live.',
     h('div', { class: 'starter' }, input, btn),
     err,
-    h('div', { class: 'muted small' }, 'Or point any browser at the proxy ', h('code', { text: st.proxy || '' }), '.'),
+    h('div', { class: 'muted fine' }, 'Or point any browser at the proxy ', h('code', { text: st.proxy || '' }), '.'),
   );
 }
 
@@ -843,8 +1175,13 @@ function drawRows(freshAbove) {
   if (!tbody) return;
   if (!T.items.length) {
     const st = S.status || {};
-    const msg = T.q.trim()
-      ? h('div', { class: 'empty' }, h('h3', { text: 'No traffic matches this search' }), 'Try removing a filter.')
+    const msg = fullQuery()
+      ? h(
+          'div',
+          { class: 'empty' },
+          h('h3', { text: T.filters.length ? 'No traffic matches these filters' : 'No traffic matches this search' }),
+          T.filters.length ? h('button', { class: 'btn sm', text: 'Clear filters', onclick: clearFilters }) : 'Try other words.',
+        )
       : emptyTraffic(st);
     clear(tbody, h('tr', null, h('td', { colspan: 9, style: { height: 'auto', whiteSpace: 'normal' } }, msg)));
     return;
@@ -859,6 +1196,7 @@ function drawRows(freshAbove) {
         class: [ex.id === T.sel ? 'sel' : '', ex.in_scope ? '' : 'out', ex.id > freshAbove ? 'fresh' : ''].join(' ').trim(),
         onclick: () => openInspector(ex.id),
         ondblclick: () => sendToBench(ex.id),
+        oncontextmenu: (e) => rowMenu(e, ex),
       },
       h('td', { class: 'num', text: ex.id }),
       h('td', null, h('span', { class: 'meth m-' + ex.method, text: ex.method })),
@@ -944,9 +1282,10 @@ async function openInspector(id) {
       ),
       h('button', { class: 'btn sm primary', text: 'Send to Bench', title: 'Edit and re-send on the Bench (b, or double-click a row)', onclick: () => sendToBench(id) }),
       h('button', { class: 'btn sm', text: 'New finding', onclick: () => newFinding([id], `${ex.method} ${ex.path}`) }),
+      askButton({ kind: 'request', id }),
       h('button', { class: 'iconbtn', text: '✕', title: 'Close (Esc)', onclick: closeInspector }),
     ),
-    h('div', { class: 'split' }, reqCol, respCol),
+    sideBySide('split', 'lens', reqCol, respCol),
   ]);
   const splitter = h('div', { class: 'splitter', onmousedown: (e) => startResize(e, insp) });
   clear(slot, splitter, insp);
@@ -1078,6 +1417,46 @@ function unmark(pre) {
   pre.normalize();
 }
 
+/**
+ * Request and response side by side, with a divider that drags to resize
+ * them. The split is remembered per place (`lens`, `bench`); double-click
+ * the divider to even it out again.
+ */
+function sideBySide(cls, key, left, right) {
+  const wrap = h('div', { class: cls + ' sbs' });
+  const apply = (pct) => {
+    wrap.style.setProperty('--lw', pct + 'fr');
+    wrap.style.setProperty('--rw', 100 - pct + 'fr');
+  };
+  apply(store('plonix.split.' + key) || 50);
+  const bar = h('div', {
+    class: 'vsplit',
+    title: 'Drag to resize · double-click to reset',
+    ondblclick: () => {
+      apply(50);
+      store('plonix.split.' + key, null);
+    },
+    onmousedown: (e) => {
+      e.preventDefault();
+      const box = wrap.getBoundingClientRect();
+      document.body.classList.add('colresize');
+      const move = (ev) => {
+        const pct = Math.round(Math.max(15, Math.min(85, ((ev.clientX - box.left) / box.width) * 100)));
+        apply(pct);
+        store('plonix.split.' + key, pct);
+      };
+      const up = () => {
+        document.body.classList.remove('colresize');
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    },
+  });
+  return append(wrap, [left, bar, right]);
+}
+
 function startResize(e, insp) {
   e.preventDefault();
   const startY = e.clientY;
@@ -1085,6 +1464,7 @@ function startResize(e, insp) {
   const move = (ev) => {
     T.inspH = Math.max(140, Math.min(window.innerHeight - 220, startH - (ev.clientY - startY)));
     insp.style.height = T.inspH + 'px';
+    store('plonix.inspH', T.inspH);
   };
   const up = () => {
     window.removeEventListener('mousemove', move);
@@ -1114,42 +1494,84 @@ const EV = {
   linked_from: ['🔗', 'Linked from'],
 };
 
+/**
+ * Pending scope decisions, as one slim bar above Traffic: how many are
+ * waiting, the strongest one with its choices, and Accept all / Reject all.
+ * Nothing here needs an answer: Skip moves to the next one, Hide tucks the
+ * bar away until a new domain is suggested. The count stays in the sidebar.
+ */
 function renderBanner() {
   const slot = $('#bannerslot');
   if (!slot) return;
-  const sugg = (S.scope.suggestions || []).filter((s) => !(T.dismissed || []).includes(s.domain));
-  if (!sugg.length) return clear(slot);
-  const s = sugg[0];
-  if (slot.dataset.domain === s.domain && slot.firstChild) return;
-  slot.dataset.domain = s.domain;
+  const all = S.scope.suggestions || [];
+  const fresh = all.filter((s) => !(T.hidden || []).includes(s.domain));
+  if (!all.length || !fresh.length) return clear(slot);
+  const queue = all.filter((s) => !(T.skipped || []).includes(s.domain));
+  const s = queue[0] || all[0];
+  const ev = s.evidence[0];
+  const [ico, label] = (ev && EV[ev.kind]) || ['•', ''];
   clear(
     slot,
     h(
       'div',
-      { class: 'scopebanner' },
+      { class: 'scopequeue' },
+      h('button', { class: 'qcount', title: 'Review every suggestion on the Scope screen', onclick: () => go('scope') }, h('b', { text: all.length }), all.length === 1 ? ' scope decision' : ' scope decisions'),
+      h('span', { class: 'qdom', text: s.domain, title: s.domain }),
+      ev ? h('span', { class: 'qev', title: s.evidence.map((e) => e.summary).join('\n') }, h('i', { text: ico }), ' ', label, ' ', ev.via) : null,
+      h('span', { class: 'qacts' }, scopeButtons(s, 'sm'), all.length > 1 ? h('button', { class: 'btn sm ghost', text: 'Skip', title: 'Decide later; show the next one', onclick: () => ((T.skipped = queue.length > 1 ? [...(T.skipped || []), s.domain] : []), renderBanner()) }) : null),
       h(
-        'div',
-        { class: 'top' },
-        h('span', { class: 'bell', text: '◉' }),
-        h(
-          'div',
-          { class: 'tt' },
-          'A new domain looks like part of your target',
-          h('small', { text: `Seen in ${s.requests} request${s.requests === 1 ? '' : 's'} · score ${s.score}${sugg.length > 1 ? ` · ${sugg.length - 1} more suggestion${sugg.length > 2 ? 's' : ''} waiting` : ''}` }),
-        ),
-        h('span', { class: 'dom', text: s.domain, title: s.domain }),
-      ),
-      evidenceList(s.evidence.slice(0, 4)),
-      h(
-        'div',
-        { class: 'acts' },
-        h('span', { class: 'note', text: 'Accepting lets you replay and send requests to it. Either way, Plonix keeps capturing it passively.' }),
-        h('button', { class: 'btn ghost', text: 'Later', onclick: () => ((T.dismissed = [...(T.dismissed || []), s.domain]), (slot.dataset.domain = ''), renderBanner()) }),
-        h('button', { class: 'btn danger', text: 'Reject', onclick: () => decideDomain('reject', s.domain) }),
-        h('button', { class: 'btn', text: 'Accept with subdomains', onclick: () => decideDomain('accept', s.domain, true) }),
-        h('button', { class: 'btn primary', text: 'Accept ' + s.domain, onclick: () => decideDomain('accept', s.domain) }),
+        'span',
+        { class: 'qall' },
+        all.length > 1 ? [h('button', { class: 'btn sm', text: 'Accept all', onclick: () => decideAll('accept') }), h('button', { class: 'btn sm', text: 'Reject all', onclick: () => decideAll('reject') })] : null,
+        h('button', { class: 'iconbtn', text: '✕', title: 'Hide until a new domain is suggested (they stay on the Scope screen)', onclick: () => ((T.hidden = all.map((x) => x.domain)), renderBanner()) }),
       ),
     ),
+  );
+}
+
+/** The host a suggestion is about: `*.example.com` is about example.com. */
+const suggestionBase = (domain) => domain.replace(/^\*\./, '');
+
+/** The three choices for one suggestion: this host only, with subdomains, or reject. */
+function scopeButtons(s, size, after) {
+  const base = suggestionBase(s.domain);
+  const cls = (extra) => 'btn ' + (size || '') + ' ' + (extra || '');
+  const act = (action, domain, subs) => async () => (await decideDomain(action, domain, subs)) && after && after();
+  return [
+    h('button', { class: cls('danger'), text: 'Reject', title: `Keep ${s.domain} out of scope`, onclick: act('reject', s.domain, false) }),
+    h('button', { class: cls(), text: '+ subdomains', title: `Accept ${base} and every subdomain (*.${base})`, onclick: act('accept', base, true) }),
+    h('button', { class: cls('primary'), text: 'Only ' + base, title: `Accept ${base} only, not its subdomains`, onclick: act('accept', base, false) }),
+  ];
+}
+
+/** Accepts (each host only) or rejects every pending suggestion, after asking. */
+function decideAll(action) {
+  const list = (S.scope.suggestions || []).slice();
+  if (!list.length) return;
+  const accept = action === 'accept';
+  const run = async () => {
+    closeModal();
+    let done = 0;
+    for (const s of list) {
+      const domain = accept ? suggestionBase(s.domain) : s.domain;
+      try {
+        await api('/api/scope/' + action, { method: 'POST', body: { domain, include_subdomains: false } });
+        done++;
+      } catch (e) {
+        toast(e.message, 'err');
+      }
+    }
+    toast(accept ? `✓ ${done} domain${done === 1 ? '' : 's'} accepted into scope` : `✗ ${done} domain${done === 1 ? '' : 's'} kept out of scope`, accept ? 'ok' : '');
+    await loadScope();
+    if (S.view === 'scope') renderScopeBody();
+  };
+  modal(
+    accept ? `Accept all ${list.length} suggested domains?` : `Reject all ${list.length} suggested domains?`,
+    [
+      h('p', { class: 'muted', text: accept ? 'Each host is accepted on its own, without its subdomains. You can change any of them on the Scope screen.' : 'They stay captured, but Bench sends to them are refused. You can change any of them on the Scope screen.' }),
+      h('div', { class: 'alllist' }, list.map((s) => h('div', { class: 'mono', text: accept ? suggestionBase(s.domain) : s.domain }))),
+    ],
+    [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), h('button', { class: 'btn ' + (accept ? 'primary' : 'danger'), text: accept ? 'Accept all' : 'Reject all', onclick: run })],
   );
 }
 
@@ -1382,7 +1804,7 @@ function renderBench(main) {
       h('datalist', { id: 'methods' }, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map((m) => h('option', { value: m }))),
       h('div', { class: 'reqbar' }, method, h('div', { class: 'urlwrap' }, url), sendBtn),
       h('div', { id: 'scopehint' }),
-      h('div', { class: 'rsplit' }, h('div', { class: 'rcol' }, h('div', { class: 'lbl' }, 'Request', binaryNote), editor), respCol),
+      sideBySide('rsplit', 'bench', h('div', { class: 'rcol' }, h('div', { class: 'lbl' }, 'Request', binaryNote), editor), respCol),
       historyPanel(tab, main),
       h('div', { id: 'cmpslot' }),
     ),
@@ -1703,7 +2125,14 @@ function renderScopeBody() {
   const rules = (S.scope.rules || []).slice().sort((x, y) => x.decision.localeCompare(y.decision) || x.pattern.localeCompare(y.pattern));
   clear(
     box,
-    h('div', { class: 'sechead' }, h('h3', { text: `Suggested domains (${sugg.length})` })),
+    h(
+      'div',
+      { class: 'sechead' },
+      h('h3', { text: `Suggested domains (${sugg.length})` }),
+      sugg.length > 1
+        ? h('span', { class: 'shacts' }, h('button', { class: 'btn sm', text: 'Accept all', title: 'Accept every suggested host on its own', onclick: () => decideAll('accept') }), h('button', { class: 'btn sm danger', text: 'Reject all', onclick: () => decideAll('reject') }))
+        : null,
+    ),
     sugg.length
       ? sugg.map((s) =>
           h(
@@ -1717,10 +2146,9 @@ function renderScopeBody() {
               h(
                 'span',
                 { class: 'acts' },
+                askButton({ kind: 'host', host: suggestionBase(s.domain) }, 'Ask whether this host belongs to your target'),
                 h('button', { class: 'btn sm', text: 'Traffic', onclick: () => setQuery('host:' + s.domain) }),
-                h('button', { class: 'btn sm danger', text: 'Reject', onclick: async () => (await decideDomain('reject', s.domain)) && renderScopeBody() }),
-                h('button', { class: 'btn sm', text: '+ subdomains', title: 'Accept this domain and all its subdomains', onclick: async () => (await decideDomain('accept', s.domain, true)) && renderScopeBody() }),
-                h('button', { class: 'btn sm primary', text: 'Accept', onclick: async () => (await decideDomain('accept', s.domain)) && renderScopeBody() }),
+                scopeButtons(s, 'sm', renderScopeBody),
               ),
             ),
             evidenceList(s.evidence),
@@ -1882,6 +2310,7 @@ async function drawHostDetail() {
       h('span', { class: 'hint' }),
       d !== 'accepted' ? h('button', { class: 'btn sm', text: 'Accept into scope', onclick: async () => (await decideDomain('accept', host)) && (await loadMap()) }) : null,
       h('button', { class: 'btn sm', text: 'Show traffic', onclick: () => setQuery('host:' + host) }),
+      askButton({ kind: 'host', host }),
     ),
     h('div', { class: 'lbl', style: { padding: '12px 12px 0' }, text: `Technologies (${tech.tech.length})` }),
     tech.tech.length
@@ -1967,7 +2396,7 @@ async function loadFindings() {
       h(
         'div',
         { class: 'card finding' },
-        h('div', { class: 'fh' }, h('span', { class: 'sev ' + f.severity, text: f.severity }), h('span', { class: 'ft', text: f.title }), h('span', { class: 'fmeta', text: `#${f.id} · ${f.status} · by ${f.created_by} · ${fmtDate(f.created_at)}` })),
+        h('div', { class: 'fh' }, h('span', { class: 'sev ' + f.severity, text: f.severity }), h('span', { class: 'ft', text: f.title }), h('span', { class: 'fmeta', text: `#${f.id} · ${f.status} · by ${f.created_by} · ${fmtDate(f.created_at)}` }), askButton({ kind: 'finding', id: f.id })),
         f.description || f.exchange_ids.length
           ? h(
               'div',
@@ -2014,12 +2443,337 @@ function newFinding(ids, title) {
   });
 }
 
+/* ======================================================================
+   Agents
+   ====================================================================== */
+
+// An agent counts as connected while its MCP server checks in (every 20 s).
+const AGENT_LIVE_MS = 60000;
+
+const EXAMPLE_PROMPTS = [
+  'Use Plonix to find in-scope API endpoints that returned errors, then read the most interesting request and tell me what stands out.',
+  'Using Plonix, list every endpoint on the target that takes an id parameter and group them by host.',
+  'Look at Plonix scope suggestions and explain which ones really belong to the target and why.',
+  'Summarize my Plonix findings and point to the requests that prove each one.',
+];
+
+function renderAgents(main) {
+  clear(
+    main,
+    h(
+      'div',
+      { class: 'view' },
+      h('div', { class: 'toolbar' }, h('h2', { text: 'Agents' }), h('span', { class: 'hint', text: 'Let an AI agent such as Claude Code read this project over MCP. Read-only.' })),
+      h('div', { class: 'pane' }, h('div', { class: 'stack', id: 'agentsbody' }, h('div', { class: 'muted', text: 'Loading…' }))),
+    ),
+  );
+  loadAgents();
+}
+
+async function loadAgents() {
+  let a;
+  try {
+    a = await api('/api/agents');
+  } catch (e) {
+    return toast(e.message, 'err');
+  }
+  S.agentsAt = Date.now();
+  const box = $('#agentsbody');
+  if (!box || S.view !== 'agents') return;
+  const now = Date.now();
+  const clients = a.clients || [];
+  const live = clients.filter((c) => now - c.last_seen < AGENT_LIVE_MS);
+  const ago = (ms) => {
+    const s = Math.max(0, Math.round((now - ms) / 1000));
+    return s < 60 ? 'just now' : s < 3600 ? Math.round(s / 60) + ' min ago' : fmtDate(ms);
+  };
+  const cmd = (a.connect && a.connect.command) || 'plonix connect claude';
+  // The settings card keeps its own state across the status refreshes.
+  let settingsCard = $('#agentsettings');
+  const fresh = !settingsCard;
+  if (fresh) settingsCard = h('div', { class: 'card', id: 'agentsettings' });
+  clear(
+    box,
+    h(
+      'div',
+      { class: 'card agentstatus' },
+      h(
+        'div',
+        { class: 'ah' },
+        h('span', { class: 'adot' + (live.length ? ' on' : '') }),
+        h('b', { text: live.length ? (live.length === 1 ? '1 agent connected' : live.length + ' agents connected') : 'No agent connected' }),
+        h('span', { class: 'mode', text: 'Read-only' }),
+      ),
+      clients.length
+        ? h(
+            'table',
+            { class: 'grid' },
+            h('tr', null, h('th', { text: 'Agent' }), h('th', { text: 'Status' }), h('th', { text: 'Requests' }), h('th', { text: 'Last request' })),
+            clients.map((c) =>
+              h(
+                'tr',
+                null,
+                h('td', { class: 'mono', text: c.name }),
+                h('td', { text: now - c.last_seen < AGENT_LIVE_MS ? 'connected' : 'last seen ' + ago(c.last_seen) }),
+                h('td', { text: c.requests + (c.refused ? ` (${c.refused} refused)` : '') }),
+                h('td', { class: 'mono muted', text: c.last_request }),
+              ),
+            ),
+          )
+        : h('div', { class: 'ab muted', text: 'When an agent starts the Plonix MCP server it shows up here, with every request it makes.' }),
+    ),
+    h('div', { class: 'sechead' }, h('h3', { text: 'Claude Code settings' })),
+    settingsCard,
+    h('div', { class: 'sechead' }, h('h3', { text: 'Connect Claude Code' })),
+    h(
+      'div',
+      { class: 'card' },
+      h(
+        'div',
+        { class: 'ab' },
+        h('p', null, 'Run this once in a terminal. It adds Plonix to Claude Code for all your projects:'),
+        h('div', { class: 'cmdline' }, h('code', { text: cmd }), h('button', { class: 'btn sm', text: 'Copy', onclick: () => copyText(cmd) })),
+        h(
+          'p',
+          { class: 'muted' },
+          'Any other MCP client can run ',
+          h('code', { text: 'plonix mcp' }),
+          ' as a stdio server. The ',
+          h('code', { text: 'plonix' }),
+          ' command comes from ',
+          h('code', { text: 'cargo install --path crates/plonix-cli' }),
+          '. The agent reads whichever engine is running, including this one.',
+        ),
+      ),
+    ),
+    h('div', { class: 'sechead' }, h('h3', { text: 'What agents can do' })),
+    h(
+      'div',
+      { class: 'card capgrid' },
+      h('div', null, h('div', { class: 'caph ok', text: '✓ Allowed' }), [...new Set((a.capabilities || []).filter((c) => c.path !== '/api/agents').map((c) => c.what))].map((t) => h('div', { class: 'cap', text: t }))),
+      h('div', null, h('div', { class: 'caph no', text: '✗ Not allowed' }), (a.not_allowed || []).map((t) => h('div', { class: 'cap', text: t }))),
+    ),
+    h(
+      'p',
+      { class: 'muted fine' },
+      'The engine enforces this: agents sign in with their own token, and anything outside this list is refused. Captured traffic never leaves this Mac through Plonix, but it can hold passwords and session tokens, so connect only agents you trust.',
+    ),
+    h('div', { class: 'sechead' }, h('h3', { text: 'Try asking' })),
+    h(
+      'div',
+      { class: 'card' },
+      EXAMPLE_PROMPTS.map((p) => h('div', { class: 'prompt' }, h('span', { text: '“' + p + '”' }), h('button', { class: 'btn sm ghost', text: 'Copy', onclick: () => copyText(p) }))),
+    ),
+  );
+  if (fresh) renderAgentSettings(settingsCard);
+}
+
+/* ======================================================================
+   Ask Claude Code: hand the agent the context for one spot in the app
+   ====================================================================== */
+
+async function loadAgentSettings() {
+  try {
+    S.agentSettings = await api('/api/agents/settings');
+  } catch (_) {
+    S.agentSettings = null;
+  }
+  for (const b of document.querySelectorAll('.askbtn')) b.hidden = !agentsOn();
+}
+
+const agentsOn = () => !S.agentSettings || S.agentSettings.settings.enabled;
+
+/** A small "Ask Claude" button for a request, finding or host. */
+function askButton(subject, title) {
+  return h('button', {
+    class: 'btn sm askbtn',
+    hidden: !agentsOn(),
+    title: title || 'Ask Claude Code about this, with just this context',
+    onclick: (e) => {
+      e.stopPropagation();
+      askClaude(subject);
+    },
+  }, h('span', { class: 'askico', text: '✦' }), ' Ask Claude');
+}
+
+const fmtTok = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n));
+
+/**
+ * The Ask sheet: shows exactly what will be shared and how big it is, lets
+ * the user edit the question, drop parts and shorten bodies, and asks for
+ * an explicit confirmation when it is larger than their limit.
+ */
+async function askClaude(subject) {
+  const st = { exclude: [], question: null, max: null, bundle: null, confirmBig: false };
+  const q = h('textarea', { class: 'askq', rows: 3 });
+  const partsBox = h('div', { class: 'askparts' });
+  const meter = h('div', { class: 'askmeter' });
+  const warn = h('div', { class: 'askwarn', hidden: true });
+  const clipSel = h('select', { title: 'Each request and response body is clipped to this length' }, [1000, 2000, 4000, 8000, 16000, 50000].map((n) => h('option', { value: n, text: fmtTok(n) + ' chars' })));
+  const copyBtn = h('button', { class: 'btn', text: 'Copy prompt' });
+  const openBtn = h('button', { class: 'btn primary', text: 'Open in Claude Code' });
+  let timer;
+  const rebuild = async () => {
+    try {
+      st.bundle = await api('/api/agents/ask', { method: 'POST', body: { ...subject, question: st.question, exclude: st.exclude, max_body_chars: st.max } });
+    } catch (e) {
+      m.err.textContent = e.message;
+      return;
+    }
+    m.err.textContent = '';
+    draw();
+  };
+  const later = () => {
+    clearTimeout(timer);
+    timer = setTimeout(rebuild, 350);
+  };
+  const draw = () => {
+    const b = st.bundle;
+    if (st.question == null) q.value = b.question;
+    clipSel.value = String(b.max_body_chars);
+    if (![...clipSel.options].some((o) => o.value === String(b.max_body_chars))) clipSel.append(h('option', { value: b.max_body_chars, text: fmtTok(b.max_body_chars) + ' chars', selected: true }));
+    clear(
+      partsBox,
+      b.parts.map((p) => {
+        const box = h('input', {
+          type: 'checkbox',
+          checked: p.included,
+          onchange: () => {
+            st.exclude = box.checked ? st.exclude.filter((x) => x !== p.id) : [...st.exclude, p.id];
+            st.confirmBig = false;
+            rebuild();
+          },
+        });
+        const pre = h('pre', { class: 'askpre', hidden: true, text: p.text });
+        return h(
+          'div',
+          { class: 'askpart' + (p.included ? '' : ' off') },
+          h('label', null, box, h('span', { class: 'pl', text: p.label }), p.clipped ? h('span', { class: 'clipped', text: 'clipped' }) : null, h('span', { class: 'pt', text: '~' + fmtTok(p.tokens) + ' tokens' })),
+          h('button', { class: 'link', text: 'preview', onclick: () => (pre.hidden = !pre.hidden) }),
+          pre,
+        );
+      }),
+    );
+    const pct = Math.min(100, Math.round((b.tokens / b.budget) * 100));
+    clear(meter, h('div', { class: 'bar' + (b.over_budget ? ' over' : '') }, h('i', { style: { width: pct + '%' } })), h('span', { text: `~${fmtTok(b.tokens)} of your ${fmtTok(b.budget)}-token limit` }));
+    warn.hidden = !b.over_budget;
+    if (b.over_budget) {
+      const ok = h('input', { type: 'checkbox', checked: st.confirmBig, onchange: () => ((st.confirmBig = ok.checked), sync()) });
+      clear(
+        warn,
+        h('b', { text: `This is about ${fmtTok(b.tokens)} tokens, over your limit of ${fmtTok(b.budget)}.` }),
+        ' A large context makes answers slower and less focused. Untick parts or shorten the bodies, or ',
+        h('label', null, ok, ' send it anyway'),
+        '. The limit is in Agents → Claude Code.',
+      );
+    }
+    sync();
+  };
+  const sync = () => {
+    const blocked = !st.bundle || (st.bundle.over_budget && !st.confirmBig);
+    openBtn.disabled = blocked;
+    copyBtn.disabled = blocked;
+  };
+  q.addEventListener('input', () => {
+    st.question = q.value;
+    later();
+  });
+  clipSel.addEventListener('change', () => {
+    st.max = Number(clipSel.value);
+    st.confirmBig = false;
+    rebuild();
+  });
+  copyBtn.onclick = async () => {
+    await copyText(st.bundle.prompt);
+    closeModal();
+  };
+  openBtn.onclick = async () => {
+    try {
+      await api('/api/agents/launch', { method: 'POST', body: { prompt: st.bundle.prompt } });
+      closeModal();
+      toast('Opened Claude Code in Terminal', 'ok');
+    } catch (e) {
+      if (e.code === 'unsupported') {
+        await copyText(st.bundle.prompt);
+        m.err.textContent = 'Opening a terminal works on macOS only. The prompt is on your clipboard: paste it into Claude Code.';
+      } else m.err.textContent = e.message;
+    }
+  };
+  const m = modal(
+    'Ask Claude Code',
+    [
+      h('label', null, 'Your question', q),
+      h('div', { class: 'askhead' }, h('span', { text: 'What Claude Code gets' }), h('label', { class: 'askclip' }, 'Bodies up to ', clipSel)),
+      partsBox,
+      meter,
+      warn,
+      h('p', { class: 'muted fine', text: 'Only what is ticked is sent, straight from this Mac to Claude Code. It may include passwords or session tokens from captured traffic.' }),
+    ],
+    [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), copyBtn, openBtn],
+  );
+  m.el.querySelector('.mcard').classList.add('wide');
+  await rebuild();
+}
+
+/** Claude Code settings: on or off, what it may see, and how much context to hand over. */
+async function renderAgentSettings(box) {
+  let cfg;
+  try {
+    cfg = await api('/api/agents/settings');
+  } catch (e) {
+    return clear(box, h('div', { class: 'ab rerr', text: e.message }));
+  }
+  S.agentSettings = cfg;
+  const st = cfg.settings;
+  const save = async (patch) => {
+    try {
+      S.agentSettings = await api('/api/agents/settings', { method: 'PUT', body: { ...S.agentSettings.settings, ...patch } });
+      toast('Saved', 'ok');
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+    for (const b of document.querySelectorAll('.askbtn')) b.hidden = !agentsOn();
+    renderAgentSettings(box);
+  };
+  const on = h('input', { type: 'checkbox', checked: st.enabled, onchange: () => save({ enabled: on.checked }) });
+  const radio = (value, label, note) =>
+    h('label', { class: 'opt' }, h('input', { type: 'radio', name: 'agentdata', checked: st.data === value, disabled: !st.enabled, onchange: () => save({ data: value }) }), h('span', null, h('b', { text: label }), h('small', { text: note })));
+  const budget = h('select', { disabled: !st.enabled, onchange: () => save({ context_budget: Number(budget.value) }) }, cfg.budgets.map((n) => h('option', { value: n, text: `${fmtTok(n)} tokens`, selected: n === st.context_budget })));
+  const clip = h('select', { disabled: !st.enabled, onchange: () => save({ max_body_chars: Number(clip.value) }) }, [1000, 2000, 4000, 8000, 16000].map((n) => h('option', { value: n, text: `${fmtTok(n)} characters`, selected: n === st.max_body_chars })));
+  clear(
+    box,
+    h('div', { class: 'ab setrow' }, h('label', { class: 'switch' }, on, h('span', { text: st.enabled ? 'Claude Code and other agents can read this project' : 'Agent access is off: every agent request is refused' })), h('span', { class: 'mode', text: 'Read-only' })),
+    h(
+      'div',
+      { class: 'setgrid' + (st.enabled ? '' : ' disabled') },
+      h('div', null, h('div', { class: 'caph', text: 'What agents can see' }), radio('in_scope', 'In-scope hosts only', 'Requests, hosts and technologies for hosts you accepted into scope'), radio('all', 'Everything captured', 'Also third-party and out-of-scope traffic')),
+      h(
+        'div',
+        null,
+        h('div', { class: 'caph', text: 'Tools agents get' }),
+        cfg.groups.map((g) => {
+          const c = h('input', { type: 'checkbox', checked: g.on, disabled: !st.enabled, onchange: () => save({ off: c.checked ? st.off.filter((x) => x !== g.group) : [...st.off, g.group] }) });
+          return h('label', { class: 'opt' }, c, h('span', { text: g.label }));
+        }),
+      ),
+      h(
+        'div',
+        null,
+        h('div', { class: 'caph', text: 'Ask Claude' }),
+        h('label', { class: 'opt col' }, h('span', { text: 'Warn me before sending more than' }), budget),
+        h('label', { class: 'opt col' }, h('span', { text: 'Clip each request and response body to' }), clip),
+      ),
+    ),
+  );
+}
+
 /* ---------- keyboard ---------- */
 
 document.addEventListener('keydown', (e) => {
   if (!S.token || !$('#main')) return;
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName);
   if (e.key === 'Escape') {
+    if ($('.popover, .ctxmenu')) return closePopover();
     if ($('.modal')) return closeModal();
     if (S.view === 'traffic' && !typing) return closeInspector();
   }
@@ -2035,7 +2789,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   const keys = Object.keys(VIEWS).filter((k) => !VIEWS[k].footer);
-  if (/^[1-5]$/.test(e.key)) return go(keys[Number(e.key) - 1]);
+  if (/^[1-6]$/.test(e.key)) return go(keys[Number(e.key) - 1]);
   if (e.key === '\\') return toggleSidebar();
   if (S.view !== 'traffic') return;
   if (e.key === '/') {

@@ -1,3 +1,5 @@
+<img src="docs/images/plonix-mark.svg" width="64" height="64" alt="Plonix logo">
+
 # Plonix
 
 **The open-source web security workbench for macOS. Fast, native, and scriptable from day one.**
@@ -6,7 +8,7 @@ Plonix captures everything your browser does, learns the real shape of the targe
 
 ![The Plonix window: live traffic with an adaptive-scope suggestion and the Lens showing a request and its response](docs/images/plonix-window.png)
 
-> **Status: early development.** The core engine (proxy, traffic store, search, adaptive scope, local API), the `plonix` CLI and the Plonix app work today and are covered by tests. The MCP server is next. See [Roadmap](#roadmap).
+> **Status: early development.** The core engine (proxy, traffic store, search, adaptive scope, local API), the `plonix` CLI, the Plonix app and read-only MCP access for AI agents work today and are covered by tests. See [Roadmap](#roadmap).
 
 ---
 
@@ -22,7 +24,7 @@ Most of a web assessment is the same loop: capture traffic, figure out what the 
 | Scope that matches reality | Adaptive scope learns related domains as you browse and shows the evidence for each one. |
 | Filters you can type | A small query language: `host:api.acme.com method:POST status:5xx -logout`. |
 | Automation in any language | Everything goes through a local HTTP API. Use curl, Python, Go, or whatever you already script in. |
-| An AI teammate that can see your project | Built-in MCP (planned) so agents such as Claude Code work with live traffic, scope and findings. |
+| An AI teammate that can see your project | Built-in MCP: `plonix connect claude` lets Claude Code read live traffic, the map, scope and findings. Read-only, enforced by the engine. |
 
 ## Principles
 
@@ -45,6 +47,7 @@ Plonix has a handful of tools, each with its own name. They are the same in the 
 | **Scope** | Adaptive scope: the domains Plonix thinks belong to your target, with the evidence, to accept or reject | `plonix scope` |
 | **Map** | Hosts, the technologies behind them and their endpoints and parameters | `plonix hosts`, `plonix tech` |
 | **Findings** | What you found, with the requests that prove it attached as evidence | the window, or `/api/findings` |
+| **Agents** | Which AI agents are connected to the project, what they may do, and how to connect one | `plonix connect claude`, `plonix mcp` |
 | **Rules** and the **Store** | Community rule packs that teach Plonix to recognise technologies | `plonix rules`, `plonix store` |
 
 ## What works today
@@ -59,13 +62,15 @@ Plonix has a handful of tools, each with its own name. They are the same in the 
 - Hosts and the endpoints seen on each host are listed for a quick map of the target.
 
 ### Fast search with filters
-Field filters narrow by metadata, and anything else is full-text matched (case-insensitive) against URLs, headers and decoded bodies. Prefix any term with `-` to negate it.
+Field filters narrow by metadata, and anything else is full-text matched (case-insensitive) against URLs, headers and decoded bodies. Every term is an include (show only what matches) and a leading `-` makes it an exclude (hide what matches). Separate values with commas to match any of them: `status:4xx,5xx -kind:static -host:cdn.example.com`.
 
 ```text
 host:example.com          host or any subdomain (globs: host:*.cdn.*)
 method:POST               HTTP method
 status:404  status:5xx    exact code, class, or status:none for no response
 path:/api                 path prefix (globs: path:*admin*)
+ext:js                    file extension of the path
+kind:static               images, fonts, stylesheets, scripts and media
 mime:json                 substring of the response content type
 scope:in  scope:out       in or out of the current scope
 source:proxy              captured traffic, or source:replay for sent requests
@@ -113,20 +118,36 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - **Plonix.app** is a Mac app: double-click it and the Start screen opens. Pick or create a project and it opens in a window of its own, with capture running. Open more projects and each gets its own window. Closing a project's window closes its session. No terminal needed.
 - With Settings › Interface › **Open projects in: My web browser**, projects open in your default browser instead; View › Open in Browser (⇧⌘B) does it for one window.
 - **Open target** (⌘O, or the button at the top of the sidebar) opens the site you are testing in the capture browser: a separate browser with an isolated profile that routes through Plonix and trusts its certificate. The domain and its subdomains go into scope.
-- Native menu bar and shortcuts: ⌘N new project, ⇧⌘P the Start screen, ⌘, Settings, ⌘1 to ⌘5 switch between Traffic, Bench, Scope, Map and Findings, ⌃⌘S shows or hides the sidebar. Light and dark follow the system.
+- Native menu bar and shortcuts: ⌘N new project, ⇧⌘P the Start screen, ⌘, Settings, ⌘1 to ⌘6 switch between Traffic, Bench, Scope, Map, Findings and Agents, ⌃⌘S shows or hides the sidebar. Light and dark follow the system.
 - `plonix` commands in a terminal talk to the same sessions while the app is open (`-p` picks the project), and projects started from a terminal show up on the Start screen. Quitting the app closes the projects it opened.
 - The same window also runs in any browser with `plonix ui`, served by the engine itself.
 
 ### The Plonix window
 - **Sidebar:** navigation, Open target, the scope suggestions waiting on you (accept or reject in one click) and the hosts in scope with their request counts (click one to filter Traffic). Collapse it to icons with ⌃⌘S, or `\` in a browser.
 - **Traffic:** a live-updating request list with the search language and the **Lens**, an inline request/response viewer that decodes gzip/brotli and pretty-prints JSON. A banner surfaces each new domain adaptive scope suggests, with its evidence and one-click accept or reject.
+- **Include and exclude filters:** filters sit as chips above the list, under **Show only** and **Hide**. Add one with **+ Filter**, in one click from the suggestions drawn from your traffic (hide static files, hide the busiest third-party hosts, show only errors), or right-click any row to show only or hide its host, path, status class, content type, extension or method. Click a chip to flip it between show and hide, × to remove it. Filters typed in the search box become chips, and **Copy query** gives the same filters as a query for the CLI or the API. Active filters are saved with the project.
 - **Spotted in the Lens:** Plonix points out what stands out in a request or response, right above it. JWTs (header and payload decoded, algorithm, expiry; the signature is never claimed valid), Base64, hex and double URL-encoding that decode to readable text, Basic auth credentials, personal data (email addresses, Luhn-valid card numbers), leaked secrets (AWS, Google, GitHub, Slack and Stripe keys, private keys) and internal IP addresses. Click one to highlight it in place and see the decoded value, then copy it or find it across all captured traffic. Nothing is flagged unless it is there, and detection runs locally on traffic you already captured.
 - **Bench:** edit any request and send it (press `b` or double-click a row in Traffic), keep a history per tab, restore or branch any earlier send into a new tab, and compare two sends side by side (response or request diff). Sends go through the engine's scope enforcement: out-of-scope hosts are refused, and you can accept the host right there.
 - **Scope:** every suggested domain with its evidence, accept (with or without subdomains) or reject, and the rule list.
 - **Map:** hosts with their scope state, detected technologies with the evidence behind them, and endpoints with statuses and parameters.
 - **Findings:** record a finding from any request, with the requests that prove it linked as evidence.
+- **Agents:** which AI agents are connected right now and every request they made, a Claude Code settings panel (on/off, in-scope-only or everything, which tools, and the Ask-Claude context limit), the one command that connects Claude Code, and prompts to try.
 - **Suggested filters** come from the traffic you captured: in-scope only, server and client errors, the write methods in use, JSON, the busiest API paths and hosts, requests sent from the Bench, and one chip that hides static files. Each shows how many requests it matches, and a filter only appears when something matches it.
 - The page signs in through a one-time link (the app and `plonix ui` create it), so the API token never appears in a URL. It is locked down with a strict Content-Security-Policy, and captured content is only ever rendered as text.
+
+### AI agents over MCP
+- `plonix connect claude` adds Plonix to Claude Code as an MCP server. From then on Claude Code can search your captured traffic, read requests and responses, see hosts, endpoints and detected technologies, review scope suggestions and read findings, on the live project.
+- Access is **read-only and enforced by the engine**: agents sign in with their own token (`~/.plonix/agent-token`), and anything but reading (sending or replaying requests, changing scope, recording findings) is refused.
+- **Ask Claude Code** buttons on a request, finding, host or scope suggestion hand Claude Code just that spot's context as a prompt you review first. Plonix clips the bodies, shows what will be shared, and warns before sending more than your context limit.
+- Any other MCP client can run `plonix mcp` as a stdio server. Captured data stays on your machine. See [docs/agents.md](docs/agents.md).
+
+```sh
+plonix open example.com      # capture while you browse
+plonix connect claude        # once
+claude                       # then ask:
+```
+
+> Use Plonix to find in-scope API endpoints that returned errors, then read the most interesting request and tell me what stands out.
 
 ### Local API
 - An HTTP API on loopback only, protected by a bearer token stored at `~/.plonix/api-token` (mode `0600`).
@@ -262,6 +283,9 @@ The API listens on port 8090 when it is free; `plonix status` shows the actual a
 | GET | `/api/storage` | How much traffic is out of scope, and the storage policy |
 | POST | `/api/storage/prune` | Delete out-of-scope traffic now (`{"confirm": true}`) |
 | GET | `/api/sessions` | Every open project, with its proxy and API addresses |
+| GET | `/api/agents` | What agents may do, and which agents are connected |
+| GET / PUT | `/api/agents/settings` | Read or change agent access (user only) |
+| POST | `/api/agents/ask` | Build the context for "Ask Claude Code" about a request, finding or host |
 | POST | `/api/shutdown` | Close this project's session |
 
 Each open project has its own API address. `$PLONIX_HOME/sessions/` lists them, and `engine.json` points to the current one. The Start screen has an API of its own (see [docs/projects.md](docs/projects.md)).
@@ -290,10 +314,10 @@ crates/
 ├── plonix-core   engine: proxy, CA, store, search, scope, detection, rule packs, store index, local API,
 │   │             projects, sessions, settings and the Start screen
 │   └── ui/       the Plonix window and Start screen: plain HTML, CSS and JavaScript embedded in the binary
-├── plonix-cli    the `plonix` command: engine control, onboarding, search, scope, replay, rules, store
+├── plonix-cli    the `plonix` command: engine control, onboarding, search, scope, replay, rules, store, MCP server
 └── plonix-app    Plonix.app: the window as a desktop app, with the engine built in
 store/            community store: index.json and rule packs
-docs/             detection rules, extension design
+docs/             detection rules, agents and MCP, extension design
 ```
 
 ## Roadmap
@@ -310,11 +334,11 @@ docs/             detection rules, extension design
 - [x] Technology detection from community rule packs, with a store (`plonix tech`, `plonix rules`, `plonix store`)
 - [x] The Plonix window (`plonix ui`): live traffic, the Bench with branch and compare, adaptive scope review, map with technologies, findings
 - [x] Plonix.app for macOS: the window as a desktop app with the engine built in, Open target from the app, native menu bar
+- [x] Read-only MCP server (`plonix mcp`), `plonix connect claude` and the Agents screen
 - [x] Projects in folders you choose, several open at once with a session each, a Start screen, and Settings (proxy, storage, interface)
 
 **Coming**
-- [ ] Built-in MCP server and `plonix connect claude`, so Claude Code and other agents can work with live traffic, scope and findings, always inside accepted scope
-- [ ] An Agents screen in the app once MCP lands
+- [ ] Opt-in active mode for agents: replay and send within accepted scope, switched on by you ([design](docs/agents.md#later-an-opt-in-active-mode))
 - [ ] Signed and notarized app downloads
 - [ ] Sandboxed WebAssembly extensions with a closed capability list that can never bypass scope ([design](docs/extensions.md))
 

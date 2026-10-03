@@ -66,9 +66,21 @@ impl Client {
         }
     }
 
+    /// Connects as an AI agent, with the agent token, to the current session
+    /// (or the one `$PLONIX_PROJECT` names): the engine only allows what
+    /// agents may do (see `plonix_core::access`).
+    pub fn connect_agent(home: &Home, initiator: &str) -> Result<Self> {
+        let info = engine_info(home, None).ok_or_else(|| anyhow!(NotRunning))?;
+        Self::connect_with(&info, &home.agent_token(), initiator)
+    }
+
     /// Connects to a specific session.
     pub fn to(home: &Home, info: &EngineInfo, initiator: &str) -> Result<Self> {
-        let token = std::fs::read_to_string(home.api_token()).map_err(|_| anyhow!(NotRunning))?;
+        Self::connect_with(info, &home.api_token(), initiator)
+    }
+
+    fn connect_with(info: &EngineInfo, token_file: &std::path::Path, initiator: &str) -> Result<Self> {
+        let token = std::fs::read_to_string(token_file).map_err(|_| anyhow!(NotRunning))?;
         let client = Self {
             base: info.api.trim_end_matches('/').to_string(),
             token: token.trim().to_string(),

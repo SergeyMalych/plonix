@@ -1,12 +1,14 @@
 //! The `plonix` command.
 //!
 //! Every subcommand except `engine` and `ca` is a client of the engine's
-//! local API (see `client`), exactly like the GUI. The MCP server will be
+//! local API (see `client`), exactly like the GUI. The MCP server (`mcp`) is
 //! another front end over the same `client` and `render` modules.
 
 mod client;
 mod community;
+mod connect;
 mod engine_ctl;
+mod mcp;
 mod open;
 mod render;
 
@@ -38,6 +40,7 @@ Get started:
   plonix replay 42 -H 'X-Debug: 1'
   plonix tech                      technologies detected on each host
   plonix store                     community detection rule packs
+  plonix connect claude            let Claude Code read this project (read-only MCP)
 
 Exit codes:
   0 ok · 1 error · 2 bad usage or query · 3 engine not running
@@ -100,7 +103,7 @@ enum Cmd {
     /// Search captured traffic, newest first
     #[command(
         visible_alias = "s",
-        after_help = "Filters: host:example.com  method:POST  status:404|5xx|none  path:/api  mime:json\n         scope:in|out  source:proxy|replay  \"quoted phrase\"  -negated  free text\nPut options such as -n before the query: everything after the first term is search text."
+        after_help = "Filters: host:example.com  method:POST  status:404|5xx|none  path:/api  mime:json  ext:js\n         kind:static  scope:in|out  source:proxy|replay  \"quoted phrase\"  free text\nInclude and exclude: a term shows only what matches, -term hides it; commas match any value:\n  plonix search status:4xx,5xx -kind:static -host:cdn.example.com\nPut options such as -n before the query: everything after the first term is search text."
     )]
     Search(SearchArgs),
     /// Print new traffic as it is captured (Ctrl-C to stop)
@@ -138,6 +141,13 @@ enum Cmd {
     },
     /// Browse and install community rule packs
     Store(community::StoreArgs),
+    /// Connect an AI agent to Plonix (read-only)
+    Connect {
+        #[command(subcommand)]
+        cmd: connect::ConnectCmd,
+    },
+    /// Run the read-only MCP server on stdin/stdout (started by your agent)
+    Mcp,
     /// The local certificate authority
     Ca {
         #[command(subcommand)]
@@ -388,6 +398,8 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Cmd::Tech { host } => community::tech_cmd(&ctx, host)?,
         Cmd::Rules { cmd } => community::rules_cmd(&ctx, cmd.unwrap_or(community::RulesCmd::List))?,
         Cmd::Store(a) => community::store_cmd(&ctx, a)?,
+        Cmd::Connect { cmd } => connect::connect_cmd(&ctx, cmd)?,
+        Cmd::Mcp => mcp::serve(ctx.home.clone())?,
         Cmd::Ca { cmd } => ca_cmd(&ctx, cmd.unwrap_or(CaCmd::Show))?,
         Cmd::Engine(a) => engine_ctl::run_foreground(
             ctx.home.clone(),

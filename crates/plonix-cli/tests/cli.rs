@@ -648,3 +648,130 @@ fn two_projects_run_side_by_side() {
     p.run(&["stop", "--all"]).ok();
     assert!(!p.run(&["sessions"]).stdout().contains("Acme"));
 }
+
+/// A client session with `plonix mcp` over stdio, one JSON-RPC message per line.
+struct Mcp {
+    child: std::process::Child,
+    out: BufReader<std::process::ChildStdout>,
+    next_id: i64,
+}
+
+impl Mcp {
+    fn start(p: &Plonix) -> Self {
+        let mut child = p.cmd(&["mcp"]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+        let out = BufReader::new(child.stdout.take().unwrap());
+        Self { child, out, next_id: 0 }
+    }
+
+    fn send(&mut self, msg: serde_json::Value) {
+        let stdin = self.child.stdin.as_mut().unwrap();
+        writeln!(stdin, "{msg}").unwrap();
+        stdin.flush().unwrap();
+    }
+
+    fn request(&mut self, method: &str, params: serde_json::Value) -> serde_json::Value {
+        self.next_id += 1;
+        self.send(serde_json::json!({ "jsonrpc": "2.0", "id": self.next_id, "method": method, "params": params }));
+        let mut line = String::new();
+        self.out.read_line(&mut line).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap_or_else(|e| panic!("bad line {line:?}: {e}"));
+        assert_eq!(v["id"], self.next_id);
+        v
+    }
+
+    fn tool(&mut self, name: &str, args: serde_json::Value) -> (bool, String) {
+        let v = self.request("tools/call", serde_json::json!({ "name": name, "arguments": args }));
+        let r = &v["result"];
+        (r["isError"] == true, r["content"][0]["text"].as_str().unwrap_or("").to_string())
+    }
+}
+
+impl Drop for Mcp {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+#[test]
+fn mcp_server_gives_agents_read_only_access() {
+    let p = Plonix::new();
+    let target = serve_target();
+    let proxy = p.start();
+    via_proxy(&proxy, &format!("http://localhost:{target}/"), &[]);
+    via_proxy(&proxy, &format!("http://localhost:{target}/echo?user=7"), &[("Authorization", "Bearer secret-token")]);
+    p.search_until("", 2);
+    p.run(&["scope", "accept", "localhost"]).ok();
+
+    let mut m = Mcp::start(&p);
+    let init = m.request("initialize", serde_json::json!({ "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": { "name": "test-agent", "version": "1" } }));
+    assert_eq!(init["result"]["serverInfo"]["name"], "plonix");
+    assert!(init["result"]["instructions"].as_str().unwrap().contains("read-only"));
+    m.send(serde_json::json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
+
+    let tools = m.request("tools/list", serde_json::json!({}));
+    let names: Vec<&str> = tools["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"search_traffic") && names.contains(&"get_request") && names.contains(&"get_scope"), "{names:?}");
+
+    let (err, text) = m.tool("search_traffic", serde_json::json!({ "query": "path:/echo" }));
+    assert!(!err, "{text}");
+    assert!(text.contains("/echo?user=7") && text.contains("1 of 1 match(es)"), "{text}");
+    let id: i64 = text.lines().nth(1).unwrap().split_whitespace().next().unwrap().parse().unwrap();
+
+    let (err, text) = m.tool("get_request", serde_json::json!({ "id": id }));
+    assert!(!err && text.contains("GET /echo?user=7 HTTP/1.1") && text.contains("HTTP/1.1 200"), "{text}");
+    let (err, text) = m.tool("get_scope", serde_json::json!({}));
+    assert!(!err && text.contains("\"localhost\""), "{text}");
+    let (err, text) = m.tool("list_hosts", serde_json::json!({}));
+    assert!(!err && text.contains("localhost"), "{text}");
+    let (err, text) = m.tool("get_request", serde_json::json!({ "id": 999 }));
+    assert!(err && text.contains("not found"), "{text}");
+
+    // There is no tool that changes anything, and the engine refuses the agent token for it anyway.
+    let v = m.request("tools/call", serde_json::json!({ "name": "replay", "arguments": { "id": id } }));
+    assert_eq!(v["error"]["code"], -32602);
+    let token = std::fs::read_to_string(p.home.path().join("agent-token")).unwrap();
+    let err = ureq::post(&format!("{}/api/replay", api_base(&p)))
+        .set("Authorization", &format!("Bearer {}", token.trim()))
+        .send_json(serde_json::json!({ "id": id }))
+        .unwrap_err();
+    assert!(matches!(err, ureq::Error::Status(403, _)), "{err}");
+
+    // The window's Agents screen sees the connection.
+    let user_token = std::fs::read_to_string(p.home.path().join("api-token")).unwrap();
+    let agents: serde_json::Value = ureq::get(&format!("{}/api/agents", api_base(&p)))
+        .set("Authorization", &format!("Bearer {}", user_token.trim()))
+        .call()
+        .unwrap()
+        .into_json()
+        .unwrap();
+    let c = agents["clients"].as_array().unwrap().iter().find(|c| c["name"] == "test-agent").expect("test-agent connected");
+    assert!(c["requests"].as_u64().unwrap() >= 5, "{c}");
+}
+
+#[test]
+fn connect_claude_adds_the_mcp_server() {
+    let mut p = Plonix::new();
+    let dir = tempfile::tempdir().unwrap();
+    let claude = fake_program(dir.path(), "claude", "claude-args.txt");
+    p.env.push(("PLONIX_CLAUDE".into(), claude.display().to_string()));
+
+    let out = p.run(&["connect", "claude"]).ok().stdout();
+    assert!(out.contains("added MCP server \"plonix\" for all your projects"), "{out}");
+    assert!(out.contains("search_traffic") && out.contains("Send or replay requests"), "{out}");
+    assert!(p.home.path().join("agent-token").exists());
+    // The fake records its last call: the add.
+    let args = read_when_ready(&dir.path().join("claude-args.txt"));
+    let args: Vec<&str> = args.lines().collect();
+    assert_eq!(&args[..5], ["mcp", "add-json", "--scope", "user", "plonix"]);
+    let cfg: serde_json::Value = serde_json::from_str(args[5]).unwrap();
+    assert_eq!(cfg["args"], serde_json::json!(["mcp"]));
+    assert!(cfg["command"].as_str().unwrap().ends_with("plonix"));
+    assert_eq!(cfg["env"]["PLONIX_HOME"], p.home.path().display().to_string());
+
+    // --print changes nothing and shows the config to paste.
+    std::fs::remove_file(dir.path().join("claude-args.txt")).unwrap();
+    let out = p.run(&["connect", "claude", "--print"]).ok().stdout();
+    assert!(out.contains("claude mcp add --scope user plonix --") && out.contains("\"mcpServers\""), "{out}");
+    assert!(!dir.path().join("claude-args.txt").exists());
+}

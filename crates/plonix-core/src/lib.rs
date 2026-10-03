@@ -7,7 +7,9 @@
 //! Each open project is a session with an engine of its own (see
 //! [`session`]); the Start screen ([`hub`]) lists, creates and opens them.
 
+pub mod access;
 pub mod api;
+pub mod ask;
 pub mod browser;
 pub mod ca;
 pub mod codec;
@@ -23,6 +25,7 @@ pub mod proxy;
 pub mod query;
 pub mod registry;
 pub mod rulepack;
+pub mod scan;
 pub mod scope;
 pub mod session;
 pub mod settings;

@@ -1,0 +1,67 @@
+{
+  "plonix_scanpack": 1,
+  "name": "baseline",
+  "version": "0.1.0",
+  "description": "Baseline relevance detectors: emit the signals that gate active-scan tactics. Tactics ship in their own packs.",
+  "author": "Plonix",
+  "license": "Apache-2.0",
+  "detectors": [
+    {
+      "id": "web",
+      "signal": "web",
+      "description": "Any captured HTTP endpoint. Gates checks that apply to any web target.",
+      "conditions": [{ "path": "." }]
+    },
+    {
+      "id": "jwt",
+      "signal": "jwt-present",
+      "description": "A JSON Web Token appears in a request Authorization header, a cookie, or a response body.",
+      "conditions": [
+        { "request_header": "authorization", "regex": "bearer\\s+eyJ[A-Za-z0-9_-]+\\." },
+        { "body": "eyJ[A-Za-z0-9_-]{6,}\\.[A-Za-z0-9_-]{6,}\\." }
+      ]
+    },
+    {
+      "id": "session-cookie",
+      "signal": "session-cookie",
+      "description": "A session cookie is set by the application.",
+      "conditions": [
+        { "header": "set-cookie", "regex": "(session|sess|sid|phpsessid|jsessionid|connect\\.sid|auth)" }
+      ]
+    },
+    {
+      "id": "graphql",
+      "signal": "graphql-endpoint",
+      "description": "A GraphQL endpoint is in use.",
+      "match": "any",
+      "conditions": [
+        { "path": "/graphql" },
+        { "body": "\"errors\"\\s*:\\s*\\[\\s*\\{[^}]*\"locations\"" }
+      ]
+    },
+    {
+      "id": "php",
+      "signal": "php",
+      "description": "The application runs on PHP.",
+      "tech": ["php"]
+    },
+    {
+      "id": "nodejs",
+      "signal": "nodejs",
+      "description": "The application runs on Node.js.",
+      "tech": ["nodejs", "node", "express", "nextjs", "nuxt"]
+    },
+    {
+      "id": "wordpress",
+      "signal": "wordpress",
+      "description": "The application is WordPress.",
+      "tech": ["wordpress"]
+    },
+    {
+      "id": "api-json",
+      "signal": "json-api",
+      "description": "A JSON API surface is in use.",
+      "conditions": [{ "header": "content-type", "regex": "application/(json|.*\\+json)" }]
+    }
+  ]
+}

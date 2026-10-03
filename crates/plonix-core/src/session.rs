@@ -75,6 +75,7 @@ pub async fn open(home: &Home, mut project: Project, options: OpenOptions) -> Re
     }
     engine.set_overrides(UpstreamOptions { insecure: options.insecure_upstream, extra_roots: options.extra_roots.clone(), ..Default::default() });
     let token = home.load_or_create_token()?;
+    let agent_token = home.load_or_create_agent_token()?;
     engine.start_recorder();
     let api = bind_api(options.api_port.or(project.file.last_api_port)).await?;
     let api_addr = api.local_addr()?;
@@ -82,7 +83,7 @@ pub async fn open(home: &Home, mut project: Project, options: OpenOptions) -> Re
         let _ = std::fs::remove_file(project.open_marker());
         return Err(e);
     }
-    let router = crate::api::router(engine.clone(), token.clone(), api_addr, home.clone());
+    let router = crate::api::router(engine.clone(), crate::api::Tokens { user: token.clone(), agent: agent_token }, api_addr, home.clone());
     let stopping = engine.clone();
     tokio::spawn(async move {
         let _ = axum::serve(api, router).with_graceful_shutdown(async move { stopping.stopped().await }).await;
