@@ -1,0 +1,22 @@
+[package]
+name = "plonix-app"
+version = "0.1.0"
+edition = "2024"
+description = "Plonix for macOS: the Plonix window as a native app, with the engine built in"
+
+[[bin]]
+name = "plonix-app"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow = "1.0.104"
+plonix-core = { version = "0.1.0", path = "../plonix-core" }
+serde_json = "1.0.151"
+tauri = { version = "2", features = [] }
+tokio = { version = "1.53.2", features = ["full"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+ureq = { version = "2", default-features = false, features = ["json"] }

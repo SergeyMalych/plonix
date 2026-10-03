@@ -19,9 +19,11 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::browser;
 use crate::codec;
 use crate::engine::{Engine, ReplayRequest, SendError, SendRequest};
 use crate::model::{Exchange, NewFinding, SEVERITIES};
+use crate::paths::Home;
 use crate::query;
 use crate::scope::Decision;
 use crate::ui::{self, LaunchCodes};
@@ -33,10 +35,11 @@ struct AppState {
     api_addr: SocketAddr,
     proxy_addr: SocketAddr,
     launch_codes: Arc<LaunchCodes>,
+    home: Home,
 }
 
-pub fn router(engine: Arc<Engine>, token: String, api_addr: SocketAddr, proxy_addr: SocketAddr) -> Router {
-    let state = AppState { engine, token, api_addr, proxy_addr, launch_codes: Arc::default() };
+pub fn router(engine: Arc<Engine>, token: String, api_addr: SocketAddr, proxy_addr: SocketAddr, home: Home) -> Router {
+    let state = AppState { engine, token, api_addr, proxy_addr, launch_codes: Arc::default(), home };
     Router::new()
         .route("/", get(ui::index))
         .route("/ui/app.js", get(ui::app_js))
@@ -46,6 +49,7 @@ pub fn router(engine: Arc<Engine>, token: String, api_addr: SocketAddr, proxy_ad
         .route("/api/ui/launch", post(ui_launch))
         .route("/api/status", get(status))
         .route("/api/traffic", get(traffic))
+        .route("/api/traffic/facets", get(facets))
         .route("/api/traffic/{id}", get(exchange))
         .route("/api/hosts", get(hosts))
         .route("/api/hosts/{host}/endpoints", get(endpoints))
@@ -56,6 +60,7 @@ pub fn router(engine: Arc<Engine>, token: String, api_addr: SocketAddr, proxy_ad
         .route("/api/scope/accept", post(accept))
         .route("/api/scope/reject", post(reject))
         .route("/api/scope/remove", post(remove))
+        .route("/api/browser/open", post(open_browser))
         .route("/api/send", post(send))
         .route("/api/replay", post(replay))
         .route("/api/findings", get(findings).post(add_finding))
@@ -224,6 +229,15 @@ async fn hosts(State(s): State<AppState>) -> Response {
     }
 }
 
+async fn facets(State(s): State<AppState>) -> Response {
+    let engine = s.engine.clone();
+    match tokio::task::spawn_blocking(move || engine.store.facets(&engine.rules())).await {
+        Ok(Ok(f)) => Json(f).into_response(),
+        Ok(Err(e)) => internal(e),
+        Err(e) => internal(e.into()),
+    }
+}
+
 async fn endpoints(State(s): State<AppState>, Path(host): Path<String>) -> Response {
     match s.engine.store.endpoints(&host) {
         Ok(e) => Json(e).into_response(),
@@ -298,6 +312,59 @@ async fn remove(State(s): State<AppState>, Json(b): Json<DomainBody>) -> Respons
         Ok(Ok(removed)) => Json(json!({ "removed": removed })).into_response(),
         Ok(Err(e)) => internal(e),
         Err(e) => internal(e.into()),
+    }
+}
+
+#[derive(Deserialize)]
+struct OpenBody {
+    target: String,
+    /// Accept the target's domain (and subdomains) into scope first.
+    #[serde(default = "yes")]
+    scope: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// Opens the capture browser at a target: an isolated browser profile that
+/// routes through this engine's proxy and trusts its CA.
+async fn open_browser(State(s): State<AppState>, Json(b): Json<OpenBody>) -> Response {
+    let target = match browser::parse_target(&b.target) {
+        Ok(t) => t,
+        Err(e) => return err(StatusCode::BAD_REQUEST, "bad_target", &format!("{e:#}")),
+    };
+    let mut rule = Value::Null;
+    if b.scope {
+        let engine = s.engine.clone();
+        let host = target.host.clone();
+        match tokio::task::spawn_blocking(move || engine.decide(&host, Decision::Accepted, true, "")).await {
+            Ok(Ok(r)) => rule = json!(r),
+            Ok(Err(e)) => return err(StatusCode::BAD_REQUEST, "bad_target", &format!("{e:#}")),
+            Err(e) => return internal(e.into()),
+        }
+    }
+    let Some(found) = browser::detect() else {
+        return err(
+            StatusCode::NOT_FOUND,
+            "no_browser",
+            &format!(
+                "no browser found to launch. Install Google Chrome, Brave, Edge or Firefox, or set any browser's HTTP and HTTPS proxy to {}",
+                s.proxy_addr
+            ),
+        );
+    };
+    let launched = browser::launch(&s.home, &found, &s.proxy_addr.to_string(), &s.engine.ca.spki_sha256(), &target.url);
+    match launched {
+        Ok(_) => Json(json!({
+            "url": target.url,
+            "host": target.host,
+            "browser": found.name,
+            "needs_trust": found.kind == browser::Kind::Firefox,
+            "scope": rule,
+        }))
+        .into_response(),
+        Err(e) => internal(e),
     }
 }
 

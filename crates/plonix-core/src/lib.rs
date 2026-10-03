@@ -5,6 +5,7 @@
 //! MCP server are all clients of the same local API.
 
 pub mod api;
+pub mod browser;
 pub mod ca;
 pub mod codec;
 pub mod detect;

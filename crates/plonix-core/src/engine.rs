@@ -410,7 +410,7 @@ pub async fn start_with(engine: Arc<Engine>, config: &EngineConfig) -> Result<Ru
     let proxy_addr = proxy.local_addr()?;
     let api_addr = api.local_addr()?;
     tokio::spawn(crate::proxy::serve(proxy, engine.clone()));
-    let router = crate::api::router(engine.clone(), token.clone(), api_addr, proxy_addr);
+    let router = crate::api::router(engine.clone(), token.clone(), api_addr, proxy_addr, config.home.clone());
     let shutdown_engine = engine.clone();
     tokio::spawn(async move {
         let _ = axum::serve(api, router)

@@ -242,6 +242,55 @@ impl Store {
         rows.collect::<Result<_, _>>().map_err(Into::into)
     }
 
+    /// Counts over recent traffic that filter suggestions are built from.
+    pub fn facets(&self, rules: &ScopeRules) -> Result<Facets> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT host, method, status, mime, source, path FROM exchanges ORDER BY id DESC LIMIT ?1")?;
+        let mut rows = stmt.query([Facets::SAMPLE as i64])?;
+        let mut f = Facets::default();
+        let (mut methods, mut statuses, mut kinds, mut hosts, mut paths) =
+            (BTreeMap::new(), BTreeMap::new(), BTreeMap::new(), BTreeMap::new(), BTreeMap::new());
+        let mut scope_cache: BTreeMap<String, bool> = BTreeMap::new();
+        while let Some(r) = rows.next()? {
+            let host: String = r.get(0)?;
+            let method: String = r.get(1)?;
+            let status: Option<u16> = r.get(2)?;
+            let mime: String = r.get(3)?;
+            let source: String = r.get(4)?;
+            let path: String = r.get(5)?;
+            f.sampled += 1;
+            let in_scope = *scope_cache.entry(host.clone()).or_insert_with(|| rules.in_scope(&host));
+            *methods.entry(method).or_insert(0) += 1;
+            let class = match status {
+                Some(s) if (100..600).contains(&s) => format!("{}xx", s / 100),
+                Some(_) => "other".into(),
+                None => "none".into(),
+            };
+            *statuses.entry(class).or_insert(0) += 1;
+            if let Some(kind) = mime_kind(&mime) {
+                *kinds.entry(kind).or_insert(0) += 1;
+            }
+            if source == "replay" {
+                f.replays += 1;
+            }
+            if in_scope {
+                f.in_scope += 1;
+                if let Some(seg) = first_segment(&path) {
+                    *paths.entry(seg).or_insert(0) += 1;
+                }
+                *hosts.entry(host).or_insert(0) += 1;
+            } else {
+                f.out_of_scope += 1;
+            }
+        }
+        f.methods = ranked(methods);
+        f.statuses = ranked(statuses);
+        f.kinds = ranked(kinds);
+        f.hosts = ranked(hosts);
+        f.paths = ranked(paths);
+        Ok(f)
+    }
+
     /// Endpoints seen on a host, with numeric/UUID path segments folded into `{id}`.
     pub fn endpoints(&self, host: &str) -> Result<Vec<Endpoint>> {
         let conn = self.conn.lock().unwrap();
@@ -447,6 +496,47 @@ fn row_to_exchange(r: &Row) -> rusqlite::Result<Exchange> {
 }
 
 /// `/users/42/orders/9f1c...` → `/users/{id}/orders/{id}`
+fn ranked(map: BTreeMap<String, i64>) -> Vec<Count> {
+    let mut v: Vec<Count> = map.into_iter().map(|(value, count)| Count { value, count }).collect();
+    v.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.value.cmp(&b.value)));
+    v
+}
+
+/// A response content type, as one of the kinds `mime:` filters are useful for.
+pub fn mime_kind(mime: &str) -> Option<String> {
+    let m = mime.to_ascii_lowercase();
+    let kind = if m.contains("json") {
+        "json"
+    } else if m.contains("html") {
+        "html"
+    } else if m.contains("javascript") || m.contains("ecmascript") {
+        "javascript"
+    } else if m.contains("xml") && !m.starts_with("image/") {
+        "xml"
+    } else if m.contains("css") {
+        "css"
+    } else if m.starts_with("image/") {
+        "image"
+    } else if m.starts_with("font/") || m.contains("woff") || m.contains("font") {
+        "font"
+    } else if m.starts_with("text/") {
+        "text"
+    } else {
+        return None;
+    };
+    Some(kind.into())
+}
+
+/// `/api/users/7` → `/api`. Skips files and ids, which make poor filters.
+fn first_segment(path: &str) -> Option<String> {
+    let seg = path.trim_start_matches('/').split(['/', '?']).next()?;
+    let folded = fold_path(seg);
+    if seg.is_empty() || seg.contains('.') || folded == "{id}" || seg.len() > 40 {
+        return None;
+    }
+    Some(format!("/{seg}"))
+}
+
 pub fn fold_path(path: &str) -> String {
     path.split('/')
         .map(|seg| {
@@ -527,6 +617,31 @@ mod tests {
         assert_eq!(got.tls_sans, ex.tls_sans);
         assert_eq!(got.url(), "https://www.example.com/login?q=1&page=2");
         assert!(s.get_exchange(id + 1).unwrap().is_none());
+    }
+
+    #[test]
+    fn facets_only_list_what_occurs() {
+        let s = Store::open_in_memory().unwrap();
+        let rules = seeded(&s);
+        let mut json = sample("api.example.com", "POST", "/api/v1/users", 201, "{}");
+        json.resp_headers = vec![("Content-Type".into(), "application/json".into())];
+        s.insert_exchange(&json).unwrap();
+        s.insert_exchange(&sample("api.example.com", "GET", "/api/v1/users/7", 500, "err")).unwrap();
+        s.insert_exchange(&sample("www.example.com", "GET", "/favicon.ico", 200, "")).unwrap();
+        s.insert_exchange(&sample("cdn.other.net", "GET", "/static/app.js", 404, "")).unwrap();
+
+        let f = s.facets(&rules).unwrap();
+        assert_eq!((f.sampled, f.in_scope, f.out_of_scope, f.replays), (4, 3, 1, 0));
+        assert_eq!(f.methods, vec![Count { value: "GET".into(), count: 3 }, Count { value: "POST".into(), count: 1 }]);
+        let statuses: Vec<&str> = f.statuses.iter().map(|c| c.value.as_str()).collect();
+        assert_eq!(statuses, vec!["2xx", "4xx", "5xx"]);
+        assert_eq!(f.kinds[0], Count { value: "html".into(), count: 3 });
+        assert!(f.kinds.iter().any(|c| c.value == "json"));
+        assert!(!f.kinds.iter().any(|c| c.value == "image"));
+        // Only in-scope traffic, and files are not path filters.
+        assert_eq!(f.paths, vec![Count { value: "/api".into(), count: 2 }]);
+        assert_eq!(f.hosts[0], Count { value: "api.example.com".into(), count: 2 });
+        assert!(!f.hosts.iter().any(|c| c.value == "cdn.other.net"));
     }
 
     #[test]
