@@ -4,6 +4,7 @@
 //! $PLONIX_HOME (default ~/.plonix)
 //! ├── ca.pem / ca.key        local certificate authority (trust once)
 //! ├── api-token              bearer token for the local API (0600)
+//! ├── agent-token            read-only token for AI agents (0600)
 //! ├── engine.json            address of the running engine, written on start
 //! ├── logs/engine.log
 //! ├── browser/               profile for the pre-configured browser
@@ -51,6 +52,10 @@ impl Home {
     pub fn api_token(&self) -> PathBuf {
         self.root.join("api-token")
     }
+    /// Token for AI agents, limited to what [`crate::access`] allows.
+    pub fn agent_token(&self) -> PathBuf {
+        self.root.join("agent-token")
+    }
     pub fn engine_file(&self) -> PathBuf {
         self.root.join("engine.json")
     }
@@ -66,25 +71,34 @@ impl Home {
 
     /// Returns the API token, creating a random one on first use.
     pub fn load_or_create_token(&self) -> Result<String> {
-        let path = self.api_token();
-        if let Ok(t) = std::fs::read_to_string(&path) {
-            let t = t.trim().to_string();
-            if !t.is_empty() {
-                return Ok(t);
-            }
-        }
-        let mut buf = [0u8; 24];
-        ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut buf)
-            .map_err(|_| anyhow::anyhow!("no system randomness"))?;
-        let token: String = buf.iter().map(|b| format!("{b:02x}")).collect();
-        write_private(&path, token.as_bytes())?;
-        Ok(token)
+        load_or_create_secret(&self.api_token())
+    }
+
+    /// Returns the agent token, creating a random one on first use.
+    pub fn load_or_create_agent_token(&self) -> Result<String> {
+        load_or_create_secret(&self.agent_token())
     }
 
     pub fn read_engine_info(&self) -> Option<EngineInfo> {
         let data = std::fs::read_to_string(self.engine_file()).ok()?;
         serde_json::from_str(&data).ok()
     }
+}
+
+/// Reads a random secret from `path`, creating it (0600) on first use.
+fn load_or_create_secret(path: &Path) -> Result<String> {
+    if let Ok(t) = std::fs::read_to_string(path) {
+        let t = t.trim().to_string();
+        if !t.is_empty() {
+            return Ok(t);
+        }
+    }
+    let mut buf = [0u8; 24];
+    ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut buf)
+        .map_err(|_| anyhow::anyhow!("no system randomness"))?;
+    let token: String = buf.iter().map(|b| format!("{b:02x}")).collect();
+    write_private(path, token.as_bytes())?;
+    Ok(token)
 }
 
 /// Written by a running engine so that clients can find it.
