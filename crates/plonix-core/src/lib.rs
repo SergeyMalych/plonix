@@ -18,6 +18,7 @@ pub mod proxy;
 pub mod query;
 pub mod registry;
 pub mod rulepack;
+pub mod scan;
 pub mod scope;
 pub mod store;
 pub mod ui;
