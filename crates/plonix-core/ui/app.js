@@ -774,6 +774,78 @@ function filtersChanged() {
 }
 
 /** Saved with the project in the engine, so filters survive reloads and match in every window. */
+/**
+ * Traffic columns. Path takes whatever width is left; every other column has a
+ * width the user can drag, saved with the project. Columns left of Path are
+ * dragged by their right edge, the ones right of it by their left edge, so the
+ * edge under the pointer always follows it.
+ */
+const TCOLS = [
+  { key: 'n', label: '#', w: 52, th: 'num' },
+  { key: 'method', label: 'Method', w: 66 },
+  { key: 'host', label: 'Host', w: 220, col: 'c-host', th: 'c-host' },
+  { key: 'path', label: 'Path' },
+  { key: 'status', label: 'Status', w: 64 },
+  { key: 'type', label: 'Type', w: 92 },
+  { key: 'size', label: 'Size', w: 72, col: 'c-size', th: 'num c-size' },
+  { key: 'ms', label: 'ms', w: 60, col: 'c-ms', th: 'num c-ms' },
+  { key: 'time', label: 'Time', w: 84 },
+];
+const TCOL_MIN = 36;
+
+function trafficColumns() {
+  const widths = T.colW || {};
+  const cols = TCOLS.map((c) => h('col', { class: c.col, style: c.w ? { width: (widths[c.key] || c.w) + 'px' } : null }));
+  const flex = TCOLS.findIndex((c) => !c.w);
+  const ths = TCOLS.map((c, i) => {
+    const th = h('th', { class: c.th, text: c.label });
+    if (c.w) th.append(h('span', { class: 'colgrip ' + (i < flex ? 'r' : 'l'), title: 'Drag to resize · double-click to reset', onmousedown: (e) => startColResize(e, c, cols[i], i < flex ? 1 : -1), ondblclick: () => setColWidth(c, cols[i], null) }));
+    return th;
+  });
+  if (!T.colsLoaded) loadTrafficColumns(cols);
+  return [h('colgroup', null, cols), h('thead', null, h('tr', null, ths))];
+}
+
+async function loadTrafficColumns(cols) {
+  try {
+    const v = await api('/api/views/traffic-columns');
+    T.colsLoaded = true;
+    T.colW = {};
+    for (const c of TCOLS) {
+      const w = v.widths && v.widths[c.key];
+      if (c.w && Number.isFinite(w) && w >= TCOL_MIN) T.colW[c.key] = Math.round(w);
+    }
+    TCOLS.forEach((c, i) => c.w && (cols[i].style.width = (T.colW[c.key] || c.w) + 'px'));
+  } catch (_) {
+    /* engine unreachable: default widths */
+  }
+}
+
+function setColWidth(c, col, w) {
+  T.colW = T.colW || {};
+  if (w == null) delete T.colW[c.key];
+  else T.colW[c.key] = w;
+  col.style.width = (w || c.w) + 'px';
+  clearTimeout(T.colSaveT);
+  T.colSaveT = setTimeout(() => api('/api/views/traffic-columns', { method: 'PUT', body: { widths: T.colW } }).catch(() => {}), 300);
+}
+
+function startColResize(e, c, col, dir) {
+  e.preventDefault();
+  e.stopPropagation();
+  const startX = e.clientX;
+  const startW = e.currentTarget.parentElement.getBoundingClientRect().width || (T.colW || {})[c.key] || c.w;
+  document.body.classList.add('colresize');
+  const move = (ev) => setColWidth(c, col, Math.round(Math.max(TCOL_MIN, Math.min(900, startW + dir * (ev.clientX - startX)))));
+  const up = () => {
+    document.body.classList.remove('colresize');
+    window.removeEventListener('mousemove', move);
+    window.removeEventListener('mouseup', up);
+  };
+  window.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', up);
+}
+
 function saveTrafficView() {
   clearTimeout(T.saveT);
   T.saveT = setTimeout(() => {
@@ -858,41 +930,7 @@ function renderTraffic(main) {
   liveBtn.classList.toggle('paused', !T.live);
 
   const tbody = h('tbody', { id: 'rows' });
-  const table = h(
-    'table',
-    { class: 'ttable' },
-    h(
-      'colgroup',
-      null,
-      h('col', { style: { width: '52px' } }),
-      h('col', { style: { width: '66px' } }),
-      h('col', { class: 'c-host', style: { width: '22%' } }),
-      h('col'),
-      h('col', { style: { width: '56px' } }),
-      h('col', { style: { width: '92px' } }),
-      h('col', { class: 'c-size', style: { width: '72px' } }),
-      h('col', { class: 'c-ms', style: { width: '60px' } }),
-      h('col', { style: { width: '84px' } }),
-    ),
-    h(
-      'thead',
-      null,
-      h(
-        'tr',
-        null,
-        h('th', { class: 'num', text: '#' }),
-        h('th', { text: 'Method' }),
-        h('th', { class: 'c-host', text: 'Host' }),
-        h('th', { text: 'Path' }),
-        h('th', { text: 'Status' }),
-        h('th', { text: 'Type' }),
-        h('th', { class: 'num c-size', text: 'Size' }),
-        h('th', { class: 'num c-ms', text: 'ms' }),
-        h('th', { text: 'Time' }),
-      ),
-    ),
-    tbody,
-  );
+  const table = h('table', { class: 'ttable' }, trafficColumns(), tbody);
   const wrap = h('div', { class: 'tablewrap', id: 'tablewrap' }, table);
   append(main, [
     h(
