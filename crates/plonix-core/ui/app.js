@@ -2003,13 +2003,14 @@ function renderBench(main) {
   const editor = h('textarea', {
     value: tab.raw,
     spellcheck: 'false',
-    oninput: () => ((tab.raw = editor.value), saveBench()),
+    oninput: () => ((tab.raw = editor.value), saveBench(), editor._onedit && editor._onedit()),
     onkeydown: (e) => {
       if (e.key === 'Tab') {
         e.preventDefault();
         const s = editor.selectionStart;
         editor.setRangeText('  ', s, editor.selectionEnd, 'end');
         tab.raw = editor.value;
+        editor._onedit && editor._onedit();
       }
     },
   });
@@ -2070,12 +2071,20 @@ function renderBench(main) {
     : runMode
       ? h('span', { class: 'r' }, h('button', { class: 'btn sm', text: '+ Mark position', title: 'Wrap the selected text as a payload position', onclick: () => marker('editor') }))
       : h('span', { class: 'r', text: 'headers, blank line, body' });
+  // Lens on the Bench: reads the request being edited and lets its encoded
+  // values (JWTs, URL-encoding, Base64) be edited in decoded form, plus quick
+  // actions on any selected text. Send mode only, to stay clear of the Run
+  // panel's position markers.
+  const lensStrip = runMode ? null : h('div', { class: 'benchlens' });
+  const editWrap = runMode ? editor : h('div', { class: 'editorwrap' }, editor);
   const reqCol = h(
     'div',
     { class: 'rcol' },
     h('div', { class: 'lbl' }, 'Request', binaryNote),
-    editor,
+    editWrap,
+    lensStrip,
   );
+  if (lensStrip) wireBenchLens(tab, editor, editWrap, lensStrip, main);
   const respCol = h('div', { class: 'rcol' });
   const runCol = h('div', { class: 'rcol runcol' });
   const panelToggle = h(
@@ -2124,6 +2133,388 @@ function renderBench(main) {
     drawBenchResponse(tab, respCol);
     drawCompare(tab);
   }
+}
+
+/* =======================================================================
+   Editable Lens on the Bench
+   Reads the request being edited and surfaces its encoded values the way
+   Lens does in Traffic — but here each one can be edited in its decoded
+   form and is re-encoded straight back into the request. Any selected text
+   gets the same quick actions, and the whole draft can be sent to Claude.
+   ===================================================================== */
+
+/* ---- codecs (unicode-safe, all local) ---- */
+function bl_b64decode(s) {
+  const t = s.replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
+  try {
+    const bin = atob(t + '='.repeat((4 - (t.length % 4)) % 4));
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  } catch (_) {
+    return null;
+  }
+}
+function bl_b64encode(s) {
+  const bytes = new TextEncoder().encode(s);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+function bl_b64urlDecode(s) {
+  return bl_b64decode(s);
+}
+function bl_b64urlEncode(s) {
+  return bl_b64encode(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function bl_b64urlBytes(bytes) {
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function bl_hexDecode(s) {
+  try {
+    const bytes = new Uint8Array(s.length / 2);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(s.substr(i * 2, 2), 16);
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch (_) {
+    return null;
+  }
+}
+function bl_hexEncode(s) {
+  return [...new TextEncoder().encode(s)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+function bl_tryJson(s) {
+  try {
+    const v = JSON.parse(s);
+    return v && typeof v === 'object' ? v : null;
+  } catch (_) {
+    return null;
+  }
+}
+function bl_pretty(s) {
+  const v = bl_tryJson(s);
+  return v ? JSON.stringify(v, null, 2) : s;
+}
+/** Mostly-printable text, the only decoded form worth offering. */
+function bl_readable(s) {
+  if (s == null || s.length < 4) return false;
+  let printable = 0, letters = 0;
+  for (const c of s) {
+    const code = c.codePointAt(0);
+    if (code >= 32 || c === '\n' || c === '\r' || c === '\t') printable++;
+    if (/[A-Za-z0-9]/.test(c)) letters++;
+  }
+  const n = [...s].length;
+  return printable * 100 >= n * 95 && letters * 100 >= n * 40;
+}
+/** HS256 signature over `data` with `key`, as base64url. */
+async function bl_hs256(data, key) {
+  const enc = new TextEncoder();
+  const k = await crypto.subtle.importKey('raw', enc.encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', k, enc.encode(data));
+  return bl_b64urlBytes(new Uint8Array(sig));
+}
+
+/** Works out what one token is and how to read and rewrite it, or null. */
+function classifyToken(tok) {
+  if (/^eyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*$/.test(tok)) {
+    const [h3, p3, sig = ''] = tok.split('.');
+    const header = bl_tryJson(bl_b64urlDecode(h3) || '');
+    const payload = bl_tryJson(bl_b64urlDecode(p3) || '');
+    if (header && payload) {
+      const alg = String(header.alg || '?');
+      const notes = ['alg ' + alg];
+      if (typeof payload.exp === 'number') notes.push(payload.exp * 1000 < Date.now() ? 'expired' : 'expires ' + fmtDate(payload.exp * 1000));
+      else notes.push('no expiry');
+      if (!sig || alg.toLowerCase() === 'none') notes.push('unsigned');
+      return { kind: 'jwt', label: 'JWT', category: 'decode', notes, jwt: { header, payload, sig } };
+    }
+  }
+  if (/%[0-9A-Fa-f]{2}/.test(tok)) {
+    let dec = null;
+    try {
+      dec = decodeURIComponent(tok);
+    } catch (_) {
+      dec = null;
+    }
+    if (dec != null && dec !== tok) return { kind: 'url', label: 'URL-encoded', category: 'decode', notes: [], decode: () => dec, encode: (v) => encodeURIComponent(v) };
+  }
+  if (/^[A-Za-z0-9+/_-]{12,}={0,2}$/.test(tok)) {
+    const dec = bl_b64decode(tok);
+    if (dec != null && bl_readable(dec)) {
+      const j = bl_tryJson(dec);
+      if (j) return { kind: 'b64json', label: 'Base64 JSON', category: 'decode', notes: [], decode: () => bl_pretty(dec), encode: (v) => bl_b64encode(JSON.stringify(JSON.parse(v))) };
+      if (/\d/.test(tok) && !tok.includes('/')) return { kind: 'b64', label: 'Base64', category: 'decode', notes: [], decode: () => dec, encode: (v) => bl_b64encode(v) };
+    }
+  }
+  if (/^[0-9a-fA-F]{16,}$/.test(tok) && tok.length % 2 === 0) {
+    const dec = bl_hexDecode(tok);
+    if (dec != null && bl_readable(dec)) return { kind: 'hex', label: 'Hex', category: 'decode', notes: [], decode: () => dec, encode: (v) => bl_hexEncode(v) };
+  }
+  return null;
+}
+
+/** Best effort for an arbitrary selection the detectors did not claim. */
+function genericDecode(t) {
+  const trimmed = t.trim();
+  const known = classifyToken(trimmed);
+  if (known) return known;
+  if (/%[0-9A-Fa-f]{2}/.test(t)) {
+    try {
+      const dec = decodeURIComponent(t);
+      return { kind: 'url', label: 'URL-encoded', category: 'decode', notes: [], decode: () => dec, encode: (v) => encodeURIComponent(v) };
+    } catch (_) {
+      /* fall through */
+    }
+  }
+  const b = bl_b64decode(trimmed);
+  if (b != null && bl_readable(b)) return { kind: 'b64', label: 'Base64', category: 'decode', notes: [], decode: () => b, encode: (v) => bl_b64encode(v) };
+  return { kind: 'text', label: 'Text', category: 'info', notes: ['not an encoded value'], decode: () => t, encode: (v) => v };
+}
+
+function benchLoc(raw, idx) {
+  const lineStart = raw.lastIndexOf('\n', idx - 1) + 1;
+  const nl = raw.indexOf('\n', idx);
+  const line = raw.slice(lineStart, nl < 0 ? raw.length : nl);
+  if (lineStart === 0) {
+    const q = raw.indexOf('?');
+    return q >= 0 && idx > q ? 'query' : 'request line';
+  }
+  const m = line.match(/^([A-Za-z0-9-]+):/);
+  if (m) return 'header ' + m[1];
+  return 'body';
+}
+
+/** Every editable encoded value in the draft, with its exact span. */
+function scanDraft(raw) {
+  const items = [];
+  const re = /[^\s&?#"';,<>=]{8,}={0,2}/g;
+  let m;
+  while ((m = re.exec(raw)) && items.length < 30) {
+    const d = classifyToken(m[0]);
+    if (!d) continue;
+    items.push(Object.assign(d, { start: m.index, end: m.index + m[0].length, value: m[0], loc: benchLoc(raw, m.index) }));
+  }
+  return items;
+}
+
+/* ---- wiring ---- */
+function wireBenchLens(tab, editor, editWrap, strip, main) {
+  const qbar = buildQbar(tab, editor, strip, main);
+  editWrap.appendChild(qbar);
+  let t;
+  const redraw = () => drawBenchLens(tab, editor, strip, main);
+  editor._onedit = () => {
+    clearTimeout(t);
+    t = setTimeout(redraw, 220);
+    qbar.classList.remove('show');
+  };
+  const poke = () => qbar.classList.toggle('show', editor.selectionStart !== editor.selectionEnd);
+  editor.addEventListener('mouseup', () => setTimeout(poke, 0));
+  editor.addEventListener('keyup', (e) => {
+    if (e.shiftKey || e.key.startsWith('Arrow') || e.key === 'a') setTimeout(poke, 0);
+  });
+  editor.addEventListener('scroll', () => qbar.classList.remove('show'));
+  redraw();
+}
+
+function drawBenchLens(tab, editor, strip, main) {
+  const items = scanDraft(editor.value);
+  const slot = h('div', { class: 'blslot' });
+  const chips = items.length
+    ? items.map((it) => benchChip(it, tab, editor, strip, slot, main))
+    : h('span', { class: 'blempty', text: 'Nothing to decode here yet. Select any value for quick actions.' });
+  clear(strip, h('div', { class: 'spots blspots' }, h('span', { class: 'spotlbl', text: 'Spotted' }), chips, askDraftButton(tab, editor, null)), slot);
+  strip._slot = slot;
+}
+
+function benchChip(it, tab, editor, strip, slot, main) {
+  const chip = h(
+    'button',
+    {
+      class: 'spot c-' + it.category,
+      title: it.label + ' · ' + it.loc,
+      onclick: () => {
+        const was = chip.classList.contains('on');
+        for (const c of strip.querySelectorAll('.spot')) c.classList.remove('on');
+        if (was) return clear(slot);
+        chip.classList.add('on');
+        clear(slot, buildValueCard(it, { start: it.start, end: it.end }, editor, tab, strip, main, true));
+      },
+    },
+    h('i'),
+    h('span', { class: 'sl', text: it.label }),
+    h('span', { class: 'sw', text: it.loc }),
+    h('span', { class: 'edb', text: 'Edit' }),
+  );
+  return chip;
+}
+
+/** Splice `enc` into the editor over `span`, keeping the span in sync. */
+function spliceEditor(editor, tab, span, enc) {
+  editor.value = editor.value.slice(0, span.start) + enc + editor.value.slice(span.end);
+  span.end = span.start + enc.length;
+  tab.raw = editor.value;
+  saveBench();
+}
+function blFlash(el) {
+  el.classList.add('on');
+  setTimeout(() => el.classList.remove('on'), 1100);
+}
+
+function buildValueCard(it, span, editor, tab, strip, main, editable) {
+  const needle = it.value.replace(/"/g, '').slice(0, 120);
+  const head = h(
+    'div',
+    { class: 'sdh' },
+    h('b', { text: it.label }),
+    h('span', { class: 'muted', text: ' in ' + (it.loc || 'selection') }),
+    h('span', { class: 'sdact' }, needle.length >= 4 ? h('button', { class: 'btn sm', text: 'Find in traffic', onclick: () => setQuery('"' + needle + '"') }) : null, askDraftButton(tab, editor, it.value)),
+    h('button', { class: 'blx', text: '✕', title: 'Close', onclick: () => clear(strip._slot) }),
+  );
+  const notes = it.notes && it.notes.length ? h('div', { class: 'sdnotes' }, it.notes.map((n) => h('span', { class: 'sdnote' + (/^(unsigned|expired)/.test(n) ? ' warn' : ''), text: n }))) : null;
+  if (it.kind === 'jwt') return h('div', { class: 'spotdetail' }, head, notes, jwtEditor(it, span, editor, tab));
+  const live = h('span', { class: 'bllive', text: '✓ re-encoded' });
+  const ta = h('textarea', { class: 'sdv blv', spellcheck: 'false', value: it.decode() });
+  if (!editable) ta.readOnly = true;
+  ta.addEventListener('input', () => {
+    try {
+      spliceEditor(editor, tab, span, it.encode(ta.value));
+      blFlash(live);
+    } catch (_) {
+      /* invalid mid-edit (e.g. half-typed JSON); wait for a valid value */
+    }
+  });
+  return h('div', { class: 'spotdetail' }, head, h('div', { class: 'sdk' }, editable ? 'Decoded — edit to rewrite the request' : 'Decoded', live), ta, editable ? null : h('div', { class: 'dnote blnote', text: 'Read-only preview.' }));
+}
+
+/** The JWT editor: edit the claims (or header) as JSON; the token in the
+ *  request is rebuilt live. The signature is kept as-is and the token marked
+ *  unsigned, unless a signing key is given, in which case it is re-signed. */
+function jwtEditor(it, span, editor, tab) {
+  const st = { part: 'payload', key: '' };
+  const live = h('span', { class: 'bllive' });
+  const ta = h('textarea', { class: 'sdv blv bljwt', spellcheck: 'false' });
+  const load = () => (ta.value = JSON.stringify(st.part === 'payload' ? it.jwt.payload : it.jwt.header, null, 2));
+  load();
+  const mk = (p, label) =>
+    h('button', {
+      class: st.part === p ? 'on' : '',
+      text: label,
+      onclick: () => {
+        st.part = p;
+        for (const b of seg.children) b.classList.remove('on');
+        seg.children[p === 'payload' ? 0 : 1].classList.add('on');
+        load();
+      },
+    });
+  const seg = h('span', { class: 'seg blseg' }, mk('payload', 'Claims'), mk('header', 'Header'));
+  const keyIn = h('input', { class: 'blkey', placeholder: 'HS256 key to re-sign (optional)', spellcheck: 'false' });
+
+  const rebuild = async () => {
+    const h3 = bl_b64urlEncode(JSON.stringify(it.jwt.header));
+    const p3 = bl_b64urlEncode(JSON.stringify(it.jwt.payload));
+    let sig = it.jwt.sig, signed = false;
+    if (st.key) {
+      try {
+        sig = await bl_hs256(h3 + '.' + p3, st.key);
+        signed = true;
+      } catch (_) {
+        signed = false;
+      }
+    }
+    spliceEditor(editor, tab, span, h3 + '.' + p3 + '.' + sig);
+    live.textContent = signed ? '✓ re-signed with key' : '✓ rebuilt · signature not re-signed';
+    live.classList.toggle('warn', !signed);
+    blFlash(live);
+  };
+  ta.addEventListener('input', () => {
+    const obj = bl_tryJson(ta.value);
+    if (!obj) return;
+    if (st.part === 'payload') it.jwt.payload = obj;
+    else it.jwt.header = obj;
+    rebuild();
+  });
+  keyIn.addEventListener('input', () => {
+    st.key = keyIn.value.trim();
+    rebuild();
+  });
+  return h(
+    'div',
+    { class: 'bljwtbox' },
+    h('div', { class: 'sdk' }, seg, live),
+    ta,
+    keyIn,
+    h('div', { class: 'dnote blnote', text: 'Editing a claim changes the token, so the original signature no longer matches — which is exactly what you want to test whether the server verifies it. Add the key to sign a valid token.' }),
+  );
+}
+
+/* ---- selection quick actions ---- */
+function draftSubject(tab, editor, selection) {
+  const { headers, body } = parseRaw(editor.value);
+  return { kind: 'draft', method: (tab.method || 'GET').toUpperCase(), url: tab.url || '', headers, body, selection: selection || null };
+}
+function askDraftButton(tab, editor, selection) {
+  return h(
+    'button',
+    { class: 'btn sm askbtn blask', hidden: !agentsOn(), title: selection ? 'Ask Claude about the selected text' : 'Ask Claude about this request', onclick: () => askClaude(draftSubject(tab, editor, selection)) },
+    h('span', { class: 'askico', text: '✦' }),
+    selection ? ' Ask Claude' : ' Ask about this request',
+  );
+}
+
+function buildQbar(tab, editor, strip, main) {
+  const sel = () => editor.value.slice(editor.selectionStart, editor.selectionEnd);
+  const openSel = (editable) => {
+    const t = sel();
+    if (!t) return;
+    const it = genericDecode(t);
+    it.value = t;
+    it.loc = 'selection';
+    clear(strip._slot, buildValueCard(it, { start: editor.selectionStart, end: editor.selectionEnd }, editor, tab, strip, main, editable));
+    strip.scrollIntoView({ block: 'nearest' });
+  };
+  const applyEnc = (fn, label) => {
+    const t = sel();
+    if (!t) return;
+    let out;
+    try {
+      out = fn(t);
+    } catch (_) {
+      return toast('Could not ' + label, 'err');
+    }
+    if (out == null) return toast('Could not ' + label, 'err');
+    spliceEditor(editor, tab, { start: editor.selectionStart, end: editor.selectionEnd }, out);
+    toast(label + ' ✓', 'ok');
+    editor._onedit && editor._onedit();
+  };
+  const menu = h(
+    'div',
+    { class: 'qmenu' },
+    h('button', { text: 'URL-encode', onclick: () => applyEnc((t) => encodeURIComponent(t), 'URL-encoded') }),
+    h('button', { text: 'URL-decode', onclick: () => applyEnc((t) => decodeURIComponent(t), 'URL-decoded') }),
+    h('button', { text: 'Base64', onclick: () => applyEnc((t) => bl_b64encode(t), 'Base64-encoded') }),
+    h('button', { text: 'Base64-decode', onclick: () => applyEnc((t) => bl_b64decode(t), 'Base64-decoded') }),
+  );
+  const encBtn = h('button', {
+    text: 'Encode ▾',
+    onclick: (e) => {
+      e.stopPropagation();
+      menu.classList.toggle('show');
+    },
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.qcaret')) menu.classList.remove('show');
+  });
+  return h(
+    'div',
+    { class: 'qbar' },
+    h('button', { text: '◇ Decode', onclick: () => openSel(false) }),
+    h('button', { text: '✎ Edit decoded', onclick: () => openSel(true) }),
+    h('span', { class: 'qcaret' }, encBtn, menu),
+    h('span', { class: 'qsep' }),
+    h('button', { class: 'ai', onclick: () => askClaude(draftSubject(tab, editor, sel())) }, '✦ Ask Claude'),
+  );
 }
 
 /* ----- Bench payload runs ----- */

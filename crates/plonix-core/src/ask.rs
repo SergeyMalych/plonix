@@ -29,6 +29,18 @@ pub enum Subject {
     Finding { id: i64 },
     /// A host: what it serves, its technologies and scope evidence.
     Host { host: String },
+    /// A request being edited on the Bench, before it is sent.
+    Draft {
+        method: String,
+        url: String,
+        #[serde(default)]
+        headers: Vec<(String, String)>,
+        #[serde(default)]
+        body: String,
+        /// The part of the request the user highlighted, if any.
+        #[serde(default)]
+        selection: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -92,6 +104,7 @@ pub fn build(engine: &Engine, req: &AskRequest, settings: &AgentSettings) -> Res
         Subject::Request { id } => request_parts(engine, *id, max_body)?,
         Subject::Finding { id } => finding_parts(engine, *id, max_body)?,
         Subject::Host { host } => host_parts(engine, host)?,
+        Subject::Draft { method, url, headers, body, selection } => draft_parts(method, url, headers, body, selection.as_deref(), max_body),
     };
     for p in &mut parts {
         p.included = !req.exclude.contains(&p.id);
@@ -213,6 +226,28 @@ fn request_parts(engine: &Engine, id: i64, max: usize) -> Result<(String, String
             .into(),
         parts,
     ))
+}
+
+/// Context for a request the user is editing on the Bench but has not sent.
+/// There is no stored exchange yet, so the parts come straight from the
+/// draft the client holds: the request text, and the slice the user
+/// highlighted when they asked.
+fn draft_parts(method: &str, url: &str, headers: &[(String, String)], body: &str, selection: Option<&str>, max: usize) -> (String, String, Vec<Part>) {
+    let head: String = headers.iter().map(|(k, v)| format!("{k}: {v}\n")).collect();
+    let (body_text, clipped) = if body.is_empty() { (String::new(), false) } else { clip(body, max) };
+    let body_block = if body_text.is_empty() { String::new() } else { format!("\n{body_text}\n") };
+    let req = format!("{method} {url} HTTP/1.1\n{head}{body_block}");
+    let mut parts = vec![part("request", "Request I'm about to send".into(), req, clipped)];
+    if let Some(sel) = selection.map(str::trim).filter(|s| !s.is_empty()) {
+        let (sel, c) = clip(sel, max);
+        parts.push(part("selection", "The part I highlighted".into(), sel, c));
+    }
+    let default_q = if selection.is_some() {
+        "I'm editing this request on the Bench. Look at the part I highlighted: what is it, is it worth changing, and what would you try?".into()
+    } else {
+        "I'm editing this request on the Bench before sending it. What stands out, what might be worth changing, and what would you test?".into()
+    };
+    ("Request on the Bench".into(), default_q, parts)
 }
 
 fn tech_lines(tech: &[crate::detect::Detection]) -> String {
