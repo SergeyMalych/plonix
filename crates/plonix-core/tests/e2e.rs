@@ -44,6 +44,9 @@ async fn upstream_handler(req: Request<Incoming>) -> Result<Response<Full<Bytes>
             text.push_str(&String::from_utf8_lossy(&body));
             Response::builder().header("content-type", "text/plain").body(Full::new(Bytes::from(text)))
         }
+        "/.git/config" => Response::builder()
+            .header("content-type", "text/plain")
+            .body(Full::new(Bytes::from_static(b"[core]\n\trepositoryformatversion = 0\n"))),
         _ => Response::builder().status(404).body(Full::new(Bytes::from_static(b"nope"))),
     };
     Ok(resp.unwrap())
@@ -102,6 +105,7 @@ impl rustls::server::ResolvesServerCert for Fixed {
 async fn start(home: &Home, extra_root: Option<CertificateDer<'static>>) -> Running {
     home.ensure().unwrap();
     let ca = Arc::new(CertAuthority::load_or_create(home).unwrap());
+    std::fs::create_dir_all(home.root.join("projects")).unwrap();
     let store = Store::open(&home.project_db("test")).unwrap();
     let upstream = Upstream::new(false, extra_root.into_iter().collect()).unwrap();
     let engine = Engine::new("test", store, ca, upstream).unwrap();
@@ -250,6 +254,45 @@ async fn adaptive_scope_suggests_with_evidence() {
     assert!(!r.engine.store.suggestions(&r.engine.rules()).unwrap().iter().any(|s| s.domain == "127.0.0.1"));
     r.engine.remove_rule("127.0.0.1").unwrap();
     assert!(r.engine.store.suggestions(&r.engine.rules()).unwrap().iter().any(|s| s.domain == "127.0.0.1"));
+}
+
+#[tokio::test]
+async fn active_scan_finds_a_real_exposure_and_stays_in_scope() {
+    use plonix_core::scan::ScanRequest;
+
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let up = serve_http().await;
+    let r = start(&home, None).await;
+
+    // Capture one request so /echo is a discovered endpoint for the scan.
+    via_proxy(r.proxy_addr, &format!("http://localhost:{}/echo?q=1", up.port()), &[]).await;
+    wait_for_count(&r.engine, 1).await;
+
+    // A scan against an un-accepted host is refused before any request.
+    let out_of_scope = r.engine.scan(ScanRequest { host: "localhost".into(), ..Default::default() }, "test").await;
+    assert!(matches!(out_of_scope, Err(SendError::OutOfScope { .. })), "scan must refuse an un-accepted host");
+
+    r.engine.decide("localhost", Decision::Accepted, false, "").unwrap();
+    let report = r.engine.scan(ScanRequest { host: "localhost".into(), ..Default::default() }, "scan").await.unwrap();
+
+    // The fixed-path git probe and the reflected-parameter check both fire.
+    let titles: Vec<&str> = report.findings.iter().map(|f| f.title.as_str()).collect();
+    assert!(titles.iter().any(|t| t.contains(".git/config")), "expected a .git/config finding, got {titles:?}");
+    assert!(titles.iter().any(|t| t.contains("reflected")), "expected a reflected-parameter finding, got {titles:?}");
+    assert!(report.requests_sent >= 2);
+    assert!(report.tactics_run.iter().any(|t| t == "exposed-git-config"));
+
+    // Every request the scan sent was recorded against the in-scope host.
+    let findings = r.engine.store.findings().unwrap();
+    assert!(findings.iter().any(|f| f.title.contains(".git/config") && f.severity == "high"));
+
+    // A rejected host is refused too, even after being known.
+    r.engine.decide("localhost", Decision::Rejected, false, "").unwrap();
+    assert!(matches!(
+        r.engine.scan(ScanRequest { host: "localhost".into(), ..Default::default() }, "scan").await,
+        Err(SendError::OutOfScope { decision: "rejected", .. })
+    ));
 }
 
 #[tokio::test]

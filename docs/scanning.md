@@ -203,3 +203,23 @@ A new **Scans** screen (⌘7), with a simple left-to-right flow:
 5. Read-only MCP tools for advising.
 6. (Later, with the WASM sandbox) logic tactics via the bounded check
    interface.
+
+## What is built
+
+- The detector/tactic framework, the `plonix_scanpack: 1` pack model, and
+  fingerprint-driven suggestions (`Catalog::suggest`).
+- The active-scan runner (`Engine::scan`): it selects gated tactics, plans
+  bounded requests, sends each one through `engine::send` (the scope choke
+  point) so the scan can only reach accepted hosts, evaluates responses, and
+  records findings against the existing Findings store. It never fires on its
+  own and is bounded by a request budget.
+- Benign built-in content: relevance detectors (`baseline`) and
+  non-destructive checks (`probes`: exposed `.git/config` and `.env`,
+  `server-status`, and a harmless reflected-parameter marker).
+- API: `GET /api/scan/catalog`, `GET /api/scan/suggest/{host}` (both
+  read-only, so the advising agent layer may call them), and `POST /api/scan`
+  (user-only; agents cannot start scans).
+- CLI: `plonix scan suggest|catalog|run`.
+
+Still to come: crawl and crawl-with-browser discovery, the Scans UI area, and
+installed scan-pack pinning in the store.

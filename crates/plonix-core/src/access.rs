@@ -83,6 +83,7 @@ pub enum Group {
     Map,
     Scope,
     Findings,
+    Scan,
 }
 
 impl Group {
@@ -93,6 +94,7 @@ impl Group {
         (Group::Map, "Hosts, endpoints and detected technologies"),
         (Group::Scope, "Scope rules and suggestions"),
         (Group::Findings, "Findings"),
+        (Group::Scan, "Scan detectors, tactics and suggested profiles"),
     ];
 }
 
@@ -111,6 +113,8 @@ const READ_ONLY: &[Capability] = &[
     cap("/api/tech/{host}", "Technologies detected on each host", Group::Map),
     cap("/api/scope", "Scope rules and suggested domains", Group::Scope),
     cap("/api/findings", "Recorded findings", Group::Findings),
+    cap("/api/scan/catalog", "Available scan detectors and tactics", Group::Scan),
+    cap("/api/scan/suggest/{host}", "Suggested scan profile for a host (read-only advice)", Group::Scan),
     cap("/api/agents", "This access policy", Group::Basics),
 ];
 
@@ -343,6 +347,8 @@ mod tests {
             ("GET", "/api/tech/example.com"),
             ("GET", "/api/scope"),
             ("GET", "/api/findings"),
+            ("GET", "/api/scan/catalog"),
+            ("GET", "/api/scan/suggest/example.com"),
             ("GET", "/api/agents"),
         ] {
             assert!(allowed(m, method, path), "{method} {path} should be allowed");
@@ -355,6 +361,7 @@ mod tests {
         for (method, path) in [
             ("POST", "/api/send"),
             ("POST", "/api/replay"),
+            ("POST", "/api/scan"),
             ("POST", "/api/scope/accept"),
             ("POST", "/api/scope/reject"),
             ("POST", "/api/scope/remove"),

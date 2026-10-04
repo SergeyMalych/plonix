@@ -102,11 +102,24 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - Detection is driven by declarative **rule packs** that anyone can write and share. Install them from a file, a URL or the **store**, a JSON index hosted anywhere. New rules apply to traffic you already captured.
 - Packs are untrusted data: strictly validated, linear-time patterns only, pinned by SHA-256 and re-verified on load. They can't run code, reach the network or touch scope. See [docs/detection-rules.md](docs/detection-rules.md) and the extension design in [docs/extensions.md](docs/extensions.md).
 
+### Projects, side by side
+- **A project is a folder you choose.** It holds the project's traffic, scope and findings (`traffic.db`), its settings (`plonix-project.json`) and its own capture-browser profile. Move or copy the folder and open it again; it just works. New projects go in `~/Plonix` unless you pick another folder.
+- **Open several projects at once.** Each open project runs its own session: its own proxy port (8080, then 8081, 8082…), its own API and its own database. Nothing collides, and a project is never opened twice. All projects share one certificate, so you trust it once.
+- **The Start screen** lists your projects with their folders, whether they are open and on which proxy port. Create a project (with a folder picker), open one, change its settings, rename it, show its folder or remove it from the list.
+- **Keep only in-scope traffic** (Settings › Storage, per project): when the project closes, Plonix deletes traffic to every host that is not in scope and compacts the file, so it is gone from disk. Requests your findings point to are kept, and if nothing is in scope yet, nothing is deleted. If Plonix quits unexpectedly, the clean-up runs the next time the project opens. See [docs/projects.md](docs/projects.md).
+
+### Settings
+- **Proxy** (per project, applies right away): listen address and port (use 0.0.0.0 to capture from phones and other devices), next-free-port fallback, HTTPS decryption on or off, hosts that are never decrypted (for apps that pin certificates), server certificate checks, an upstream HTTP or SOCKS5 proxy with login and a list of hosts to reach directly, and timeouts.
+- **Storage** (per project): keep only in-scope traffic, with a count of what it would delete and a button to delete it now.
+- **Interface** (all projects): open projects in a Plonix window or in your web browser, and show the Start screen or reopen the last project when Plonix starts.
+- Settings are a registry: a feature adds a section by describing its fields, and the Settings screens draw it with validation and storage included (see [docs/projects.md](docs/projects.md#adding-a-settings-section)).
+
 ### The Plonix app
-- **Plonix.app** is a Mac app: double-click it and the Plonix window opens with capture running. It starts the engine inside the app (or uses the one already running), signs itself in, and needs no terminal.
+- **Plonix.app** is a Mac app: double-click it and the Start screen opens. Pick or create a project and it opens in a window of its own, with capture running. Open more projects and each gets its own window. Closing a project's window closes its session. No terminal needed.
+- With Settings › Interface › **Open projects in: My web browser**, projects open in your default browser instead; View › Open in Browser (⇧⌘B) does it for one window.
 - **Open target** (⌘O, or the button at the top of the sidebar) opens the site you are testing in the capture browser: a separate browser with an isolated profile that routes through Plonix and trusts its certificate. The domain and its subdomains go into scope.
-- Native menu bar and shortcuts: ⌘1 to ⌘6 switch between Traffic, Bench, Scope, Map, Findings and Agents, ⌃⌘S shows or hides the sidebar. Light and dark follow the system.
-- `plonix` commands in a terminal talk to the same engine while the app is open, so scripts and the window always see the same project. Quitting the app stops an engine it started.
+- Native menu bar and shortcuts: ⌘N new project, ⇧⌘P the Start screen, ⌘, Settings, ⌘1 to ⌘6 switch between Traffic, Bench, Scope, Map, Findings and Agents, ⌃⌘S shows or hides the sidebar. Light and dark follow the system.
+- `plonix` commands in a terminal talk to the same sessions while the app is open (`-p` picks the project), and projects started from a terminal show up on the Start screen. Quitting the app closes the projects it opened.
 - The same window also runs in any browser with `plonix ui`, served by the engine itself.
 
 ### The Plonix window
@@ -212,11 +225,19 @@ plonix rules add ./my-pack.json            # or an https:// URL, optionally --sh
 plonix store                               # browse community packs
 plonix store install admin-panels          # verified against the store's sha256
 plonix stop                                # captured traffic is kept
+
+plonix start -p shop                       # open another project; it gets its own proxy
+plonix sessions                            # projects open right now, with their ports
+plonix -p shop search status:5xx           # -p (or $PLONIX_PROJECT) picks the project
+plonix projects                            # every project and its folder
+plonix projects new "Acme staging" --location ~/work
+plonix launcher                            # the Start screen, in your browser
+plonix stop --all
 ```
 
 Replays only go to accepted hosts. Anything else is refused with exit code 4 and a hint to accept the host first. Every command takes `--json` for scripting. Exit codes are `0` ok, `1` error, `2` bad usage or query, `3` engine not running, `4` refused by scope, `5` not found.
 
-`plonix start` runs the engine without opening a browser (`--project`, `--port`, `--insecure-upstream` for self-signed staging hosts). Data lives in `~/.plonix`, or `$PLONIX_HOME`.
+`plonix start` opens a project without opening a browser (`-p`, `--port`, `--insecure-upstream` for self-signed staging hosts). Without `-p`, commands talk to the current session: the project opened last. Projects live in their own folders; Plonix's own files (certificate, token, the list of projects, shared settings) live in `~/.plonix`, or `$PLONIX_HOME`.
 
 ### Using the local API directly
 
@@ -257,10 +278,17 @@ The API listens on port 8090 when it is free; `plonix status` shows the actual a
 | POST | `/api/send` | Send a new request (in-scope hosts only) |
 | POST | `/api/replay` | Replay a captured exchange, optionally modified |
 | GET / POST | `/api/findings` | List or record findings |
+| GET | `/api/settings` | Settings sections, with their fields and values |
+| PUT | `/api/settings/{section}` | Save a section (`{"values": {...}}`); proxy changes apply at once |
+| GET | `/api/storage` | How much traffic is out of scope, and the storage policy |
+| POST | `/api/storage/prune` | Delete out-of-scope traffic now (`{"confirm": true}`) |
+| GET | `/api/sessions` | Every open project, with its proxy and API addresses |
 | GET | `/api/agents` | What agents may do, and which agents are connected |
 | GET / PUT | `/api/agents/settings` | Read or change agent access (user only) |
 | POST | `/api/agents/ask` | Build the context for "Ask Claude Code" about a request, finding or host |
-| POST | `/api/shutdown` | Stop the engine |
+| POST | `/api/shutdown` | Close this project's session |
+
+Each open project has its own API address. `$PLONIX_HOME/sessions/` lists them, and `engine.json` points to the current one. The Start screen has an API of its own (see [docs/projects.md](docs/projects.md)).
 
 ## Architecture
 
@@ -283,8 +311,9 @@ The engine is a headless background process. Every front end talks to it the sam
 
 ```text
 crates/
-├── plonix-core   engine: proxy, CA, store, search, scope, detection, rule packs, store index, local API
-│   └── ui/       the Plonix window: plain HTML, CSS and JavaScript embedded in the binary
+├── plonix-core   engine: proxy, CA, store, search, scope, detection, rule packs, store index, local API,
+│   │             projects, sessions, settings and the Start screen
+│   └── ui/       the Plonix window and Start screen: plain HTML, CSS and JavaScript embedded in the binary
 ├── plonix-cli    the `plonix` command: engine control, onboarding, search, scope, replay, rules, store, MCP server
 └── plonix-app    Plonix.app: the window as a desktop app, with the engine built in
 store/            community store: index.json and rule packs
@@ -306,6 +335,7 @@ docs/             detection rules, agents and MCP, extension design
 - [x] The Plonix window (`plonix ui`): live traffic, the Bench with branch and compare, adaptive scope review, map with technologies, findings
 - [x] Plonix.app for macOS: the window as a desktop app with the engine built in, Open target from the app, native menu bar
 - [x] Read-only MCP server (`plonix mcp`), `plonix connect claude` and the Agents screen
+- [x] Projects in folders you choose, several open at once with a session each, a Start screen, and Settings (proxy, storage, interface)
 
 **Coming**
 - [ ] Opt-in active mode for agents: replay and send within accepted scope, switched on by you ([design](docs/agents.md#later-an-opt-in-active-mode))

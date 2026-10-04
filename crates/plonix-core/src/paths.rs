@@ -6,11 +6,17 @@
 //! ├── api-token              bearer token for the local API (0600)
 //! ├── agent-token            read-only token for AI agents (0600)
 //! ├── agents.json            what agents may see (Agents screen)
-//! ├── engine.json            address of the running engine, written on start
+//! ├── engine.json            the current session's address (the last one opened)
+//! ├── sessions/<id>.json     one file per open project session
+//! ├── hub.json               address of the Start screen, while it runs
+//! ├── projects.json          projects Plonix knows about, and where they are
+//! ├── settings.json          settings shared by all projects
 //! ├── logs/engine.log
-//! ├── browser/               profile for the pre-configured browser
-//! └── projects/<name>.db     one SQLite database per project
+//! └── projects/              default place for new projects (see below)
 //! ```
+//!
+//! Each project is a folder of its own, anywhere on disk (see
+//! [`crate::project`]). Without `$PLONIX_HOME`, new projects go in `~/Plonix`.
 
 use std::path::{Path, PathBuf};
 
@@ -27,7 +33,7 @@ impl Home {
     pub fn resolve(explicit: Option<&Path>) -> Result<Self> {
         let root = match explicit {
             Some(p) => p.to_path_buf(),
-            None => match std::env::var_os("PLONIX_HOME") {
+            None => match std::env::var_os("PLONIX_HOME").filter(|p| !p.is_empty()) {
                 Some(p) => PathBuf::from(p),
                 None => {
                     let home = std::env::var_os("HOME").context("HOME is not set")?;
@@ -39,8 +45,8 @@ impl Home {
     }
 
     pub fn ensure(&self) -> Result<()> {
-        std::fs::create_dir_all(self.root.join("projects"))?;
         std::fs::create_dir_all(self.root.join("logs"))?;
+        std::fs::create_dir_all(self.sessions_dir())?;
         Ok(())
     }
 
@@ -70,8 +76,26 @@ impl Home {
     pub fn browser_profile(&self) -> PathBuf {
         self.root.join("browser")
     }
+    /// Where earlier versions kept a project's database.
     pub fn project_db(&self, project: &str) -> PathBuf {
         self.root.join("projects").join(format!("{project}.db"))
+    }
+    pub fn sessions_dir(&self) -> PathBuf {
+        self.root.join("sessions")
+    }
+    pub fn hub_file(&self) -> PathBuf {
+        self.root.join("hub.json")
+    }
+    pub fn projects_file(&self) -> PathBuf {
+        self.root.join("projects.json")
+    }
+    /// Where new projects go unless the user picks a folder: `~/Plonix` for
+    /// the standard data directory, else inside the chosen one.
+    pub fn default_projects_dir(&self) -> PathBuf {
+        match std::env::var_os("HOME").map(PathBuf::from) {
+            Some(h) if self.root == h.join(".plonix") => h.join("Plonix"),
+            _ => self.root.join("projects"),
+        }
     }
 
     /// Returns the API token, creating a random one on first use.
@@ -114,6 +138,20 @@ pub struct EngineInfo {
     pub proxy: String,
     pub project: String,
     pub started_at: i64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub project_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_dir: Option<PathBuf>,
+}
+
+/// Replaces a file in one step, so readers never see half of it.
+pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
+    let dir = path.parent().unwrap_or(Path::new("."));
+    std::fs::create_dir_all(dir)?;
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, data).with_context(|| format!("writing {}", tmp.display()))?;
+    std::fs::rename(&tmp, path).with_context(|| format!("writing {}", path.display()))
 }
 
 /// Writes a file readable only by the current user.
