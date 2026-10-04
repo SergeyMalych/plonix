@@ -31,7 +31,12 @@ impl Plonix {
     }
 
     fn run(&self, args: &[&str]) -> Run {
-        Run(self.cmd(args).stdin(Stdio::null()).output().unwrap())
+        let r = Run(self.cmd(args).stdin(Stdio::null()).output().unwrap());
+        if r.code() != 0 {
+            // Shown only when the test fails: what the engines logged.
+            eprintln!("--- engine log after `plonix {}`:\n{}", args.join(" "), std::fs::read_to_string(self.home.path().join("logs/engine.log")).unwrap_or_default());
+        }
+        r
     }
 
     fn run_with_input(&self, args: &[&str], input: &str) -> Run {
