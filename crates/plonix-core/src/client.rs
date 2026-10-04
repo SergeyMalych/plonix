@@ -106,6 +106,10 @@ impl Client {
         )
     }
 
+    pub fn put(&self, path: &str, body: Value) -> Result<Value> {
+        self.handle(self.request("PUT", path).send_json(body))
+    }
+
     pub fn patch(&self, path: &str, body: Value) -> Result<Value> {
         self.handle(self.request("PATCH", path).send_json(body))
     }

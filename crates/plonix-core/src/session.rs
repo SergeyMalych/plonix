@@ -81,6 +81,14 @@ pub async fn open(home: &Home, mut project: Project, options: OpenOptions) -> Re
     engine.start_recorder();
     let api = bind_api(options.api_port.or(project.file.last_api_port)).await?;
     let api_addr = api.local_addr()?;
+    let intercept = crate::intercept::InterceptOptions::from_values(&project.settings(crate::intercept::SETTINGS_SECTION));
+    if let Err(e) = engine.set_intercept_options(intercept) {
+        tracing::warn!("{}: {e:#}; Intercept holds without a filter", project.name());
+    }
+    let replace_on = project.settings(crate::replace::SETTINGS_SECTION).get("enabled").and_then(serde_json::Value::as_bool).unwrap_or(true);
+    if let Err(e) = engine.set_replace_on(replace_on) {
+        tracing::warn!("{}: match-and-replace rules could not be read: {e:#}", project.name());
+    }
     if let Err(e) = engine.apply_proxy_settings(&proxy).await {
         let _ = std::fs::remove_file(project.open_marker());
         return Err(e);

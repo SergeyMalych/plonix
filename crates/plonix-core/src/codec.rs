@@ -24,6 +24,22 @@ pub fn decode_body(headers: &Headers, body: &[u8]) -> Vec<u8> {
     out.unwrap_or_else(|| body.to_vec())
 }
 
+/// The body with its `Content-Encoding` undone, only when there is one and
+/// all of it decodes (within `max` bytes); `None` otherwise. Used where the
+/// decoded body replaces the original, so a partial result is no good.
+pub fn decode_whole(headers: &Headers, body: &[u8], max: usize) -> Option<Vec<u8>> {
+    let enc = header(headers, "content-encoding")?.trim().to_ascii_lowercase();
+    let limit = max as u64 + 1;
+    let mut out = Vec::new();
+    let done = match enc.as_str() {
+        "gzip" | "x-gzip" => flate2::read::MultiGzDecoder::new(body).take(limit).read_to_end(&mut out),
+        "deflate" => flate2::read::ZlibDecoder::new(body).take(limit).read_to_end(&mut out),
+        "br" => brotli::Decompressor::new(body, 4096).take(limit).read_to_end(&mut out),
+        _ => return None,
+    };
+    (done.is_ok() && out.len() <= max).then_some(out)
+}
+
 /// Everything a decoder produces before it ends or fails, or `None` when it
 /// produces nothing usable.
 fn read_partial(mut r: impl Read) -> Option<Vec<u8>> {
