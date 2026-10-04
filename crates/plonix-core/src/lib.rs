@@ -16,6 +16,7 @@ pub mod crawl;
 pub mod codec;
 pub mod detect;
 pub mod engine;
+pub mod exclude;
 pub mod insight;
 pub mod market;
 pub mod extension;

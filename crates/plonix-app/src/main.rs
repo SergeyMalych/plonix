@@ -13,6 +13,8 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod updates;
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -74,12 +76,16 @@ fn main() {
         .init();
 
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updates::Updates::new())
         .menu(build_menu)
         .on_menu_event(|app, event| on_menu(app, event.id().as_ref()))
         .setup(|app| {
             let handle = app.handle().clone();
             launcher_window(&handle)?;
             std::thread::Builder::new().name("plonix-start".into()).spawn(move || start(handle))?;
+            updates::start(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -326,6 +332,9 @@ fn focused(app: &AppHandle) -> Option<WebviewWindow> {
 }
 
 fn on_menu(app: &AppHandle, id: &str) {
+    if updates::on_menu_event(app, id) {
+        return;
+    }
     let win = focused(app);
     let in_project = win.as_ref().is_some_and(|w| w.label() != LAUNCHER);
     match id {
@@ -389,7 +398,7 @@ fn open_in_browser(w: &WebviewWindow) {
 }
 
 /// The platform's standard menu, plus File › New Project…, Projects and
-/// Open Target…, Settings…, and the Plonix screens in View.
+/// Open Target…, Settings…, the update items, and the Plonix screens in View.
 fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let menu = Menu::default(app)?;
     let new_project = MenuItem::with_id(app, "new-project", "New Project…", true, Some("CmdOrCtrl+N"))?;
@@ -406,6 +415,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     } else {
         file.append_items(&[&PredefinedMenuItem::separator(app)?, &settings])?;
     }
+    add_update_items(app, &menu)?;
 
     let view = find_or_add_submenu(app, &menu, "View", 3)?;
     let mut items: Vec<MenuItem<Wry>> = Vec::new();
@@ -425,6 +435,27 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     }
     view.prepend_items(&refs)?;
     Ok(menu)
+}
+
+/// Check for Updates… and its automatic-check choices go right under About
+/// in the app menu on macOS, and in Help elsewhere.
+fn add_update_items(app: &AppHandle, menu: &Menu<Wry>) -> tauri::Result<()> {
+    let (check_now, auto) = updates::menu_items(app)?;
+    let sep = PredefinedMenuItem::separator(app)?;
+    if cfg!(target_os = "macos")
+        && let Some(MenuItemKind::Submenu(app_menu)) = menu.items()?.into_iter().next()
+    {
+        // The app menu starts with About Plonix.
+        let at = 1.min(app_menu.items()?.len());
+        app_menu.insert_items(&[&sep, &check_now, &auto], at)?;
+        return Ok(());
+    }
+    let help = find_or_add_submenu(app, menu, "Help", usize::MAX)?;
+    if !help.items()?.is_empty() {
+        help.append(&sep)?;
+    }
+    help.append_items(&[&check_now, &auto])?;
+    Ok(())
 }
 
 fn find_or_add_submenu(app: &AppHandle, menu: &Menu<Wry>, title: &str, position: usize) -> tauri::Result<Submenu<Wry>> {

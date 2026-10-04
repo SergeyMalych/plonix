@@ -30,5 +30,11 @@
     "macOS": {
       "minimumSystemVersion": "11.0"
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": ["https://github.com/SergeyMalych/plonix/releases/latest/download/latest.json"]
+    }
   }
 }
