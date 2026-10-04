@@ -113,6 +113,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/scan/catalog", get(scan_catalog))
         .route("/api/scan/suggest/{host}", get(scan_suggest))
         .route("/api/scan", post(scan_run))
+        .route("/api/crawl", post(crawl_run))
         .route("/api/agents", get(agents))
         .route("/api/agents/settings", get(agent_settings).put(put_agent_settings))
         .route("/api/agents/ask", post(agent_ask))
@@ -452,6 +453,15 @@ async fn scan_suggest(State(s): State<AppState>, Path(host): Path<String>) -> Re
 
 async fn scan_run(State(s): State<AppState>, headers: HeaderMap, Json(req): Json<crate::scan::ScanRequest>) -> Response {
     match s.engine.scan(req, &initiator(&headers)).await {
+        Ok(report) => Json(report).into_response(),
+        Err(e @ SendError::OutOfScope { .. }) => err(StatusCode::FORBIDDEN, "out_of_scope", &e.to_string()),
+        Err(SendError::Other(e)) => internal(e),
+        Err(e) => err(StatusCode::BAD_REQUEST, "bad_request", &e.to_string()),
+    }
+}
+
+async fn crawl_run(State(s): State<AppState>, headers: HeaderMap, Json(req): Json<crate::crawl::CrawlRequest>) -> Response {
+    match s.engine.crawl(req, &initiator(&headers)).await {
         Ok(report) => Json(report).into_response(),
         Err(e @ SendError::OutOfScope { .. }) => err(StatusCode::FORBIDDEN, "out_of_scope", &e.to_string()),
         Err(SendError::Other(e)) => internal(e),

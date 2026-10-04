@@ -12,6 +12,7 @@ pub mod api;
 pub mod ask;
 pub mod browser;
 pub mod ca;
+pub mod crawl;
 pub mod codec;
 pub mod detect;
 pub mod engine;

@@ -20,6 +20,7 @@ use crate::model::{Exchange, Headers, Source, now_ms};
 use crate::paths::{EngineInfo, Home};
 use crate::project::PruneReport;
 use crate::rulepack::{Library, PackInfo};
+use crate::crawl;
 use crate::exclude::{self, ExcludedDomain, Exclusions, Group, GroupStatus};
 use crate::scan;
 use crate::scope::{self, Decision, Rule, ScopeRules};
@@ -763,6 +764,91 @@ impl Engine {
         }
         if budget_hit {
             report.notes.push(format!("request budget of {budget} reached; some tactics may not have run"));
+        }
+        Ok(report)
+    }
+
+    /// Crawls an accepted host: fetches in-scope pages through `send`, follows
+    /// the same-host links it finds, and records what it sees. GET only; it
+    /// never submits a form and never leaves accepted scope.
+    pub async fn crawl(&self, req: crawl::CrawlRequest, initiator: &str) -> Result<crawl::CrawlReport, SendError> {
+        let host = scope::normalize_host(&req.host);
+        let decision = self.rules().decide(&host);
+        if decision != Decision::Accepted {
+            return Err(SendError::OutOfScope { host, decision: decision.as_str() });
+        }
+
+        let exchanges = self.store.exchanges_for_host(&host, 50).map_err(SendError::Other)?;
+        let (scheme, port) = exchanges.first().map(|e| (e.scheme.clone(), e.port)).unwrap_or_else(|| ("https".into(), 443));
+        let default_port = (scheme == "https" && port == 443) || (scheme == "http" && port == 80);
+        let authority = if default_port { host.clone() } else { format!("{host}:{port}") };
+
+        let max_pages = req.max_pages.unwrap_or(crawl::DEFAULT_MAX_PAGES).min(crawl::MAX_PAGES_CEIL);
+        let max_depth = req.max_depth.unwrap_or(crawl::DEFAULT_MAX_DEPTH);
+
+        let mut report = crawl::CrawlReport { host: host.clone(), pages_fetched: 0, urls_found: 0, forms: vec![], notes: vec![] };
+        if req.browser {
+            report.notes.push("the browser crawl mode is not available yet; ran a plain crawl".into());
+        }
+
+        // Seed with the start path and any already-discovered endpoints.
+        let start = req.start.as_deref().unwrap_or("/");
+        let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut queue: std::collections::VecDeque<(String, usize)> = std::collections::VecDeque::new();
+        let enqueue = |url: String, depth: usize, seen: &mut std::collections::BTreeSet<String>, queue: &mut std::collections::VecDeque<(String, usize)>| {
+            let key = crawl::dedup_key(&url);
+            if seen.insert(key) {
+                queue.push_back((url, depth));
+            }
+        };
+        enqueue(format!("{scheme}://{authority}{}", if start.starts_with('/') { start.to_string() } else { format!("/{start}") }), 0, &mut seen, &mut queue);
+        for e in self.store.endpoints(&host).map_err(SendError::Other)?.into_iter().filter(|e| e.method.eq_ignore_ascii_case("GET")) {
+            enqueue(format!("{scheme}://{authority}{}", e.path), 0, &mut seen, &mut queue);
+        }
+        report.urls_found = seen.len();
+
+        let mut budget_hit = false;
+        while let Some((url, depth)) = queue.pop_front() {
+            if report.pages_fetched >= max_pages {
+                budget_hit = true;
+                break;
+            }
+            report.pages_fetched += 1;
+            let ex = match self.send(SendRequest { method: "GET".into(), url: url.clone(), ..Default::default() }, initiator).await {
+                Ok(ex) => ex,
+                Err(SendError::OutOfScope { .. }) => continue,
+                Err(e) => {
+                    report.notes.push(format!("fetch failed: {e}"));
+                    continue;
+                }
+            };
+            let is_html = crate::model::header(&ex.resp_headers, "content-type").is_some_and(|c| c.to_ascii_lowercase().contains("html"));
+            if !is_html {
+                continue;
+            }
+            let Some(body) = crate::codec::body_text(&ex.resp_headers, &ex.resp_body) else { continue };
+            for form in crawl::extract_forms(&body) {
+                let action = if form.action.is_empty() {
+                    url.clone()
+                } else {
+                    crawl::resolve_same_host(&scheme, &authority, &ex.path, &form.action).unwrap_or(form.action.clone())
+                };
+                let resolved = crawl::Form { action, ..form };
+                if !report.forms.contains(&resolved) {
+                    report.forms.push(resolved);
+                }
+            }
+            if depth < max_depth {
+                for raw in crawl::extract_links(&body) {
+                    if let Some(next) = crawl::resolve_same_host(&scheme, &authority, &ex.path, &raw) {
+                        enqueue(next, depth + 1, &mut seen, &mut queue);
+                    }
+                }
+            }
+            report.urls_found = seen.len();
+        }
+        if budget_hit {
+            report.notes.push(format!("page budget of {max_pages} reached; more pages remain uncrawled"));
         }
         Ok(report)
     }

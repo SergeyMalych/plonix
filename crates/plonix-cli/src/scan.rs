@@ -35,6 +35,60 @@ pub struct RunArgs {
     pub max_requests: Option<usize>,
 }
 
+#[derive(Args)]
+pub struct CrawlArgs {
+    /// The host to crawl (must be accepted into scope)
+    pub host: String,
+    /// Where to start, as a path
+    #[arg(long, value_name = "PATH")]
+    pub start: Option<String>,
+    /// Most pages to fetch
+    #[arg(long, value_name = "N")]
+    pub max_pages: Option<usize>,
+    /// How deep to follow links
+    #[arg(long, value_name = "N")]
+    pub max_depth: Option<usize>,
+    /// Use the browser driver for JS-rendered pages (not available yet)
+    #[arg(long)]
+    pub browser: bool,
+}
+
+pub fn crawl_cmd(ctx: &Ctx, a: CrawlArgs) -> Result<()> {
+    let c = ctx.client()?;
+    let body = json!({
+        "host": a.host.trim(),
+        "start": a.start,
+        "browser": a.browser,
+        "max_pages": a.max_pages,
+        "max_depth": a.max_depth,
+    });
+    let v = c.post("/api/crawl", body)?;
+    if ctx.json {
+        return ctx.print_json(&v);
+    }
+    println!(
+        "Crawled {} — {} page(s) fetched, {} URL(s) found (all in scope).",
+        a.host.trim(),
+        v["pages_fetched"].as_u64().unwrap_or(0),
+        v["urls_found"].as_u64().unwrap_or(0)
+    );
+    let forms = v["forms"].as_array().cloned().unwrap_or_default();
+    if !forms.is_empty() {
+        println!("\nForms:");
+        for f in &forms {
+            let fields: Vec<&str> = f["fields"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default();
+            println!("  {:<5} {:<30} [{}]", f["method"].as_str().unwrap_or(""), f["action"].as_str().unwrap_or(""), fields.join(", "));
+        }
+    }
+    println!("\nDiscovered endpoints are on the Map: `plonix hosts`, then the app's Map screen.");
+    for note in v["notes"].as_array().cloned().unwrap_or_default() {
+        if let Some(n) = note.as_str() {
+            println!("Note: {n}");
+        }
+    }
+    Ok(())
+}
+
 pub fn scan_cmd(ctx: &Ctx, cmd: ScanCmd) -> Result<()> {
     match cmd {
         ScanCmd::Suggest { host } => suggest(ctx, &host),
