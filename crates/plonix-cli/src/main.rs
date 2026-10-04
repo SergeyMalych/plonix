@@ -11,6 +11,7 @@ mod engine_ctl;
 mod mcp;
 mod open;
 mod render;
+mod bench;
 mod scan;
 
 use std::io::{BufRead, IsTerminal, Write};
@@ -142,6 +143,11 @@ enum Cmd {
     },
     /// Crawl a host to discover endpoints, parameters and forms
     Crawl(scan::CrawlArgs),
+    /// Bench: run payloads through marked positions of a request
+    Bench {
+        #[command(subcommand)]
+        cmd: bench::BenchCmd,
+    },
     /// Detection rule packs: list, add from a file or URL, remove, check
     Rules {
         #[command(subcommand)]
@@ -406,6 +412,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Cmd::Tech { host } => community::tech_cmd(&ctx, host)?,
         Cmd::Scan { cmd } => scan::scan_cmd(&ctx, cmd)?,
         Cmd::Crawl(a) => scan::crawl_cmd(&ctx, a)?,
+        Cmd::Bench { cmd } => bench::bench_cmd(&ctx, cmd)?,
         Cmd::Rules { cmd } => community::rules_cmd(&ctx, cmd.unwrap_or(community::RulesCmd::List))?,
         Cmd::Store(a) => community::store_cmd(&ctx, a)?,
         Cmd::Connect { cmd } => connect::connect_cmd(&ctx, cmd)?,

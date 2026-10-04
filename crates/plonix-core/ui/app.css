@@ -594,3 +594,39 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .opt select { border: 1px solid var(--line-2); background: var(--surface-2); border-radius: 7px; padding: 4px 8px; font-size: 12px; }
 @media (max-width: 900px) { .setgrid { grid-template-columns: 1fr; } .setgrid > div + div { border-left: 0; border-top: 1px solid var(--line-2); } }
 .backbtn { flex: 0 0 auto; white-space: nowrap; }
+
+/* ---------- Bench payload runs ---------- */
+.seg.benchpanel { flex: 0 0 auto; }
+.seg button.on { background: var(--accent-soft); color: var(--accent); }
+.runcol { min-width: 0; display: flex; flex-direction: column; }
+.runconf { padding: 4px 12px 12px; display: flex; flex-direction: column; gap: 12px; overflow: auto; }
+.runpos { font-size: 12px; color: var(--fg-2); }
+.runfield { display: flex; align-items: center; gap: 10px; }
+.plabel { font-size: 11px; font-weight: 650; color: var(--fg-3); min-width: 86px; }
+.listrow { display: flex; align-items: flex-start; gap: 10px; }
+.listpick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.listpick select, .runconf input, .runconf textarea { border: 1px solid var(--line); background: var(--surface-2); border-radius: 6px; padding: 4px 7px; outline: 0; font: inherit; }
+.listpick select:focus, .runconf input:focus, .runconf textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.listdetail { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.listvals { width: 100%; min-height: 64px; resize: vertical; font-family: var(--mono); font-size: 11.5px; }
+input.num { width: 72px; }
+.runopts { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; font-size: 12px; color: var(--fg-2); }
+.runopts label { display: flex; align-items: center; gap: 6px; }
+.runconf .btn.primary { align-self: flex-start; }
+.runbusy { padding: 16px 14px; color: var(--fg-2); font-size: 13px; }
+.runresultswrap { border-top: 1px solid var(--line-2); }
+.runsum { padding: 8px 14px; font-size: 12px; color: var(--fg-2); }
+.runnote { padding: 2px 14px 6px; font-size: 11.5px; color: var(--warn); }
+.runtable { font-family: var(--mono); font-size: 11.5px; }
+.rthead, .rtrow { display: grid; grid-template-columns: 58px 62px 72px 72px 1fr auto; align-items: center; gap: 8px; padding: 3px 14px; }
+.rthead { position: sticky; top: 0; background: var(--surface); border-bottom: 1px solid var(--line-2); z-index: 1; }
+.sortbtn { background: transparent; border: 0; padding: 0; font: inherit; font-weight: 650; color: var(--fg-3); text-align: left; text-transform: uppercase; letter-spacing: .04em; font-size: 10px; }
+.sortbtn.on { color: var(--accent); }
+.rtrow { border-bottom: 1px solid var(--line-2); cursor: pointer; }
+.rtrow:hover { background: var(--surface-2); }
+.rtrow.sel { background: var(--accent-soft); }
+.rtrow.diff .c-len { color: var(--accent); font-weight: 650; }
+.rtrow .c-val { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rtrow .c-n { color: var(--fg-3); }
+.runsel { padding: 0 2px; }
+.runsel pre.raw { margin: 0; padding: 6px 14px; max-height: 42vh; overflow: auto; }

@@ -21,6 +21,7 @@ use crate::paths::{EngineInfo, Home};
 use crate::project::PruneReport;
 use crate::rulepack::{Library, PackInfo};
 use crate::crawl;
+use crate::runs;
 use crate::scan;
 use crate::scope::{self, Decision, Rule, ScopeRules};
 use crate::settings::ProxySettings;
@@ -763,6 +764,93 @@ impl Engine {
         }
         if budget_hit {
             report.notes.push(format!("page budget of {max_pages} reached; more pages remain uncrawled"));
+        }
+        Ok(report)
+    }
+
+    /// Runs a set of payloads through the marked positions of a request. Every
+    /// request it produces goes through [`Self::send`], so a run is bounded by
+    /// scope exactly like a single Bench send: it can only reach accepted hosts,
+    /// it is capped by a request budget, and every send is recorded. A person
+    /// starts it; it never fires on its own.
+    pub async fn run(&self, req: runs::RunRequest, initiator: &str) -> Result<runs::RunReport, SendError> {
+        let plan = runs::plan(&req).map_err(SendError::BadRequest)?;
+        let budget = req.max_requests.unwrap_or(runs::DEFAULT_REQUEST_BUDGET).min(runs::MAX_REQUEST_BUDGET);
+        let delay = std::time::Duration::from_millis(req.delay_ms.unwrap_or(runs::DEFAULT_DELAY_MS).min(runs::MAX_DELAY_MS));
+        let method = if req.method.trim().is_empty() { "GET".into() } else { req.method.to_ascii_uppercase() };
+
+        let mut report = runs::RunReport { positions: plan.positions(), ..Default::default() };
+
+        // Build the full list of requests to send: the baseline (if asked), then
+        // one per value-assignment.
+        let base = plan.base_values();
+        let mut assignments: Vec<(bool, Vec<String>)> = Vec::new();
+        if req.include_base {
+            assignments.push((true, base.clone()));
+        }
+        for a in plan.assignments() {
+            assignments.push((false, a));
+        }
+        report.planned = assignments.len();
+        if assignments.len() > budget {
+            assignments.truncate(budget);
+            report.truncated = true;
+        }
+
+        let mut first = true;
+        for (baseline, values) in assignments {
+            // Pace the run; no pause before the very first request.
+            if !first && !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+            first = false;
+
+            let (url, raw) = plan.render(&values);
+            let (headers, body) = match runs::split_raw(&raw) {
+                Ok(hb) => hb,
+                Err(e) => return Err(SendError::BadRequest(e)),
+            };
+            let send = SendRequest {
+                method: method.clone(),
+                url,
+                headers,
+                body: if body.is_empty() { None } else { Some(body) },
+                body_base64: None,
+            };
+            let n = report.rows.len() + 1;
+            match self.send(send, initiator).await {
+                Ok(ex) => report.rows.push(runs::RunRow {
+                    n,
+                    values: values.clone(),
+                    exchange_id: ex.id,
+                    status: ex.status,
+                    length: ex.resp_body.len(),
+                    duration_ms: ex.duration_ms,
+                    error: ex.error,
+                    baseline,
+                }),
+                // The first out-of-scope refusal stops the run with a clear
+                // error, since every request targets the same host family.
+                Err(e @ SendError::OutOfScope { .. }) => {
+                    if report.rows.is_empty() {
+                        return Err(e);
+                    }
+                    report.notes.push(e.to_string());
+                    break;
+                }
+                Err(SendError::BadRequest(m)) => {
+                    if report.rows.is_empty() {
+                        return Err(SendError::BadRequest(m));
+                    }
+                    report.notes.push(format!("request {n}: {m}"));
+                }
+                Err(SendError::Other(e)) => return Err(SendError::Other(e)),
+                Err(e) => report.notes.push(format!("request {n}: {e}")),
+            }
+        }
+        report.requests_sent = report.rows.len();
+        if report.truncated {
+            report.notes.push(format!("request budget of {budget} reached; {} of {} requests were sent", report.requests_sent, report.planned));
         }
         Ok(report)
     }
