@@ -21,6 +21,12 @@ Projects that an earlier Plonix kept as `~/.plonix/projects/<name>.db` move into
 
 A local folder works best. Captured traffic changes constantly, which syncs poorly, so Plonix warns about folders that a cloud storage service syncs.
 
+## The demo project
+
+**Try the Demo** on the Start screen (or `plonix projects demo`) creates a ready-made project to explore Plonix with, in `plonix-demo` in the projects folder, and opens it. It holds traffic from Brightcart, a made-up online shop on reserved `.example` hosts, as a researcher would have it after a short session: Lens insights (a token, encoded values, a card number, a key in a script), scope suggestions with their evidence, common third parties to exclude, findings, two Bench experiments and what Scans would check. The traffic was written into the project's database, not captured, so opening the demo sends nothing anywhere, and its hosts do not exist.
+
+Change anything you like. **Start demo over…** in the project's **⋯** menu (or `plonix projects demo --fresh`) replaces it with a fresh copy. Only a project marked as the demo can be started over, and only while it is closed.
+
 ## Sessions
 
 Each open project runs in a session with an engine of its own:
@@ -103,6 +109,7 @@ The Start screen is served on its own loopback address (8070 by default; `$PLONI
 | GET | `/api/projects` | Known projects, with folder, size and the session serving each one |
 | POST | `/api/projects` | Create a project (`{"name": "...", "location": "/parent/folder"}`) |
 | POST | `/api/projects/add` | Add an existing project folder (`{"path": "..."}`) |
+| POST | `/api/projects/demo` | The demo project, created on first use; `{"fresh": true}` replaces it with a new copy |
 | POST | `/api/projects/{id}/open` | Open it (or find its session) and return a one-time link for its window |
 | POST | `/api/projects/{id}/close` | Close its session |
 | POST | `/api/projects/{id}/forget` | Remove it from the list; the folder is kept |

@@ -269,6 +269,7 @@ fn router(hub: Arc<Hub>) -> Router {
         .route("/api/hub", get(about))
         .route("/api/projects", get(projects).post(create))
         .route("/api/projects/add", post(add_existing))
+        .route("/api/projects/demo", post(demo))
         .route("/api/projects/{id}/open", post(open))
         .route("/api/projects/{id}/close", post(close))
         .route("/api/projects/{id}/forget", post(forget))
@@ -412,6 +413,25 @@ async fn add_existing(State(hub): State<Arc<Hub>>, Json(b): Json<AddBody>) -> Re
     match Project::load(&dir).and_then(|p| project::remember(&hub.home, &p, false).map(|_| p)) {
         Ok(p) => Json(json!({ "id": p.id(), "name": p.name(), "path": p.dir })).into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, "bad_request", &format!("{e:#}")),
+    }
+}
+
+#[derive(Deserialize, Default)]
+struct DemoBody {
+    /// Replace the demo with a fresh copy.
+    #[serde(default)]
+    fresh: bool,
+}
+
+/// The demo project, created on first use (or made afresh). Opening it is a
+/// separate step, like for any project.
+async fn demo(State(hub): State<Arc<Hub>>, body: Option<Json<DemoBody>>) -> Response {
+    let fresh = body.map(|Json(b)| b.fresh).unwrap_or_default();
+    let home = hub.home.clone();
+    match tokio::task::spawn_blocking(move || crate::demo::ensure(&home, fresh)).await {
+        Ok(Ok(p)) => Json(json!({ "id": p.id(), "name": p.name(), "path": p.dir })).into_response(),
+        Ok(Err(e)) => err(StatusCode::CONFLICT, "cannot_create_demo", &format!("{e:#}")),
+        Err(e) => internal(e.into()),
     }
 }
 

@@ -212,6 +212,12 @@ enum ProjectsCmd {
     Path { project: String },
     /// Remove a project from the list (its folder is kept)
     Forget { project: String },
+    /// Create the demo project: a made-up shop's traffic, already explored
+    Demo {
+        /// Replace the demo project with a fresh copy
+        #[arg(long)]
+        fresh: bool,
+    },
 }
 
 #[derive(Args)]
@@ -567,6 +573,13 @@ fn projects_cmd(ctx: &Ctx, cmd: ProjectsCmd) -> Result<()> {
             }
             project::forget(&ctx.home, &entry.id)?;
             println!("Removed '{}' from the list. Its folder is still at {}.", entry.name, open::tilde(&entry.path));
+        }
+        ProjectsCmd::Demo { fresh } => {
+            let p = plonix_core::demo::ensure(&ctx.home, fresh)?;
+            if ctx.json {
+                return ctx.print_json(&json!({ "id": p.id(), "name": p.name(), "path": p.dir }));
+            }
+            println!("The demo project is in {}.\nOpen it with `plonix start -p {}`.", open::tilde(&p.dir), p.id());
         }
     }
     Ok(())

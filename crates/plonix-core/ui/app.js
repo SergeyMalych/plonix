@@ -187,6 +187,7 @@ async function boot() {
     if (e.code === 'unauthorized') return;
     return showLock(e.message);
   }
+  if (S.status.demo) await loadDemoBench();
   const v = (location.hash.match(/^#\/(\w+)/) || [])[1];
   if (VIEWS[v]) S.view = v;
   renderShell();
@@ -223,6 +224,57 @@ function showLock(message) {
       ),
     ),
   );
+}
+
+/* ---------- the demo project ---------- */
+
+/** The demo ships its Bench experiments with the project; they are used
+ * until this window has Bench tabs of its own. */
+async function loadDemoBench() {
+  if (pstore('plonix.bench')) return;
+  try {
+    const seed = await api('/api/views/bench');
+    if (Array.isArray(seed.tabs) && seed.tabs.length) {
+      R.tabs = seed.tabs;
+      R.active = seed.active || 0;
+      saveBench();
+    }
+  } catch (_) {}
+}
+
+/** A strip with a short tour of what the demo shows. */
+function demoBar() {
+  const lensSample = async () => {
+    try {
+      const r = await api('/api/traffic?limit=1&q=' + encodeURIComponent('path:/v1/orders/1042 mime:json'));
+      if (r.items.length) return showExchange(r.items[0].id);
+    } catch (_) {}
+    go('traffic');
+  };
+  const bar = h(
+    'div',
+    { class: 'demobar' },
+    h('span', null, h('b', { text: 'Demo project. ' }), 'Traffic from Brightcart, a made-up shop, captured ahead of time. Its hosts are not real, so nothing here reaches the internet. Try:'),
+    h(
+      'span',
+      { class: 'tour' },
+      h('button', { class: 'btn sm', text: 'What Lens spots', title: 'An order with a token, an email and a card number in it', onclick: lensSample }),
+      h('button', { class: 'btn sm', text: 'Scope suggestions', title: 'Hosts tied to the shop, with the evidence for each', onclick: () => go('scope') }),
+      h('button', { class: 'btn sm', text: 'Bench experiment', title: 'Order lookup: two sends ready to compare', onclick: () => go('bench') }),
+      h('button', { class: 'btn sm', text: 'Findings', onclick: () => go('findings') }),
+      h('button', { class: 'btn sm', text: 'Scans', title: 'Which checks fit this app, and why', onclick: () => go('scans') }),
+    ),
+    h('button', {
+      class: 'iconbtn x',
+      title: 'Hide the tour',
+      text: '✕',
+      onclick: () => {
+        pstore('plonix.demoTourClosed', true);
+        bar.remove();
+      },
+    }),
+  );
+  return bar;
 }
 
 /* ---------- theme ---------- */
@@ -283,6 +335,7 @@ function renderShell() {
         h('button', { class: 'iconbtn', title: 'Theme (auto / light / dark)', onclick: cycleTheme, text: '◐' }),
       ),
     ),
+    S.status.demo && !pstore('plonix.demoTourClosed') ? demoBar() : null,
     h(
       'div',
       { class: 'body' },

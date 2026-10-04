@@ -501,43 +501,13 @@ impl Engine {
     }
 
     fn analyze(&self, ex: &Exchange, id: i64, rules: &ScopeRules) -> Result<()> {
-        let analysis = scope::analyze(ex, rules, &|h| self.store.token_owner(h));
-        if !analysis.tokens.is_empty() {
-            self.store.add_tokens(&analysis.tokens, &scope::normalize_host(&ex.host))?;
-        }
-        for ev in &analysis.evidence {
-            self.store.add_evidence(ev, id, ex.ts)?;
-        }
-        Ok(())
+        analyze_into(&self.store, ex, id, rules)
     }
 
     /// Re-runs the analyzer over all stored traffic. Called when scope
     /// changes, because a newly accepted host turns its traffic into evidence.
     pub fn rescan(&self) -> Result<()> {
-        let rules = self.rules();
-        self.store.clear_analysis()?;
-        // Pass 1 learns session tokens from in-scope traffic, so that token
-        // reuse is detected regardless of the order requests were made in.
-        let mut last = 0;
-        loop {
-            let batch = self.store.exchanges_after(last, 500)?;
-            let Some(tail) = batch.last() else { break };
-            last = tail.id;
-            for ex in batch.iter().filter(|e| rules.in_scope(&e.host)) {
-                let tokens = scope::session_tokens(ex, true);
-                self.store.add_tokens(&tokens, &scope::normalize_host(&ex.host))?;
-            }
-        }
-        let mut last = 0;
-        loop {
-            let batch = self.store.exchanges_after(last, 500)?;
-            let Some(tail) = batch.last() else { break };
-            last = tail.id;
-            for ex in &batch {
-                self.analyze(ex, ex.id, &rules)?;
-            }
-        }
-        Ok(())
+        reanalyze(&self.store, &self.rules())
     }
 
     /// Accepts or rejects a domain. `*.example.com` means example.com and all subdomains.
@@ -1092,6 +1062,44 @@ pub struct Running {
     pub api_addr: SocketAddr,
     pub token: String,
     pub agent_token: String,
+}
+
+fn analyze_into(store: &Store, ex: &Exchange, id: i64, rules: &ScopeRules) -> Result<()> {
+    let analysis = scope::analyze(ex, rules, &|h| store.token_owner(h));
+    if !analysis.tokens.is_empty() {
+        store.add_tokens(&analysis.tokens, &scope::normalize_host(&ex.host))?;
+    }
+    for ev in &analysis.evidence {
+        store.add_evidence(ev, id, ex.ts)?;
+    }
+    Ok(())
+}
+
+/// Rebuilds scope evidence for everything in `store` against `rules`.
+pub fn reanalyze(store: &Store, rules: &ScopeRules) -> Result<()> {
+    store.clear_analysis()?;
+    // Pass 1 learns session tokens from in-scope traffic, so that token
+    // reuse is detected regardless of the order requests were made in.
+    let mut last = 0;
+    loop {
+        let batch = store.exchanges_after(last, 500)?;
+        let Some(tail) = batch.last() else { break };
+        last = tail.id;
+        for ex in batch.iter().filter(|e| rules.in_scope(&e.host)) {
+            let tokens = scope::session_tokens(ex, true);
+            store.add_tokens(&tokens, &scope::normalize_host(&ex.host))?;
+        }
+    }
+    let mut last = 0;
+    loop {
+        let batch = store.exchanges_after(last, 500)?;
+        let Some(tail) = batch.last() else { break };
+        last = tail.id;
+        for ex in &batch {
+            analyze_into(store, ex, ex.id, rules)?;
+        }
+    }
+    Ok(())
 }
 
 /// Starts an engine for a project by name, the way earlier versions did.

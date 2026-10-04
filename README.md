@@ -257,6 +257,7 @@ plonix sessions                            # projects open right now, with their
 plonix -p shop search status:5xx           # -p (or $PLONIX_PROJECT) picks the project
 plonix projects                            # every project and its folder
 plonix projects new "Acme staging" --location ~/work
+plonix projects demo                       # a ready-made project to explore Plonix with
 plonix launcher                            # the Start screen, in your browser
 plonix stop --all
 ```

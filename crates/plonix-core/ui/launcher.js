@@ -178,6 +178,7 @@ function renderShell() {
         h(
           'div',
           { class: 'lbtns' },
+          h('button', { class: 'btn', text: 'Try the Demo', title: 'Explore a sample project: traffic captured from a made-up shop, with scope, findings and Bench experiments', onclick: () => openDemo() }),
           h('button', { class: 'btn', text: 'Add Existing…', title: 'Add a project folder that is not in the list', onclick: addExisting }),
           h('button', { class: 'btn primary', text: 'New Project', onclick: () => newProject() }),
         ),
@@ -220,10 +221,12 @@ function drawList() {
     .slice(0, RECENT);
   const rest = L.projects.filter((p) => !recent.includes(p));
   box.replaceChildren(
-    recent.length ? h('div', { class: 'lsec', text: 'Pick up where you left off' }) : null,
-    recent.length ? h('div', { class: 'recent' }, recent.map(card)) : null,
-    rest.length && recent.length ? h('div', { class: 'lsec', text: 'Other projects' }) : null,
-    ...rest.map(row),
+    ...[
+      recent.length ? h('div', { class: 'lsec', text: 'Pick up where you left off' }) : null,
+      recent.length ? h('div', { class: 'recent' }, recent.map(card)) : null,
+      rest.length && recent.length ? h('div', { class: 'lsec', text: 'Other projects' }) : null,
+      ...rest.map(row),
+    ].filter(Boolean),
   );
   // On launch the most recent project is one Enter away.
   if (first && recent.length) box.querySelector('.rcard .btn')?.focus();
@@ -241,7 +244,7 @@ function card(p) {
       h('div', { class: 'pav', text: (p.name.trim()[0] || 'P').toUpperCase() }),
       h('button', { class: 'iconbtn', title: 'More', text: '⋯', onclick: (e) => (e.stopPropagation(), moreMenu(p, e.currentTarget)) }),
     ),
-    h('div', { class: 'rname', text: p.name, title: p.name }),
+    h('div', { class: 'rname', title: p.name }, h('span', { text: p.name }), demoBadge(p)),
     h('div', { class: 'ppath mono', title: p.path, text: tilde(p.path) }),
     h(
       'div',
@@ -270,7 +273,7 @@ function row(p) {
     h(
       'div',
       { class: 'pinfo' },
-      h('div', { class: 'pname' }, h('span', { text: p.name }), state),
+      h('div', { class: 'pname' }, h('span', { text: p.name }), demoBadge(p), state),
       h('div', { class: 'ppath mono', title: p.path, text: tilde(p.path) }),
       p.warning ? h('div', { class: 'pwarn', text: p.warning }) : null,
     ),
@@ -297,6 +300,53 @@ function welcome() {
     h('p', { text: 'Give it a name, usually the target you are testing. You can change everything later.' }),
     h('div', { class: 'starter' }, name, h('button', { class: 'btn primary', text: 'Create and Open', onclick: go })),
     h('p', { class: 'small', text: 'It is saved in ' + tilde(L.about.projects_dir || '~/Plonix') + '. Choose another folder with New Project.' }),
+    h(
+      'div',
+      { class: 'demohint' },
+      h('span', { text: 'New to Plonix? Look around a sample project first: traffic from a made-up shop, already explored.' }),
+      h('button', { class: 'btn', text: 'Try the Demo', onclick: () => openDemo() }),
+    ),
+  );
+}
+
+function demoBadge(p) {
+  return p.demo ? h('span', { class: 'pbadge', text: 'Demo', title: 'A sample project. Start it over from ⋯ whenever you like.' }) : null;
+}
+
+/* ---------- the demo project ---------- */
+
+/** Opens the demo project, creating it the first time. */
+async function openDemo() {
+  try {
+    const d = await api('/api/projects/demo', { method: 'POST', body: {} });
+    await refresh();
+    await openProject({ id: d.id, name: d.name });
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+function restartDemo(p) {
+  const m = modal(
+    'Start the demo over?',
+    [h('p', { class: 'muted', text: 'The demo project goes back to how it shipped: your changes to its scope, findings and Bench are replaced by a fresh copy.' })],
+    [
+      h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }),
+      h('button', {
+        class: 'btn primary',
+        text: 'Start Over',
+        onclick: async () => {
+          try {
+            await api('/api/projects/demo', { method: 'POST', body: { fresh: true } });
+            closeModal();
+            toast('The demo project is fresh again.', 'ok');
+            refresh();
+          } catch (e) {
+            m.err.textContent = e.message;
+          }
+        },
+      }),
+    ],
   );
 }
 
@@ -431,6 +481,7 @@ function moreMenu(p, anchor) {
     p.available && ['Settings…', () => projectSettings(p)],
     p.available && [IN_APP ? 'Show in Finder' : 'Show folder', () => api(`/api/projects/${p.id}/reveal`, { method: 'POST' }).catch((e) => toast(e.message, 'err'))],
     p.session && ['Close project', () => closeProject(p)],
+    p.demo && !p.session && ['Start demo over…', () => restartDemo(p)],
     !p.session && ['Remove from list…', () => forgetProject(p)],
   ].filter(Boolean);
   const old = $('.popmenu');

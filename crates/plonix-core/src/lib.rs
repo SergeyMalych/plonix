@@ -15,6 +15,7 @@ pub mod browser;
 pub mod ca;
 pub mod crawl;
 pub mod codec;
+pub mod demo;
 pub mod detect;
 pub mod engine;
 pub mod exclude;

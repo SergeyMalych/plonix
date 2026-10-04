@@ -43,6 +43,9 @@ pub struct ProjectFile {
     /// What "keep only in-scope traffic" removed the last time it ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_prune: Option<PruneReport>,
+    /// The ready-made demo project (see [`crate::demo`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub demo: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,6 +85,7 @@ impl Project {
             settings: Map::new(),
             last_api_port: None,
             last_prune: None,
+            demo: false,
         };
         let project = Self { dir: absolute(dir), file };
         project.save()?;
@@ -345,6 +349,9 @@ pub struct Listing {
     /// False when the folder is gone or no longer a project.
     pub available: bool,
     pub open: bool,
+    /// The ready-made demo project.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub demo: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -365,6 +372,7 @@ pub fn listings(home: &Home) -> Vec<Listing> {
             Listing {
                 available: loaded.is_some(),
                 open: loaded.as_ref().is_some_and(Project::is_open),
+                demo: loaded.as_ref().is_some_and(|p| p.file.demo),
                 size_bytes,
                 warning: settings::synced_folder_warning(&entry.path),
                 entry,
