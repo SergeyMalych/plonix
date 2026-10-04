@@ -27,6 +27,11 @@ the markers yourself:
 plonix bench run 'https://host/api?id=§1§' --list range:1-100
 ```
 
+The Run panel shows the request with each marked position highlighted, so it is
+always clear where the values go. Below it, each position gets a card naming
+what it is (a number, an identifier, a path segment, a username, a JWT, and so
+on) and where it sits, with its own list picker when a mode needs one.
+
 ### Modes
 
 - **One at a time** (single-position) — one position changes per request while
@@ -40,8 +45,13 @@ plonix bench run 'https://host/api?id=§1§' --list range:1-100
 
 ### Lists
 
-Pick a built-in list, a **number range**, or a **custom list** you type in. The
-built-in lists ship with Plonix:
+For each position, pick a list, a **number range**, or **type your own** values.
+Every picker shows a live preview of the first values and how many there are, so
+you can see what a list holds before you run it. Plonix also **suggests** lists
+that suit each position — identifier formats for a numeric id, path lists for a
+path segment, usernames for a sign-in field — as one-click chips.
+
+The built-in lists ship with Plonix:
 
 ```
 plonix bench lists

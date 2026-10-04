@@ -62,6 +62,9 @@ pub async fn open(home: &Home, mut project: Project, options: OpenOptions) -> Re
     engine.set_rule_library(Library::new(home));
     engine.set_filter_library(crate::filterpack::FilterLibrary::new(home));
     engine.set_list_library(crate::listpack::ListLibrary::new(home));
+    if project.file.demo {
+        engine.set_responder(crate::demo::responder());
+    }
 
     // The last session did not close cleanly: finish its clean-up now.
     if storage.keep_only_in_scope && project.open_marker().exists() {

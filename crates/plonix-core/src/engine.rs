@@ -29,7 +29,7 @@ use crate::scan;
 use crate::scope::{self, Decision, Rule, ScopeRules};
 use crate::settings::ProxySettings;
 use crate::store::Store;
-use crate::upstream::{OutboundRequest, Upstream, UpstreamOptions, host_matches};
+use crate::upstream::{InboundResponse, OutboundRequest, Upstream, UpstreamOptions, host_matches};
 
 pub struct Engine {
     pub project: String,
@@ -58,7 +58,15 @@ pub struct Engine {
     overrides: Mutex<UpstreamOptions>,
     /// Bodies passing through the proxy are recorded up to this many bytes.
     body_limit: AtomicUsize,
+    /// An optional stand-in for the network, consulted before a send goes out.
+    /// The demo project installs one so its made-up hosts answer locally; no
+    /// other project sets it, so real traffic always goes to the real network.
+    responder: RwLock<Option<Responder>>,
 }
+
+/// A stand-in for the network: given an outbound request it may return a
+/// canned response, or `None` to let the request go out as usual.
+pub type Responder = Arc<dyn Fn(&OutboundRequest) -> Option<InboundResponse> + Send + Sync>;
 
 /// How much of each body is recorded until the settings say otherwise.
 pub const DEFAULT_BODY_LIMIT: usize = 10 * 1024 * 1024;
@@ -199,7 +207,18 @@ impl Engine {
             applied_listen: Mutex::new(None),
             overrides: Mutex::default(),
             body_limit: AtomicUsize::new(DEFAULT_BODY_LIMIT),
+            responder: RwLock::new(None),
         }))
+    }
+
+    /// Installs a stand-in for the network (see [`Responder`]). Only the demo
+    /// project uses this.
+    pub fn set_responder(&self, responder: Responder) {
+        *self.responder.write().unwrap() = Some(responder);
+    }
+
+    fn responder(&self) -> Option<Responder> {
+        self.responder.read().unwrap().clone()
     }
 
     /// How many bytes of each body the proxy records.
@@ -680,10 +699,11 @@ impl Engine {
             initiator: Some(initiator.to_string()),
             ..Default::default()
         };
-        let result = self
-            .upstream()
-            .send(OutboundRequest { scheme, host, port, method, target, headers: req.headers, body: Bytes::from(body), extra_headers: vec![] })
-            .await;
+        let outbound = OutboundRequest { scheme, host, port, method, target, headers: req.headers, body: Bytes::from(body), extra_headers: vec![] };
+        let result = match self.responder().and_then(|r| r(&outbound)) {
+            Some(resp) => Ok(resp),
+            None => self.upstream().send(outbound).await,
+        };
         ex.duration_ms = started.elapsed().as_millis() as i64;
         match result {
             Ok(up) => {
@@ -1115,6 +1135,9 @@ pub async fn start(config: &EngineConfig) -> Result<Running> {
     engine.set_rule_library(Library::new(&config.home));
     engine.set_filter_library(FilterLibrary::new(&config.home));
     engine.set_list_library(ListLibrary::new(&config.home));
+    if project.file.demo {
+        engine.set_responder(crate::demo::responder());
+    }
     start_with(engine, config).await
 }
 

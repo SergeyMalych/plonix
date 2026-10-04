@@ -994,7 +994,16 @@ async fn run_lists(State(s): State<AppState>) -> Response {
     let engine = s.engine.clone();
     match tokio::task::spawn_blocking(move || engine.lists()).await {
         Ok(set) => {
-            let lists: Vec<_> = set.catalog();
+            // Each list carries a small sample of its values so the Bench can
+            // preview what a list holds without fetching all of it.
+            let lists: Vec<_> = set
+                .catalog()
+                .into_iter()
+                .map(|l| {
+                    let sample: Vec<&String> = set.values.get(&l.id).map(|v| v.iter().take(6).collect()).unwrap_or_default();
+                    json!({ "id": l.id, "title": l.title, "description": l.description, "count": l.count, "pack": l.pack, "builtin": l.builtin, "sample": sample })
+                })
+                .collect();
             Json(json!({ "lists": lists, "packs": set.packs, "problems": set.problems })).into_response()
         }
         Err(e) => internal(e.into()),

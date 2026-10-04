@@ -1997,13 +1997,14 @@ function renderBench(main) {
       tab.url = url.value;
       saveBench();
       renderScopeHint();
+      refreshRun();
     },
     onkeydown: (e) => e.key === 'Enter' && !e.metaKey && !e.ctrlKey && send(),
   });
   const editor = h('textarea', {
     value: tab.raw,
     spellcheck: 'false',
-    oninput: () => ((tab.raw = editor.value), saveBench()),
+    oninput: () => ((tab.raw = editor.value), saveBench(), refreshRun()),
     onkeydown: (e) => {
       if (e.key === 'Tab') {
         e.preventDefault();
@@ -2051,6 +2052,13 @@ function renderBench(main) {
   R.send = send;
 
   const runMode = tab.panel === 'run';
+  // Refresh just the run column (positions, preview, lists) as the request is
+  // edited, without rebuilding the editor and losing the cursor.
+  const refreshRun = () => {
+    if (!runMode) return;
+    clearTimeout(R.refreshT);
+    R.refreshT = setTimeout(() => renderRunPanel(tab, main, runCol), 120);
+  };
   // The last focused position field, so "Add position" knows where to insert.
   const marker = (field) => {
     const el = field === 'url' ? url : editor;
@@ -2152,60 +2160,155 @@ function runCfg(tab) {
   return tab.run;
 }
 
-/** One list picker; `cfg` is the stored list object, `onchange` persists it. */
-function listPicker(cfg, onchange) {
-  const kinds = cfg.kind || 'builtin';
+/** The marked positions of a tab, in the order the engine fills them (URL
+ * first, then the raw headers/body). Each carries where it sits and a guess
+ * at what kind of value it is, so the panel can label it and suggest a list. */
+function positionsOf(tab) {
+  const out = [];
+  const scan = (text, locate) => {
+    const parts = (text || '').split(MARK);
+    let before = '';
+    for (let i = 0; i < parts.length; i++) {
+      if (i % 2 === 1) out.push(locate(parts[i], before));
+      before += parts[i] + (i < parts.length - 1 ? MARK : '');
+    }
+  };
+  scan(tab.url, (value, before) => {
+    const q = before.includes('?');
+    const ctx = q ? (before.match(/[?&]([^=&]*)=[^?&=]*$/) || [])[1] || '' : '';
+    return { value, where: q ? 'url-query' : 'url-path', ctx };
+  });
+  const raw = tab.raw || '';
+  const headEnd = raw.indexOf('\n\n');
+  scan(raw, (value, before) => {
+    const inBody = headEnd >= 0 && before.length > headEnd + 1;
+    const line = before.slice(before.lastIndexOf('\n') + 1);
+    const ctx = inBody ? '' : (line.match(/^([A-Za-z0-9-]+)\s*:/) || [])[1] || '';
+    return { value, where: inBody ? 'body' : 'header', ctx };
+  });
+  return out.map((p) => ({ ...p, ...detectKind(p) }));
+}
+
+/** A plain-language name for where a position sits. */
+function whereLabel(where) {
+  return { 'url-path': 'in the URL path', 'url-query': 'in the query', header: 'in a header', body: 'in the body' }[where] || '';
+}
+
+/** Guesses what a position holds and which lists suit it. `suggest` is a
+ * priority order of list ids; only those actually in the library are shown. */
+function detectKind(p) {
+  const v = (p.value || '').trim();
+  const ctx = (p.ctx || '').toLowerCase();
+  const parts = v.split('.');
+  const b64url = (s) => s.length > 0 && /^[A-Za-z0-9_-]+$/.test(s);
+  if (p.where === 'header' && ctx === 'authorization') return { label: 'auth token', suggest: ['input-probes'] };
+  if (p.where === 'header' && ctx === 'content-type') return { label: 'content type', suggest: ['content-types'] };
+  if (p.where === 'header' && ctx === 'user-agent') return { label: 'user agent', suggest: ['user-agents'] };
+  if (parts.length === 3 && parts[0].startsWith('ey') && parts.slice(0, 2).every(b64url)) return { label: 'JWT token', suggest: ['input-probes'] };
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)) return { label: 'UUID', suggest: ['id-formats', 'numbers-1-100'] };
+  if (/^-?\d+$/.test(v)) {
+    const idish = /(^id$|_id$|id$)/.test(ctx) || p.where === 'url-path';
+    return { label: idish ? 'identifier' : 'number', suggest: idish ? ['id-formats', 'numbers-1-100', 'digits'] : ['numbers-1-100', 'digits'] };
+  }
+  if (/^(true|false)$/i.test(v)) return { label: 'boolean', suggest: ['booleans'] };
+  if (p.where === 'url-query' && /^(user|username|login|account|name|email)$/.test(ctx)) return { label: 'username', suggest: ['common-usernames'] };
+  if (p.where === 'url-path') return { label: 'path segment', suggest: ['common-paths', 'api-paths', 'common-params'] };
+  if (v.length >= 12 && /[A-Za-z]/.test(v) && /[0-9+/=_-]/.test(v) && /^[A-Za-z0-9+/=_-]+$/.test(v)) return { label: 'encoded value', suggest: ['input-probes'] };
+  return { label: 'value', suggest: ['input-probes', 'common-params', 'common-usernames'] };
+}
+
+/** The suggested lists for a position that actually exist in the library. */
+function suggestionsFor(pos, max = 2) {
+  const have = new Set((LIST_CATALOG || []).map((l) => l.id));
+  return (pos.suggest || []).filter((id) => have.has(id)).slice(0, max);
+}
+
+/** A short sample and total count for a list config, for the preview line. */
+function listPreview(cfg) {
+  if (cfg.kind === 'range') {
+    const from = Number(cfg.from ?? 1);
+    const to = Number(cfg.to ?? 100);
+    const step = Number(cfg.step || 1) || 1;
+    const sample = [];
+    for (let v = from; (step > 0 ? v <= to : v >= to) && sample.length < 6; v += step) sample.push(String(v));
+    const count = step !== 0 ? Math.max(0, Math.floor((to - from) / step) + 1) : 0;
+    return { sample, count };
+  }
+  if (cfg.kind === 'values') {
+    const vals = (cfg.values || []).filter((v) => v !== '');
+    return { sample: vals.slice(0, 6), count: vals.length };
+  }
+  const l = (LIST_CATALOG || []).find((x) => x.id === cfg.id);
+  return { sample: (l && l.sample) || [], count: l ? l.count : 0 };
+}
+
+/** One list picker: a kind select, the detail for that kind, and a live
+ * preview of the values. `onchange` persists; `redraw` re-renders the card. */
+function listPicker(cfg, onchange, redraw) {
+  const kind = cfg.kind || 'builtin';
   const sel = h(
     'select',
     { class: 'listkind', onchange: () => pick(sel.value) },
-    h('option', { value: 'builtin', text: 'Saved list', selected: kinds === 'builtin' }),
-    h('option', { value: 'range', text: 'Number range', selected: kinds === 'range' }),
-    h('option', { value: 'values', text: 'Custom list', selected: kinds === 'values' }),
+    h('option', { value: 'builtin', text: 'From a list', selected: kind === 'builtin' }),
+    h('option', { value: 'range', text: 'Number range', selected: kind === 'range' }),
+    h('option', { value: 'values', text: 'Type my own', selected: kind === 'values' }),
   );
-  const slot = h('span', { class: 'listdetail' });
-  const pick = (kind) => {
-    cfg.kind = kind;
-    if (kind === 'builtin' && !cfg.id) cfg.id = (LIST_CATALOG[0] || {}).id;
+  const pick = (k) => {
+    cfg.kind = k;
+    if (k === 'builtin' && !cfg.id) cfg.id = (LIST_CATALOG[0] || {}).id;
     onchange();
-    drawDetail();
+    redraw();
   };
-  const drawDetail = () => {
-    if (cfg.kind === 'builtin') {
-      const d = h(
-        'select',
-        { onchange: () => ((cfg.id = d.value), onchange()) },
-        (LIST_CATALOG || []).map((l) => h('option', { value: l.id, text: `${l.title} (${l.count})${l.builtin ? '' : ' · ' + l.pack}`, selected: l.id === cfg.id })),
-      );
-      clear(slot, d);
-    } else if (cfg.kind === 'range') {
-      const from = h('input', { class: 'num', type: 'number', value: cfg.from ?? 1, oninput: () => ((cfg.from = Number(from.value)), onchange()) });
-      const to = h('input', { class: 'num', type: 'number', value: cfg.to ?? 100, oninput: () => ((cfg.to = Number(to.value)), onchange()) });
-      const step = h('input', { class: 'num', type: 'number', value: cfg.step ?? 1, oninput: () => ((cfg.step = Number(step.value) || 1), onchange()) });
-      clear(slot, 'from ', from, ' to ', to, ' step ', step);
-    } else {
-      const ta = h('textarea', { class: 'listvals', placeholder: 'One value per line', value: (cfg.values || []).join('\n'), oninput: () => ((cfg.values = ta.value.split('\n')), onchange()) });
-      clear(slot, ta);
-    }
+  const detail = h('span', { class: 'listdetail' });
+  if (cfg.kind === 'range') {
+    const num = (key, dflt) => h('input', { class: 'num', type: 'number', value: cfg[key] ?? dflt, oninput: (e) => ((cfg[key] = Number(e.target.value)), onchange(), redrawPreview()) });
+    clear(detail, 'from ', num('from', 1), ' to ', num('to', 100), ' step ', num('step', 1));
+  } else if (cfg.kind === 'values') {
+    const ta = h('textarea', { class: 'listvals', placeholder: 'One value per line', value: (cfg.values || []).join('\n'), oninput: () => ((cfg.values = ta.value.split('\n')), onchange(), redrawPreview()) });
+    clear(detail, ta);
+  } else {
+    const d = h(
+      'select',
+      { onchange: () => ((cfg.id = d.value), onchange(), redrawPreview()) },
+      (LIST_CATALOG || []).map((l) => h('option', { value: l.id, text: `${l.title} (${l.count})${l.builtin ? '' : ' · ' + l.pack}`, selected: l.id === cfg.id })),
+    );
+    clear(detail, d);
+  }
+  const preview = h('div', { class: 'listprev' });
+  const redrawPreview = () => {
+    const { sample, count } = listPreview(cfg);
+    clear(
+      preview,
+      h('span', { class: 'prevcount', text: count ? `${count} value${count === 1 ? '' : 's'}` : 'no values' }),
+      sample.length ? h('span', { class: 'prevvals', text: sample.map((v) => (v === '' ? '∅' : v)).join('  ·  ') + (count > sample.length ? '  …' : '') }) : null,
+    );
   };
-  drawDetail();
-  return h('div', { class: 'listpick' }, sel, slot);
+  redrawPreview();
+  return h('div', { class: 'listpick' }, h('div', { class: 'pickrow' }, sel, detail), preview);
 }
 
 async function renderRunPanel(tab, main, col) {
   await loadLists();
   if (!col.isConnected) return;
   const cfg = runCfg(tab);
-  const positions = countPositions(tab);
+  const positions = positionsOf(tab);
+  const n = positions.length;
   const multi = cfg.mode !== 'sweep';
+  const redraw = () => renderRunPanel(tab, main, col);
 
-  // Keep the per-position list array sized to the positions when in a
-  // multi-position mode; sweep uses a single list for all of them.
+  // Size the per-position list array to the positions (multi modes), or one
+  // shared list (sweep).
   const lists = cfg.lists;
-  const need = multi ? positions : 1;
+  const need = multi ? n : 1;
   while (lists.length < need) lists.push({ kind: 'builtin', id: (LIST_CATALOG[0] || {}).id });
   if (lists.length > need) lists.length = need;
-
   const persist = () => saveBench();
+
+  const modeHelp = {
+    sweep: 'Change one position at a time, using one list for all of them.',
+    parallel: 'Step every position together, each through its own list.',
+    matrix: 'Try every combination of values across the positions.',
+  };
   const modeSeg = h(
     'span',
     { class: 'seg' },
@@ -2217,46 +2320,142 @@ async function renderRunPanel(tab, main, col) {
       h('button', {
         class: cfg.mode === id ? 'on' : '',
         text: lbl,
-        title:
-          id === 'sweep'
-            ? 'Single position: change one marked position at a time, one list for all'
-            : id === 'parallel'
-              ? 'Multi-position: step every position together, one list each'
-              : 'Multi-position: every combination of values, one list each',
+        title: modeHelp[id],
         onclick: () => {
           cfg.mode = id;
           saveBench();
-          renderBench(main);
+          redraw();
         },
       }),
     ),
   );
 
-  const listRows = multi
-    ? lists.map((c, i) => h('div', { class: 'listrow' }, h('span', { class: 'plabel', text: 'Position ' + (i + 1) }), listPicker(c, persist)))
-    : [h('div', { class: 'listrow' }, h('span', { class: 'plabel', text: 'Payload list' }), listPicker(lists[0], persist))];
+  // A read-only preview of the request with the positions highlighted, so it
+  // is obvious where the values go.
+  const chip = (i, value) => h('span', { class: 'poschip', title: `Position ${i + 1}` }, h('b', { text: String(i + 1) }), value === '' ? '∅' : value);
+  const highlight = (text, startIdx) => {
+    const parts = (text || '').split(MARK);
+    const nodes = [];
+    let k = startIdx;
+    for (let i = 0; i < parts.length; i++) {
+      if (i % 2 === 1) nodes.push(chip(k++, parts[i]));
+      else if (parts[i]) nodes.push(document.createTextNode(parts[i]));
+    }
+    return nodes;
+  };
+  const urlMarks = (tab.url || '').split(MARK).length - 1;
+  const preview =
+    n === 0
+      ? null
+      : h(
+          'div',
+          { class: 'runprev' },
+          h('div', { class: 'prevline' }, h('span', { class: 'prevmethod', text: tab.method || 'GET' }), ' ', ...highlight(tab.url, 0)),
+          (tab.raw || '').includes(MARK) ? h('div', { class: 'prevraw' }, ...highlight(tab.raw, Math.floor(urlMarks / 2))) : null,
+        );
+
+  // One card per position: what it is and, in multi modes, its list.
+  const posCard = (pos, i, withPicker) =>
+    h(
+      'div',
+      { class: 'poscard' },
+      h(
+        'div',
+        { class: 'poshead' },
+        h('span', { class: 'posnum', text: String(i + 1) }),
+        h('span', { class: 'poskind', text: pos.label }),
+        h('span', { class: 'poswhere', text: whereLabel(pos.where) }),
+        h('span', { class: 'posval', title: pos.value, text: pos.value === '' ? '∅' : pos.value }),
+      ),
+      withPicker ? listPicker(lists[i], persist, redraw) : null,
+      withPicker ? suggestRow(suggestionsFor(pos), lists[i], persist, redraw) : null,
+    );
+
+  let listSection;
+  if (n === 0) {
+    listSection = null;
+  } else if (multi) {
+    listSection = h('div', { class: 'poscards' }, ...positions.map((p, i) => posCard(p, i, true)));
+  } else {
+    // Sweep: positions listed read-only, then one shared list + suggestions
+    // drawn from across the positions.
+    const union = [];
+    for (const p of positions) for (const id of suggestionsFor(p, 3)) if (!union.includes(id)) union.push(id);
+    listSection = h(
+      'div',
+      { class: 'poscards' },
+      h('div', { class: 'poscards' }, ...positions.map((p, i) => posCard(p, i, false))),
+      h(
+        'div',
+        { class: 'poscard sharedlist' },
+        h('div', { class: 'poshead' }, h('span', { class: 'poskind', text: n === 1 ? 'List' : 'One list, run through each position' })),
+        listPicker(lists[0], persist, redraw),
+        suggestRow(union.slice(0, 3), lists[0], persist, redraw),
+      ),
+    );
+  }
 
   const base = h('input', { type: 'checkbox', checked: !!cfg.base, onchange: () => ((cfg.base = base.checked), persist()) });
   const max = h('input', { class: 'num', type: 'number', placeholder: '1000', value: cfg.max, oninput: () => ((cfg.max = max.value), persist()) });
   const delay = h('input', { class: 'num', type: 'number', placeholder: '50', value: cfg.delay, oninput: () => ((cfg.delay = delay.value), persist()) });
-  const startBtn = h('button', { class: 'btn primary', text: 'Start run', onclick: () => startRun(tab, main) });
+  const startBtn = h('button', { class: 'btn primary', disabled: n === 0, text: n === 0 ? 'Mark a position to run' : 'Start run', onclick: () => startRun(tab, main) });
 
   const posNote =
-    positions === 0
-      ? h('div', { class: 'scopehint blocked' }, 'Mark at least one position: select text in the URL or request and press ', h('b', { text: '§' }), ' / ', h('b', { text: '+ Mark position' }), '.')
-      : h('div', { class: 'runpos', text: `${positions} position${positions === 1 ? '' : 's'} marked.` });
+    n === 0
+      ? h(
+          'div',
+          { class: 'scopehint blocked' },
+          'Mark the parts to vary: select text in the URL and press ',
+          h('b', { text: '§' }),
+          ', or select in the request and press ',
+          h('b', { text: '+ Mark position' }),
+          '.',
+        )
+      : h('div', { class: 'runpos', text: `${n} position${n === 1 ? '' : 's'} marked. Pick a list for ${n === 1 ? 'it' : 'each'} below.` });
 
   clear(
     col,
     h('div', { class: 'lbl', text: 'Run' }),
-    h('div', { class: 'runconf' }, posNote, h('div', { class: 'runfield' }, h('span', { class: 'plabel', text: 'Mode' }), modeSeg), ...listRows, h(
+    h(
       'div',
-      { class: 'runopts' },
-      h('label', { class: 'chk' }, base, ' Send original first (baseline)'),
-      h('label', null, 'Max requests ', max),
-      h('label', null, 'Delay ms ', delay),
-    ), startBtn),
+      { class: 'runconf' },
+      posNote,
+      preview,
+      h('div', { class: 'runfield' }, h('span', { class: 'plabel', text: 'Mode' }), modeSeg),
+      h('div', { class: 'modehelp', text: modeHelp[cfg.mode] }),
+      listSection,
+      h(
+        'div',
+        { class: 'runopts' },
+        h('label', { class: 'chk' }, base, ' Send original first (baseline)'),
+        h('label', null, 'Max requests ', max),
+        h('label', null, 'Delay ms ', delay),
+      ),
+      startBtn,
+    ),
   );
+}
+
+/** A row of one-click suggested lists for a position. */
+function suggestRow(ids, cfg, onchange, redraw) {
+  if (!ids || !ids.length) return null;
+  const chip = (id) => {
+    const l = (LIST_CATALOG || []).find((x) => x.id === id);
+    if (!l) return null;
+    const on = cfg.kind === 'builtin' && cfg.id === id;
+    return h('button', {
+      class: 'suggchip' + (on ? ' on' : ''),
+      text: (on ? '✓ ' : '+ ') + l.title,
+      title: `Use the ${l.title} list (${l.count} values)`,
+      onclick: () => {
+        cfg.kind = 'builtin';
+        cfg.id = id;
+        onchange();
+        redraw();
+      },
+    });
+  };
+  return h('div', { class: 'suggrow' }, h('span', { class: 'sugglbl', text: 'Suggested:' }), ...ids.map(chip).filter(Boolean));
 }
 
 async function startRun(tab, main) {
