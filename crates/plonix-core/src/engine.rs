@@ -198,11 +198,17 @@ impl Engine {
         let listener = bind_listener(addr, fallback, self.proxy_addr()).await.with_context(|| format!("binding the proxy to {addr}"))?;
         let bound = listener.local_addr()?;
         let task = tokio::spawn(crate::proxy::serve(listener, self.clone()));
-        let mut p = self.proxy.lock().unwrap();
-        if let Some(old) = p.task.replace(task) {
+        let old = {
+            let mut p = self.proxy.lock().unwrap();
+            p.addr = Some(bound);
+            p.task.replace(task)
+        };
+        if let Some(old) = old {
+            // Wait until the old listener is dropped, so its port is free
+            // when this returns. Connections it accepted carry on.
             old.abort();
+            let _ = old.await;
         }
-        p.addr = Some(bound);
         Ok(bound)
     }
 
