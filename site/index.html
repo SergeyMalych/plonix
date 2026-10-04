@@ -8,32 +8,64 @@
 <meta property="og:title" content="Plonix">
 <meta property="og:description" content="Open-source, macOS-native web security workbench: intercept, adaptive scope, fast search, scriptable API, AI-native.">
 <meta property="og:image" content="assets/window.webp">
-<meta name="theme-color" content="#0b0d17">
+<meta name="theme-color" content="#f5f5fa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0e13" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="assets/plonix-mark.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
-/* Layout: one dark optical bench. A live "lens" over raw traffic opens the page;
+/* Layout: one optical bench, light by default with a dark twin. A live "lens" over raw traffic opens the page;
    below it the real app, then the five-step loop, then each tool shown as it is. */
 :root {
-  --ink: #0b0d17;          /* page ground, indigo-biased near-black */
-  --ink-2: #11142a;        /* raised surfaces */
-  --ink-3: #181c38;
-  --line: #262b52;
-  --fg: #e9eaf5;
-  --muted: #9a9fc2;
-  --faint: #6a6f96;
-  --indigo: #7c84ff;       /* brand indigo, lifted for a dark ground */
-  --indigo-deep: #4b55d6;  /* the logo's own indigo */
-  --amber: #f5bd55;        /* "spotted" highlight, as in the Lens */
-  --green: #45d197;
-  --red: #ff7a7a;
+  --ink: #f5f5fa;          /* page ground: cool paper */
+  --ink-2: #ffffff;        /* raised surfaces */
+  --ink-3: #eceef6;
+  --line: #e0e2ee;
+  --fg: #15162b;
+  --muted: #565a78;
+  --faint: #8b8ea8;
+  --indigo: #4b55d6;       /* the logo's own indigo */
+  --indigo-deep: #4b55d6;
+  --glow: #8f7bff;         /* hero light */
+  --glow-2: #ff9d7a;       /* warm counter-light */
+  --amber: #f7c64f;        /* "spotted" highlight, as in the Lens */
+  --tag: #a86400;
+  --green: #11a36a;
+  --red: #d33b4a;
+  --code-fg: #4a4e6e; --code-key: #4b55d6; --code-enc: #a3a6bd; --decoded-bg: #fffaf0;
+  --tok-fg: #2f37b8; --tok-ex: #b4202f; --tok-txt: #8a5300;
+  --chrome: #eef0f6; --shadow: #23286b33; --ring-glow: #4b55d633;
+  --term-bg: #13141f; --term-line: #ffffff14;
   --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
   --body: "Hanken Grotesk", -apple-system, "Helvetica Neue", system-ui, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --wrap: 1180px;
-  color-scheme: dark;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ink: #0d0e13; --ink-2: #15161e; --ink-3: #1d1f2a; --line: #292b39;
+    --fg: #ecedf4; --muted: #a2a5bb; --faint: #6f7289;
+    --indigo: #8b93ff; --indigo-deep: #4b55d6; --glow: #5b4bd6; --glow-2: #c4553a;
+    --amber: #f5bd55; --tag: #f5bd55; --green: #45d197; --red: #ff7a85;
+    --code-fg: #c9cbe0; --code-key: #a9a3ff; --code-enc: #7c7f99; --decoded-bg: #1c1e2b;
+    --tok-fg: #cdd0ff; --tok-ex: #ffc2c6; --tok-txt: #ffe2a8;
+    --chrome: #1b1d27; --shadow: #000000aa; --ring-glow: #8b93ff40;
+    --term-bg: #08090d; --term-line: #ffffff12;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+    --ink: #0d0e13; --ink-2: #15161e; --ink-3: #1d1f2a; --line: #292b39;
+    --fg: #ecedf4; --muted: #a2a5bb; --faint: #6f7289;
+    --indigo: #8b93ff; --indigo-deep: #4b55d6; --glow: #5b4bd6; --glow-2: #c4553a;
+    --amber: #f5bd55; --tag: #f5bd55; --green: #45d197; --red: #ff7a85;
+    --code-fg: #c9cbe0; --code-key: #a9a3ff; --code-enc: #7c7f99; --decoded-bg: #1c1e2b;
+    --tok-fg: #cdd0ff; --tok-ex: #ffc2c6; --tok-txt: #ffe2a8;
+    --chrome: #1b1d27; --shadow: #000000aa; --ring-glow: #8b93ff40;
+    --term-bg: #08090d; --term-line: #ffffff12;
+    color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
@@ -85,15 +117,16 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
 .btn.primary:hover { background: #5862e6; }
 .btn.small { height: 36px; padding-inline: 14px; font-size: 0.9rem; border-radius: 10px; }
 .btn svg { width: 18px; height: 18px; flex: none; }
-@media (max-width: 760px) { .nav-links { display: none; } .nav .btn.small { margin-left: auto; } }
+@media (max-width: 760px) { .nav-links { display: none; } .nav .theme-btn { margin-left: auto; } }
 
 /* ---------- hero ---------- */
 .hero { position: relative; padding-block: 76px 40px; }
 .hero::before {
-  content: ""; position: absolute; inset: -120px 0 auto 0; height: 780px; z-index: -1; pointer-events: none;
+  content: ""; position: absolute; inset: -120px 0 auto 0; height: 820px; z-index: -1; pointer-events: none;
   background:
-    radial-gradient(520px 380px at 78% 38%, color-mix(in srgb, var(--indigo-deep) 34%, transparent), transparent 70%),
-    radial-gradient(420px 300px at 12% 10%, color-mix(in srgb, var(--indigo-deep) 16%, transparent), transparent 70%);
+    radial-gradient(540px 400px at 78% 40%, color-mix(in srgb, var(--glow) 28%, transparent), transparent 70%),
+    radial-gradient(380px 300px at 92% 8%, color-mix(in srgb, var(--glow-2) 22%, transparent), transparent 70%),
+    radial-gradient(420px 300px at 8% 8%, color-mix(in srgb, var(--glow) 12%, transparent), transparent 70%);
 }
 .hero-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr); gap: 56px; align-items: center; }
 .hero h1 { font-size: clamp(2.6rem, 5.3vw, 4.5rem); margin-top: 22px; }
@@ -108,7 +141,7 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
 /* the lens demo */
 .lensbox {
   position: relative; border-radius: 18px; background: var(--ink-2); border: 1px solid var(--line);
-  box-shadow: 0 40px 90px -30px #000, 0 0 0 1px color-mix(in srgb, var(--indigo) 8%, transparent) inset;
+  box-shadow: 0 40px 90px -30px var(--shadow);
   overflow: hidden; touch-action: pan-y; cursor: none;
 }
 .lensbox-bar {
@@ -119,21 +152,21 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
 .lensbox-bar .st { margin-left: auto; color: var(--green); }
 .pane { position: relative; }
 .http {
-  margin: 0; padding: 18px 20px 22px; font: 400 0.8rem/1.85 var(--mono); color: #c9cbe3;
+  margin: 0; padding: 18px 20px 22px; font: 400 0.8rem/1.85 var(--mono); color: var(--code-fg);
 }
 .http div { white-space: nowrap; overflow: hidden; text-overflow: clip; }
-.http .k { color: #a99bff; }
+.http .k { color: var(--code-key); }
 .http .m { color: var(--indigo); font-weight: 500; }
-.http .enc { color: #8d92b8; }
-.http.decoded { position: absolute; inset: 0; background: #151937; color: var(--fg);
+.http .enc { color: var(--code-enc); }
+.http.decoded { position: absolute; inset: 0; background: var(--decoded-bg); color: var(--fg);
   clip-path: circle(var(--r, 92px) at var(--x, 70%) var(--y, 38%)); }
 .http.decoded .dec { color: #1a1300; background: var(--amber); border-radius: 4px; padding: 1px 5px; font-weight: 500; }
-.http.decoded .tag { color: var(--amber); font-size: .72rem; letter-spacing: .06em; margin-left: 6px; }
+.http.decoded .tag { color: var(--tag); font-size: .72rem; letter-spacing: .06em; margin-left: 6px; }
 .ring-el {
   position: absolute; left: 0; top: 0; width: calc(var(--r, 92px) * 2); height: calc(var(--r, 92px) * 2);
   transform: translate(calc(var(--x, 70%) - var(--r, 92px)), calc(var(--y, 38%) - var(--r, 92px)));
   border: 5px solid var(--indigo); border-radius: 50%; pointer-events: none;
-  box-shadow: 0 0 0 1px #0006, 0 18px 50px -10px #000, inset 0 0 24px #7c84ff40;
+  box-shadow: 0 18px 50px -10px var(--shadow), inset 0 0 24px var(--ring-glow);
 }
 .ring-el::after { content: ""; position: absolute; left: 50%; top: 50%; width: 9px; height: 9px; margin: -4.5px; border-radius: 50%; background: var(--indigo); opacity: .9; }
 .lens-caption { margin-top: 14px; color: var(--faint); font-size: 0.88rem; display: flex; gap: 10px; align-items: center; }
@@ -142,10 +175,10 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
 /* ---------- window shot ---------- */
 .shot {
   border-radius: 14px; overflow: hidden; border: 1px solid var(--line); background: var(--ink-2);
-  box-shadow: 0 50px 120px -40px #000, 0 0 0 1px #ffffff08 inset;
+  box-shadow: 0 50px 120px -40px var(--shadow);
 }
-.shot .bar { display: flex; gap: 8px; align-items: center; padding: 11px 14px; background: #171a33; border-bottom: 1px solid var(--line); }
-.shot .bar i { width: 12px; height: 12px; border-radius: 50%; background: #3a3f68; }
+.shot .bar { display: flex; gap: 8px; align-items: center; padding: 11px 14px; background: var(--chrome); border-bottom: 1px solid var(--line); }
+.shot .bar i { width: 12px; height: 12px; border-radius: 50%; background: var(--line); }
 .shot .bar i:nth-child(1) { background: #ff6159; } .shot .bar i:nth-child(2) { background: #ffbd2e; } .shot .bar i:nth-child(3) { background: #28c941; }
 .shot .bar span { margin-inline: auto; font: 0.78rem var(--mono); color: var(--faint); transform: translateX(-26px); }
 .showcase { padding-block: 40px 30px; perspective: 1600px; }
@@ -154,24 +187,72 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
 @media (prefers-reduced-motion: reduce) { .showcase .shot { transform: none; transition: none; } }
 .shot-caption { text-align: center; color: var(--faint); font-size: .9rem; margin-top: 18px; }
 
-/* ---------- loop ---------- */
 section.block { padding-block: 110px; }
 @media (max-width: 700px) { section.block { padding-block: 72px; } }
 .head { display: grid; gap: 18px; max-width: 760px; }
-.loop { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: 56px; border-top: 1px solid var(--line); }
-.loop li { list-style: none; padding: 26px 22px 6px 0; position: relative; }
-.loop li + li { padding-left: 22px; border-left: 1px solid var(--line); }
-.loop li::before { content: ""; position: absolute; top: -6px; left: 0; width: 11px; height: 11px; border-radius: 50%; background: var(--ink); border: 2px solid var(--indigo); }
-.loop li + li::before { left: -6px; }
-.loop .step { font: 600 1.45rem var(--display); letter-spacing: -.01em; }
-.loop .tool { font: 0.78rem var(--mono); color: var(--indigo); margin-top: 6px; }
-.loop p { color: var(--muted); font-size: .95rem; margin-top: 12px; }
-.loop { padding: 0; }
+
+/* ---------- features ---------- */
+.fgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: 52px; }
+.fcard { display: grid; grid-template-rows: auto 1fr; gap: 20px; background: var(--ink-2); border: 1px solid var(--line); border-radius: 18px; padding: 14px 14px 24px; text-decoration: none; transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease; }
+.fcard:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--indigo) 45%, var(--line)); box-shadow: 0 24px 50px -30px var(--shadow); }
+.fcard .txt { display: grid; gap: 8px; padding-inline: 10px; align-content: start; }
+.fcard h3 { font: 600 1.3rem/1.2 var(--display); letter-spacing: -.015em; }
+.fcard p { color: var(--muted); font-size: .96rem; }
+.fcard .more { font: 500 .8rem var(--mono); color: var(--indigo); margin-top: 4px; }
+.demo { height: 168px; border-radius: 12px; background: var(--ink-3); padding: 16px; display: grid; align-content: center; gap: 8px; overflow: hidden; font: .76rem/1.4 var(--mono); color: var(--muted); min-width: 0; }
+.demo .row1 { display: flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; }
+.demo .dark { background: var(--term-bg); color: #d5d7ea; border-radius: 10px; padding: 12px 14px; display: grid; gap: 4px; }
+.demo .dark .p { color: #8b93ff; } .demo .dark .ok { color: #45d197; }
+.demo .pillbtn { justify-self: start; background: var(--indigo-deep); color: #fff; border-radius: 8px; padding: 6px 11px; font: 600 .76rem var(--body); }
+.demo .proj { display: flex; align-items: center; gap: 10px; background: var(--ink-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; min-width: 0; }
+.demo .av { width: 24px; height: 24px; border-radius: 7px; background: var(--indigo-deep); color: #fff; display: grid; place-items: center; font: 700 .72rem var(--body); flex: none; }
+.demo .proj b { font: 600 .82rem var(--body); color: var(--fg); }
+.demo .on { color: var(--green); margin-left: auto; white-space: nowrap; }
+.demo .off { color: var(--faint); margin-left: auto; white-space: nowrap; }
+.demo .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.demo .tile { background: var(--ink-2); border: 1px solid var(--line); border-radius: 10px; padding: 9px; display: grid; gap: 4px; min-width: 0; }
+.demo .tile b { font: 600 .74rem var(--mono); color: var(--fg); overflow: hidden; text-overflow: ellipsis; }
+.demo .tile span { font-size: .66rem; color: var(--faint); }
+.demo .tile i { font: normal 600 .62rem var(--body); color: var(--green); }
+.demo .qb { background: var(--ink-2); border: 1px solid var(--line); border-radius: 9px; padding: 8px 11px; color: var(--fg); white-space: nowrap; overflow: hidden; }
+.demo .chips2 { display: flex; flex-wrap: wrap; gap: 6px; }
+.demo .c { border-radius: 999px; padding: 3px 9px; font-size: .7rem; }
+.demo .c.in { background: color-mix(in srgb, var(--indigo) 16%, transparent); color: var(--tok-fg); }
+.demo .c.out { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--tok-ex); }
+.demo .sug { background: var(--ink-2); border: 1px solid color-mix(in srgb, var(--indigo) 40%, var(--line)); border-radius: 10px; padding: 10px 12px; display: grid; gap: 6px; }
+.demo .sug b { color: var(--fg); font-weight: 500; }
+.demo .btns { display: flex; gap: 6px; }
+.demo .btns span { border-radius: 7px; padding: 4px 9px; font: 600 .7rem var(--body); border: 1px solid var(--line); color: var(--fg); }
+.demo .btns .acc { background: var(--indigo-deep); border-color: var(--indigo-deep); color: #fff; }
+.demo .btns .rej { color: var(--red); }
+.demo .big { font: 800 2.6rem/1 var(--display); color: var(--fg); letter-spacing: -.03em; }
+.demo .big small { font: 500 .8rem var(--body); color: var(--muted); letter-spacing: 0; margin-left: 6px; }
+.demo .checks { display: flex; flex-wrap: wrap; gap: 6px 12px; }
+.demo .checks span::before { content: "\2713  "; color: var(--green); }
+.facts2 { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+.facts2 span { font: .8rem var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; }
+@media (max-width: 980px) { .fgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 620px) { .fgrid { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- flow ---------- */
+.flow { list-style: none; padding: 0; margin: 40px 0 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: var(--ink-2); border: 1px solid var(--line); border-radius: 18px; }
+.flow li { position: relative; padding: 24px 22px 26px; display: grid; gap: 6px; align-content: start; }
+.flow li + li { border-left: 1px solid var(--line); }
+.flow li + li::before { content: "\203A"; position: absolute; left: -13px; top: 26px; width: 24px; height: 24px; border-radius: 50%; background: var(--ink-2); border: 1px solid var(--line); display: grid; place-items: center; color: var(--indigo); font: 600 1rem/1 var(--body); }
+.flow .n { font: 500 .72rem var(--mono); color: var(--faint); }
+.flow b { font: 600 1.2rem var(--display); letter-spacing: -.01em; }
+.flow i { justify-self: start; font: normal .72rem var(--mono); color: var(--tok-fg); background: color-mix(in srgb, var(--indigo) 12%, transparent); border-radius: 999px; padding: 2px 9px; }
+.flow span { color: var(--muted); font-size: .9rem; margin-top: 4px; }
 @media (max-width: 900px) {
-  .loop { grid-template-columns: minmax(0, 1fr); border-top: 0; border-left: 1px solid var(--line); margin-left: 6px; }
-  .loop li, .loop li + li { padding: 0 0 30px 28px; border-left: 0; }
-  .loop li::before, .loop li + li::before { top: 8px; left: -7px; }
+  .flow { grid-template-columns: minmax(0, 1fr); }
+  .flow li + li { border-left: 0; border-top: 1px solid var(--line); }
+  .flow li + li::before { left: 22px; top: -13px; content: "\2304"; line-height: .6; }
 }
+
+/* ---------- theme switch ---------- */
+.theme-btn { width: 38px; height: 36px; border-radius: 10px; border: 1px solid var(--line); background: var(--ink-2); color: var(--fg); display: grid; place-items: center; cursor: pointer; margin-left: 4px; }
+.theme-btn:hover { border-color: var(--indigo); }
+.theme-btn svg { width: 18px; height: 18px; }
 
 /* ---------- feature rows ---------- */
 .feature { display: grid; grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); gap: 64px; align-items: center; }
@@ -185,7 +266,7 @@ section.block { padding-block: 110px; }
 .ticks li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; color: var(--fg); font-size: .98rem; }
 .ticks li::before { content: ""; width: 10px; height: 10px; margin-top: 8px; border-radius: 50%; border: 2px solid var(--indigo); }
 .ticks li span { color: var(--muted); }
-.light-shot { border-radius: 14px; overflow: hidden; border: 1px solid var(--line); box-shadow: 0 40px 90px -36px #000; background: #f4f5f9; }
+.light-shot { border-radius: 14px; overflow: hidden; border: 1px solid var(--line); box-shadow: 0 40px 90px -36px var(--shadow); background: #f4f5f9; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { font: 0.8rem var(--mono); padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--ink-2); display: inline-flex; align-items: center; gap: 7px; }
 .chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--c, var(--indigo)); }
@@ -211,9 +292,9 @@ section.block { padding-block: 110px; }
 .qparse { list-style: none; margin: 0; padding: 8px 0; }
 .qparse li { display: grid; grid-template-columns: minmax(150px, 280px) minmax(0, 1fr); gap: 20px; padding: 10px 18px; align-items: baseline; }
 .qparse li + li { border-top: 1px dashed color-mix(in srgb, var(--line) 70%, transparent); }
-.tok { font: 500 0.88rem var(--mono); justify-self: start; padding: 3px 9px; border-radius: 7px; background: color-mix(in srgb, var(--indigo) 16%, transparent); color: #c8ccff; word-break: break-all; }
-.tok.ex { background: color-mix(in srgb, var(--red) 14%, transparent); color: #ffc2c2; }
-.tok.txt { background: color-mix(in srgb, var(--amber) 14%, transparent); color: #ffe2a8; }
+.tok { font: 500 0.88rem var(--mono); justify-self: start; padding: 3px 9px; border-radius: 7px; background: color-mix(in srgb, var(--indigo) 16%, transparent); color: var(--tok-fg); word-break: break-all; }
+.tok.ex { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--tok-ex); }
+.tok.txt { background: color-mix(in srgb, var(--amber) 14%, transparent); color: var(--tok-txt); }
 .qparse .what { color: var(--muted); font-size: .95rem; }
 .qparse .what b { color: var(--fg); font-weight: 600; }
 @media (max-width: 600px) { .qparse li { grid-template-columns: minmax(0, 1fr); gap: 6px; } }
@@ -221,17 +302,17 @@ section.block { padding-block: 110px; }
 /* ---------- agents ---------- */
 .agents { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; margin-top: 52px; align-items: start; }
 .term {
-  border-radius: 14px; border: 1px solid var(--line); background: #080a14; overflow: hidden; min-width: 0;
-  box-shadow: 0 30px 80px -40px #000;
+  border-radius: 14px; border: 1px solid var(--term-line); background: var(--term-bg); overflow: hidden; min-width: 0;
+  box-shadow: 0 30px 80px -40px var(--shadow);
 }
-.term .bar { display: flex; gap: 7px; align-items: center; padding: 11px 14px; border-bottom: 1px solid var(--line); font: 0.75rem var(--mono); color: var(--faint); }
+.term .bar { display: flex; gap: 7px; align-items: center; padding: 11px 14px; border-bottom: 1px solid var(--term-line); font: 0.75rem var(--mono); color: #7d809a; }
 .term .bar i { width: 10px; height: 10px; border-radius: 50%; background: #2c3158; }
 .term .bar span { margin-left: 8px; }
 .term pre { margin: 0; padding: 18px 20px 22px; font: 0.84rem/1.8 var(--mono); color: #cfd1ea; overflow-x: auto; }
-.term .p { color: var(--indigo); user-select: none; }
-.term .c { color: var(--faint); }
-.term .ok { color: var(--green); }
-.term .q { color: var(--amber); }
+.term .p { color: #8b93ff; user-select: none; }
+.term .c { color: #6f7289; }
+.term .ok { color: #45d197; }
+.term .q { color: #f5bd55; }
 .guard { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin-top: 28px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
 .guard div { padding: 20px 22px; display: grid; gap: 6px; }
 .guard div + div { border-left: 1px solid var(--line); }
@@ -244,19 +325,11 @@ section.block { padding-block: 110px; }
 }
 
 /* ---------- code tabs ---------- */
-.tabs { display: flex; gap: 4px; padding: 6px; border-bottom: 1px solid var(--line); }
-.tabs button { font: 500 0.8rem var(--mono); padding: 7px 12px; border-radius: 8px; border: 0; background: transparent; color: var(--faint); cursor: pointer; }
-.tabs button[aria-selected="true"] { background: var(--ink-3); color: var(--fg); }
-.tabs .copybtn { margin-left: auto; color: var(--muted); }
-.tabs .copybtn:hover { color: var(--fg); }
-
-/* ---------- principles ---------- */
-.principles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 44px 56px; margin-top: 60px; }
-.principles div { display: grid; gap: 10px; align-content: start; }
-.principles b { font: 600 1.3rem var(--display); letter-spacing: -.01em; }
-.principles span { color: var(--muted); }
-@media (max-width: 860px) { .principles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 560px) { .principles { grid-template-columns: minmax(0, 1fr); gap: 30px; } }
+.tabs { display: flex; gap: 4px; padding: 6px; border-bottom: 1px solid var(--term-line); }
+.tabs button { font: 500 0.8rem var(--mono); padding: 7px 12px; border-radius: 8px; border: 0; background: transparent; color: #7d809a; cursor: pointer; }
+.tabs button[aria-selected="true"] { background: #ffffff14; color: #ecedf4; }
+.tabs .copybtn { margin-left: auto; color: #a2a5bb; }
+.tabs .copybtn:hover { color: #ecedf4; }
 
 /* ---------- start ---------- */
 .start { position: relative; border: 1px solid var(--line); border-radius: 24px; padding: 64px 56px; overflow: hidden; background: var(--ink-2); }
@@ -293,12 +366,13 @@ footer a:hover { color: var(--fg); }
       Plonix
     </a>
     <nav class="nav-links" aria-label="Sections">
-      <a href="#loop">How it works</a>
-      <a href="#scope">Adaptive scope</a>
-      <a href="#search">Search</a>
-      <a href="#agents">Agents</a>
-      <a href="#cli">CLI &amp; API</a>
+      <a href="#features">Features</a>
+      <a href="#scope">Scope</a>
+      <a href="#search">Filtering</a>
+      <a href="#agents">AI</a>
+      <a href="#market">Market</a>
     </nav>
+    <button type="button" class="theme-btn" id="theme" aria-label="Switch to dark mode" title="Switch theme"></button>
     <a class="btn small" href="https://github.com/SergeyMalych/plonix">
       <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
       GitHub
@@ -350,24 +424,59 @@ footer a:hover { color: var(--fg); }
   </div>
 </section>
 
-<section class="block" id="loop">
+<section class="block" id="features">
+  <div class="wrap">
+    <div class="head reveal">
+      <span class="eyebrow">Why Plonix</span>
+      <h2>Everything a web assessment needs. Nothing it doesn't.</h2>
+    </div>
+    <div class="fgrid reveal">
+      <a class="fcard" href="#agents">
+        <div class="demo"><div class="dark"><div><span class="p">$</span> plonix connect claude</div><div><span class="ok">&#10003;</span> Claude Code connected &middot; read-only</div></div><span class="pillbtn">Ask Claude Code</span></div>
+        <div class="txt"><h3>AI-first, built for Claude Code</h3><p>Built-in MCP gives Claude Code your live traffic, scope and findings in one command. Ask about any request with one click.</p><span class="more">AI and agents &rarr;</span></div>
+      </a>
+      <a class="fcard" href="#projects">
+        <div class="demo"><div class="proj"><span class="av">S</span><b>Shop API</b><span class="on">&#9679; :8081</span></div><div class="proj"><span class="av">A</span><b>Acme staging</b><span class="on">&#9679; :8080</span></div><div class="proj"><span class="av" style="opacity:.45">B</span><b>Bank portal</b><span class="off">closed</span></div></div>
+        <div class="txt"><h3>Several projects at the same time</h3><p>Every project is its own folder, window, proxy and database. Open as many as you need; nothing collides.</p><span class="more">Projects &rarr;</span></div>
+      </a>
+      <a class="fcard" href="#market">
+        <div class="demo"><div class="tiles"><div class="tile"><b>api-kit</b><span>Bundle</span><i>&#10003; Verified</i></div><div class="tile"><b>leaks</b><span>Filter pack</span><i>&#10003; Verified</i></div><div class="tile"><b>check-scope</b><span>Skill</span><i>&#10003; Built in</i></div></div><div class="row1"><span class="on" style="margin:0">&#10003;</span> Signed &middot; checked before install</div></div>
+        <div class="txt"><h3>A community Market for everything modular</h3><p>Skills, rule packs, filter packs and bundles, maintained by the community and signed before they install.</p><span class="more">Market &rarr;</span></div>
+      </a>
+      <a class="fcard" href="#search">
+        <div class="demo"><div class="qb">status:5xx method:POST -is:trackers</div><div class="chips2"><span class="c in">+ Auth flows</span><span class="c in">+ host:api.acme.test</span><span class="c out">&minus; Analytics &amp; trackers</span><span class="c out">&minus; static files</span></div></div>
+        <div class="txt"><h3>Advanced filtering</h3><p>Type a query or click chips to show only or hide. Save named filters, and use the same query in the CLI and API.</p><span class="more">Filtering &rarr;</span></div>
+      </a>
+      <a class="fcard" href="#scope">
+        <div class="demo"><div class="sug"><div><b>static.acmecdn.test</b> looks like part of your target</div><div>&#8599; called from shop.acme.test &middot; shares a certificate</div><div class="btns"><span class="acc">Accept</span><span>+ subdomains</span><span class="rej">Reject</span></div></div></div>
+        <div class="txt"><h3>Scope that works, and stays easy</h3><p>Scope grows as you browse, with evidence for every suggestion. One click to accept or reject, and noise like trackers is excluded for you.</p><span class="more">Adaptive scope &rarr;</span></div>
+      </a>
+      <a class="fcard" href="#start">
+        <div class="demo"><div class="big">&lt;60s<small>download to captured traffic</small></div><div class="checks"><span>Certificate</span><span>Proxy</span><span>Scope</span><span>Browser</span></div></div>
+        <div class="txt"><h3>Friendly from the first minute</h3><p>One click or one command sets up the certificate, proxy, scope and a capture browser. A real Mac app with shortcuts you already know.</p><span class="more">Get started &rarr;</span></div>
+      </a>
+    </div>
+    <div class="facts2 reveal"><span>Native Mac app</span><span>Rust engine</span><span>Your data stays on your Mac</span><span>Open source, Apache-2.0</span><span>CLI + local API</span></div>
+  </div>
+</section>
+
+<section class="block" id="flow" style="padding-block:40px 30px">
   <div class="wrap">
     <div class="head reveal">
       <span class="eyebrow">How it works</span>
-      <h2>One loop, five steps, no weight.</h2>
-      <p class="lede">Most of a web assessment is the same loop. Plonix gives each step one tool, with the same name in the window, the terminal and the docs.</p>
+      <h2>From first request to proven finding.</h2>
     </div>
-    <ol class="loop reveal">
-      <li><div class="step">Capture</div><div class="tool">Traffic</div><p>Every request and response through the proxy, HTTPS included, stored per project.</p></li>
-      <li><div class="step">Discover</div><div class="tool">Scope · Map</div><p>Related domains, hosts, endpoints, parameters and the technology behind them.</p></li>
-      <li><div class="step">Investigate</div><div class="tool">Search · Lens</div><p>A query language you can type, and an inspector that decodes as you read.</p></li>
-      <li><div class="step">Experiment</div><div class="tool">Bench</div><p>Edit, send, branch and compare. Each tab is one experiment.</p></li>
-      <li><div class="step">Validate</div><div class="tool">Findings</div><p>Write it up with the requests that prove it attached as evidence.</p></li>
+    <ol class="flow reveal">
+      <li><span class="n">1</span><b>Capture</b><i>Traffic</i><span>Every request and response, HTTPS included.</span></li>
+      <li><span class="n">2</span><b>Discover</b><i>Scope &middot; Map</i><span>Domains, hosts, endpoints and tech.</span></li>
+      <li><span class="n">3</span><b>Investigate</b><i>Search &middot; Lens</i><span>Filter fast, decode as you read.</span></li>
+      <li><span class="n">4</span><b>Experiment</b><i>Bench</i><span>Edit, send, branch and compare.</span></li>
+      <li><span class="n">5</span><b>Validate</b><i>Findings</i><span>Write it up with the proof attached.</span></li>
     </ol>
   </div>
 </section>
 
-<section class="block" id="scope" style="padding-top:0">
+<section class="block" id="scope">
   <div class="wrap">
     <div class="feature reveal">
       <div class="copy">
@@ -541,23 +650,6 @@ footer a:hover { color: var(--fg); }
   </div>
 </section>
 
-<section class="block">
-  <div class="wrap">
-    <div class="head reveal">
-      <span class="eyebrow">Principles</span>
-      <h2>Simple by default. Powerful when you need it.</h2>
-    </div>
-    <div class="principles reveal">
-      <div><b>Fast</b><span>A native Rust core and one SQLite database per project. Large projects stay quick to search.</span></div>
-      <div><b>Native</b><span>A real Mac app with its own window, menu bar, shortcuts and Dock icon. Light and dark follow the system.</span></div>
-      <div><b>Minimal</b><span>A few workflows done well. No screen you will never open.</span></div>
-      <div><b>Friendly first</b><span>From download to captured traffic in under a minute. One command sets up the certificate, proxy, scope and browser.</span></div>
-      <div><b>Open</b><span>Apache-2.0, no paid tier holding back the good parts. Detection rules are community packs anyone can write.</span></div>
-      <div><b>Yours</b><span>Captured data stays on your Mac. Agents get scoped, read-only access you can see and switch off.</span></div>
-    </div>
-  </div>
-</section>
-
 <section id="start">
   <div class="wrap">
     <div class="start reveal">
@@ -608,6 +700,22 @@ footer a:hover { color: var(--fg); }
 
 <script>
 (() => {
+  /* ---- theme switch ---- */
+  const root = document.documentElement, tbtn = document.getElementById('theme');
+  const sys = matchMedia('(prefers-color-scheme: dark)');
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+  const current = () => root.dataset.theme || (sys.matches ? 'dark' : 'light');
+  const paint = () => { const d = current() === 'dark'; tbtn.innerHTML = d ? SUN : MOON; tbtn.setAttribute('aria-label', d ? 'Switch to light mode' : 'Switch to dark mode'); };
+  try { const saved = localStorage.getItem('plonix-theme'); if (saved === 'light' || saved === 'dark') root.dataset.theme = saved; } catch (e) {}
+  paint();
+  sys.addEventListener('change', paint);
+  tbtn.addEventListener('click', () => {
+    const next = current() === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next; paint();
+    try { localStorage.setItem('plonix-theme', next); } catch (e) {}
+  });
+
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   /* ---- the lens ---- */
