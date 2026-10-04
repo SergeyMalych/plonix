@@ -17,7 +17,7 @@ use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -29,7 +29,9 @@ use crate::codec;
 use crate::engine::{Engine, ReplayRequest, SendError, SendRequest};
 use crate::model::{Exchange, NewFinding, SEVERITIES};
 use crate::paths::Home;
+use crate::project::Project;
 use crate::query;
+use crate::settings::{self, Level};
 use crate::scope::Decision;
 use crate::ui::{self, LaunchCodes};
 
@@ -41,9 +43,14 @@ struct AppState {
     agents: Arc<AgentActivity>,
     agent_settings: Arc<RwLock<AgentSettings>>,
     api_addr: SocketAddr,
-    proxy_addr: SocketAddr,
     launch_codes: Arc<LaunchCodes>,
     home: Home,
+}
+
+impl AppState {
+    fn proxy_addr(&self) -> String {
+        self.engine.proxy_addr().map(|a| a.to_string()).unwrap_or_default()
+    }
 }
 
 /// Bearer tokens the API accepts.
@@ -54,7 +61,7 @@ pub struct Tokens {
     pub agent: String,
 }
 
-pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, proxy_addr: SocketAddr, home: Home) -> Router {
+pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: Home) -> Router {
     let state = AppState {
         engine,
         token: tokens.user,
@@ -62,13 +69,14 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, proxy_a
         agents: Arc::default(),
         agent_settings: Arc::new(RwLock::new(AgentSettings::load(&home))),
         api_addr,
-        proxy_addr,
         launch_codes: Arc::default(),
         home,
     };
+    let project_id = state.engine.project_ref.get().map(|p| p.id.clone()).unwrap_or_default();
     Router::new()
-        .route("/", get(ui::index))
+        .route("/", get(move || ui::index(project_id.clone())))
         .route("/ui/app.js", get(ui::app_js))
+        .route("/ui/settings.js", get(ui::settings_js))
         .route("/ui/app.css", get(ui::app_css))
         .route("/ui/icon.svg", get(ui::icon))
         .route("/ui/session", post(ui_session))
@@ -92,6 +100,11 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, proxy_a
         .route("/api/send", post(send))
         .route("/api/replay", post(replay))
         .route("/api/findings", get(findings).post(add_finding))
+        .route("/api/settings", get(get_settings))
+        .route("/api/settings/{section}", put(put_settings))
+        .route("/api/storage", get(storage))
+        .route("/api/storage/prune", post(prune))
+        .route("/api/sessions", get(sessions))
         .route("/api/scan/catalog", get(scan_catalog))
         .route("/api/scan/suggest/{host}", get(scan_suggest))
         .route("/api/scan", post(scan_run))
@@ -104,7 +117,19 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, proxy_a
         .with_state(state)
 }
 
+/// Largest request body the API accepts.
+const MAX_BODY: usize = 64 * 1024 * 1024;
+
 async fn guard(State(s): State<AppState>, req: Request, next: Next) -> Response {
+    // Read the whole body before answering, even for refusals and handlers
+    // that ignore it: closing a connection with unread bytes resets it, and
+    // the client can lose the response it was reading.
+    let (parts, body) = req.into_parts();
+    let body = match axum::body::to_bytes(body, MAX_BODY).await {
+        Ok(b) => b,
+        Err(_) => return err(StatusCode::PAYLOAD_TOO_LARGE, "too_large", "the request body is too large or was cut off"),
+    };
+    let req = Request::from_parts(parts, axum::body::Body::from(body));
     let host = req.headers().get("host").and_then(|h| h.to_str().ok()).unwrap_or("");
     let host_ok = host.rsplit_once(':').is_some_and(|(h, p)| {
         p.parse::<u16>().ok() == Some(s.api_addr.port()) && matches!(h, "127.0.0.1" | "localhost" | "[::1]")
@@ -154,15 +179,15 @@ fn outside_agent_data() -> Response {
     )
 }
 
-fn constant_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn constant_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-fn err(status: StatusCode, code: &str, msg: &str) -> Response {
+pub(crate) fn err(status: StatusCode, code: &str, msg: &str) -> Response {
     (status, Json(json!({ "error": msg, "code": code }))).into_response()
 }
 
-fn internal(e: anyhow::Error) -> Response {
+pub(crate) fn internal(e: anyhow::Error) -> Response {
     err(StatusCode::INTERNAL_SERVER_ERROR, "internal", &format!("{e:#}"))
 }
 
@@ -215,10 +240,13 @@ async fn ui_session(State(s): State<AppState>, headers: HeaderMap, Json(b): Json
 async fn status(State(s): State<AppState>) -> Response {
     let rules = s.engine.rules();
     let pending = s.engine.store.suggestions(&rules).map(|v| v.len()).unwrap_or(0);
+    let project = s.engine.project_ref.get();
     Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
         "project": s.engine.project,
-        "proxy": s.proxy_addr.to_string(),
+        "project_id": project.map(|p| p.id.clone()),
+        "project_dir": project.map(|p| p.dir.clone()),
+        "proxy": s.proxy_addr(),
         "api": s.api_addr.to_string(),
         "pid": std::process::id(),
         "started_at": s.engine.started_at,
@@ -512,11 +540,12 @@ async fn open_browser(State(s): State<AppState>, Json(b): Json<OpenBody>) -> Res
             "no_browser",
             &format!(
                 "no browser found to launch. Install Google Chrome, Brave, Edge or Firefox, or set any browser's HTTP and HTTPS proxy to {}",
-                s.proxy_addr
+                s.proxy_addr()
             ),
         );
     };
-    let launched = browser::launch(&s.home, &found, &s.proxy_addr.to_string(), &s.engine.ca.spki_sha256(), &target.url);
+    let profile = browser::profile_dir(&s.home, s.engine.project_ref.get().map(|p| p.dir.as_path()));
+    let launched = browser::launch(&profile, &found, &s.proxy_addr(), &s.engine.ca.spki_sha256(), &target.url);
     match launched {
         Ok(_) => Json(json!({
             "url": target.url,
@@ -647,6 +676,117 @@ async fn agent_launch(State(s): State<AppState>, Json(b): Json<LaunchBody>) -> R
 }
 
 async fn shutdown(State(s): State<AppState>) -> Response {
-    s.engine.shutdown.notify_waiters();
-    Json(Value::from(json!({ "ok": true }))).into_response()
+    s.engine.request_shutdown();
+    Json(json!({ "ok": true })).into_response()
+}
+
+fn this_project(s: &AppState) -> Option<Project> {
+    s.engine.project_ref.get().and_then(|p| Project::load(&p.dir).ok())
+}
+
+/// Every settings section with its values: global ones, and this project's.
+async fn get_settings(State(s): State<AppState>) -> Response {
+    let project = this_project(&s);
+    let mut v = settings::describe(&s.home, project.as_ref().map(|p| &p.file.settings));
+    v["project"] = json!(project.map(|p| json!({ "id": p.id(), "name": p.name(), "dir": p.dir })));
+    Json(v).into_response()
+}
+
+#[derive(Deserialize)]
+struct SettingsBody {
+    values: Value,
+}
+
+/// Saves one section. Proxy changes apply to the running session at once.
+async fn put_settings(State(s): State<AppState>, Path(id): Path<String>, Json(b): Json<SettingsBody>) -> Response {
+    let Some(section) = settings::section(&id) else {
+        return err(StatusCode::NOT_FOUND, "not_found", &format!("no settings section '{id}'"));
+    };
+    let mut project = this_project(&s);
+    let current = match (section.level, &project) {
+        (Level::Global, _) => settings::global(&s.home, &id),
+        (Level::Project, Some(p)) => p.settings(&id),
+        (Level::Project, None) => return err(StatusCode::CONFLICT, "no_project", "this engine has no project folder to save settings in"),
+    };
+    let values = match section.check(&b.values, &current) {
+        Ok(v) => v,
+        Err(problems) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "some settings need fixing", "code": "bad_settings", "problems": problems })),
+            )
+                .into_response();
+        }
+    };
+    if id == settings::PROXY {
+        // Apply first: a listen address that cannot be bound is not saved.
+        let p = settings::ProxySettings::from_values(&values);
+        if let Err(e) = s.engine.apply_proxy_settings(&p).await {
+            let problems = [settings::Problem::new("listen_port", format!("{e:#}"))];
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("{e:#}"), "code": "bad_settings", "problems": problems })))
+                .into_response();
+        }
+        crate::session::refresh(&s.home, &s.engine, s.api_addr);
+    }
+    let saved = match (section.level, project.as_mut()) {
+        (Level::Global, _) => settings::save_global(&s.home, &id, &values),
+        (Level::Project, Some(p)) => p.save_settings(&id, values.clone()),
+        (Level::Project, None) => unreachable!(),
+    };
+    if let Err(e) = saved {
+        return internal(e);
+    }
+    Json(json!({ "section": id, "values": values, "applies": section.applies, "proxy": s.proxy_addr() })).into_response()
+}
+
+/// How much traffic is out of scope, and the storage policy.
+async fn storage(State(s): State<AppState>) -> Response {
+    let engine = s.engine.clone();
+    let stats = match tokio::task::spawn_blocking(move || engine.storage_stats()).await {
+        Ok(Ok(st)) => st,
+        Ok(Err(e)) => return internal(e),
+        Err(e) => return internal(e.into()),
+    };
+    let project = this_project(&s);
+    let policy = project.as_ref().map(|p| settings::StorageSettings::from_values(&p.settings(settings::STORAGE)));
+    Json(json!({
+        "stats": stats,
+        "keep_only_in_scope": policy.is_some_and(|p| p.keep_only_in_scope),
+        "last_prune": project.and_then(|p| p.file.last_prune),
+    }))
+    .into_response()
+}
+
+#[derive(Deserialize)]
+struct PruneBody {
+    /// Must be true: deleting traffic is never a side effect of a stray request.
+    #[serde(default)]
+    confirm: bool,
+}
+
+/// Deletes out-of-scope traffic now.
+async fn prune(State(s): State<AppState>, Json(b): Json<PruneBody>) -> Response {
+    if !b.confirm {
+        return err(StatusCode::BAD_REQUEST, "bad_request", "send {\"confirm\": true} to delete out-of-scope traffic");
+    }
+    let engine = s.engine.clone();
+    match tokio::task::spawn_blocking(move || engine.prune_out_of_scope()).await {
+        Ok(Ok(report)) => {
+            if let Some(mut p) = this_project(&s) {
+                let _ = p.update(|f| f.last_prune = Some(report.clone()));
+            }
+            Json(report).into_response()
+        }
+        Ok(Err(e)) => internal(e),
+        Err(e) => internal(e.into()),
+    }
+}
+
+/// Every running session (this one included), so a window can switch.
+async fn sessions(State(s): State<AppState>) -> Response {
+    let home = s.home.clone();
+    match tokio::task::spawn_blocking(move || crate::session::running(&home)).await {
+        Ok(list) => Json(list).into_response(),
+        Err(e) => internal(e.into()),
+    }
 }

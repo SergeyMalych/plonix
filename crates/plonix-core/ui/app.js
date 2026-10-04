@@ -58,6 +58,13 @@ const header = (headers, name) => {
   return hit ? hit[1] : null;
 };
 
+/* State kept in the browser for one project (search, Bench tabs, last
+ * target) is keyed by the project's id, so it stays with the project even
+ * when another project later opens at the same address. */
+const PROJECT_ID = (document.querySelector('meta[name="plonix-project"]') || {}).content || '';
+const pkey = (key) => (PROJECT_ID && !PROJECT_ID.includes('{') ? `${key}@${PROJECT_ID}` : key);
+const pstore = (key, value) => store(pkey(key), value);
+
 function store(key, value) {
   try {
     if (value === undefined) return JSON.parse(localStorage.getItem(key));
@@ -71,10 +78,11 @@ function store(key, value) {
 /* ---------- API ---------- */
 
 class ApiError extends Error {
-  constructor(status, code, message) {
+  constructor(status, code, message, data) {
     super(message);
     this.status = status;
     this.code = code;
+    this.problems = data && data.problems;
   }
 }
 
@@ -111,7 +119,7 @@ async function api(path, { method = 'GET', body } = {}) {
     signOut();
     throw new ApiError(401, 'unauthorized', 'Signed out');
   }
-  if (!resp.ok) throw new ApiError(resp.status, (data && data.code) || 'error', (data && data.error) || resp.statusText);
+  if (!resp.ok) throw new ApiError(resp.status, (data && data.code) || 'error', (data && data.error) || resp.statusText, data);
   return data;
 }
 
@@ -238,6 +246,7 @@ const VIEWS = {
   map: { label: 'Map', ico: '⊞', render: renderMap },
   findings: { label: 'Findings', ico: '⚑', render: renderFindings },
   agents: { label: 'Agents', ico: '✦', render: renderAgents },
+  settings: { label: 'Settings', ico: '⚙', render: renderSettings, footer: true },
 };
 
 const IN_APP = !!window.__PLONIX_APP__;
@@ -245,6 +254,7 @@ const IN_APP = !!window.__PLONIX_APP__;
 function renderShell() {
   const nav = h('div', { class: 'nav' });
   Object.entries(VIEWS).forEach(([key, v], i) => {
+    if (v.footer) return;
     nav.append(
       h(
         'button',
@@ -283,6 +293,16 @@ function renderShell() {
         nav,
         h('div', { class: 'railsecs', id: 'railsecs' }),
         h('div', { class: 'spacer' }),
+        h(
+          'div',
+          { class: 'nav navfoot' },
+          h(
+            'button',
+            { 'data-v': 'settings', title: `Settings: proxy, storage and more${IN_APP ? '  (⌘,)' : ''}`, onclick: () => go('settings') },
+            h('span', { class: 'ico', text: '⚙' }),
+            h('span', { class: 'nl', text: 'Settings' }),
+          ),
+        ),
         h(
           'button',
           { class: 'railtoggle', id: 'railtoggle', onclick: toggleSidebar },
@@ -370,7 +390,7 @@ function renderRail() {
 
 /** Opens a target in the capture browser: an isolated browser that routes through Plonix. */
 function openTarget() {
-  const input = h('input', { placeholder: 'example.com', spellcheck: 'false', autocomplete: 'off', value: store('plonix.lastTarget') || '' });
+  const input = h('input', { placeholder: 'example.com', spellcheck: 'false', autocomplete: 'off', value: pstore('plonix.lastTarget') || '' });
   const go = async () => {
     const target = input.value.trim();
     if (!target) return input.focus();
@@ -397,7 +417,7 @@ function openTarget() {
 async function launchTarget(target) {
   try {
     const r = await api('/api/browser/open', { method: 'POST', body: { target } });
-    store('plonix.lastTarget', target);
+    pstore('plonix.lastTarget', target);
     toast(`Opened ${r.url} in ${r.browser}. Browse the site; requests appear in Traffic.`, 'ok');
     await loadScope();
     if (S.view !== 'traffic') go('traffic');
@@ -410,6 +430,10 @@ async function launchTarget(target) {
 function go(view, force) {
   if (!VIEWS[view]) return;
   if (S.view === view && !force) return;
+  // Going somewhere from the sidebar forgets the way back; leaveTo keeps it.
+  if (!S.keepBack) S.back = null;
+  S.keepBack = false;
+  if (S.view === 'map') saveMapScroll();
   S.view = view;
   if (location.hash !== '#/' + view) history.replaceState(null, '', '#/' + view);
   for (const b of document.querySelectorAll('.nav button')) b.classList.toggle('on', b.dataset.v === view);
@@ -418,10 +442,30 @@ function go(view, force) {
   VIEWS[view].render(main);
 }
 
+/** Moves to another screen from inside one, remembering where to go back to. */
+function leaveTo(view) {
+  if (S.view !== view && VIEWS[S.view]) S.back = S.view;
+  S.keepBack = true;
+  go(view, true);
+}
+
+function goBack() {
+  const back = S.back;
+  S.back = null;
+  if (back) go(back, true);
+}
+
+/** "← Map": returns to the screen the user came from, exactly as they left it. */
+function backButton() {
+  if (!S.back || !VIEWS[S.back]) return null;
+  return h('button', { class: 'btn sm backbtn', text: '← ' + VIEWS[S.back].label, title: 'Back to ' + VIEWS[S.back].label, onclick: goBack });
+}
+
 function updateChrome() {
   const st = S.status;
   if (!st || !$('#engine')) return;
   $('#proj').textContent = '· ' + st.project;
+  $('#proj').title = st.project_dir ? 'Project folder: ' + st.project_dir : '';
   document.title = 'Plonix · ' + st.project;
   const eng = $('#engine');
   eng.classList.toggle('down', !S.engineUp);
@@ -830,6 +874,7 @@ function renderTraffic(main) {
       h(
         'div',
         { class: 'toolbar' },
+        backButton(),
         h('div', { class: 'search', id: 'searchbox' }, h('span', { class: 'mg', text: '⌕' }), input, h('kbd', { text: '/' })),
         h('span', { class: 'count', id: 'tcount' }),
         liveBtn,
@@ -1095,7 +1140,7 @@ async function setQuery(q) {
   T.text = text;
   T.sel = null;
   saveTrafficView();
-  go('traffic', true);
+  leaveTo('traffic');
 }
 
 async function refreshTraffic(userAction) {
@@ -1127,7 +1172,7 @@ async function refreshTraffic(userAction) {
 }
 
 function emptyTraffic(st) {
-  const input = h('input', { placeholder: 'example.com', spellcheck: 'false', autocomplete: 'off', value: store('plonix.lastTarget') || '' });
+  const input = h('input', { placeholder: 'example.com', spellcheck: 'false', autocomplete: 'off', value: pstore('plonix.lastTarget') || '' });
   const err = h('div', { class: 'qerr' });
   const open = async () => {
     if (!input.value.trim()) return input.focus();
@@ -1204,6 +1249,7 @@ function selectRow(delta) {
 async function openInspector(id) {
   T.sel = id;
   for (const tr of document.querySelectorAll('#rows tr')) tr.classList.toggle('sel', Number(tr.dataset.id) === id);
+  for (const tr of document.querySelectorAll('tr[data-ex]')) tr.classList.toggle('sel', Number(tr.dataset.ex) === id);
   const slot = $('#inspslot');
   if (!slot) return;
   let ex;
@@ -1457,7 +1503,7 @@ function closeInspector() {
   T.sel = null;
   const slot = $('#inspslot');
   if (slot) clear(slot);
-  for (const tr of document.querySelectorAll('#rows tr.sel')) tr.classList.remove('sel');
+  for (const tr of document.querySelectorAll('#rows tr.sel, tr[data-ex].sel')) tr.classList.remove('sel');
 }
 
 const scopeTag = (d) => ({ accepted: 'in', rejected: 'rej', unknown: 'out' })[d];
@@ -1571,9 +1617,12 @@ function evidenceList(evidence) {
   );
 }
 
+/** Opens a request in the Lens. Screens with a Lens of their own (Traffic,
+ * Map, Findings) show it in place, so the user never loses their spot. */
 function showExchange(id) {
+  if ($('#inspslot')) return openInspector(id);
   T.sel = id;
-  go('traffic', true);
+  leaveTo('traffic');
 }
 
 /* ======================================================================
@@ -1582,7 +1631,7 @@ function showExchange(id) {
 
 const R = { tabs: [], active: 0, mode: 'response' };
 (function loadBench() {
-  const saved = store('plonix.bench');
+  const saved = pstore('plonix.bench');
   if (saved && Array.isArray(saved.tabs)) {
     R.tabs = saved.tabs;
     R.active = Math.min(saved.active || 0, Math.max(0, R.tabs.length - 1));
@@ -1590,7 +1639,7 @@ const R = { tabs: [], active: 0, mode: 'response' };
 })();
 function saveBench() {
   const tabs = R.tabs.map((t) => ({ ...t, error: undefined, picks: [] }));
-  store('plonix.bench', { tabs: tabs.slice(-30), active: R.active });
+  pstore('plonix.bench', { tabs: tabs.slice(-30), active: R.active });
 }
 const tabNo = () => (R.counter = (R.counter || R.tabs.length) + 1);
 
@@ -1620,7 +1669,7 @@ async function sendToBench(id) {
   });
   R.active = R.tabs.length - 1;
   saveBench();
-  go('bench', true);
+  leaveTo('bench');
 }
 
 function newBlankTab() {
@@ -1686,7 +1735,7 @@ function renderBench(main) {
   const view = h(
     'div',
     { class: 'view' },
-    h('div', { class: 'toolbar' }, h('h2', { text: 'Bench' }), h('span', { class: 'hint', text: 'Each tab is an experiment: edit a request, send it, branch it, compare responses. Sends only reach in-scope hosts.' })),
+    h('div', { class: 'toolbar' }, backButton(), h('h2', { text: 'Bench' }), h('span', { class: 'hint', text: 'Each tab is an experiment: edit a request, send it, branch it, compare responses. Sends only reach in-scope hosts.' })),
     tabs,
   );
   clear(main, view);
@@ -2193,7 +2242,21 @@ function renderScopeBody() {
    Map: hosts, endpoints, technologies
    ====================================================================== */
 
-const M = { hosts: [], tech: {}, sel: null, dirty: true };
+const M = { hosts: [], tech: {}, sel: null, dirty: true, scroll: null };
+
+function saveMapScroll() {
+  const list = $('#hostlist');
+  const detail = $('#hostdetail');
+  if (list && detail) M.scroll = [list.scrollTop, detail.scrollTop];
+}
+
+function restoreMapScroll() {
+  const list = $('#hostlist');
+  const detail = $('#hostdetail');
+  if (!M.scroll || !list || !detail) return;
+  [list.scrollTop, detail.scrollTop] = M.scroll;
+  M.scroll = null;
+}
 
 function renderMap(main) {
   clear(
@@ -2208,7 +2271,7 @@ function renderMap(main) {
         h('span', { class: 'hint', id: 'rulesinfo', text: 'Hosts, endpoints and parameters learned from traffic, with detected technologies.' }),
         h('button', { class: 'btn sm', text: 'Refresh', onclick: () => loadMap(true) }),
       ),
-      h('div', { class: 'mapwrap' }, h('div', { class: 'hostlist', id: 'hostlist' }), h('div', { class: 'hostdetail', id: 'hostdetail' })),
+      h('div', { class: 'traffic' }, h('div', { class: 'mapwrap' }, h('div', { class: 'hostlist', id: 'hostlist' }), h('div', { class: 'hostdetail', id: 'hostdetail' })), h('div', { id: 'inspslot' })),
     ),
   );
   loadMap(true);
@@ -2223,7 +2286,8 @@ async function loadMap(withTech) {
   M.dirty = false;
   if (!M.sel && M.hosts.length) M.sel = (M.hosts.find((x) => x.scope === 'accepted') || M.hosts[0]).host;
   drawHostList();
-  drawHostDetail();
+  await drawHostDetail();
+  restoreMapScroll();
   if (withTech) {
     api('/api/rules')
       .then((r) => {
@@ -2319,7 +2383,7 @@ async function drawHostDetail() {
         eps.map((e) =>
           h(
             'tr',
-            { class: 'click', title: 'Open a sample request', onclick: () => showExchange(e.sample_id) },
+            { class: 'click' + (T.sel === e.sample_id ? ' sel' : ''), 'data-ex': e.sample_id, title: 'Open a sample request', onclick: () => showExchange(e.sample_id) },
             h('td', null, h('span', { class: 'meth m-' + e.method, text: e.method })),
             h('td', { class: 'mono', text: e.path }),
             h('td', null, e.statuses.map((s) => [h('span', { class: statusClass(s), text: s }), ' '])),
@@ -2343,7 +2407,7 @@ function renderFindings(main) {
       'div',
       { class: 'view' },
       h('div', { class: 'toolbar' }, h('h2', { text: 'Findings' }), h('span', { class: 'hint', text: 'Reproducible issues, each tied to the requests that prove it.' }), h('button', { class: 'btn primary sm', text: 'New finding', onclick: () => newFinding([], '') })),
-      h('div', { class: 'pane' }, h('div', { class: 'stack', id: 'findbody' })),
+      h('div', { class: 'traffic' }, h('div', { class: 'pane' }, h('div', { class: 'stack', id: 'findbody' })), h('div', { id: 'inspslot' })),
     ),
   );
   loadFindings();
@@ -2381,7 +2445,7 @@ async function loadFindings() {
               'div',
               { class: 'fb' },
               f.description || null,
-              f.exchange_ids.length ? h('div', { class: 'evid' }, f.exchange_ids.map((id) => h('button', { text: 'request #' + id, title: 'Open in Traffic', onclick: () => showExchange(id) }))) : null,
+              f.exchange_ids.length ? h('div', { class: 'evid' }, f.exchange_ids.map((id) => h('button', { text: 'request #' + id, title: 'Open in the Lens', onclick: () => showExchange(id) }))) : null,
             )
           : null,
       ),
@@ -2754,7 +2818,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if ($('.popover, .ctxmenu')) return closePopover();
     if ($('.modal')) return closeModal();
-    if (S.view === 'traffic' && !typing) return closeInspector();
+    if ($('#inspector') && !typing) return closeInspector();
   }
   if (S.view === 'bench' && e.key === 'Enter' && (e.metaKey || e.ctrlKey) && R.send) {
     e.preventDefault();
@@ -2767,7 +2831,7 @@ document.addEventListener('keydown', (e) => {
     }
     return;
   }
-  const keys = Object.keys(VIEWS);
+  const keys = Object.keys(VIEWS).filter((k) => !VIEWS[k].footer);
   if (/^[1-6]$/.test(e.key)) return go(keys[Number(e.key) - 1]);
   if (e.key === '\\') return toggleSidebar();
   if (S.view !== 'traffic') return;
@@ -2782,6 +2846,99 @@ document.addEventListener('keydown', (e) => {
     selectRow(-1);
   } else if (e.key === 'b' && T.sel) sendToBench(T.sel);
 });
+
+/* ---------- settings ---------- */
+
+async function renderSettings(main) {
+  const box = h('div', { class: 'view settingsview' }, h('div', { class: 'empty', text: 'Loading settings…' }));
+  main.append(box);
+  let data;
+  try {
+    data = await api('/api/settings');
+  } catch (e) {
+    clear(box, h('div', { class: 'empty', text: e.message }));
+    return;
+  }
+  if (S.view !== 'settings') return;
+  PlonixSettings.render(box, data, {
+    select: S.settingsSection || 'proxy',
+    onSelect: (id) => (S.settingsSection = id),
+    save: async (section, values) => {
+      const r = await api('/api/settings/' + section, { method: 'PUT', body: { values } });
+      if (section === 'proxy') {
+        S.status = await api('/api/status');
+        updateChrome();
+        r.message = 'Saved and applied. The proxy listens on ' + r.proxy + '.';
+      }
+      return r;
+    },
+    extra: (section, el) => {
+      if (section.id === 'proxy') el.append(proxyPanel());
+      if (section.id === 'storage') el.append(storagePanel());
+    },
+  });
+}
+
+function proxyPanel() {
+  const st = S.status || {};
+  return h(
+    'div',
+    { class: 'spanel' },
+    h('h4', { text: 'Listening now' }),
+    h('p', null, 'This project\'s proxy is at ', h('b', { class: 'mono', text: st.proxy || '…' }), '. Other open projects have proxies of their own.'),
+    h('p', null, 'Devices that should capture through it need the Plonix certificate, from ', h('span', { class: 'mono', text: 'http://' + (st.proxy || '') + '/ca.pem' }), ' through the proxy.'),
+  );
+}
+
+function storagePanel() {
+  const panel = h('div', { class: 'spanel' }, h('h4', { text: 'Out-of-scope traffic' }), h('p', { text: 'Counting…' }));
+  api('/api/storage')
+    .then((s) => {
+      const st = s.stats;
+      const rows = [
+        h('h4', { text: 'Out-of-scope traffic' }),
+        h('p', { text: `${st.out_of_scope} of ${st.total} captured request(s) are to hosts that are not in scope.` }),
+      ];
+      if (s.last_prune) {
+        const r = s.last_prune;
+        rows.push(h('p', { class: 'muted', text: r.skipped ? `Last time: ${r.skipped}.` : `Last time (${fmtDate(r.at)}): deleted ${r.removed}, kept ${r.kept}.` }));
+      }
+      if (!st.in_scope_rules) rows.push(h('p', { class: 'muted', text: 'Nothing is in scope yet, so nothing would be deleted.' }));
+      const btn = h('button', { class: 'btn danger', text: 'Delete Out-of-Scope Traffic Now…', disabled: !st.in_scope_rules || !st.out_of_scope, onclick: () => confirmPrune(st) });
+      rows.push(h('div', { class: 'row' }, btn));
+      clear(panel, rows);
+    })
+    .catch((e) => clear(panel, h('p', { text: e.message })));
+  return panel;
+}
+
+function confirmPrune(st) {
+  const m = modal(
+    'Delete out-of-scope traffic?',
+    [
+      h('p', { text: `This permanently deletes ${st.out_of_scope} request(s) to hosts that are not in scope, then compacts the project file. Requests that findings point to are kept.` }),
+      h('p', { class: 'muted', text: 'Scope suggestions that relied on that traffic go away too.' }),
+    ],
+    [
+      h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }),
+      h('button', {
+        class: 'btn primary',
+        text: 'Delete',
+        onclick: async () => {
+          try {
+            const r = await api('/api/storage/prune', { method: 'POST', body: { confirm: true } });
+            closeModal();
+            toast(r.skipped ? r.skipped : `Deleted ${r.removed} request(s). ${r.kept} kept.`, 'ok');
+            exCache.clear();
+            go('settings', true);
+          } catch (e) {
+            m.err.textContent = e.message;
+          }
+        },
+      }),
+    ],
+  );
+}
 
 // Entry points for the Plonix app's menu bar.
 window.plonix = {
