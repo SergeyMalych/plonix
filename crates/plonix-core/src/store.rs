@@ -10,6 +10,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params, params_from_iter};
 use crate::codec;
 use crate::model::*;
 use crate::query::Query;
+use crate::exclude::Group;
 use crate::scope::{Decision, Evidence, EvidenceKind, NewEvidence, Rule, ScopeRules, Suggestion};
 
 /// Connection settings, applied every time a database is opened. They are
@@ -122,6 +123,13 @@ CREATE TABLE IF NOT EXISTS findings (
 CREATE TABLE IF NOT EXISTS view_state (
     view TEXT PRIMARY KEY,
     state TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS exclude_groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    domains TEXT NOT NULL,
+    created_at INTEGER NOT NULL
 );
 "#;
 
@@ -435,6 +443,69 @@ impl Store {
 
     pub fn delete_rule(&self, pattern: &str) -> Result<bool> {
         Ok(self.conn.lock().unwrap().execute("DELETE FROM scope_rules WHERE pattern = ?1", [pattern])? > 0)
+    }
+
+    /// Inserts or updates several scope rules in one transaction.
+    pub fn put_rules(&self, rules: &[Rule]) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        for rule in rules {
+            tx.execute(
+                "INSERT INTO scope_rules (pattern, include_subdomains, decision, created_at, note) VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(pattern) DO UPDATE SET include_subdomains = ?2, decision = ?3, note = ?5",
+                params![rule.pattern, rule.include_subdomains, rule.decision.as_str(), rule.created_at, rule.note],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Removes the exclusion rule for one host (a rule an exclusion group owns),
+    /// leaving any manually added rule for the same host untouched.
+    pub fn delete_group_rule(&self, pattern: &str) -> Result<bool> {
+        Ok(self
+            .conn
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM scope_rules WHERE pattern = ?1 AND note LIKE 'group:%'", [pattern])?
+            > 0)
+    }
+
+    /// Removes every exclusion rule a group owns.
+    pub fn delete_group_rules(&self, group_id: &str) -> Result<usize> {
+        Ok(self.conn.lock().unwrap().execute("DELETE FROM scope_rules WHERE note = ?1", [format!("group:{group_id}")])?)
+    }
+
+    // ---- custom exclusion groups ----------------------------------------
+
+    pub fn custom_groups(&self) -> Result<Vec<Group>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id, name, description, domains FROM exclude_groups ORDER BY created_at")?;
+        let rows = stmt.query_map([], |r| {
+            let domains: String = r.get(3)?;
+            Ok(Group {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                description: r.get(2)?,
+                domains: serde_json::from_str(&domains).unwrap_or_default(),
+                builtin: false,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub fn put_custom_group(&self, g: &Group, created_at: i64) -> Result<()> {
+        let domains = serde_json::to_string(&g.domains)?;
+        self.conn.lock().unwrap().execute(
+            "INSERT INTO exclude_groups (id, name, description, domains, created_at) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(id) DO UPDATE SET name = ?2, description = ?3, domains = ?4",
+            params![g.id, g.name, g.description, domains, created_at],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_custom_group(&self, id: &str) -> Result<bool> {
+        Ok(self.conn.lock().unwrap().execute("DELETE FROM exclude_groups WHERE id = ?1", [id])? > 0)
     }
 
     pub fn add_tokens(&self, hashes: &[String], host: &str) -> Result<()> {

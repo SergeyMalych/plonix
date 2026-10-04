@@ -87,7 +87,7 @@ The Plonix window has an **Ask Claude** button on a request (the Lens), a findin
 
 ## Settings
 
-The **Agents** screen has a Claude Code settings section (`$PLONIX_HOME/agents.json`):
+**Settings › AI agents** holds these choices, for all projects (stored in `$PLONIX_HOME/agents.json`, so a change made in one window reaches every open project). The Agents screen shows a summary and a link there:
 
 - **On/off.** Turn agent access off and every agent request is refused (`agents_disabled`).
 - **What agents can see.** *In-scope hosts only* (the default) limits traffic, hosts, endpoints and technologies to hosts you accepted into scope; *Everything captured* includes out-of-scope and third-party traffic.
@@ -109,8 +109,12 @@ Captured traffic can include passwords, session cookies and API keys. Whatever t
 
 The access model is built to grow one step, without loosening anything that exists today:
 
-1. A new `AgentMode::Active`, switched on by you in the Agents screen or the CLI, stored per project. An agent can never switch it on itself.
+1. A new `AgentMode::Active`, switched on by you in Settings › AI agents or the CLI, stored per project. An agent can never switch it on itself.
 2. In that mode only, `POST /api/send` and `POST /api/replay` join the allowed routes. Both already go through scope enforcement, so an agent could only reach hosts you accepted into scope.
 3. Matching MCP tools appear only when the engine reports that mode.
 
 Changing scope, recording findings and controlling the engine stay with you in every mode. Active mode is not built yet.
+
+## Skills
+
+Skills are playbooks for one job in Plonix (get to know a host, explain a request, draft a finding). `plonix mcp` offers them as MCP prompts, so Claude Code lists them as `/mcp__plonix__<name>` commands, and as the `list_skills` and `get_skill` tools. A skill can only use what these settings allow: when a capability it reads is switched off, agents are not offered it. More skills come from the Market. See [market.md](market.md#skills).

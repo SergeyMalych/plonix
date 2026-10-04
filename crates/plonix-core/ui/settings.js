@@ -32,8 +32,10 @@
   const LEVEL = { project: 'This project', global: 'All projects' };
   const APPLIES = { now: 'Saved. Changes apply right away.', next_open: 'Saved. Changes apply the next time the project opens.' };
 
+  /** Equal values, whatever order the keys come in. */
   function same(a, b) {
-    return JSON.stringify(a) === JSON.stringify(b);
+    const norm = (o) => JSON.stringify(Object.keys(o || {}).sort().map((k) => [k, o[k]]));
+    return norm(a) === norm(b);
   }
 
   /** One input for one field. Returns {el, get(), set(v), error(msg)}. */

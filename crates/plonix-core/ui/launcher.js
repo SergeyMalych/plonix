@@ -198,14 +198,60 @@ async function refresh() {
   L.timer = setTimeout(refresh, 2000);
 }
 
+/** How many recently opened projects the Start screen suggests. */
+const RECENT = 3;
+
 function drawList() {
   const box = $('#plist');
   if (!box) return;
+  // Redraw only when something changed, so focus and hover survive the refresh.
+  const sig = JSON.stringify(L.projects);
+  if (sig === L.drawn && box.childElementCount) return;
+  const first = L.drawn === undefined;
+  L.drawn = sig;
   if (!L.projects.length) {
     box.replaceChildren(welcome());
     return;
   }
-  box.replaceChildren(...L.projects.map(row));
+  // Suggest the last few projects first; everything else follows.
+  const recent = L.projects
+    .filter((p) => p.available && p.last_opened > 0)
+    .sort((a, b) => b.last_opened - a.last_opened)
+    .slice(0, RECENT);
+  const rest = L.projects.filter((p) => !recent.includes(p));
+  box.replaceChildren(
+    recent.length ? h('div', { class: 'lsec', text: 'Pick up where you left off' }) : null,
+    recent.length ? h('div', { class: 'recent' }, recent.map(card)) : null,
+    rest.length && recent.length ? h('div', { class: 'lsec', text: 'Other projects' }) : null,
+    ...rest.map(row),
+  );
+  // On launch the most recent project is one Enter away.
+  if (first && recent.length) box.querySelector('.rcard .btn')?.focus();
+}
+
+/** A suggested project: name, when it was last open, and one button. */
+function card(p) {
+  const open = !!p.session;
+  return h(
+    'div',
+    { class: 'rcard', ondblclick: () => openProject(p) },
+    h(
+      'div',
+      { class: 'rtop' },
+      h('div', { class: 'pav', text: (p.name.trim()[0] || 'P').toUpperCase() }),
+      h('button', { class: 'iconbtn', title: 'More', text: '⋯', onclick: (e) => (e.stopPropagation(), moreMenu(p, e.currentTarget)) }),
+    ),
+    h('div', { class: 'rname', text: p.name, title: p.name }),
+    h('div', { class: 'ppath mono', title: p.path, text: tilde(p.path) }),
+    h(
+      'div',
+      { class: 'rfoot' },
+      open
+        ? h('span', { class: 'pstate open' }, h('span', { class: 'dot' }), 'Open · proxy ', h('b', { class: 'mono', text: p.session.proxy }))
+        : h('span', { class: 'pstate', text: 'Opened ' + ago(p.last_opened) + (p.size_bytes ? ' · ' + fmtSize(p.size_bytes) : '') }),
+      h('button', { class: 'btn ' + (open ? '' : 'primary'), text: open ? 'Show' : 'Open', onclick: (e) => (e.stopPropagation(), openProject(p)) }),
+    ),
+  );
 }
 
 function row(p) {
