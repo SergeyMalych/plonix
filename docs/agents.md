@@ -2,7 +2,7 @@
 
 Plonix lets an AI agent work with your live project: the traffic you captured, the map of the target, detected technologies, scope and findings. It does this through MCP, the protocol coding agents such as Claude Code use for tools.
 
-Agents get **read-only** access. They can look at everything the project holds and cannot send requests, change scope or record, edit or delete findings. The engine enforces this, not the agent.
+Agents get **read-only** access. They can look at everything the project holds and cannot send requests, change scope or record, edit or delete findings. The one thing they can leave behind is a *suggested edit* to a request you are editing on the Bench, which you review and apply yourself (see [Suggested Bench edits](#suggested-bench-edits)). The engine enforces this, not the agent.
 
 ## Connect Claude Code
 
@@ -17,13 +17,16 @@ Plonix · connect Claude Code
   ✓ Agent token  ~/.plonix/agent-token  (read-only)
   ✓ Claude Code  added MCP server "plonix" for all your projects: /Users/you/.cargo/bin/plonix mcp
 
-What the agent can do (read-only):
-  status · search_traffic · get_request · get_insights · get_messages · list_hosts · list_endpoints · detected_tech · get_scope · list_findings · findings_report
+What the agent can do (read-only; a Bench edit is only suggested, for you to apply):
+  status · search_traffic · get_request · get_insights · get_messages · list_hosts · list_endpoints · detected_tech · get_scope · list_findings · list_skills · get_skill · findings_report · propose_bench_edit
 Not allowed:
   ✗ Send or replay requests
   ✗ Accept, reject or remove scope rules
   ✗ Record, edit or delete findings
   ✗ Open browsers, sign in to the window or stop the engine
+  ✗ Install, update or remove anything from the Market
+  ✗ See, edit, forward or drop requests held in Intercept
+  ✗ Apply a suggested edit to a Bench draft, or start a payload run
 ```
 
 `plonix connect claude` runs `claude mcp add-json` for you. Options:
@@ -72,12 +75,25 @@ Set `PLONIX_HOME` in the server's environment if your data is not in `~/.plonix`
 | `get_scope` | Scope rules and suggested domains with their evidence |
 | `list_findings` | Findings with severity, status, description and evidence request ids |
 | `findings_report` | The findings as a Markdown report with their evidence requests and responses (bodies clipped); false positives left out unless asked for. Evidence on hosts outside scope is left out when agents see in-scope traffic only |
+| `propose_bench_edit` | Leaves a suggested edit to a Bench draft for you to review: the draft id, a summary and the complete edited request. Sends nothing and changes nothing |
 
-Every tool is marked read-only in its MCP annotations.
+Every tool is marked read-only in its MCP annotations, except `propose_bench_edit`: it stores a suggestion, so it is marked as not read-only, but it is not destructive and never reaches the network.
+
+## Suggested Bench edits
+
+When you ask Claude about a request on the Bench, the prompt carries that draft's id and invites Claude to propose a concrete edit with `propose_bench_edit`. The tool takes the draft id, a short summary and the complete edited request (method, URL, headers, body).
+
+- The engine only **stores** the proposal, in memory, for that draft. It checks that it is a request the Bench could hold (an `http`/`https` URL, a valid method and header names, no line breaks in header values, sane sizes) and keeps a few per draft. It never sends it and never touches the draft.
+- The Bench shows it as a diff against your draft as it is now, with **Apply to draft** and **Discard** ([bench.md](bench.md#claudes-suggested-edits)). Applying only changes the draft; sending stays your click on **Send**, through the usual scope check.
+- JWTs: Claude has no signing key, so an edited token keeps its original signature and is marked unsigned until you re-sign it in the Lens. A signature Claude made up is replaced with the original.
+- Agents can only add a proposal (`POST /api/bench/proposals`). Listing, comparing, applying and discarding are yours (those routes are refused to the agent token), and so are sending and runs.
+- Switch it off in **Settings › AI agents** (*Suggest edits to a Bench request*): the tool disappears and the route is refused with `capability_off`.
+
+In the in-app conversation, Claude's proposal shows up as *Suggested an edit to the request*, with **Review on the Bench** once the answer is done. A Claude Code session in a terminal can propose too, as long as you pass it the draft id from the prompt (Copy prompt and Open in Terminal include it).
 
 ## Ask Claude Code from the app
 
-The Plonix window has an **Ask Claude** button on a request (the Lens), a finding, a host (the Map) and a scope suggestion. It opens a sheet that:
+The Plonix window has an **Ask Claude** button on a request (the Lens), a finding, a host (the Map), a scope suggestion and a request you are editing on the Bench (where Claude can also [suggest an edit](#suggested-bench-edits)). It opens a sheet that:
 
 - writes a question suited to that spot, which you can edit;
 - shows exactly what will be shared, split into named parts (request, response, what Plonix spotted, technologies, endpoints, scope evidence), each with its size, and lets you untick any part;
@@ -92,7 +108,7 @@ The Plonix window has an **Ask Claude** button on a request (the Lens), a findin
 
 - **On/off.** Turn agent access off and every agent request is refused (`agents_disabled`).
 - **What agents can see.** *In-scope hosts only* (the default) limits traffic, hosts, endpoints and technologies to hosts you accepted into scope; *Everything captured* includes out-of-scope and third-party traffic.
-- **Tools agents get.** Switch off groups of capabilities (captured requests, insights, the map, scope, findings). A switched-off capability is refused (`capability_off`) and its MCP tools disappear from `tools/list`.
+- **Tools agents get.** Switch off groups of capabilities (captured requests, insights, the map, scope, findings, scan advice, suggesting Bench edits). A switched-off capability is refused (`capability_off`) and its MCP tools disappear from `tools/list`.
 - **Ask Claude.** The context-size limit that triggers the warning, and how far each body is clipped.
 
 Agents can read this policy (to explain a refusal) but can never change it: the settings route is in no mode's capability list.
@@ -100,7 +116,7 @@ Agents can read this policy (to explain a refusal) but can never change it: the 
 ## How access is enforced
 
 - `plonix mcp` signs in to the engine's local API with its own token, `~/.plonix/agent-token` (mode `0600`). It never reads the full API token.
-- The engine checks every request made with the agent token against a fixed list of allowed routes (`crates/plonix-core/src/access.rs`). Today that list contains only reads. Anything else (`/api/send`, `/api/replay`, `/api/scope/*`, `POST /api/findings`, `/api/ui/launch`, `/api/browser/open`, `/api/shutdown`, every `/api/intercept` and `/api/replace` route) is refused with `403 agent_not_allowed`, and the refusal is shown on the Agents screen.
+- The engine checks every request made with the agent token against a fixed list of allowed routes (`crates/plonix-core/src/access.rs`). Today that list contains only reads, plus `POST /api/bench/proposals`, which stores a suggested Bench edit and nothing else. Anything else (`/api/send`, `/api/replay`, `/api/scope/*`, `POST /api/findings`, `/api/ui/launch`, `/api/browser/open`, `/api/shutdown`, every `/api/intercept` and `/api/replace` route) is refused with `403 agent_not_allowed`, and the refusal is shown on the Agents screen.
 - The API stays loopback-only. Plonix never sends captured traffic anywhere; the agent reads it on your machine.
 - The data-scope and capability settings are applied in the same middleware, so an agent sees only what you allow whatever it asks for.
 

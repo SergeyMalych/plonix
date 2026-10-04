@@ -2237,7 +2237,7 @@ function renderBench(main) {
     return;
   }
 
-  const method = h('input', { class: 'method', value: tab.method, spellcheck: 'false', list: 'methods', oninput: () => ((tab.method = method.value.toUpperCase()), saveBench()) });
+  const method = h('input', { class: 'method', value: tab.method, spellcheck: 'false', list: 'methods', oninput: () => ((tab.method = method.value.toUpperCase()), saveBench(), proposalEdited(tab, main)) });
   const url = h('input', {
     value: tab.url,
     spellcheck: 'false',
@@ -2246,13 +2246,14 @@ function renderBench(main) {
       saveBench();
       renderScopeHint();
       refreshRun();
+      proposalEdited(tab, main);
     },
     onkeydown: (e) => e.key === 'Enter' && !e.metaKey && !e.ctrlKey && send(),
   });
   const editor = h('textarea', {
     value: tab.raw,
     spellcheck: 'false',
-    oninput: () => ((tab.raw = editor.value), saveBench(), refreshRun(), editor._onedit && editor._onedit()),
+    oninput: () => ((tab.raw = editor.value), saveBench(), refreshRun(), proposalEdited(tab, main), editor._onedit && editor._onedit()),
     onkeydown: (e) => {
       if (e.key === 'Tab') {
         e.preventDefault();
@@ -2373,6 +2374,7 @@ function renderBench(main) {
       h('datalist', { id: 'methods' }, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map((m) => h('option', { value: m }))),
       h('div', { class: 'reqbar' }, panelToggle, method, h('div', { class: 'urlwrap' }, url), urlMarkBtn, runMode ? null : sendBtn),
       h('div', { id: 'scopehint' }),
+      runMode ? null : h('div', { id: 'propslot' }),
       runMode
         ? sideBySide('rsplit', 'bench', reqCol, runCol)
         : sideBySide('rsplit', 'bench', reqCol, respCol),
@@ -2389,6 +2391,7 @@ function renderBench(main) {
   } else {
     drawBenchResponse(tab, respCol);
     drawCompare(tab);
+    drawProposal(tab, main);
   }
 }
 
@@ -2707,10 +2710,193 @@ function jwtEditor(it, span, editor, tab) {
 }
 
 /* ---- selection quick actions ---- */
+/** A stable id for a Bench tab, so Claude's suggested edits find their way back to it. */
+function draftId(tab) {
+  if (!tab.did) {
+    tab.did = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    saveBench();
+  }
+  return tab.did;
+}
 function draftSubject(tab, editor, selection) {
   const { headers, body } = parseRaw(editor.value);
-  return { kind: 'draft', method: (tab.method || 'GET').toUpperCase(), url: tab.url || '', headers, body, selection: selection || null };
+  return { kind: 'draft', method: (tab.method || 'GET').toUpperCase(), url: tab.url || '', headers, body, selection: selection || null, draft_id: draftId(tab) };
 }
+
+/* ---- Claude's suggested edits ----
+   Claude can answer a question about a draft with a concrete edited request
+   (the propose_bench_edit tool). The engine only keeps it; here it is shown
+   as a diff against the draft as it is now, and nothing changes until the
+   user presses Apply. Apply only rewrites the draft: sending stays the
+   user's own click on Send. */
+
+/** Folds long unchanged runs, keeping a little context around changes. */
+function foldLines(lines, ctx = 3) {
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].op !== 'same') {
+      out.push(lines[i++]);
+      continue;
+    }
+    let j = i;
+    while (j < lines.length && lines[j].op === 'same') j++;
+    const run = j - i;
+    const head = i === 0 ? 0 : ctx;
+    const tail = j === lines.length ? 0 : ctx;
+    if (run > head + tail + 1) {
+      out.push(...lines.slice(i, i + head), { op: 'gap', n: run - head - tail }, ...lines.slice(j - tail, j));
+    } else out.push(...lines.slice(i, j));
+    i = j;
+  }
+  return out;
+}
+function propPre(lines) {
+  return h(
+    'pre',
+    { class: 'propdiff' },
+    foldLines(lines).map((l) =>
+      l.op === 'gap'
+        ? h('span', { class: 'dl gap', text: `… ${l.n} unchanged line${l.n === 1 ? '' : 's'}` })
+        : h('span', { class: 'dl' + (l.op === 'add' ? ' add' : l.op === 'del' ? ' del' : ''), text: (l.op === 'add' ? '+ ' : l.op === 'del' ? '− ' : '  ') + l.text }),
+    ),
+  );
+}
+/** Named values (headers, query or form fields) as removed/added lines. */
+function fieldLines(fields, sep) {
+  const out = [];
+  for (const f of fields) {
+    if (f.old != null) out.push({ op: 'del', text: f.name + sep + f.old });
+    if (f.new != null) out.push({ op: 'add', text: f.name + sep + f.new });
+  }
+  return out;
+}
+function propSection(title, ...kids) {
+  return h('div', { class: 'propsec' }, h('div', { class: 'propsech', text: title }), ...kids);
+}
+
+function proposalCard(tab, main, p, d, count) {
+  const secs = [];
+  if (d.same) secs.push(h('div', { class: 'propsame', text: 'This matches your draft as it is now.' }));
+  if (d.method || d.url) {
+    const m0 = d.method ? d.method.old : d.proposed.method;
+    const u0 = d.url ? d.url.old : d.proposed.url;
+    secs.push(propSection('Request line', propPre([{ op: 'del', text: `${m0} ${u0}` }, { op: 'add', text: `${d.proposed.method} ${d.proposed.url}` }])));
+  }
+  if (d.query.length) secs.push(propSection('Query, decoded', propPre(fieldLines(d.query, ' = '))));
+  if (d.headers.length) secs.push(propSection('Headers', propPre(fieldLines(d.headers, ': '))));
+  if (d.body.changed) {
+    const label = { json: 'Body, as JSON', form: 'Body, form fields decoded', text: 'Body' }[d.body.view] || 'Body';
+    secs.push(propSection(label, propPre(d.body.view === 'form' ? fieldLines(d.body.fields, ' = ') : d.body.lines)));
+  }
+  for (const t of d.tokens) {
+    secs.push(
+      propSection(
+        'JWT in ' + t.location + ', decoded',
+        t.notes.length ? h('div', { class: 'sdnotes propnotes' }, t.notes.map((n) => h('span', { class: 'sdnote' + (/^(unsigned|not re-signed|signature)/.test(n) ? ' warn' : ''), text: n }))) : null,
+        propPre(t.lines),
+      ),
+    );
+  }
+  const discard = async () => {
+    try {
+      await api(`/api/bench/proposals/${p.id}`, { method: 'DELETE' });
+    } catch (_) {}
+    drawProposal(tab, main);
+  };
+  const apply = async () => {
+    const q = d.proposed;
+    tab.undo = { method: tab.method, url: tab.url, raw: tab.raw };
+    tab.method = q.method;
+    tab.url = q.url;
+    tab.raw = q.headers.map(([k, v]) => `${k}: ${v}`).join('\n') + '\n\n' + q.body;
+    saveBench();
+    try {
+      await api(`/api/bench/proposals/${p.id}`, { method: 'DELETE' });
+    } catch (_) {}
+    renderBench(main);
+    toast('Applied to the draft. Nothing was sent: press Send when you are ready.', 'ok');
+  };
+  const meta = [p.from && p.from !== 'you' ? 'from ' + p.from : null, fmtTime(p.created), count > 1 ? `${count - 1} more waiting` : null].filter(Boolean).join(' · ');
+  return h(
+    'div',
+    { class: 'propcard' },
+    h('div', { class: 'proph' }, h('span', { class: 'askico', text: '✦' }), h('b', { text: 'Claude suggests an edit' }), h('span', { class: 'muted', text: meta })),
+    p.summary ? h('p', { class: 'propsum', text: p.summary }) : null,
+    h('div', { class: 'propbody' }, secs),
+    h(
+      'div',
+      { class: 'propfoot' },
+      h('span', { class: 'muted', text: 'Apply only changes the draft. Nothing is sent until you press Send.' }),
+      h('button', { class: 'btn sm', text: 'Discard', onclick: discard }),
+      h('button', { class: 'btn sm primary', text: 'Apply to draft', disabled: d.same, onclick: apply }),
+    ),
+  );
+}
+
+function undoBar(tab, main) {
+  if (!tab.undo) return null;
+  const undo = () => {
+    Object.assign(tab, tab.undo);
+    tab.undo = null;
+    saveBench();
+    renderBench(main);
+  };
+  return h(
+    'div',
+    { class: 'propundo' },
+    h('span', { class: 'askico', text: '✦' }),
+    h('span', { text: "Claude's edit is in the draft. Nothing has been sent." }),
+    h('button', { class: 'btn sm', text: 'Undo', onclick: undo }),
+    h('button', { class: 'blx', text: '✕', title: 'Dismiss', onclick: () => ((tab.undo = null), saveBench(), drawProposal(tab, main)) }),
+  );
+}
+
+/** Shows the newest suggestion for the active tab, diffed against its draft now. */
+async function drawProposal(tab, main) {
+  const slot = $('#propslot');
+  if (!slot) return;
+  let list = [];
+  if (tab.did) {
+    try {
+      list = (await api('/api/bench/proposals?draft=' + encodeURIComponent(tab.did))).proposals || [];
+    } catch (_) {
+      list = [];
+    }
+  }
+  if (R.tabs[R.active] !== tab || !document.body.contains(slot)) return;
+  R.propSeen = tab.did + ':' + list.map((p) => p.id).join(',');
+  if (!list.length) return clear(slot, undoBar(tab, main));
+  const { headers, body } = parseRaw(tab.raw || '');
+  let v;
+  try {
+    v = await api(`/api/bench/proposals/${list[0].id}/diff`, { method: 'POST', body: { method: (tab.method || 'GET').toUpperCase(), url: tab.url || '', headers, body } });
+  } catch (_) {
+    return clear(slot, undoBar(tab, main));
+  }
+  if (R.tabs[R.active] !== tab || !document.body.contains(slot)) return;
+  clear(slot, proposalCard(tab, main, v.proposal, v.diff, list.length));
+}
+
+/** Re-compares after the user edits the draft, while a suggestion is shown. */
+function proposalEdited(tab, main) {
+  if (!$('#propslot .propcard')) return;
+  clearTimeout(R.propT);
+  R.propT = setTimeout(() => drawProposal(tab, main), 400);
+}
+
+// Suggestions can arrive while the Bench is open (from the in-app answer or a
+// Claude Code session in a terminal), so the active tab checks for new ones.
+setInterval(() => {
+  const tab = R.tabs[R.active];
+  if (S.view !== 'bench' || document.hidden || !tab || !tab.did || !$('#propslot')) return;
+  api('/api/bench/proposals?draft=' + encodeURIComponent(tab.did))
+    .then((v) => {
+      const seen = tab.did + ':' + (v.proposals || []).map((p) => p.id).join(',');
+      if (seen !== R.propSeen) drawProposal(tab, $('#main'));
+    })
+    .catch(() => {});
+}, 3000);
 function askDraftButton(tab, editor, selection) {
   return h(
     'button',
@@ -5045,7 +5231,7 @@ const fmtTok = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' 
 async function askClaude(subject) {
   const st = { exclude: [], question: null, max: null, bundle: null, confirmBig: false };
   // The live in-app conversation, if one has been started.
-  const convo = { id: null, since: 0, sessionId: null, running: false };
+  const convo = { id: null, since: 0, sessionId: null, running: false, proposed: false };
 
   /* ---- compose view (what gets shared) ---- */
   const q = h('textarea', { class: 'askq', rows: 3 });
@@ -5183,6 +5369,33 @@ async function askClaude(subject) {
   const offerFallback = () => {
     copyBtn.hidden = termBtn.hidden = false;
   };
+  // Claude suggested an edit to the Bench draft: point to the review there.
+  // Nothing has changed yet; the Bench shows the diff with Apply and Discard.
+  const offerReview = async () => {
+    convo.proposed = false;
+    if (subject.kind !== 'draft' || !subject.draft_id) return;
+    let list = [];
+    try {
+      list = (await api('/api/bench/proposals?draft=' + encodeURIComponent(subject.draft_id))).proposals || [];
+    } catch (_) {}
+    if (!list.length || !alive()) return;
+    add(
+      h(
+        'div',
+        { class: 'cprop' },
+        h('span', { text: 'Claude suggested an edit to this request. Your draft is unchanged until you apply it.' }),
+        h('button', {
+          class: 'btn primary sm',
+          text: 'Review on the Bench',
+          onclick: () => {
+            closeModal();
+            if (S.view === 'bench') drawProposal(R.tabs[R.active], $('#main'));
+            else leaveTo('bench');
+          },
+        }),
+      ),
+    );
+  };
 
   const alive = () => document.body.contains(transcript);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -5205,6 +5418,9 @@ async function askClaude(subject) {
           add(bubble('bot', ev.text));
         } else if (ev.type === 'tool') {
           add(h('div', { class: 'ctool', text: '✦ ' + ev.text }));
+        } else if (ev.type === 'proposal') {
+          add(h('div', { class: 'ctool', text: '✦ ' + ev.text }));
+          convo.proposed = true;
         } else if (ev.type === 'error') {
           setThinking(false);
           sayError(ev.text);
@@ -5215,6 +5431,7 @@ async function askClaude(subject) {
       if (snap.status !== 'running') {
         convo.running = false;
         setThinking(false);
+        if (convo.proposed) offerReview();
         if (snap.status === 'done') {
           followRow.hidden = false;
           followIn.disabled = sendBtn.disabled = false;

@@ -31,6 +31,7 @@ pub mod hub;
 pub mod model;
 pub mod paths;
 pub mod project;
+pub mod proposal;
 pub mod proxy;
 pub mod query;
 pub mod render;

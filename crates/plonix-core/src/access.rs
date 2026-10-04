@@ -10,6 +10,12 @@
 //! findings as a report), and cannot send or replay requests, change scope,
 //! record, edit or delete findings or control the engine.
 //!
+//! The one thing an agent may leave behind is a *suggestion*: an edited
+//! version of a request the user is working on in the Bench
+//! (`POST /api/bench/proposals`, see [`crate::proposal`]). It is kept in
+//! memory for the user to review; it sends nothing, and only the user can
+//! apply it to the draft (and then send it themselves).
+//!
 //! # Adding an active mode later
 //!
 //! An opt-in mode that lets agents send and replay requests would:
@@ -87,6 +93,8 @@ pub enum Group {
     Scope,
     Findings,
     Scan,
+    /// Suggesting edits to a Bench draft, for the user to review.
+    Bench,
 }
 
 impl Group {
@@ -98,6 +106,7 @@ impl Group {
         (Group::Scope, "Scope rules and suggestions"),
         (Group::Findings, "Findings"),
         (Group::Scan, "Scan detectors, tactics and suggested profiles"),
+        (Group::Bench, "Suggest edits to a Bench request (you review and apply them; nothing is sent)"),
     ];
 }
 
@@ -124,6 +133,9 @@ const READ_ONLY: &[Capability] = &[
     cap("/api/agents", "This access policy", Group::Basics),
     cap("/api/skills", "Skills: playbooks for jobs in Plonix", Group::Basics),
     cap("/api/skills/{name}", "Skills: playbooks for jobs in Plonix", Group::Basics),
+    // The only write: it stores a suggestion for the user to review on the
+    // Bench. It cannot send, apply or change anything else.
+    Capability { method: "POST", path: "/api/bench/proposals", what: "Suggest an edit to a Bench request, for the user to review", group: Group::Bench },
 ];
 
 /// Which captured traffic agents may see.
@@ -202,7 +214,7 @@ fn group_key(g: Group) -> String {
 /// where the engine has always kept them.
 pub fn settings_section() -> Section {
     let mut s = Section::new(SETTINGS_SECTION, "AI agents", Level::Global)
-        .describe("What AI agents such as Claude Code may read from your projects, and how much an \"Ask Claude\" hand-off may carry. Agents can only read; they can never change these settings.")
+        .describe("What AI agents such as Claude Code may read from your projects, and how much an \"Ask Claude\" hand-off may carry. Agents can only read (and suggest Bench edits for you to apply); they can never change these settings.")
         .order(40)
         .field(Field::toggle("enabled", "Let AI agents read projects", true).group("Access").help("When off, every agent request is refused."))
         .field(
@@ -363,6 +375,7 @@ pub fn not_allowed(mode: AgentMode) -> &'static [&'static str] {
             "Open browsers, sign in to the window or stop the engine",
             "Install, update or remove anything from the Market",
             "See, edit, forward or drop requests held in Intercept",
+            "Apply a suggested edit to a Bench draft, or start a payload run",
         ],
     }
 }
@@ -462,6 +475,7 @@ mod tests {
             ("GET", "/api/scan/catalog"),
             ("GET", "/api/scan/suggest/example.com"),
             ("GET", "/api/agents"),
+            ("POST", "/api/bench/proposals"),
         ] {
             assert!(allowed(m, method, path), "{method} {path} should be allowed");
         }
@@ -501,9 +515,25 @@ mod tests {
             ("POST", "/api/replace"),
             ("PATCH", "/api/replace/1"),
             ("DELETE", "/api/replace/1"),
+            ("GET", "/api/bench/proposals"),
+            ("POST", "/api/bench/proposals/1/diff"),
+            ("DELETE", "/api/bench/proposals/1"),
+            ("POST", "/api/bench/proposals/1/apply"),
+            ("POST", "/api/run"),
         ] {
             assert!(!allowed(m, method, path), "{method} {path} should be refused");
         }
+    }
+
+    #[test]
+    fn suggesting_a_bench_edit_is_the_only_write() {
+        let writes: Vec<&Capability> = READ_ONLY.iter().filter(|c| c.method != "GET").collect();
+        assert_eq!(writes.len(), 1);
+        assert_eq!((writes[0].method, writes[0].path), ("POST", "/api/bench/proposals"));
+        let mut s = AgentSettings::default();
+        assert_eq!(check(AgentMode::ReadOnly, &s, "POST", "/api/bench/proposals"), Ok(()));
+        s.off = vec![Group::Bench];
+        assert_eq!(check(AgentMode::ReadOnly, &s, "POST", "/api/bench/proposals"), Err(Refusal::SwitchedOff));
     }
 
     #[test]

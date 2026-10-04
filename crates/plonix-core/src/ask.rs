@@ -40,6 +40,10 @@ pub enum Subject {
         /// The part of the request the user highlighted, if any.
         #[serde(default)]
         selection: Option<String>,
+        /// The Bench's id for this draft, so Claude can suggest an edit to
+        /// it with `propose_bench_edit`.
+        #[serde(default)]
+        draft_id: Option<String>,
     },
 }
 
@@ -104,13 +108,17 @@ pub fn build(engine: &Engine, req: &AskRequest, settings: &AgentSettings) -> Res
         Subject::Request { id } => request_parts(engine, *id, max_body)?,
         Subject::Finding { id } => finding_parts(engine, *id, max_body)?,
         Subject::Host { host } => host_parts(engine, host)?,
-        Subject::Draft { method, url, headers, body, selection } => draft_parts(method, url, headers, body, selection.as_deref(), max_body),
+        Subject::Draft { method, url, headers, body, selection, .. } => draft_parts(method, url, headers, body, selection.as_deref(), max_body),
     };
     for p in &mut parts {
         p.included = !req.exclude.contains(&p.id);
     }
     let question = req.question.as_deref().map(str::trim).filter(|q| !q.is_empty()).map(String::from).unwrap_or(default_q);
-    let prompt = prompt(&question, &parts);
+    let footer = match &req.subject {
+        Subject::Draft { draft_id: Some(id), .. } => draft_footer(id),
+        _ => FOOTER.to_string(),
+    };
+    let prompt = prompt(&question, &parts, &footer);
     let tokens = estimate_tokens(prompt.chars().count());
     Ok(Bundle {
         title,
@@ -129,12 +137,27 @@ a target they are authorized to test. If the Plonix MCP tools are connected (sea
 list_endpoints, get_scope, list_findings), use them to look further. They are read-only. Do not send traffic to the target \
 yourself; suggest requests for the user to send from Plonix instead.";
 
-fn prompt(question: &str, parts: &[Part]) -> String {
+/// The footer for a Bench draft: Claude may suggest a concrete edit, which
+/// the user reviews as a diff and applies (or not) before sending it.
+fn draft_footer(id: &str) -> String {
+    let id: String = id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').take(64).collect();
+    if id.is_empty() {
+        return FOOTER.to_string();
+    }
+    format!(
+        "{FOOTER}\n\nThis request is a draft on the Plonix Bench (draft id `{id}`). When you suggest a concrete change to it, also call the \
+Plonix tool `propose_bench_edit` with draft_id \"{id}\", a one-line summary and the complete edited request (method, url, headers, body). \
+That only shows your edit to the user as a diff on the Bench; they decide whether to apply it, and they send it themselves. \
+You have no signing key: if you change a JWT, keep its original signature and say so."
+    )
+}
+
+fn prompt(question: &str, parts: &[Part], footer: &str) -> String {
     let mut out = format!("{question}\n\n");
     for p in parts.iter().filter(|p| p.included) {
         let _ = write!(out, "## {}\n\n```\n{}\n```\n\n", p.label, p.text.trim_end());
     }
-    out.push_str(FOOTER);
+    out.push_str(footer);
     out
 }
 
@@ -422,9 +445,17 @@ mod tests {
     fn prompt_includes_only_chosen_parts() {
         let mut parts = vec![part("a", "Part A".into(), "alpha".into(), false), part("b", "Part B".into(), "beta".into(), false)];
         parts[1].included = false;
-        let p = prompt("What now?", &parts);
+        let p = prompt("What now?", &parts, FOOTER);
         assert!(p.starts_with("What now?") && p.contains("## Part A") && p.contains("alpha"));
         assert!(!p.contains("beta") && p.contains("read-only"));
+    }
+
+    #[test]
+    fn a_bench_draft_invites_a_suggested_edit() {
+        let f = draft_footer("d-1`; rm");
+        assert!(f.contains("propose_bench_edit") && f.contains("draft_id \"d-1rm\"") && f.contains("send it themselves"), "{f}");
+        assert!(f.starts_with(FOOTER));
+        assert_eq!(draft_footer("``"), FOOTER);
     }
 
     #[test]

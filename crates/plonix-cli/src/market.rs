@@ -422,6 +422,7 @@ fn group_label(g: Group) -> &'static str {
         Group::Scope => "scope",
         Group::Findings => "findings",
         Group::Scan => "scan",
+        Group::Bench => "bench",
     }
 }
 
