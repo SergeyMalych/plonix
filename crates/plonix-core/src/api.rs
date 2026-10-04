@@ -114,6 +114,8 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/browser/open", post(open_browser))
         .route("/api/send", post(send))
         .route("/api/replay", post(replay))
+        .route("/api/run", post(run))
+        .route("/api/run/lists", get(run_lists))
         .route("/api/findings", get(findings).post(add_finding))
         .route("/api/findings/export", get(export_findings))
         .route("/api/findings/{id}", get(finding).patch(edit_finding).delete(delete_finding))
@@ -918,6 +920,26 @@ async fn send(State(s): State<AppState>, headers: HeaderMap, Json(req): Json<Sen
 async fn replay(State(s): State<AppState>, headers: HeaderMap, Json(req): Json<ReplayRequest>) -> Response {
     let r = s.engine.replay(req, &initiator(&headers)).await;
     send_result(&s, r)
+}
+
+/// Runs payloads through the marked positions of a request. User-only: this
+/// route is in no agent mode's capabilities, so agents cannot start a run.
+async fn run(State(s): State<AppState>, headers: HeaderMap, Json(req): Json<crate::runs::RunRequest>) -> Response {
+    match s.engine.run(req, &initiator(&headers)).await {
+        Ok(report) => Json(report).into_response(),
+        Err(e @ SendError::OutOfScope { .. }) => err(StatusCode::FORBIDDEN, "out_of_scope", &e.to_string()),
+        Err(SendError::Other(e)) => internal(e),
+        Err(e) => err(StatusCode::BAD_REQUEST, "bad_request", &e.to_string()),
+    }
+}
+
+/// The built-in payload lists that ship with Plonix.
+async fn run_lists(State(_s): State<AppState>) -> Response {
+    let lists: Vec<Value> = crate::runs::builtin_lists()
+        .iter()
+        .map(|l| json!({ "id": l.id, "title": l.title, "description": l.description, "count": l.values.len() }))
+        .collect();
+    Json(json!({ "lists": lists })).into_response()
 }
 
 async fn findings(State(s): State<AppState>) -> Response {

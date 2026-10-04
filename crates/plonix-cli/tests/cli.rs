@@ -342,6 +342,51 @@ fn read_when_ready(path: &Path) -> String {
 }
 
 #[test]
+fn bench_runs_payloads_through_marked_positions_and_stays_in_scope() {
+    let p = Plonix::new();
+    let target = serve_target();
+    let proxy = p.start();
+
+    // Capture one request so the host is known, then accept it.
+    via_proxy(&proxy, &format!("http://localhost:{target}/echo?id=1"), &[]);
+    p.search_until("", 1);
+
+    // The built-in lists are listed.
+    let out = p.run(&["bench", "lists"]).ok().stdout();
+    assert!(out.contains("numbers-1-100") && out.contains("input-probes"), "{out}");
+
+    let url = format!("http://localhost:{target}/echo?id=\u{a7}1\u{a7}");
+
+    // A run against a host that is not accepted is refused, and sends nothing.
+    let r = p.run(&["bench", "run", &url, "--list", "range:1-3", "--delay-ms", "0"]);
+    assert_eq!(r.code(), 4, "stdout:\n{}\nstderr:\n{}", r.stdout(), r.stderr());
+    assert!(r.stderr().to_lowercase().contains("scope"), "{}", r.stderr());
+
+    p.run(&["scope", "accept", "localhost"]).ok();
+
+    // A single-position sweep over a range, with a baseline.
+    let out = p
+        .run(&["bench", "run", &url, "--list", "range:1-3", "--base", "--delay-ms", "0"])
+        .ok()
+        .stdout();
+    assert!(out.contains("1 position(s) in sweep mode"), "{out}");
+    assert!(out.contains("4 request(s) sent"), "{out}"); // baseline + 3
+    assert!(out.contains("(baseline)"), "{out}");
+
+    // A budget stops the run short and says so.
+    let out = p
+        .run(&["bench", "run", &url, "--list", "builtin:numbers-1-100", "--max-requests", "5", "--delay-ms", "0"])
+        .ok()
+        .stdout();
+    assert!(out.contains("5 request(s) sent"), "{out}");
+    assert!(out.to_lowercase().contains("budget"), "{out}");
+
+    // Every request the run sent is in Traffic as a Bench send.
+    let v = p.search_until("source:replay", 4);
+    assert!(v["items"].as_array().unwrap().len() >= 4, "runs are recorded: {v}");
+}
+
+#[test]
 fn open_starts_everything_and_launches_the_browser_through_the_proxy() {
     let mut p = Plonix::new();
     let bin = tempfile::tempdir().unwrap();

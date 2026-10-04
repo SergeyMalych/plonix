@@ -1683,7 +1683,7 @@ const R = { tabs: [], active: 0, mode: 'response' };
   }
 })();
 function saveBench() {
-  const tabs = R.tabs.map((t) => ({ ...t, error: undefined, picks: [] }));
+  const tabs = R.tabs.map((t) => ({ ...t, error: undefined, picks: [], runState: undefined }));
   pstore('plonix.bench', { tabs: tabs.slice(-30), active: R.active });
 }
 const tabNo = () => (R.counter = (R.counter || R.tabs.length) + 1);
@@ -1866,8 +1866,54 @@ function renderBench(main) {
   };
   R.send = send;
 
-  const binaryNote = tab.bodyB64 ? h('span', { class: 'r', text: `binary body (${fmtSize(b64len(tab.bodyB64))}) is sent unchanged unless you type a body` }) : h('span', { class: 'r', text: 'headers, blank line, body' });
+  const runMode = tab.panel === 'run';
+  // The last focused position field, so "Add position" knows where to insert.
+  const marker = (field) => {
+    const el = field === 'url' ? url : editor;
+    const s = el.selectionStart ?? el.value.length;
+    const e = el.selectionEnd ?? s;
+    const before = el.value.slice(0, s);
+    const sel = el.value.slice(s, e) || 'value';
+    const after = el.value.slice(e);
+    el.value = before + MARK + sel + MARK + after;
+    if (field === 'url') tab.url = url.value;
+    else tab.raw = editor.value;
+    saveBench();
+    renderBench(main);
+  };
+  const binaryNote = tab.bodyB64
+    ? h('span', { class: 'r', text: `binary body (${fmtSize(b64len(tab.bodyB64))}) is sent unchanged unless you type a body` })
+    : runMode
+      ? h('span', { class: 'r' }, h('button', { class: 'btn sm', text: '+ Mark position', title: 'Wrap the selected text as a payload position', onclick: () => marker('editor') }))
+      : h('span', { class: 'r', text: 'headers, blank line, body' });
+  const reqCol = h(
+    'div',
+    { class: 'rcol' },
+    h('div', { class: 'lbl' }, 'Request', binaryNote),
+    editor,
+  );
   const respCol = h('div', { class: 'rcol' });
+  const runCol = h('div', { class: 'rcol runcol' });
+  const panelToggle = h(
+    'span',
+    { class: 'seg benchpanel' },
+    [
+      ['send', 'Send'],
+      ['run', 'Run'],
+    ].map(([id, lbl]) =>
+      h('button', {
+        class: (tab.panel || 'send') === id ? 'on' : '',
+        text: lbl,
+        title: id === 'send' ? 'Send one request and inspect it' : 'Run lists of payloads through marked positions',
+        onclick: () => {
+          tab.panel = id;
+          saveBench();
+          renderBench(main);
+        },
+      }),
+    ),
+  );
+  const urlMarkBtn = runMode ? h('button', { class: 'iconbtn', text: '§', title: 'Mark the selected part of the URL as a payload position', onclick: () => marker('url') }) : null;
   const body = h(
     'div',
     { class: 'pane' },
@@ -1875,17 +1921,289 @@ function renderBench(main) {
       'div',
       { class: 'rbody' },
       h('datalist', { id: 'methods' }, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map((m) => h('option', { value: m }))),
-      h('div', { class: 'reqbar' }, method, h('div', { class: 'urlwrap' }, url), sendBtn),
+      h('div', { class: 'reqbar' }, panelToggle, method, h('div', { class: 'urlwrap' }, url), urlMarkBtn, runMode ? null : sendBtn),
       h('div', { id: 'scopehint' }),
-      sideBySide('rsplit', 'bench', h('div', { class: 'rcol' }, h('div', { class: 'lbl' }, 'Request', binaryNote), editor), respCol),
-      historyPanel(tab, main),
-      h('div', { id: 'cmpslot' }),
+      runMode
+        ? sideBySide('rsplit', 'bench', reqCol, runCol)
+        : sideBySide('rsplit', 'bench', reqCol, respCol),
+      runMode ? h('div', { id: 'runresults' }) : historyPanel(tab, main),
+      runMode ? null : h('div', { id: 'cmpslot' }),
     ),
   );
   view.append(body);
   renderScopeHint();
-  drawBenchResponse(tab, respCol);
-  drawCompare(tab);
+  if (runMode) {
+    R.send = () => startRun(tab, main);
+    renderRunPanel(tab, main, runCol);
+    drawRunResults(tab, main);
+  } else {
+    drawBenchResponse(tab, respCol);
+    drawCompare(tab);
+  }
+}
+
+/* ----- Bench payload runs ----- */
+
+const MARK = '§'; // §, the position marker, matched to the engine.
+let BUILTIN_LISTS = null;
+
+async function loadBuiltinLists() {
+  if (BUILTIN_LISTS) return BUILTIN_LISTS;
+  try {
+    const v = await api('/api/run/lists');
+    BUILTIN_LISTS = v.lists || [];
+  } catch (_) {
+    BUILTIN_LISTS = [];
+  }
+  return BUILTIN_LISTS;
+}
+
+function countPositions(tab) {
+  const n = ((tab.url || '').split(MARK).length - 1 + (tab.raw || '').split(MARK).length - 1) / 2;
+  return Number.isInteger(n) ? n : Math.floor(n); // odd counts mean an unclosed marker
+}
+
+function runCfg(tab) {
+  if (!tab.run) tab.run = { mode: 'sweep', lists: [], base: false, max: '', delay: '50' };
+  return tab.run;
+}
+
+/** One list picker; `cfg` is the stored list object, `onchange` persists it. */
+function listPicker(cfg, onchange) {
+  const kinds = cfg.kind || 'builtin';
+  const sel = h(
+    'select',
+    { class: 'listkind', onchange: () => pick(sel.value) },
+    h('option', { value: 'builtin', text: 'Built-in list', selected: kinds === 'builtin' }),
+    h('option', { value: 'range', text: 'Number range', selected: kinds === 'range' }),
+    h('option', { value: 'values', text: 'Custom list', selected: kinds === 'values' }),
+  );
+  const slot = h('span', { class: 'listdetail' });
+  const pick = (kind) => {
+    cfg.kind = kind;
+    if (kind === 'builtin' && !cfg.id) cfg.id = (BUILTIN_LISTS[0] || {}).id;
+    onchange();
+    drawDetail();
+  };
+  const drawDetail = () => {
+    if (cfg.kind === 'builtin') {
+      const d = h(
+        'select',
+        { onchange: () => ((cfg.id = d.value), onchange()) },
+        (BUILTIN_LISTS || []).map((l) => h('option', { value: l.id, text: `${l.title} (${l.count})`, selected: l.id === cfg.id })),
+      );
+      clear(slot, d);
+    } else if (cfg.kind === 'range') {
+      const from = h('input', { class: 'num', type: 'number', value: cfg.from ?? 1, oninput: () => ((cfg.from = Number(from.value)), onchange()) });
+      const to = h('input', { class: 'num', type: 'number', value: cfg.to ?? 100, oninput: () => ((cfg.to = Number(to.value)), onchange()) });
+      const step = h('input', { class: 'num', type: 'number', value: cfg.step ?? 1, oninput: () => ((cfg.step = Number(step.value) || 1), onchange()) });
+      clear(slot, 'from ', from, ' to ', to, ' step ', step);
+    } else {
+      const ta = h('textarea', { class: 'listvals', placeholder: 'One value per line', value: (cfg.values || []).join('\n'), oninput: () => ((cfg.values = ta.value.split('\n')), onchange()) });
+      clear(slot, ta);
+    }
+  };
+  drawDetail();
+  return h('div', { class: 'listpick' }, sel, slot);
+}
+
+async function renderRunPanel(tab, main, col) {
+  await loadBuiltinLists();
+  if (!col.isConnected) return;
+  const cfg = runCfg(tab);
+  const positions = countPositions(tab);
+  const multi = cfg.mode !== 'sweep';
+
+  // Keep the per-position list array sized to the positions when in a
+  // multi-position mode; sweep uses a single list for all of them.
+  const lists = cfg.lists;
+  const need = multi ? positions : 1;
+  while (lists.length < need) lists.push({ kind: 'builtin', id: (BUILTIN_LISTS[0] || {}).id });
+  if (lists.length > need) lists.length = need;
+
+  const persist = () => saveBench();
+  const modeSeg = h(
+    'span',
+    { class: 'seg' },
+    [
+      ['sweep', 'One at a time'],
+      ['parallel', 'Lockstep'],
+      ['matrix', 'All combinations'],
+    ].map(([id, lbl]) =>
+      h('button', {
+        class: cfg.mode === id ? 'on' : '',
+        text: lbl,
+        title:
+          id === 'sweep'
+            ? 'Single position: change one marked position at a time, one list for all'
+            : id === 'parallel'
+              ? 'Multi-position: step every position together, one list each'
+              : 'Multi-position: every combination of values, one list each',
+        onclick: () => {
+          cfg.mode = id;
+          saveBench();
+          renderBench(main);
+        },
+      }),
+    ),
+  );
+
+  const listRows = multi
+    ? lists.map((c, i) => h('div', { class: 'listrow' }, h('span', { class: 'plabel', text: 'Position ' + (i + 1) }), listPicker(c, persist)))
+    : [h('div', { class: 'listrow' }, h('span', { class: 'plabel', text: 'Payload list' }), listPicker(lists[0], persist))];
+
+  const base = h('input', { type: 'checkbox', checked: !!cfg.base, onchange: () => ((cfg.base = base.checked), persist()) });
+  const max = h('input', { class: 'num', type: 'number', placeholder: '1000', value: cfg.max, oninput: () => ((cfg.max = max.value), persist()) });
+  const delay = h('input', { class: 'num', type: 'number', placeholder: '50', value: cfg.delay, oninput: () => ((cfg.delay = delay.value), persist()) });
+  const startBtn = h('button', { class: 'btn primary', text: 'Start run', onclick: () => startRun(tab, main) });
+
+  const posNote =
+    positions === 0
+      ? h('div', { class: 'scopehint blocked' }, 'Mark at least one position: select text in the URL or request and press ', h('b', { text: '§' }), ' / ', h('b', { text: '+ Mark position' }), '.')
+      : h('div', { class: 'runpos', text: `${positions} position${positions === 1 ? '' : 's'} marked.` });
+
+  clear(
+    col,
+    h('div', { class: 'lbl', text: 'Run' }),
+    h('div', { class: 'runconf' }, posNote, h('div', { class: 'runfield' }, h('span', { class: 'plabel', text: 'Mode' }), modeSeg), ...listRows, h(
+      'div',
+      { class: 'runopts' },
+      h('label', { class: 'chk' }, base, ' Send original first (baseline)'),
+      h('label', null, 'Max requests ', max),
+      h('label', null, 'Delay ms ', delay),
+    ), startBtn),
+  );
+}
+
+async function startRun(tab, main) {
+  const positions = countPositions(tab);
+  if ((tab.url || '').split(MARK).length % 2 === 0 || (tab.raw || '').split(MARK).length % 2 === 0) {
+    return toast('A position is not closed: every § needs a matching §.', 'err');
+  }
+  if (positions === 0) return toast('Mark at least one position first.', 'err');
+  const cfg = runCfg(tab);
+  const { headers, body, bad } = parseRaw(tab.raw);
+  if (bad.length) return toast('Not a header line: ' + bad[0], 'err');
+  // Rebuild the raw with the parsed headers + body so marks in both survive.
+  const raw = headers.map(([k, v]) => `${k}: ${v}`).join('\n') + '\n\n' + body;
+  const req = {
+    method: tab.method,
+    url: tab.url,
+    raw,
+    lists: cfg.lists.map(cleanList),
+    mode: cfg.mode,
+    include_base: !!cfg.base,
+    max_requests: cfg.max ? Number(cfg.max) : null,
+    delay_ms: cfg.delay === '' ? null : Number(cfg.delay),
+  };
+  tab.runState = { busy: true, report: null, error: null, sort: tab.runState?.sort, sel: null };
+  drawRunResults(tab, main);
+  try {
+    const report = await api('/api/run', { method: 'POST', body: req });
+    tab.runState = { busy: false, report, error: null, sort: tab.runState?.sort, sel: null };
+  } catch (e) {
+    tab.runState = { busy: false, report: null, error: e.message, sort: null, sel: null };
+  }
+  drawRunResults(tab, main);
+}
+
+function cleanList(c) {
+  if (c.kind === 'range') return { kind: 'range', from: Number(c.from ?? 1), to: Number(c.to ?? 100), step: Number(c.step || 1) };
+  if (c.kind === 'values') return { kind: 'values', values: (c.values || []).filter((v, i, a) => !(v === '' && i === a.length - 1)) };
+  return { kind: 'builtin', id: c.id };
+}
+
+function drawRunResults(tab, main) {
+  const slot = $('#runresults');
+  if (!slot) return;
+  const st = tab.runState;
+  if (!st) return clear(slot);
+  if (st.busy) return clear(slot, h('div', { class: 'runbusy', text: 'Running… sending requests through scope.' }));
+  if (st.error) return clear(slot, h('div', { class: 'rerr' }, h('b', { text: 'Run failed. ' }), st.error));
+  const rep = st.report;
+  if (!rep) return clear(slot);
+
+  const baseLen = (rep.rows.find((r) => r.baseline) || {}).length;
+  let rows = rep.rows.slice();
+  const sort = st.sort;
+  if (sort) {
+    const key = sort.key;
+    rows.sort((a, b) => {
+      const av = key === 'values' ? a.values.join() : (a[key] ?? 0);
+      const bv = key === 'values' ? b.values.join() : (b[key] ?? 0);
+      return (av > bv ? 1 : av < bv ? -1 : 0) * (sort.dir === 'desc' ? -1 : 1);
+    });
+  }
+  const th = (key, label) =>
+    h('button', {
+      class: 'sortbtn' + (sort && sort.key === key ? ' on' : ''),
+      text: label + (sort && sort.key === key ? (sort.dir === 'desc' ? ' ↓' : ' ↑') : ''),
+      onclick: () => {
+        st.sort = sort && sort.key === key ? { key, dir: sort.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' };
+        drawRunResults(tab, main);
+      },
+    });
+
+  const table = h(
+    'div',
+    { class: 'runtable' },
+    h('div', { class: 'rthead' }, th('n', '#'), th('status', 'Status'), th('length', 'Length'), th('duration_ms', 'Time'), th('values', 'Payload')),
+    ...rows.map((r) =>
+      h(
+        'div',
+        {
+          class: 'rtrow' + (st.sel === r.exchange_id ? ' sel' : '') + (baseLen != null && !r.baseline && r.length !== baseLen ? ' diff' : ''),
+          onclick: () => {
+            st.sel = r.exchange_id;
+            drawRunResults(tab, main);
+          },
+        },
+        h('span', { class: 'c-n', text: '#' + r.n + (r.baseline ? ' ·' : '') }),
+        h('span', { class: statusClass(r.status), text: r.status == null ? 'ERR' : r.status }),
+        h('span', { class: 'c-len', text: fmtSize(r.length) }),
+        h('span', { class: 'c-ms', text: r.duration_ms + ' ms' }),
+        h('span', { class: 'c-val', text: r.values.join(' | ') || '(base)', title: r.values.join(' | ') }),
+        h('button', {
+          class: 'btn sm',
+          text: 'Finding',
+          onclick: (ev) => {
+            ev.stopPropagation();
+            newFinding([r.exchange_id], `${tab.name}: ${r.values.join(' | ')}`);
+          },
+        }),
+      ),
+    ),
+  );
+
+  const summary = h(
+    'div',
+    { class: 'runsum' },
+    `${rep.requests_sent} request${rep.requests_sent === 1 ? '' : 's'} sent across ${rep.positions} position${rep.positions === 1 ? '' : 's'}.` +
+      (rep.truncated ? ` Stopped at the budget (${rep.planned} planned).` : '') +
+      ' Tick a row to inspect its response. Every request is in Traffic too.',
+  );
+
+  clear(slot, h('div', { class: 'runresultswrap' }, summary, table, h('div', { class: 'runsel' })));
+  for (const n of rep.notes || []) slot.firstChild.append(h('div', { class: 'runnote', text: 'Note: ' + n }));
+  if (st.sel != null) drawRunSelection(tab);
+}
+
+async function drawRunSelection(tab) {
+  const slot = $('.runsel');
+  if (!slot) return;
+  clear(slot, h('pre', { class: 'raw muted', text: 'Loading…' }));
+  let ex;
+  try {
+    ex = await getExchange(tab.runState.sel);
+  } catch (e) {
+    return clear(slot, h('div', { class: 'rerr', text: e.message }));
+  }
+  if (!slot.isConnected) return;
+  clear(
+    slot,
+    h('div', { class: 'lbl' }, 'Response', h('span', { class: 'r' }, h('span', { class: statusClass(ex.status), text: ex.status == null ? 'no response' : ex.status }), ` · ${ex.duration_ms} ms · ${fmtSize(b64len(ex.resp_body))} · #${ex.id}`)),
+    rawPre(responseText(ex, true)),
+  );
 }
 
 function renderScopeHint() {

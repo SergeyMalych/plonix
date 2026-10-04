@@ -337,6 +337,79 @@ async fn active_scan_finds_a_real_exposure_and_stays_in_scope() {
 }
 
 #[tokio::test]
+async fn payload_run_feeds_positions_and_stays_in_scope() {
+    use plonix_core::runs::{Payloads, RunMode, RunRequest};
+
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let up = serve_http().await;
+    let r = start(&home, None).await;
+
+    let base = format!("http://localhost:{}", up.port());
+    let list = |v: &[&str]| Payloads::Values { values: v.iter().map(|s| s.to_string()).collect() };
+
+    // A run against an un-accepted host is refused before any request goes out.
+    let req = RunRequest {
+        url: format!("{base}/echo?id=§1§"),
+        raw: "Accept: */*\n\n".into(),
+        lists: vec![list(&["1", "2", "3"])],
+        mode: RunMode::Sweep,
+        include_base: true,
+        delay_ms: Some(0),
+        ..Default::default()
+    };
+    assert!(matches!(r.engine.run(req.clone(), "test").await, Err(SendError::OutOfScope { .. })), "run must refuse an un-accepted host");
+    assert_eq!(r.engine.store.count().unwrap(), 0, "nothing was sent before scope was accepted");
+
+    r.engine.decide("localhost", Decision::Accepted, false, "").unwrap();
+    let report = r.engine.run(req, "bench").await.unwrap();
+
+    // Baseline + one request per value; the baseline carries the base value.
+    assert_eq!(report.positions, 1);
+    assert_eq!(report.requests_sent, 4);
+    assert!(report.rows[0].baseline);
+    let sent: Vec<&str> = report.rows.iter().map(|row| row.values[0].as_str()).collect();
+    assert_eq!(sent, vec!["1", "1", "2", "3"]);
+
+    // Each request actually carried its own payload value to the server.
+    for row in &report.rows {
+        let ex = r.engine.store.get_exchange(row.exchange_id).unwrap().unwrap();
+        let text = String::from_utf8_lossy(&ex.resp_body);
+        assert!(text.contains(&format!("/echo?id={}", row.values[0])), "row {} did not carry its payload to the server: {text}", row.n);
+        assert_eq!(ex.initiator.as_deref(), Some("bench"));
+    }
+
+    // A budget stops the run short and says so.
+    let capped = r
+        .engine
+        .run(
+            RunRequest {
+                url: format!("{base}/echo?id=§1§"),
+                lists: vec![Payloads::Range { from: 1, to: 100, step: 1 }],
+                mode: RunMode::Sweep,
+                max_requests: Some(5),
+                delay_ms: Some(0),
+                ..Default::default()
+            },
+            "bench",
+        )
+        .await
+        .unwrap();
+    assert!(capped.truncated);
+    assert_eq!(capped.requests_sent, 5);
+    assert_eq!(capped.planned, 100);
+
+    // A rejected host is refused too.
+    r.engine.decide("localhost", Decision::Rejected, false, "").unwrap();
+    assert!(matches!(
+        r.engine
+            .run(RunRequest { url: format!("{base}/echo?id=§1§"), lists: vec![list(&["1"])], mode: RunMode::Sweep, delay_ms: Some(0), ..Default::default() }, "bench")
+            .await,
+        Err(SendError::OutOfScope { decision: "rejected", .. })
+    ));
+}
+
+#[tokio::test]
 async fn active_requests_are_refused_until_scope_is_accepted() {
     let dir = tempfile::tempdir().unwrap();
     let home = Home { root: dir.path().into() };

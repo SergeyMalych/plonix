@@ -13,6 +13,7 @@ mod market;
 mod mcp;
 mod open;
 mod render;
+mod bench;
 mod scan;
 
 use std::io::{BufRead, IsTerminal, Write};
@@ -149,6 +150,11 @@ enum Cmd {
     Findings {
         #[command(subcommand)]
         cmd: Option<findings::FindingsCmd>,
+    },
+    /// Bench: run payloads through marked positions of a request
+    Bench {
+        #[command(subcommand)]
+        cmd: bench::BenchCmd,
     },
     /// Detection rule packs: list, add from a file or URL, remove, check
     Rules {
@@ -426,6 +432,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Cmd::Scan { cmd } => scan::scan_cmd(&ctx, cmd)?,
         Cmd::Crawl(a) => scan::crawl_cmd(&ctx, a)?,
         Cmd::Findings { cmd } => findings::findings_cmd(&ctx, cmd.unwrap_or(findings::FindingsCmd::List { status: None }))?,
+        Cmd::Bench { cmd } => bench::bench_cmd(&ctx, cmd)?,
         Cmd::Rules { cmd } => community::rules_cmd(&ctx, cmd.unwrap_or(community::RulesCmd::List))?,
         Cmd::Filters { cmd } => community::filters_cmd(&ctx, cmd.unwrap_or(community::FiltersCmd::List))?,
         Cmd::Market(a) => market::market_cmd(&ctx, a)?,

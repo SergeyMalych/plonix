@@ -30,6 +30,7 @@ pub mod query;
 pub mod report;
 pub mod registry;
 pub mod rulepack;
+pub mod runs;
 pub mod scan;
 pub mod scope;
 pub mod shelf;
