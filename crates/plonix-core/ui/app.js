@@ -260,6 +260,7 @@ function demoBar() {
       { class: 'tour' },
       h('button', { class: 'btn sm', text: 'What Lens spots', title: 'An order with a token, an email and a card number in it', onclick: lensSample }),
       h('button', { class: 'btn sm', text: 'Scope suggestions', title: 'Hosts tied to the shop, with the evidence for each', onclick: () => go('scope') }),
+      h('button', { class: 'btn sm', text: 'Filters', title: 'Ready-made include and exclude filters, and how to write your own', onclick: filterTour }),
       h('button', { class: 'btn sm', text: 'Bench experiment', title: 'Order lookup: two sends ready to compare', onclick: () => go('bench') }),
       h('button', { class: 'btn sm', text: 'Findings', onclick: () => go('findings') }),
       h('button', { class: 'btn sm', text: 'Scans', title: 'Which checks fit this app, and why', onclick: () => go('scans') }),
@@ -275,6 +276,70 @@ function demoBar() {
     }),
   );
   return bar;
+}
+
+/** The demo's filters overview: views of its traffic, each one click away,
+ * and the search language at a glance. */
+async function filterTour() {
+  let views = [];
+  try {
+    views = (await api('/api/views/filter_tour')).views || [];
+  } catch (_) {}
+  const chip = (f) => {
+    const { key, value } = filterLabel(f.term);
+    return h('span', { class: 'fchip ' + f.mode }, h('span', { class: 'fbody' }, h('span', { class: 'fmode', text: f.mode === 'include' ? '+' : '−' }), key ? h('span', { class: 'fk', text: key }) : null, h('span', { class: 'fv', text: value })), h('span', { class: 'fpad' }));
+  };
+  const apply = (v) => {
+    closeModal();
+    T.filters = v.filters.map((f) => ({ ...f }));
+    T.text = '';
+    T.viewLoaded = true;
+    if (S.view === 'traffic') {
+      const q = $('#q');
+      if (q) q.value = '';
+      filtersChanged();
+    } else {
+      saveTrafficView();
+      go('traffic');
+    }
+    toast(v.title + ': ' + v.why);
+  };
+  const rows = views.map((v) => {
+    const n = h('span', { class: 'n muted' });
+    api('/api/traffic?limit=0&q=' + encodeURIComponent(queryFor(v.filters, '')))
+      .then((r) => (n.textContent = r.total + ' requests'))
+      .catch(() => {});
+    return h(
+      'div',
+      { class: 'ftour-row' },
+      h('div', { class: 'ftour-main' }, h('b', { text: v.title }), h('span', { class: 'muted', text: v.why }), h('span', { class: 'fgroup' }, v.filters.map(chip))),
+      n,
+      h('button', { class: 'btn sm', text: 'Apply', onclick: () => apply(v) }),
+    );
+  });
+  const lang = [
+    ['host:api.example.com', 'a host and its subdomains (globs: host:*.cdn.*)'],
+    ['-host:a.com,b.com', 'a leading minus hides; a comma list matches any value'],
+    ['status:4xx,5xx', 'status classes or codes; status:none for no response'],
+    ['method:POST', 'request method'],
+    ['path:/api', 'path prefix (globs: path:*admin*)'],
+    ['ext:js  mime:json', 'file extension, response type'],
+    ['kind:static', 'images, fonts, styles, scripts and media'],
+    ['scope:in  source:replay', 'in scope or not; captured or sent from the Bench'],
+    ['is:auth', 'a named filter from a filter pack (see + Filter)'],
+    ['"set-cookie: sid"', 'anything else is full text: URLs, headers, bodies'],
+  ];
+  const m = modal(
+    'Filters',
+    [
+      h('p', { class: 'muted', text: 'Filters narrow the traffic list. Each is a chip: + chips show only what matches, − chips hide it. Click a chip to flip it. Add them with + Filter, from the suggested chips under the search box, from a row’s right-click menu, or by typing a term such as host:api.example.com and pressing Enter. They are saved with the project.' }),
+      h('div', { class: 'ftour' }, rows.length ? rows : h('p', { class: 'muted', text: 'No examples in this project.' })),
+      h('h4', { class: 'ftour-h', text: 'The search language' }),
+      h('div', { class: 'ftour-lang' }, lang.map(([q, what]) => [h('code', { text: q }), h('span', { class: 'muted', text: what })])),
+    ],
+    [h('button', { class: 'btn', text: 'Clear filters', onclick: () => (closeModal(), clearFilters(), go('traffic')) }), h('button', { class: 'btn primary', text: 'Done', onclick: closeModal })],
+  );
+  m.el.querySelector('.mcard').classList.add('wide');
 }
 
 /* ---------- theme ---------- */
@@ -537,7 +602,11 @@ function updateChrome() {
   $('#f-ca').textContent = (st.ca_fingerprint || '').slice(0, 23) + '…';
   $('#f-cap').textContent = st.exchanges;
   $('#f-ver').textContent = st.version;
-  $('#ct-traffic').textContent = st.exchanges || '';
+  const held = (st.intercept && st.intercept.held) || 0;
+  const ctTraffic = $('#ct-traffic');
+  ctTraffic.textContent = held || st.exchanges || '';
+  ctTraffic.classList.toggle('hot', held > 0);
+  ctTraffic.title = held ? held + ' held in Intercept, waiting for you' : '';
   const pending = stillPending(S.scope.suggestions).length;
   const pend = $('#ct-scope');
   pend.textContent = pending || '';
@@ -566,6 +635,7 @@ async function poll() {
       if (S.view === 'map' && st.exchanges !== prev.exchanges) M.dirty = true;
     }
     if (S.view === 'agents' && Date.now() - (S.agentsAt || 0) > 4000) loadAgents();
+    if (st.intercept && st.intercept.seq !== IC.seq) loadIntercept();
   } catch (e) {
     if (e.code === 'unauthorized') return;
     S.engineUp = false;
@@ -759,10 +829,14 @@ function liftFilters(q) {
 
 /** The query the filters and the search box make together. */
 function fullQuery() {
+  return queryFor(T.filters, T.text);
+}
+
+function queryFor(filters, text) {
   const parts = [];
   for (const mode of ['include', 'exclude']) {
     const groups = new Map();
-    for (const f of T.filters.filter((x) => x.mode === mode)) {
+    for (const f of filters.filter((x) => x.mode === mode)) {
       const field = fieldOf(f.term);
       if (field === 'text') {
         parts.push((mode === 'exclude' ? '-' : '') + f.term);
@@ -773,7 +847,7 @@ function fullQuery() {
     }
     for (const [field, values] of groups) parts.push((mode === 'exclude' ? '-' : '') + field + ':' + values.join(','));
   }
-  if (T.text.trim()) parts.push(T.text.trim());
+  if (text.trim()) parts.push(text.trim());
   return parts.join(' ');
 }
 
@@ -1029,15 +1103,20 @@ function renderTraffic(main) {
         h('div', { class: 'search', id: 'searchbox' }, h('span', { class: 'mg', text: '⌕' }), input, h('kbd', { text: '/' })),
         h('span', { class: 'count', id: 'tcount' }),
         liveBtn,
+        interceptButton(),
       ),
       h('div', { class: 'filterchips', id: 'chips' }),
       h('div', { class: 'qerr', id: 'qerr', hidden: true }),
       h('div', { id: 'bannerslot' }),
+      h('div', { id: 'icslot' }),
       h('div', { class: 'traffic' }, wrap, h('div', { id: 'inspslot' })),
     ),
   ]);
   renderChips();
   renderBanner();
+  IC.drawn = null;
+  drawInterceptPanel();
+  loadIntercept();
   T.refresh = refreshTraffic;
   loadTrafficView().then(() => {
     if (S.view !== 'traffic' || !input.isConnected) return;
@@ -1046,6 +1125,172 @@ function renderTraffic(main) {
     T.refresh(true);
   });
   if (T.sel) openInspector(T.sel);
+}
+
+/* ---------- intercept ---------- */
+
+/** Requests and responses held in the proxy, the one being edited, and unsent edits by id. */
+const IC = { on: false, queue: [], sel: null, drafts: {}, seq: -1, opts: {}, drawn: null };
+
+function interceptButton() {
+  const n = IC.queue.length;
+  return h(
+    'button',
+    {
+      class: 'btn sm icbtn' + (IC.on ? ' on' : ''),
+      id: 'icbtn',
+      title: IC.on
+        ? 'Intercept is on: matching requests wait for you. Turn it off to let everything held go on (i)'
+        : 'Intercept: hold requests to in-scope hosts to edit, forward or drop them (i)',
+      onclick: () => setIntercept(!IC.on),
+    },
+    h('span', { class: 'dot' }),
+    'Intercept',
+    n ? h('span', { class: 'qn', text: n }) : null,
+  );
+}
+
+async function setIntercept(on) {
+  try {
+    const r = await api('/api/intercept', { method: 'PUT', body: { on } });
+    if (!on && r.released) toast(`Intercept is off. ${r.released} held item(s) went on unchanged.`, 'ok');
+    applyIntercept(r);
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+async function loadIntercept() {
+  try {
+    applyIntercept(await api('/api/intercept'));
+  } catch (_) {}
+}
+
+function applyIntercept(r) {
+  Object.assign(IC, { on: r.on, queue: r.queue || [], seq: r.seq, opts: r });
+  const ids = new Set(IC.queue.map((i) => i.id));
+  for (const k of Object.keys(IC.drafts)) if (!ids.has(Number(k))) delete IC.drafts[k];
+  if (!ids.has(IC.sel)) IC.sel = IC.queue.length ? IC.queue[0].id : null;
+  const b = $('#icbtn');
+  if (b) b.replaceWith(interceptButton());
+  drawInterceptPanel();
+}
+
+const fmtSecs = (s) => (s >= 60 && s % 60 === 0 ? s / 60 + ' min' : s + ' s');
+
+function drawInterceptPanel() {
+  const slot = $('#icslot');
+  if (!slot) return;
+  const o = IC.opts;
+  // Redraw only when something changed, so typing in the editor is not interrupted.
+  const key = JSON.stringify([IC.on, IC.sel, IC.queue.map((i) => i.id), o.hold, o.filter, o.responses, o.timeout_s]);
+  if (IC.drawn === key && slot.firstChild) return;
+  IC.drawn = key;
+  if (!IC.on && !IC.queue.length) return clear(slot);
+  const what = (o.hold === 'everything' ? 'every host' : 'in-scope hosts') + (o.responses ? ', requests and responses' : ', requests only') + (o.filter ? ', matching ' + o.filter : '');
+  const head = h(
+    'div',
+    { class: 'ichead' },
+    h('b', { text: 'Intercept' }),
+    h('span', { class: 'muted', text: `Holding ${what}. Anything unanswered goes on after ${fmtSecs(o.timeout_s || 0)}.` }),
+    h('button', { class: 'btn sm ghost', text: 'Options…', onclick: () => ((S.settingsSection = 'intercept'), leaveTo('settings')) }),
+    h('button', { class: 'btn sm', text: 'Forward all', disabled: !IC.queue.length, title: 'Send everything held on, unchanged', onclick: forwardAllHeld }),
+  );
+  if (!IC.queue.length) return clear(slot, h('div', { class: 'icpanel' }, head, h('div', { class: 'icnone muted', text: 'Nothing held. Matching requests wait here until you forward or drop them.' })));
+  const list = h(
+    'div',
+    { class: 'iclist' },
+    IC.queue.map((it) =>
+      h(
+        'button',
+        { class: 'icitem' + (it.id === IC.sel ? ' sel' : ''), onclick: () => ((IC.sel = it.id), drawInterceptPanel()) },
+        h('span', { class: 'tag ' + (it.kind === 'response' ? 'pend' : 'replay'), text: it.kind === 'response' ? 'resp' : 'req' }),
+        h('span', { class: 'meth m-' + it.method, text: it.method }),
+        h('span', { class: 'icurl', text: it.url, title: it.url }),
+        it.status ? h('span', { class: statusClass(it.status), text: it.status }) : null,
+      ),
+    ),
+  );
+  const it = IC.queue.find((i) => i.id === IC.sel);
+  const focused = document.activeElement && document.activeElement.classList.contains('icedit') ? document.activeElement : null;
+  const ta = h('textarea', {
+    class: 'icedit',
+    spellcheck: 'false',
+    'aria-label': 'Held ' + it.kind + ' as text',
+    value: IC.drafts[it.id] != null ? IC.drafts[it.id] : it.raw,
+    oninput: () => (IC.drafts[it.id] = ta.value),
+    onkeydown: (e) => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        forwardHeld(it.id);
+      }
+      if (e.key === 'Escape') ta.blur();
+    },
+  });
+  const editor = h(
+    'div',
+    { class: 'iceditor' },
+    h('div', { class: 'lbl' }, it.kind === 'response' ? 'Response' : 'Request', h('span', { class: 'r', text: `${it.http_version} · goes on by itself at ${fmtTime(it.expires_at)}` })),
+    it.note ? h('div', { class: 'icnote', text: it.note }) : null,
+    ta,
+    h('div', { class: 'qerr', id: 'icerr' }),
+    h(
+      'div',
+      { class: 'icact' },
+      h('button', { class: 'btn sm', text: 'Revert', title: 'Undo your edits', onclick: () => (delete IC.drafts[it.id], (IC.drawn = null), drawInterceptPanel()) }),
+      h('button', { class: 'btn sm danger', text: 'Drop', title: 'Stop it here; the browser gets an error page (d)', onclick: () => dropHeld(it.id) }),
+      h('button', { class: 'btn sm primary', text: 'Forward', title: 'Send it on, with your edits (⌘↵, or f)', onclick: () => forwardHeld(it.id) }),
+    ),
+  );
+  clear(slot, h('div', { class: 'icpanel' }, head, h('div', { class: 'icbody' }, list, editor)));
+  if (focused) ta.focus();
+}
+
+async function forwardHeld(id) {
+  const it = IC.queue.find((i) => i.id === id);
+  if (!it) return;
+  const raw = IC.drafts[id];
+  try {
+    await api(`/api/intercept/${id}/forward`, { method: 'POST', body: raw != null && raw !== it.raw ? { raw } : {} });
+    delete IC.drafts[id];
+  } catch (e) {
+    const err = $('#icerr');
+    if (err && e.code === 'bad_edit') return (err.textContent = e.message);
+    toast(e.message, 'err');
+  }
+  loadIntercept();
+}
+
+async function dropHeld(id) {
+  try {
+    await api(`/api/intercept/${id}/drop`, { method: 'POST', body: {} });
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+  loadIntercept();
+}
+
+async function forwardAllHeld() {
+  try {
+    await api('/api/intercept/forward-all', { method: 'POST', body: {} });
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+  loadIntercept();
+}
+
+/** The request or response as it arrived, before it was edited in Intercept. */
+function showOriginal(ex) {
+  const block = (title, text) => (text ? [h('div', { class: 'lbl', text: title }), h('pre', { class: 'raw origraw', text })] : []);
+  modal(
+    'Before it was edited',
+    [
+      h('p', { class: 'muted mnote', text: 'This exchange was changed in Intercept. The Lens shows what was sent; this is what arrived.' }),
+      block('Original request', ex.original_request),
+      block('Original response', ex.original_response),
+    ],
+    [h('button', { class: 'btn', text: 'Close', onclick: closeModal })],
+  );
 }
 
 /**
@@ -1387,6 +1632,7 @@ function drawRows(freshAbove) {
   const rows = T.items.map((ex) => {
     const tags = [];
     if (ex.source === 'replay') tags.push(h('span', { class: 'tag replay', text: 'sent' }));
+    if (ex.edited) tags.push(h('span', { class: 'tag edited', text: 'edited', title: 'Changed in Intercept before it went on' }));
     const tr = h(
       'tr',
       {
@@ -1482,6 +1728,8 @@ async function openInspector(id) {
         h('span', { text: ex.duration_ms + ' ms' }),
         h('span', { text: fmtSize(ex.resp_size != null ? ex.resp_size : b64len(ex.resp_body)) }),
         ex.http_version ? h('span', { text: ex.http_version, title: 'The protocol spoken with the server' }) : null,
+        ex.edited ? h('button', { class: 'tag edited', text: 'edited', title: 'Changed in Intercept before it went on. Show the original', onclick: () => showOriginal(ex) }) : null,
+        ex.replaced && ex.replaced.length ? h('span', { class: 'tag edited', text: 'replaced', title: 'Changed by match-and-replace rules:\n' + ex.replaced.join('\n') }) : null,
         h('span', { class: 'tag ' + scopeTag(decide(ex.host)), text: scopeLabel(decide(ex.host)) }),
       ),
       h('button', { class: 'btn sm primary', text: 'Send to Bench', title: 'Edit and re-send on the Bench (b, or double-click a row)', onclick: () => sendToBench(id) }),
@@ -2105,7 +2353,7 @@ function renderBench(main) {
       }),
     ),
   );
-  const urlMarkBtn = runMode ? h('button', { class: 'iconbtn', text: '§', title: 'Mark the selected part of the URL as a payload position', onclick: () => marker('url') }) : null;
+  const urlMarkBtn = runMode ? h('button', { class: 'iconbtn', text: '•', title: 'Mark the selected part of the URL as a payload position', onclick: () => marker('url') }) : null;
   const body = h(
     'div',
     { class: 'pane' },
@@ -2136,7 +2384,7 @@ function renderBench(main) {
 
 /* ----- Bench payload runs ----- */
 
-const MARK = '§'; // §, the position marker, matched to the engine.
+const MARK = '•'; // •, the position marker, matched to the engine.
 let LIST_CATALOG = null;
 
 async function loadLists() {
@@ -2406,7 +2654,7 @@ async function renderRunPanel(tab, main, col) {
           'div',
           { class: 'scopehint blocked' },
           'Mark the parts to vary: select text in the URL and press ',
-          h('b', { text: '§' }),
+          h('b', { text: '•' }),
           ', or select in the request and press ',
           h('b', { text: '+ Mark position' }),
           '.',
@@ -2461,7 +2709,7 @@ function suggestRow(ids, cfg, onchange, redraw) {
 async function startRun(tab, main) {
   const positions = countPositions(tab);
   if ((tab.url || '').split(MARK).length % 2 === 0 || (tab.raw || '').split(MARK).length % 2 === 0) {
-    return toast('A position is not closed: every § needs a matching §.', 'err');
+    return toast('A position is not closed: every • needs a matching •.', 'err');
   }
   if (positions === 0) return toast('Mark at least one position first.', 'err');
   const cfg = runCfg(tab);
@@ -4751,6 +4999,9 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     selectRow(-1);
   } else if (e.key === 'b' && T.sel) sendToBench(T.sel);
+  else if (e.key === 'i') setIntercept(!IC.on);
+  else if (e.key === 'f' && IC.sel != null) forwardHeld(IC.sel);
+  else if (e.key === 'd' && IC.sel != null) dropHeld(IC.sel);
 });
 
 /* ---------- settings ---------- */
@@ -4775,6 +5026,7 @@ async function renderSettings(main) {
     save: async (section, values) => {
       const r = await api('/api/settings/' + section, { method: 'PUT', body: { values } });
       if (section === 'agents') loadAgentSettings();
+      if (section === 'intercept') loadIntercept();
       if (section === 'proxy') {
         S.status = await api('/api/status');
         updateChrome();
@@ -4785,6 +5037,7 @@ async function renderSettings(main) {
     extra: (section, el) => {
       if (section.id === 'proxy') el.append(proxyPanel());
       if (section.id === 'storage') el.append(storagePanel());
+      if (section.id === 'replace') el.append(replacePanel());
     },
   });
 }
@@ -4819,6 +5072,84 @@ function storagePanel() {
       clear(panel, rows);
     })
     .catch((e) => clear(panel, h('p', { text: e.message })));
+  return panel;
+}
+
+const REPLACE_TARGETS = [
+  ['request_line', 'Request line'],
+  ['request_header', 'Request headers'],
+  ['request_body', 'Request body'],
+  ['response_header', 'Response headers'],
+  ['response_body', 'Response body'],
+];
+
+/** Match-and-replace rules: list, switch on or off, remove, add. */
+function replacePanel() {
+  const panel = h('div', { class: 'spanel replace' }, h('h4', { text: 'Rules' }), h('p', { text: 'Loading…' }));
+  const label = (t) => (REPLACE_TARGETS.find(([k]) => k === t) || [t, t])[1];
+  const call = async (path, opts) => {
+    try {
+      await api(path, opts);
+      load();
+      return true;
+    } catch (e) {
+      toast(e.message, 'err');
+      return false;
+    }
+  };
+  const row = (r) =>
+    h(
+      'div',
+      { class: 'rrule' + (r.enabled ? '' : ' off') },
+      h('input', { type: 'checkbox', checked: r.enabled, title: r.enabled ? 'On: switch off' : 'Off: switch on', onchange: (e) => call('/api/replace/' + r.id, { method: 'PATCH', body: { enabled: e.target.checked } }) }),
+      h('span', { class: 'rtarget', text: label(r.target) }),
+      h('span', { class: 'mono rpat', text: r.pattern, title: r.regex ? 'Regular expression' : 'Literal text' }),
+      h('span', { class: 'muted', text: '→' }),
+      h('span', { class: 'mono rpat', text: r.replace === '' ? '(removed)' : r.replace }),
+      r.regex ? h('span', { class: 'tag', text: 'regex' }) : null,
+      r.in_scope_only ? h('span', { class: 'tag', text: 'in scope only' }) : null,
+      r.note ? h('span', { class: 'muted', text: r.note }) : null,
+      h('button', { class: 'iconbtn', text: '✕', title: 'Remove this rule', onclick: () => call('/api/replace/' + r.id, { method: 'DELETE' }) }),
+    );
+  const form = () => {
+    const target = h('select', null, REPLACE_TARGETS.map(([k, l]) => h('option', { value: k, text: l })));
+    const pattern = h('input', { type: 'text', placeholder: 'Match, e.g. (?i)^user-agent: .*$', spellcheck: false });
+    const replace = h('input', { type: 'text', placeholder: 'Replace with (empty removes the match)', spellcheck: false });
+    const regex = h('input', { type: 'checkbox' });
+    const scoped = h('input', { type: 'checkbox' });
+    const note = h('input', { type: 'text', placeholder: 'Note (optional)' });
+    const add = async () => {
+      if (!pattern.value) return pattern.focus();
+      // In a text field, \n stands for a line break, so header rules can add a header.
+      const body = { target: target.value, match: pattern.value, replace: replace.value.replace(/\\n/g, '\n'), regex: regex.checked, in_scope_only: scoped.checked, note: note.value };
+      if (await call('/api/replace', { method: 'POST', body })) toast('Rule added. It applies to traffic from now on.', 'ok');
+    };
+    return h(
+      'div',
+      { class: 'rform' },
+      h('div', { class: 'row' }, target, pattern, replace),
+      h(
+        'div',
+        { class: 'row' },
+        h('label', null, regex, ' Regular expression ($1 inserts a capture)'),
+        h('label', null, scoped, ' In-scope hosts only'),
+        note,
+        h('button', { class: 'btn primary', text: 'Add Rule', onclick: add }),
+      ),
+      h('p', { class: 'muted', text: 'Header rules see one "Name: value" line per header: replace a whole line with nothing to remove a header, or use \\n in the replacement to add one.' }),
+    );
+  };
+  const load = () =>
+    api('/api/replace')
+      .then((v) => {
+        const rows = [h('h4', { text: 'Rules, in the order they apply' })];
+        if (!v.enabled) rows.push(h('p', { class: 'muted', text: 'Match and replace is switched off above; these rules change nothing until it is on.' }));
+        if (!v.rules.length) rows.push(h('p', { class: 'muted', text: 'No rules yet.' }));
+        rows.push(v.rules.map(row), form());
+        clear(panel, rows);
+      })
+      .catch((e) => clear(panel, h('p', { text: e.message })));
+  load();
   return panel;
 }
 

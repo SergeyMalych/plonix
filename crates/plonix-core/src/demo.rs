@@ -776,7 +776,7 @@ export async function api(path, opts = {{}}) {{
         "name": "Order IDs — run",
         "from": own_order,
         "method": "GET",
-        "url": format!("https://{API}/v1/orders/\u{a7}1042\u{a7}"),
+        "url": format!("https://{API}/v1/orders/\u{2022}1042\u{2022}"),
         "raw": raw(&bearer),
         "bodyB64": null,
         "history": [],
@@ -786,6 +786,31 @@ export async function api(path, opts = {{}}) {{
         "run": { "mode": "sweep", "lists": [{ "kind": "range", "from": 1038, "to": 1046, "step": 1 }], "base": true, "max": "", "delay": "40" }
     });
     store.set_view_state("bench", &json!({ "tabs": [order_run, lookup, none_tab], "active": 0 }))?;
+    seed_filters(store)?;
+    Ok(())
+}
+
+/// Traffic starts with static files hidden, and the filters overview offers
+/// a few views of this traffic, each a set of include and exclude chips.
+fn seed_filters(store: &Store) -> Result<()> {
+    let inc = |term: &str| json!({ "term": term, "mode": "include" });
+    let exc = |term: &str| json!({ "term": term, "mode": "exclude" });
+    store.set_view_state("traffic", &json!({ "filters": [exc("kind:static")], "text": "" }))?;
+    let view = |title: &str, why: &str, filters: Vec<serde_json::Value>| json!({ "title": title, "why": why, "filters": filters });
+    store.set_view_state(
+        "filter_tour",
+        &json!({ "views": [
+            view("Hide the noise", "Two exclude chips: images, fonts, styles and scripts, and the analytics a page pulls in.", vec![exc("kind:static"), exc("is:trackers")]),
+            view("Just the shop's API", "Two include chips must both match: one host, and JSON responses.", vec![inc("host:api.brightcart.example"), inc("mime:json")]),
+            view("What went wrong", "Two values of one field match either one: client errors or server errors.", vec![inc("status:4xx"), inc("status:5xx")]),
+            view("Requests that change things", "A named filter from the built-in pack: POST, PUT, PATCH and DELETE.", vec![inc("is:writes"), exc("kind:static")]),
+            view("The sign-in flow", "The built-in Auth flows filter: logins, OAuth, tokens and sessions, on any host.", vec![inc("is:auth")]),
+            view("Find a value anywhere", "Plain text matches URLs, headers and decoded bodies. Here: every response with a card number field.", vec![inc("card_number")]),
+            view("Third parties", "Out-of-scope hosts, without the trackers: what to decide on next.", vec![inc("scope:out"), exc("is:trackers")]),
+            view("Your Bench experiments", "Requests sent from the Bench rather than captured.", vec![inc("source:replay")]),
+            view("Mix them", "API failures outside the product catalog: one include and two exclude chips.", vec![inc("host:api.brightcart.example"), exc("status:2xx"), exc("path:/v1/products")]),
+        ] }),
+    )?;
     Ok(())
 }
 
@@ -819,6 +844,19 @@ mod tests {
 
         // Findings, the Bench and Lens insights.
         assert_eq!(store.findings().unwrap().len(), 5);
+        let named = crate::filterpack::FilterLibrary::at(&home.root.join("filters")).load();
+        let tour = store.view_state("filter_tour").unwrap().unwrap();
+        for v in tour["views"].as_array().unwrap() {
+            let mut q = String::new();
+            for f in v["filters"].as_array().unwrap() {
+                let minus = if f["mode"] == "exclude" { "-" } else { "" };
+                q.push_str(&format!("{minus}{} ", f["term"].as_str().unwrap()));
+            }
+            // Two values of one field are one comma list, as the window sends them.
+            let q = q.replace("status:4xx status:5xx", "status:4xx,5xx");
+            let (_, n) = store.search(&named.parse(&q).unwrap(), &rules, 1, 0).unwrap();
+            assert!(n > 0, "{} shows something ({q})", v["title"]);
+        }
         let bench = store.view_state("bench").unwrap().unwrap();
         assert_eq!(bench["tabs"].as_array().unwrap().len(), 3);
         let all = store.exchanges_after(0, 500).unwrap();

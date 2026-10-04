@@ -18,13 +18,13 @@ values at them.
 
 ### Marking positions
 
-Select the part of the URL or the request you want to vary and press **§** (in
+Select the part of the URL or the request you want to vary and press **•** (in
 the URL) or **+ Mark position** (in the request body/headers). The selection is
-wrapped in `§…§`. You can mark several positions. From the command line, type
+wrapped in `•…•`. You can mark several positions. From the command line, type
 the markers yourself:
 
 ```
-plonix bench run 'https://host/api?id=§1§' --list range:1-100
+plonix bench run 'https://host/api?id=•1•' --list range:1-100
 ```
 
 The Run panel shows the request with each marked position highlighted, so it is
@@ -75,11 +75,11 @@ in no agent mode's capabilities.
 
 ```
 # single-position sweep over a range, with a baseline
-plonix bench run 'https://host/item?id=§1§' --list range:1-5 --base
+plonix bench run 'https://host/item?id=•1•' --list range:1-5 --base
 
 # all combinations of two lists, with a header position and a body
-plonix bench run 'https://host/q?a=§x§' -X POST \
-  -H 'X-Mode: §m§' --body 'q=test' \
+plonix bench run 'https://host/q?a=•x•' -X POST \
+  -H 'X-Mode: •m•' --body 'q=test' \
   --mode matrix --list values:1,2 --list builtin:http-methods
 ```
 

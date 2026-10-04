@@ -23,7 +23,7 @@ A local folder works best. Captured traffic changes constantly, which syncs poor
 
 ## The demo project
 
-**Try the Demo** on the Start screen (or `plonix projects demo`) creates a ready-made project to explore Plonix with, in `plonix-demo` in the projects folder, and opens it. It holds traffic from Brightcart, a made-up online shop on reserved `.example` hosts, as a researcher would have it after a short session: Lens insights (a token, encoded values, a card number, a key in a script), scope suggestions with their evidence, common third parties to exclude, findings, Bench experiments and what Scans would check. The traffic was written into the project's database, not captured, so opening the demo sends nothing anywhere, and its hosts do not exist.
+**Try the Demo** on the Start screen (or `plonix projects demo`) creates a ready-made project to explore Plonix with, in `plonix-demo` in the projects folder, and opens it. It holds traffic from Brightcart, a made-up online shop on reserved `.example` hosts, as a researcher would have it after a short session: Lens insights (a token, encoded values, a card number, a key in a script), scope suggestions with their evidence, common third parties to exclude, a filters overview (ready-made include and exclude views of the traffic, and the search language at a glance), findings, Bench experiments and what Scans would check. The traffic was written into the project's database, not captured, so opening the demo sends nothing anywhere, and its hosts do not exist.
 
 Although the demo's hosts are not real, its API answers locally, so you can actually try things. The Bench opens on a ready-made run: the order id is marked as a position with a range of ids queued, and pressing **Start run** walks the ids and shows how each one returns a different customer's order — the finding the demo is built around. This stand-in only ever answers the demo's made-up hosts, never a real one.
 
@@ -71,6 +71,8 @@ Settings come in sections. A section is either **global** (one value for all pro
 | Section | Level | Fields |
 | --- | --- | --- |
 | Proxy | project | listen address and port, next-free-port fallback, decrypt HTTPS, hosts never decrypted, check server certificates, upstream proxy (`http://` or `socks5://`, with optional login), hosts reached directly, connect and request timeouts, how much of each body to keep (10 MB by default; longer bodies pass through in full and are marked as cut) |
+| Intercept | project | hold in-scope hosts only or everything, a Traffic search that narrows what is held, hold responses too, forward unanswered items after (300 seconds by default). Whether Intercept is on is not saved: a project always opens with it off |
+| Match and replace | project | apply the project's match-and-replace rules (on by default). The rules themselves are kept in `traffic.db` and managed under this section, with `plonix replace` or `/api/replace` |
 | Storage | project | keep only in-scope traffic |
 | Interface | global | open projects in a Plonix window or the web browser |
 | AI agents | global | let agents read projects or not, in-scope hosts only or everything, which kinds of data, and the Ask Claude size limits. Stored in `agents.json` through a section storage hook (`Section::stored_by`) |

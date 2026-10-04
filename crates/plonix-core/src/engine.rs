@@ -20,7 +20,9 @@ use crate::model::{Exchange, Headers, Source, now_ms};
 use crate::paths::{EngineInfo, Home};
 use crate::filterpack::{FilterLibrary, FilterSet};
 use crate::listpack::{ListLibrary, ListSet};
+use crate::intercept::{InterceptOptions, Interceptor};
 use crate::project::PruneReport;
+use crate::replace::RuleSet;
 use crate::rulepack::{Library, PackInfo};
 use crate::crawl;
 use crate::exclude::{self, ExcludedDomain, Exclusions, Group, GroupStatus};
@@ -62,6 +64,11 @@ pub struct Engine {
     /// The demo project installs one so its made-up hosts answer locally; no
     /// other project sets it, so real traffic always goes to the real network.
     responder: RwLock<Option<Responder>>,
+    /// Requests and responses held in the proxy for the user (see [`crate::intercept`]).
+    pub intercept: Interceptor,
+    /// Match-and-replace rules in effect (see [`crate::replace`]); empty while switched off.
+    replace: RwLock<Arc<RuleSet>>,
+    replace_on: AtomicBool,
 }
 
 /// A stand-in for the network: given an outbound request it may return a
@@ -186,6 +193,7 @@ pub enum SendError {
 impl Engine {
     pub fn new(project: &str, store: Store, ca: Arc<CertAuthority>, upstream: Upstream) -> Result<Arc<Self>> {
         let rules = store.rules()?;
+        let replace = RuleSet::new(&store.replace_rules()?);
         let (recorder, rx) = mpsc::unbounded_channel();
         Ok(Arc::new(Self {
             recorder,
@@ -208,6 +216,9 @@ impl Engine {
             overrides: Mutex::default(),
             body_limit: AtomicUsize::new(DEFAULT_BODY_LIMIT),
             responder: RwLock::new(None),
+            intercept: Interceptor::default(),
+            replace: RwLock::new(replace),
+            replace_on: AtomicBool::new(true),
         }))
     }
 
@@ -295,6 +306,31 @@ impl Engine {
         self.set_body_limit((p.max_body_mb as usize).saturating_mul(1024 * 1024));
         *self.interception.write().unwrap() = Interception { decrypt: p.intercept_tls, passthrough: p.passthrough_hosts.clone() };
         Ok(bound)
+    }
+
+    /// The match-and-replace rules the proxy applies.
+    pub fn replace_rules(&self) -> Arc<RuleSet> {
+        self.replace.read().unwrap().clone()
+    }
+
+    /// Switches match and replace on or off (Settings › Match and replace).
+    pub fn set_replace_on(&self, on: bool) -> Result<()> {
+        self.replace_on.store(on, Ordering::Relaxed);
+        self.reload_replace_rules()
+    }
+
+    /// Reads the rules again after they changed.
+    pub fn reload_replace_rules(&self) -> Result<()> {
+        let set = if self.replace_on.load(Ordering::Relaxed) { RuleSet::new(&self.store.replace_rules()?) } else { Arc::default() };
+        *self.replace.write().unwrap() = set;
+        Ok(())
+    }
+
+    /// Applies Intercept's options. A filter that does not parse is refused.
+    pub fn set_intercept_options(&self, options: InterceptOptions) -> Result<()> {
+        let filter = self.filters().parse(&options.filter).context("the Intercept filter")?;
+        self.intercept.set_options(options, filter);
+        Ok(())
     }
 
     /// Upstream options that apply on top of the settings for this run

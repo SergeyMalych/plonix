@@ -12,7 +12,7 @@
 //!
 //! A position is a span of the request that the run replaces with each value.
 //! Positions are marked in the URL and in the raw headers/body with the
-//! [`MARKER`] character around the span, e.g. `id=§1§`. Positions are numbered
+//! [`MARKER`] character around the span, e.g. `id=•1•`. Positions are numbered
 //! in order: those in the URL first, then those in the raw request.
 //!
 //! # Modes
@@ -32,7 +32,7 @@ use serde::{Deserialize, Serialize};
 use crate::model::Headers;
 
 /// The character that marks a position, placed on both sides of the span.
-pub const MARKER: char = '§';
+pub const MARKER: char = '•';
 
 /// Most positions a single run may mark.
 pub const MAX_POSITIONS: usize = 20;
@@ -187,7 +187,7 @@ pub struct Template {
 }
 
 impl Template {
-    /// Parses a string, treating `§…§` pairs as positions.
+    /// Parses a string, treating `•…•` pairs as positions.
     pub fn parse(s: &str) -> Result<Template, String> {
         let mut segments = vec![String::new()];
         let mut bases = Vec::new();
@@ -397,7 +397,7 @@ mod tests {
 
     #[test]
     fn parses_positions_and_fills_them() {
-        let t = Template::parse("GET /api?id=§1§&p=§2§").unwrap();
+        let t = Template::parse("GET /api?id=•1•&p=•2•").unwrap();
         assert_eq!(t.positions(), 2);
         assert_eq!(t.bases, vec!["1", "2"]);
         assert_eq!(t.fill(&["9", "x"]), "GET /api?id=9&p=x");
@@ -407,13 +407,13 @@ mod tests {
 
     #[test]
     fn unbalanced_marker_is_an_error() {
-        assert!(Template::parse("id=§1").is_err());
+        assert!(Template::parse("id=•1").is_err());
     }
 
     #[test]
     fn sweep_changes_one_position_at_a_time() {
         let req = RunRequest {
-            url: "https://h/a?x=§0§&y=§0§".into(),
+            url: "https://h/a?x=•0•&y=•0•".into(),
             lists: vec![vals(&["1", "2"])],
             mode: RunMode::Sweep,
             ..Default::default()
@@ -432,7 +432,7 @@ mod tests {
     #[test]
     fn parallel_steps_lists_together_and_stops_at_shortest() {
         let req = RunRequest {
-            url: "https://h/?a=§§&b=§§".into(),
+            url: "https://h/?a=••&b=••".into(),
             lists: vec![vals(&["1", "2", "3"]), vals(&["x", "y"])],
             mode: RunMode::Parallel,
             ..Default::default()
@@ -444,7 +444,7 @@ mod tests {
     #[test]
     fn matrix_is_every_combination() {
         let req = RunRequest {
-            url: "https://h/?a=§§&b=§§".into(),
+            url: "https://h/?a=••&b=••".into(),
             lists: vec![vals(&["1", "2"]), vals(&["x", "y"])],
             mode: RunMode::Matrix,
             ..Default::default()
@@ -458,7 +458,7 @@ mod tests {
     #[test]
     fn multi_position_mode_needs_one_list_per_position() {
         let req = RunRequest {
-            url: "https://h/?a=§§&b=§§".into(),
+            url: "https://h/?a=••&b=••".into(),
             lists: vec![vals(&["1"])],
             mode: RunMode::Parallel,
             ..Default::default()
@@ -485,15 +485,15 @@ mod tests {
         assert_eq!(Payloads::Builtin { id: "ids".into() }.resolve(&lib).unwrap(), vec!["1", "2"]);
         assert!(Payloads::Builtin { id: "nope".into() }.resolve(&lib).is_err());
         // A run can be planned from a named list resolved through the library.
-        let req = RunRequest { url: "https://h/?x=§§".into(), lists: vec![Payloads::Builtin { id: "ids".into() }], mode: RunMode::Sweep, ..Default::default() };
+        let req = RunRequest { url: "https://h/?x=••".into(), lists: vec![Payloads::Builtin { id: "ids".into() }], mode: RunMode::Sweep, ..Default::default() };
         assert_eq!(plan(&req, &lib).unwrap().assignments().len(), 2);
     }
 
     #[test]
     fn url_positions_come_before_raw_positions() {
         let req = RunRequest {
-            url: "https://h/?u=§U§".into(),
-            raw: "X-Test: §R§\n\n".into(),
+            url: "https://h/?u=•U•".into(),
+            raw: "X-Test: •R•\n\n".into(),
             lists: vec![vals(&["a"]), vals(&["b"])],
             mode: RunMode::Parallel,
             ..Default::default()

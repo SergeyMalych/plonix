@@ -25,6 +25,9 @@
 use anyhow::{Result, bail};
 use rusqlite::types::Value;
 
+use crate::codec;
+use crate::model::{Exchange, Source};
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Field {
     Host(String),
@@ -123,6 +126,86 @@ impl Query {
             (clauses.join(" AND "), params)
         }
     }
+}
+
+impl Query {
+    /// Whether one exchange matches, without the database: used for traffic
+    /// passing through the proxy right now (Intercept). Full-text terms look
+    /// at the URL, headers and decoded bodies, like the search index does.
+    pub fn matches(&self, ex: &Exchange, in_scope: bool) -> bool {
+        let mut text = None;
+        terms_match(&self.terms, ex, in_scope, &mut text)
+    }
+}
+
+fn terms_match(terms: &[Term], ex: &Exchange, in_scope: bool, text: &mut Option<String>) -> bool {
+    terms.iter().all(|t| field_matches(&t.field, ex, in_scope, text) != t.negate)
+}
+
+fn field_matches(field: &Field, ex: &Exchange, in_scope: bool, text: &mut Option<String>) -> bool {
+    let path = ex.path.to_ascii_lowercase();
+    match field {
+        Field::Host(h) => {
+            let host = ex.host.to_ascii_lowercase();
+            if h.contains('*') { glob_match(h, &host) } else { host == *h || host.ends_with(&format!(".{h}")) }
+        }
+        Field::Method(m) => ex.method.eq_ignore_ascii_case(m),
+        Field::Status(StatusMatch::Exact(s)) => ex.status == Some(*s),
+        Field::Status(StatusMatch::Class(c)) => ex.status.is_some_and(|s| s / 100 == *c),
+        Field::Status(StatusMatch::None) => ex.status.is_none(),
+        Field::Path(p) => {
+            let p = p.to_ascii_lowercase();
+            if p.contains('*') { glob_match(&p, &path) } else { path.starts_with(&p) }
+        }
+        Field::Mime(m) => ex.mime().contains(&m.to_ascii_lowercase()),
+        Field::Scope(inside) => in_scope == *inside,
+        Field::Source(s) => ex.source.unwrap_or(Source::Proxy).as_str() == s,
+        Field::Ext(x) => path.ends_with(&format!(".{x}")),
+        Field::Kind(Kind::Static) => {
+            let mime = ex.mime();
+            STATIC_MIME_PREFIXES.iter().any(|m| mime.starts_with(m))
+                || STATIC_MIME_PARTS.iter().any(|m| mime.contains(m))
+                || STATIC_EXTS.iter().any(|x| path.ends_with(&format!(".{x}")))
+        }
+        Field::Text(t) => {
+            let hay = text.get_or_insert_with(|| {
+                format!(
+                    "{}\n{} {}\n{}\n{}\n{}\n{}",
+                    ex.url(),
+                    ex.method,
+                    ex.path,
+                    codec::headers_text(&ex.req_headers),
+                    codec::body_text(&ex.req_headers, &ex.req_body).unwrap_or_default(),
+                    codec::headers_text(&ex.resp_headers),
+                    codec::body_text(&ex.resp_headers, &ex.resp_body).unwrap_or_default()
+                )
+                .to_lowercase()
+            });
+            hay.contains(&t.to_lowercase())
+        }
+        Field::AnyOf(list) => list.iter().any(|f| field_matches(f, ex, in_scope, text)),
+        Field::Group(terms) => terms_match(terms, ex, in_scope, text),
+    }
+}
+
+/// `*` matches any run of characters; everything else is literal.
+fn glob_match(pattern: &str, s: &str) -> bool {
+    let parts: Vec<&str> = pattern.split('*').collect();
+    let (first, last) = (parts[0], parts[parts.len() - 1]);
+    if parts.len() == 1 {
+        return s == pattern;
+    }
+    if !s.starts_with(first) || s.len() < first.len() + last.len() || !s.ends_with(last) {
+        return false;
+    }
+    let mut rest = &s[first.len()..s.len() - last.len()];
+    for mid in &parts[1..parts.len() - 1] {
+        match rest.find(mid) {
+            Some(i) => rest = &rest[i + mid.len()..],
+            None => return false,
+        }
+    }
+    true
 }
 
 fn field_sql(field: &Field, scope_hosts: &[String], params: &mut Vec<Value>) -> String {
@@ -381,6 +464,31 @@ mod tests {
         assert!(Query::parse("status:2xx,abc").is_err());
         assert!(Query::parse("kind:weird").is_err());
         assert!(Query::parse("host:,").is_err());
+    }
+
+    #[test]
+    fn matches_one_exchange_like_the_search_does() {
+        let ex = Exchange {
+            scheme: "https".into(),
+            host: "api.app.test".into(),
+            port: 443,
+            method: "POST".into(),
+            path: "/api/Login".into(),
+            query: "next=1".into(),
+            req_headers: vec![("content-type".into(), "application/json".into())],
+            req_body: br#"{"user":"alice"}"#.to_vec(),
+            ..Default::default()
+        };
+        let m = |q: &str, scope: bool| Query::parse(q).unwrap().matches(&ex, scope);
+        assert!(m("method:POST path:/api", true));
+        assert!(m("host:app.test path:*login*", false));
+        assert!(m("alice -method:GET", false));
+        assert!(m("status:none", true), "a request on its way has no status yet");
+        assert!(!m("scope:in", false));
+        assert!(!m("method:GET,PUT", true));
+        assert!(!m("host:*.other.test", true));
+        assert!(m("", true));
+        assert!(glob_match("*.cdn.*", "a.cdn.test") && !glob_match("a*b", "ab-c"));
     }
 
     #[test]
