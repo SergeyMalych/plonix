@@ -373,7 +373,9 @@ fn download(app: &AppHandle, update: &Update) -> Result<Vec<u8>> {
             update.version
         );
     }
-    let win = app.get_webview_window("main");
+    // The window in front shows the progress, then gets its own title back.
+    let win = app.webview_windows().into_values().find(|w| w.is_focused().unwrap_or(false));
+    let original = win.as_ref().and_then(|w| w.title().ok()).unwrap_or_else(|| "Plonix".into());
     let set_title = |title: &str| {
         if let Some(win) = &win {
             let _ = win.set_title(title);
@@ -394,7 +396,7 @@ fn download(app: &AppHandle, update: &Update) -> Result<Vec<u8>> {
         },
         || {},
     ));
-    set_title("Plonix");
+    set_title(&original);
     result.context("downloading the update")
 }
 

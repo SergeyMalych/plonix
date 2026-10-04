@@ -165,12 +165,23 @@ pub fn firefox_profile(profile: &Path, proxy: &str) -> Result<()> {
     Ok(())
 }
 
-/// Launches `browser` through the proxy at `url`. Returns the arguments used.
-pub fn launch(home: &Home, browser: &Browser, proxy: &str, spki: &str, url: &str) -> Result<Vec<String>> {
+/// Where the capture browser keeps its profile for a project. Each project
+/// has its own, so capture browsers of projects open at the same time do
+/// not share cookies or proxy settings.
+pub fn profile_dir(home: &Home, project_dir: Option<&Path>) -> PathBuf {
+    match project_dir {
+        Some(d) => d.join("browser"),
+        None => home.browser_profile(),
+    }
+}
+
+/// Launches `browser` through the proxy at `url`, with its profile in
+/// `profile`. Returns the arguments used.
+pub fn launch(profile: &Path, browser: &Browser, proxy: &str, spki: &str, url: &str) -> Result<Vec<String>> {
     let mut args = match browser.kind {
-        Kind::Chromium => chromium_args(&home.browser_profile(), proxy, spki, url),
+        Kind::Chromium => chromium_args(profile, proxy, spki, url),
         Kind::Firefox => {
-            let profile = home.root.join("browser-firefox");
+            let profile = PathBuf::from(format!("{}-firefox", profile.display()));
             firefox_profile(&profile, proxy)?;
             vec!["-profile".into(), profile.display().to_string(), "-no-remote".into(), url.into()]
         }
