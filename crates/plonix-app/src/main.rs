@@ -1,42 +1,53 @@
 //! Plonix as a desktop app.
 //!
-//! The app window shows the Plonix UI, live against an engine: the one already
-//! running (started by `plonix start` or `plonix open`), or one the app starts
-//! inside its own process. The app signs the window in itself with a one-time
-//! launch code, so there is no link to open and no terminal step.
+//! The app opens on the Start screen, which lists projects and creates new
+//! ones. Each project opens in a window of its own, served by a session with
+//! its own engine (proxy, API and database), so several projects run side by
+//! side. Closing a project's window closes its session. All of it runs in the
+//! app's own process; projects opened from a terminal (`plonix start -p …`)
+//! show up on the Start screen too and open in a window like any other.
 //!
-//! The window only ever shows the engine's own pages. Any other link opens in
-//! the default browser.
+//! Windows only ever show Plonix's own pages. Any other link opens in the
+//! default browser. With Settings › Interface › "Open projects in: My web
+//! browser", projects open in the default browser instead of a window.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::net::{SocketAddr, TcpListener};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use plonix_core::Engine;
-use plonix_core::engine::{self, EngineConfig};
-use plonix_core::paths::{EngineInfo, Home};
+use plonix_core::hub::{self, Hub, HubEvent};
+use plonix_core::paths::Home;
+use plonix_core::settings::InterfaceSettings;
 use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu};
 use tauri::webview::PageLoadEvent;
-use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder, Wry};
+use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent, Wry};
 
-/// Project the embedded engine records into, same default as `plonix ui`.
-const PROJECT: &str = "default";
-const DEFAULT_PROXY_PORT: u16 = 8080;
-const DEFAULT_API_PORT: u16 = 8090;
+const LAUNCHER: &str = "launcher";
 
-/// Origin of the engine the window is signed in to, e.g. `http://127.0.0.1:8090`.
-static ENGINE_ORIGIN: OnceLock<String> = OnceLock::new();
+/// The Start screen and every project session it opens.
+struct Host {
+    hub: Arc<Hub>,
+    runtime: tokio::runtime::Runtime,
+}
+
+static HOST: OnceLock<Host> = OnceLock::new();
 /// Set once the starting page has loaded, so errors can be shown on it.
 static START_PAGE_READY: AtomicBool = AtomicBool::new(false);
+/// Project windows: window label → project id.
+static WINDOWS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+fn windows() -> &'static Mutex<HashMap<String, String>> {
+    WINDOWS.get_or_init(Mutex::default)
+}
 
 /// Lets the UI adapt its wording when it runs inside the app.
 const INIT_SCRIPT: &str = "window.__PLONIX_APP__ = true;";
 
-/// Menu items that drive the UI: (id, label, accelerator, script).
+/// Menu items that drive a project window: (id, label, accelerator, script).
 const VIEW_ITEMS: [(&str, &str, &str, &str); 6] = [
     ("go-traffic", "Traffic", "CmdOrCtrl+1", "window.plonix && plonix.go('traffic')"),
     ("go-bench", "Bench", "CmdOrCtrl+2", "window.plonix && plonix.go('bench')"),
@@ -47,26 +58,11 @@ const VIEW_ITEMS: [(&str, &str, &str, &str); 6] = [
 ];
 const OPEN_TARGET_SCRIPT: &str = "window.plonix && plonix.openTarget()";
 const TOGGLE_SIDEBAR_SCRIPT: &str = "window.plonix && plonix.toggleSidebar()";
+const PROJECT_SETTINGS_SCRIPT: &str = "window.plonix && plonix.go('settings')";
+const LAUNCHER_SETTINGS_SCRIPT: &str = "window.plonixLauncher && plonixLauncher.settings()";
+const NEW_PROJECT_SCRIPT: &str = "window.plonixLauncher && plonixLauncher.newProject()";
 /// The usual shortcut for showing and hiding a sidebar.
 const TOGGLE_SIDEBAR_KEY: &str = if cfg!(target_os = "macos") { "Ctrl+Cmd+S" } else { "Ctrl+Shift+S" };
-
-/// An engine running inside the app's process.
-struct Embedded {
-    engine: Arc<Engine>,
-    home: Home,
-    // Keeps the engine's tasks alive for as long as the app runs.
-    _runtime: tokio::runtime::Runtime,
-}
-
-#[derive(Default)]
-struct EngineSlot(Mutex<Option<Embedded>>);
-
-/// The engine the window talks to.
-struct Connection {
-    api: String,
-    token: String,
-    embedded: Option<Embedded>,
-}
 
 fn main() {
     tracing_subscriber::fmt()
@@ -77,76 +73,126 @@ fn main() {
         .init();
 
     let app = tauri::Builder::default()
-        .manage(EngineSlot::default())
         .menu(build_menu)
-        .on_menu_event(|app, event| {
-            let id = event.id().as_ref();
-            let script = if id == "open-target" {
-                Some(OPEN_TARGET_SCRIPT)
-            } else if id == "toggle-sidebar" {
-                Some(TOGGLE_SIDEBAR_SCRIPT)
-            } else {
-                VIEW_ITEMS.iter().find(|(item, ..)| *item == id).map(|(.., script)| *script)
-            };
-            if let (Some(script), Some(win)) = (script, app.get_webview_window("main")) {
-                let _ = win.eval(script);
-            }
-        })
+        .on_menu_event(|app, event| on_menu(app, event.id().as_ref()))
         .setup(|app| {
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("Plonix")
-                .inner_size(1320.0, 840.0)
-                .min_inner_size(900.0, 560.0)
-                .initialization_script(INIT_SCRIPT)
-                .on_navigation(allow_navigation)
-                .on_page_load(|_, payload| {
-                    if payload.event() == PageLoadEvent::Finished && !is_engine_page(payload.url()) {
-                        START_PAGE_READY.store(true, Ordering::SeqCst);
-                    }
-                })
-                .build()?;
             let handle = app.handle().clone();
-            std::thread::Builder::new().name("plonix-connect".into()).spawn(move || connect_window(handle))?;
+            launcher_window(&handle)?;
+            std::thread::Builder::new().name("plonix-start".into()).spawn(move || start(handle))?;
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("failed to start Plonix");
 
-    app.run(|app, event| {
-        if let RunEvent::Exit = event {
-            let slot = app.state::<EngineSlot>();
-            if let Some(embedded) = slot.0.lock().unwrap().take() {
-                stop_embedded(embedded);
+    app.run(|_app, event| match event {
+        RunEvent::Exit => {
+            // Closes every session, which applies "keep only in-scope traffic".
+            if let Some(host) = HOST.get() {
+                host.runtime.block_on(host.hub.shutdown());
             }
         }
+        #[cfg(target_os = "macos")]
+        RunEvent::Reopen { has_visible_windows: false, .. } => show_launcher(_app),
+        _ => {}
     });
 }
 
-/// Connects to an engine and points the window at it.
-fn connect_window(app: AppHandle) {
-    let result = Home::resolve(None).and_then(|home| connect(&home)).and_then(|conn| {
-        let url = launch_url(&conn)?;
-        Ok((conn, url))
-    });
-    let Some(win) = app.get_webview_window("main") else { return };
-    match result {
-        Ok((conn, url)) => {
-            let _ = ENGINE_ORIGIN.set(conn.api.clone());
-            if let Some(embedded) = conn.embedded {
-                *app.state::<EngineSlot>().0.lock().unwrap() = Some(embedded);
+/// The Start screen window. It shows a starting page until the hub runs.
+fn launcher_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
+    if let Some(w) = app.get_webview_window(LAUNCHER) {
+        return Ok(w);
+    }
+    let handle = app.clone();
+    let w = WebviewWindowBuilder::new(app, LAUNCHER, WebviewUrl::App("index.html".into()))
+        .title("Plonix")
+        .inner_size(880.0, 620.0)
+        .min_inner_size(640.0, 460.0)
+        .initialization_script(INIT_SCRIPT)
+        .on_navigation(move |url| launcher_navigation(&handle, url))
+        .on_page_load(|_, payload| {
+            if payload.event() == PageLoadEvent::Finished && !is_hub_page(payload.url()) {
+                START_PAGE_READY.store(true, Ordering::SeqCst);
             }
-            match Url::parse(&url) {
-                Ok(url) => {
-                    let _ = win.navigate(url);
-                }
-                Err(e) => show_error(&win, &format!("bad window address {url}: {e}")),
-            }
+        })
+        .build()?;
+    // Reopened after it was closed: go straight to the Start screen.
+    if let Some(Ok(url)) = HOST.get().and_then(|h| h.hub.launch_url().ok()).map(|u| Url::parse(&u)) {
+        let _ = w.navigate(url);
+    }
+    Ok(w)
+}
+
+fn show_launcher(app: &AppHandle) {
+    match app.get_webview_window(LAUNCHER) {
+        Some(w) => {
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+        None => {
+            let _ = launcher_window(app);
+        }
+    }
+}
+
+/// Starts the Start screen server in this process and shows it.
+fn start(app: AppHandle) {
+    let started = (|| -> Result<String> {
+        let home = Home::resolve(None)?;
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .thread_name("plonix-engine")
+            .build()
+            .context("starting the engine runtime")?;
+        let hub = runtime.block_on(hub::start(&home, None)).context("starting the Start screen")?;
+        hub.announce()?;
+        let url = hub.launch_url()?;
+        let events = hub.events.subscribe();
+        let _ = HOST.set(Host { hub, runtime });
+        let handle = app.clone();
+        std::thread::Builder::new().name("plonix-events".into()).spawn(move || follow_events(handle, events))?;
+        Ok(url)
+    })();
+    let Some(win) = app.get_webview_window(LAUNCHER) else { return };
+    match started.and_then(|u| Url::parse(&u).context("bad Start screen address")) {
+        Ok(url) => {
+            let _ = win.navigate(url);
+            reopen_last(&app);
         }
         Err(e) => show_error(&win, &format!("{e:#}")),
     }
 }
 
-fn show_error(win: &tauri::WebviewWindow, message: &str) {
+/// With "When Plonix starts: Reopen the last project", opens it right away.
+fn reopen_last(app: &AppHandle) {
+    let Some(host) = HOST.get() else { return };
+    if !InterfaceSettings::load(&host.hub.home).reopen_last {
+        return;
+    }
+    let Some(last) = plonix_core::project::list(&host.hub.home).into_iter().find(|e| e.last_opened > 0) else { return };
+    match host.runtime.block_on(host.hub.open(&last.id)) {
+        Ok(opened) => open_project_url(app, &opened.url),
+        Err(e) => tracing::warn!("could not reopen {}: {e:#}", last.name),
+    }
+}
+
+/// Closes a project's window when its session ends elsewhere (`plonix stop`).
+fn follow_events(app: AppHandle, mut events: tokio::sync::broadcast::Receiver<HubEvent>) {
+    loop {
+        match events.blocking_recv() {
+            Ok(HubEvent::Closed { project_id }) => {
+                let label = windows().lock().unwrap().iter().find(|(_, id)| **id == project_id).map(|(l, _)| l.clone());
+                if let Some(w) = label.and_then(|l| app.get_webview_window(&l)) {
+                    let _ = w.destroy();
+                }
+            }
+            Ok(_) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+            Err(_) => return,
+        }
+    }
+}
+
+fn show_error(win: &WebviewWindow, message: &str) {
     tracing::error!("{message}");
     let deadline = Instant::now() + Duration::from_secs(10);
     while !START_PAGE_READY.load(Ordering::SeqCst) && Instant::now() < deadline {
@@ -156,103 +202,106 @@ fn show_error(win: &tauri::WebviewWindow, message: &str) {
     let _ = win.eval(format!("window.plonixError && plonixError({arg})"));
 }
 
-/// Uses the engine that is already running, else starts one in this process.
-fn connect(home: &Home) -> Result<Connection> {
-    home.ensure()?;
-    let token = home.load_or_create_token()?;
-    if let Some(info) = home.read_engine_info()
-        && engine_answers(&info.api, &token)
-    {
-        tracing::info!("using the running engine at {}", info.api);
-        return Ok(Connection { api: info.api, token, embedded: None });
-    }
-    let embedded = start_embedded(home)?;
-    let info = home.read_engine_info().context("the engine did not announce itself")?;
-    Ok(Connection { api: info.api, token, embedded: Some(embedded) })
-}
-
-fn engine_answers(api: &str, token: &str) -> bool {
-    ureq::get(&format!("{api}/api/status"))
-        .set("Authorization", &format!("Bearer {token}"))
-        .set("X-Plonix-Client", "app")
-        .timeout(Duration::from_secs(2))
-        .call()
-        .is_ok()
-}
-
-/// Starts the engine on its own runtime and announces it in `engine.json`,
-/// so `plonix` commands in a terminal use the same engine as the window.
-fn start_embedded(home: &Home) -> Result<Embedded> {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_name("plonix-engine")
-        .build()
-        .context("starting the engine runtime")?;
-    let config = EngineConfig {
-        home: home.clone(),
-        project: PROJECT.into(),
-        proxy_addr: SocketAddr::from(([127, 0, 0, 1], DEFAULT_PROXY_PORT)),
-        proxy_port_fallback: true,
-        api_addr: SocketAddr::from(([127, 0, 0, 1], free_or_any(DEFAULT_API_PORT))),
-        insecure_upstream: false,
-    };
-    let running = runtime.block_on(engine::start(&config)).context("starting the engine")?;
-    let info = EngineInfo {
-        pid: std::process::id(),
-        api: format!("http://{}", running.api_addr),
-        proxy: running.proxy_addr.to_string(),
-        project: PROJECT.into(),
-        started_at: running.engine.started_at,
-    };
-    std::fs::write(home.engine_file(), serde_json::to_vec_pretty(&info)?)
-        .with_context(|| format!("writing {}", home.engine_file().display()))?;
-    tracing::info!("engine started: proxy {}, API {}", running.proxy_addr, running.api_addr);
-    Ok(Embedded { engine: running.engine, home: home.clone(), _runtime: runtime })
-}
-
-fn stop_embedded(embedded: Embedded) {
-    embedded.engine.shutdown.notify_waiters();
-    // Only remove the file if it still describes this process.
-    if embedded.home.read_engine_info().is_some_and(|i| i.pid == std::process::id()) {
-        let _ = std::fs::remove_file(embedded.home.engine_file());
-    }
-}
-
-/// Keeps a preferred port when it is free, else lets the OS pick one.
-fn free_or_any(port: u16) -> u16 {
-    if TcpListener::bind(("127.0.0.1", port)).is_ok() { port } else { 0 }
-}
-
-/// A one-time address that opens the UI signed in.
-fn launch_url(conn: &Connection) -> Result<String> {
-    let resp: serde_json::Value = ureq::post(&format!("{}/api/ui/launch", conn.api))
-        .set("Authorization", &format!("Bearer {}", conn.token))
-        .set("X-Plonix-Client", "app")
-        .timeout(Duration::from_secs(5))
-        .send_json(serde_json::json!({}))
-        .context("signing the window in")?
-        .into_json()?;
-    resp["url"].as_str().map(String::from).context("the engine did not return a window address")
-}
-
 fn origin(url: &Url) -> String {
     format!("{}://{}:{}", url.scheme(), url.host_str().unwrap_or(""), url.port_or_known_default().unwrap_or(0))
 }
 
-fn is_engine_page(url: &Url) -> bool {
-    ENGINE_ORIGIN.get().is_some_and(|o| Url::parse(o).is_ok_and(|e| origin(&e) == origin(url)))
+fn is_loopback(url: &Url) -> bool {
+    url.scheme() == "http" && matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))
 }
 
-/// The window shows the starting page and the engine's UI, nothing else.
-fn allow_navigation(url: &Url) -> bool {
-    let start_page = url.scheme() == "tauri" || url.host_str() == Some("tauri.localhost");
-    if start_page || is_engine_page(url) {
+fn is_hub_page(url: &Url) -> bool {
+    HOST.get().is_some_and(|h| Url::parse(&h.hub.url()).is_ok_and(|hub| origin(&hub) == origin(url)))
+}
+
+fn is_start_page(url: &Url) -> bool {
+    url.scheme() == "tauri" || url.host_str() == Some("tauri.localhost")
+}
+
+/// The Start screen window shows the starting page and the Start screen.
+/// When it navigates to a project (a one-time sign-in link to a session's
+/// engine), the project opens in its own window, or in the browser.
+fn launcher_navigation(app: &AppHandle, url: &Url) -> bool {
+    if is_start_page(url) || is_hub_page(url) {
         return true;
+    }
+    if is_loopback(url) && url.fragment().is_some_and(|f| f.starts_with("code=")) {
+        let (app, link) = (app.clone(), url.to_string());
+        std::thread::spawn(move || open_project_url(&app, &link));
+        return false;
     }
     if matches!(url.scheme(), "http" | "https") {
         open_externally(url.as_str());
     }
     false
+}
+
+/// Opens a project's one-time sign-in link: in its window (focusing it if it
+/// is already open), or in the default browser.
+fn open_project_url(app: &AppHandle, link: &str) {
+    let Some(host) = HOST.get() else { return };
+    let Ok(url) = Url::parse(link) else { return };
+    if InterfaceSettings::load(&host.hub.home).open_in_browser {
+        open_externally(link);
+        return;
+    }
+    let label = format!("project-{}", url.port().unwrap_or(0));
+    if let Some(w) = app.get_webview_window(&label) {
+        let _ = w.navigate(url);
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let api = origin(&url);
+    let info = host
+        .runtime
+        .block_on(host.hub.project_for_api(&api))
+        .or_else(|| plonix_core::session::running(&host.hub.home).into_iter().find(|i| i.api == api));
+    let (title, project_id) = match &info {
+        Some(i) => (format!("{} — Plonix", i.project), i.project_id.clone()),
+        None => ("Plonix".to_string(), String::new()),
+    };
+    let own_origin = api.clone();
+    let built = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
+        .title(&title)
+        .inner_size(1320.0, 840.0)
+        .min_inner_size(900.0, 560.0)
+        .initialization_script(INIT_SCRIPT)
+        .on_navigation(move |u| {
+            if is_loopback(u) && origin(u) == own_origin {
+                return true;
+            }
+            if matches!(u.scheme(), "http" | "https") {
+                open_externally(u.as_str());
+            }
+            false
+        })
+        .build();
+    match built {
+        Ok(w) => {
+            windows().lock().unwrap().insert(label.clone(), project_id.clone());
+            w.on_window_event(move |event| {
+                if let WindowEvent::Destroyed = event {
+                    close_project(&label);
+                }
+            });
+        }
+        Err(e) => tracing::error!("could not open the project window: {e}"),
+    }
+}
+
+/// Closing a project's window closes its session, if this app serves it.
+fn close_project(label: &str) {
+    let Some(project_id) = windows().lock().unwrap().remove(label) else { return };
+    let Some(host) = HOST.get() else { return };
+    let hub = host.hub.clone();
+    host.runtime.spawn(async move {
+        if hub.hosted().await.iter().any(|i| i.project_id == project_id)
+            && let Err(e) = hub.close(&project_id).await
+        {
+            tracing::error!("closing project {project_id}: {e:#}");
+        }
+    });
 }
 
 fn open_externally(url: &str) {
@@ -271,13 +320,91 @@ fn open_externally(url: &str) {
     }
 }
 
-/// The platform's standard menu, plus File › Open Target… and the Plonix
-/// screens in View.
+fn focused(app: &AppHandle) -> Option<WebviewWindow> {
+    app.webview_windows().into_values().find(|w| w.is_focused().unwrap_or(false))
+}
+
+fn on_menu(app: &AppHandle, id: &str) {
+    let win = focused(app);
+    let in_project = win.as_ref().is_some_and(|w| w.label() != LAUNCHER);
+    match id {
+        "new-project" => {
+            show_launcher(app);
+            if let Some(w) = app.get_webview_window(LAUNCHER) {
+                let _ = w.eval(NEW_PROJECT_SCRIPT);
+            }
+        }
+        "show-projects" => show_launcher(app),
+        "settings" => match win {
+            Some(w) if in_project => {
+                let _ = w.eval(PROJECT_SETTINGS_SCRIPT);
+            }
+            _ => {
+                show_launcher(app);
+                if let Some(w) = app.get_webview_window(LAUNCHER) {
+                    let _ = w.eval(LAUNCHER_SETTINGS_SCRIPT);
+                }
+            }
+        },
+        "open-in-browser" => {
+            if let Some(w) = win.filter(|_| in_project) {
+                open_in_browser(&w);
+            }
+        }
+        _ => {
+            let script = match id {
+                "open-target" => Some(OPEN_TARGET_SCRIPT),
+                "toggle-sidebar" => Some(TOGGLE_SIDEBAR_SCRIPT),
+                _ => VIEW_ITEMS.iter().find(|(item, ..)| *item == id).map(|(.., script)| *script),
+            };
+            if let (Some(script), Some(w)) = (script, win.filter(|_| in_project)) {
+                let _ = w.eval(script);
+            }
+        }
+    }
+}
+
+/// Opens the project in the focused window in the default browser as well.
+fn open_in_browser(w: &WebviewWindow) {
+    let Some(host) = HOST.get() else { return };
+    let Ok(url) = w.url() else { return };
+    let api = origin(&url);
+    let token = match host.hub.home.load_or_create_token() {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+    std::thread::spawn(move || {
+        let resp = ureq::post(&format!("{api}/api/ui/launch"))
+            .set("Authorization", &format!("Bearer {token}"))
+            .set("X-Plonix-Client", "app")
+            .timeout(Duration::from_secs(5))
+            .send_json(serde_json::json!({}));
+        if let Ok(v) = resp.and_then(|r| r.into_json::<serde_json::Value>().map_err(Into::into))
+            && let Some(link) = v["url"].as_str()
+        {
+            open_externally(link);
+        }
+    });
+}
+
+/// The platform's standard menu, plus File › New Project…, Projects and
+/// Open Target…, Settings…, and the Plonix screens in View.
 fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let menu = Menu::default(app)?;
+    let new_project = MenuItem::with_id(app, "new-project", "New Project…", true, Some("CmdOrCtrl+N"))?;
+    let projects = MenuItem::with_id(app, "show-projects", "Projects…", true, Some("CmdOrCtrl+Shift+P"))?;
     let open = MenuItem::with_id(app, "open-target", "Open Target…", true, Some("CmdOrCtrl+O"))?;
     let file = find_or_add_submenu(app, &menu, "File", 1)?;
-    file.prepend_items(&[&open, &PredefinedMenuItem::separator(app)?])?;
+    file.prepend_items(&[&new_project, &projects, &PredefinedMenuItem::separator(app)?, &open, &PredefinedMenuItem::separator(app)?])?;
+
+    let settings = MenuItem::with_id(app, "settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
+    if cfg!(target_os = "macos")
+        && let Some(MenuItemKind::Submenu(app_menu)) = menu.items()?.into_iter().next()
+    {
+        app_menu.insert_items(&[&PredefinedMenuItem::separator(app)?, &settings], 1)?;
+    } else {
+        file.append_items(&[&PredefinedMenuItem::separator(app)?, &settings])?;
+    }
 
     let view = find_or_add_submenu(app, &menu, "View", 3)?;
     let mut items: Vec<MenuItem<Wry>> = Vec::new();
@@ -285,11 +412,13 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         items.push(MenuItem::with_id(app, id, label, true, Some(accel))?);
     }
     let toggle = MenuItem::with_id(app, "toggle-sidebar", "Toggle Sidebar", true, Some(TOGGLE_SIDEBAR_KEY))?;
+    let in_browser = MenuItem::with_id(app, "open-in-browser", "Open in Browser", true, Some("CmdOrCtrl+Shift+B"))?;
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let mut refs: Vec<&dyn tauri::menu::IsMenuItem<Wry>> = items.iter().map(|i| i as &dyn tauri::menu::IsMenuItem<Wry>).collect();
     refs.push(&sep);
     refs.push(&toggle);
+    refs.push(&in_browser);
     if !view.items()?.is_empty() {
         refs.push(&sep2);
     }

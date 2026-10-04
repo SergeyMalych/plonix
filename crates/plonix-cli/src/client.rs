@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use plonix_core::paths::Home;
+use plonix_core::paths::{EngineInfo, Home};
 use serde_json::Value;
 
 pub struct Client {
@@ -14,6 +14,16 @@ pub struct Client {
 }
 
 pub const NOT_RUNNING: &str = "The Plonix engine is not running. Start it with `plonix start` (or `plonix open <target>`).";
+
+/// Which session commands talk to: `-p`/`$PLONIX_PROJECT` when given, else
+/// the current session (the one opened last).
+pub fn engine_info(home: &Home, project: Option<&str>) -> Option<EngineInfo> {
+    let selector = project.map(str::to_string).or_else(|| std::env::var("PLONIX_PROJECT").ok().filter(|p| !p.trim().is_empty()));
+    match selector {
+        Some(sel) => plonix_core::session::find(home, &sel),
+        None => home.read_engine_info(),
+    }
+}
 
 /// An error reported by the engine, with its machine-readable code
 /// (`out_of_scope`, `not_found`, `bad_query`...).
@@ -44,19 +54,32 @@ impl std::fmt::Display for NotRunning {
 impl std::error::Error for NotRunning {}
 
 impl Client {
-    /// Connects to the engine described by `$PLONIX_HOME/engine.json`.
-    pub fn connect(home: &Home, initiator: &str) -> Result<Self> {
-        Self::connect_with(home, &home.api_token(), initiator)
+    /// Connects to the session for `project`, if given, else the current one
+    /// (or the one `$PLONIX_PROJECT` names).
+    pub fn connect_project(home: &Home, project: Option<&str>, initiator: &str) -> Result<Self> {
+        match engine_info(home, project) {
+            Some(info) => Self::to(home, &info, initiator),
+            None => match project {
+                Some(p) => Err(anyhow!(NotRunning).context(format!("project '{p}' is not open"))),
+                None => Err(anyhow!(NotRunning)),
+            },
+        }
     }
 
-    /// Connects as an AI agent, with the agent token: the engine only allows
-    /// what agents may do (see `plonix_core::access`).
+    /// Connects as an AI agent, with the agent token, to the current session
+    /// (or the one `$PLONIX_PROJECT` names): the engine only allows what
+    /// agents may do (see `plonix_core::access`).
     pub fn connect_agent(home: &Home, initiator: &str) -> Result<Self> {
-        Self::connect_with(home, &home.agent_token(), initiator)
+        let info = engine_info(home, None).ok_or_else(|| anyhow!(NotRunning))?;
+        Self::connect_with(&info, &home.agent_token(), initiator)
     }
 
-    fn connect_with(home: &Home, token_file: &std::path::Path, initiator: &str) -> Result<Self> {
-        let info = home.read_engine_info().ok_or_else(|| anyhow!(NotRunning))?;
+    /// Connects to a specific session.
+    pub fn to(home: &Home, info: &EngineInfo, initiator: &str) -> Result<Self> {
+        Self::connect_with(info, &home.api_token(), initiator)
+    }
+
+    fn connect_with(info: &EngineInfo, token_file: &std::path::Path, initiator: &str) -> Result<Self> {
         let token = std::fs::read_to_string(token_file).map_err(|_| anyhow!(NotRunning))?;
         let client = Self {
             base: info.api.trim_end_matches('/').to_string(),
@@ -98,7 +121,10 @@ impl Client {
                 }
                 .into())
             }
-            Err(ureq::Error::Transport(_)) => Err(NotRunning.into()),
+            // Nothing listening: the engine is not running. Anything else (a
+            // reset, a timeout) is worth showing as it is.
+            Err(ureq::Error::Transport(t)) if t.kind() == ureq::ErrorKind::ConnectionFailed => Err(NotRunning.into()),
+            Err(ureq::Error::Transport(t)) => Err(anyhow!(NotRunning).context(format!("the engine did not answer: {t}"))),
         }
     }
 }

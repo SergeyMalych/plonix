@@ -114,8 +114,9 @@ async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<Response<Full<Bytes>
         target,
         headers: req_headers.clone(),
         body: req_body.clone(),
+        extra_headers: vec![],
     };
-    let result = ctx.engine.upstream.send(outbound).await;
+    let result = ctx.engine.upstream().send(outbound).await;
     let mut ex = Exchange {
         ts,
         scheme,
@@ -152,7 +153,7 @@ async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<Response<Full<Bytes>
             ex.error = Some(msg.clone());
             let hint = if msg.contains("certificate") || msg.contains("UnknownIssuer") {
                 "\n\nThe upstream certificate is not trusted. For staging hosts with self-signed certificates, \
-                 restart the engine with `plonix start --insecure-upstream`."
+                 turn off Settings > Proxy > Check server certificates."
             } else {
                 ""
             };
@@ -170,6 +171,9 @@ fn connect(req: Request<Incoming>, ctx: Ctx) -> Response<Full<Bytes>> {
     };
     let host = authority.host().trim_matches(['[', ']']).to_ascii_lowercase();
     let port = authority.port_u16().unwrap_or(443);
+    if !ctx.engine.decrypts(&host) {
+        return passthrough(req, ctx, host, port);
+    }
     tokio::spawn(async move {
         let upgraded = match hyper::upgrade::on(req).await {
             Ok(u) => u,
@@ -199,6 +203,23 @@ fn connect(req: Request<Incoming>, ctx: Ctx) -> Response<Full<Bytes>> {
         };
         let inner = Ctx { tunnel: Some((host, port)), ..ctx };
         serve_conn(TokioIo::new(tls), inner).await;
+    });
+    Response::new(Full::new(Bytes::new()))
+}
+
+/// Tunnels a CONNECT without decrypting it. Nothing inside is recorded.
+fn passthrough(req: Request<Incoming>, ctx: Ctx, host: String, port: u16) -> Response<Full<Bytes>> {
+    tokio::spawn(async move {
+        let mut server = match ctx.engine.upstream().connect(&host, port).await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::info!("tunnel to {host}:{port} failed: {e:#}");
+                return;
+            }
+        };
+        let Ok(upgraded) = hyper::upgrade::on(req).await else { return };
+        let mut client = TokioIo::new(upgraded);
+        let _ = tokio::io::copy_bidirectional(&mut client, &mut server).await;
     });
     Response::new(Full::new(Bytes::new()))
 }
