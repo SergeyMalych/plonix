@@ -68,6 +68,21 @@ const NEW_PROJECT_SCRIPT: &str = "window.plonixLauncher && plonixLauncher.newPro
 const TOGGLE_SIDEBAR_KEY: &str = if cfg!(target_os = "macos") { "Ctrl+Cmd+S" } else { "Ctrl+Shift+S" };
 
 fn main() {
+    // Headless entry points, before any window is created. The in-app "Ask
+    // Claude" panel wires Claude Code to this same binary run as `<app> mcp`
+    // (current_exe), so it must serve the read-only MCP server over stdio and
+    // exit — never boot the GUI, which would open a second Plonix window.
+    if std::env::args().nth(1).as_deref() == Some("mcp") {
+        let code = match Home::resolve(None).and_then(plonix_core::mcp::serve) {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("plonix mcp: {e:#}");
+                1
+            }
+        };
+        std::process::exit(code);
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_env("PLONIX_LOG").unwrap_or_else(|_| "plonix_core=info".into()),

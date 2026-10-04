@@ -119,8 +119,9 @@ impl Conversations {
 
         let run = std::sync::Arc::new(Mutex::new(Run { events: Vec::new(), status: Status::Running, session_id: None, abort: None, ord }));
         let mcp = mcp_config(home);
+        let cwd = run_dir(home);
         let task_run = run.clone();
-        let handle = tokio::spawn(async move { drive(bin, mcp, prompt, resume, task_run).await });
+        let handle = tokio::spawn(async move { drive(bin, mcp, cwd, prompt, resume, task_run).await });
         run.lock().unwrap().abort = Some(handle.abort_handle());
 
         let mut map = self.runs.lock().unwrap();
@@ -180,7 +181,7 @@ fn push(run: &mut Run, kind: Kind, text: String) {
 }
 
 /// Runs `claude -p` and streams its output into `run` until it exits.
-async fn drive(bin: PathBuf, mcp: Value, prompt: String, resume: Option<String>, run: std::sync::Arc<Mutex<Run>>) {
+async fn drive(bin: PathBuf, mcp: Value, cwd: PathBuf, prompt: String, resume: Option<String>, run: std::sync::Arc<Mutex<Run>>) {
     let mut cmd = Command::new(&bin);
     cmd.arg("-p")
         .arg(&prompt)
@@ -193,6 +194,11 @@ async fn drive(bin: PathBuf, mcp: Value, prompt: String, resume: Option<String>,
     if let Some(sid) = &resume {
         cmd.args(["--resume", sid]);
     }
+    // Run in a dedicated empty directory, never the app's working directory
+    // (which inside Plonix.app is the bundle or `/`). Otherwise `claude`
+    // scans the current folder for context and macOS throws privacy prompts
+    // for Photos, Downloads and the like.
+    cmd.current_dir(&cwd);
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
 
     let mut child = match cmd.spawn() {
@@ -325,8 +331,18 @@ fn error_text(stderr: &str, status: &std::io::Result<std::process::ExitStatus>) 
     }
 }
 
-/// The `--mcp-config` payload wiring the read-only Plonix MCP server, mirroring
-/// what `plonix connect claude` writes (this binary, run as `plonix mcp`).
+/// A dedicated, app-owned empty directory to run `claude` in, so it never
+/// scans the user's files (which triggers macOS privacy prompts).
+fn run_dir(home: &Home) -> PathBuf {
+    let dir = home.root.join("claude").join("run");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// The `--mcp-config` payload wiring the read-only Plonix MCP server. The
+/// command is this executable run as `<exe> mcp`: the `plonix` CLI serves it
+/// via `Cmd::Mcp`, and the desktop app via a headless entry point in `main`
+/// (so it never opens a window).
 fn mcp_config(home: &Home) -> Value {
     let exe = std::env::current_exe().ok().map(|e| e.canonicalize().unwrap_or(e));
     let command = exe.map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "plonix".into());
