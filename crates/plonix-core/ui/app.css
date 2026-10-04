@@ -593,4 +593,21 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .opt.col { flex-direction: column; gap: 4px; color: var(--fg-2); }
 .opt select { border: 1px solid var(--line-2); background: var(--surface-2); border-radius: 7px; padding: 4px 8px; font-size: 12px; }
 @media (max-width: 900px) { .setgrid { grid-template-columns: 1fr; } .setgrid > div + div { border-left: 0; border-top: 1px solid var(--line-2); } }
+
+/* ---- exclusions: grouped out-of-scope domains ---- */
+.excluded { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.card.group .top { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line-2); }
+.card.group .disclose { display: flex; align-items: center; gap: 8px; background: none; border: 0; cursor: pointer; color: var(--fg); padding: 0; }
+.card.group .caret { color: var(--fg-3); width: 12px; }
+.card.group .dom { font-weight: 650; font-size: 13px; }
+.card.group .meta { color: var(--fg-3); font-size: 11.5px; }
+.card.group .acts { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.gdesc { padding: 8px 14px 0; font-size: 12px; }
+.domlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 2px 14px; padding: 10px 14px 12px; }
+.domrow { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--fg); padding: 3px 0; }
+.domrow .mono { font-family: var(--mono); }
+.newgroup { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.newgroup input, .newgroup textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--line-2); background: var(--surface-2); border-radius: 7px; padding: 6px 9px; font-size: 12.5px; color: var(--fg); font-family: inherit; }
+.newgroup textarea { resize: vertical; }
+.row.end { display: flex; justify-content: flex-end; }
 .backbtn { flex: 0 0 auto; white-space: nowrap; }

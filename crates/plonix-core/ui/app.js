@@ -93,6 +93,7 @@ const S = {
   engineUp: true,
   view: 'traffic',
   scope: { rules: [], suggestions: [] },
+  exclusions: { groups: [], asked: true },
 };
 
 async function api(path, { method = 'GET', body } = {}) {
@@ -534,10 +535,14 @@ async function loadScope() {
   try {
     S.scope = await api('/api/scope');
   } catch (_) {}
+  try {
+    S.exclusions = await api('/api/scope/exclusions');
+  } catch (_) {}
   updateChrome();
   renderRail();
   if (S.view === 'traffic') renderBanner();
   if (S.view === 'bench') renderScopeHint();
+  maybeAskExclusions();
 }
 
 /** Same rule as the engine: the most specific matching rule decides. */
@@ -2160,7 +2165,10 @@ function renderScopeBody() {
   };
   domain.addEventListener('keydown', (e) => e.key === 'Enter' && add('accept'));
   const sugg = stillPending(S.scope.suggestions);
-  const rules = (S.scope.rules || []).slice().sort((x, y) => x.decision.localeCompare(y.decision) || x.pattern.localeCompare(y.pattern));
+  const rules = (S.scope.rules || [])
+    .filter((r) => !(r.note || '').startsWith('group:'))
+    .slice()
+    .sort((x, y) => x.decision.localeCompare(y.decision) || x.pattern.localeCompare(y.pattern));
   clear(
     box,
     h(
@@ -2245,6 +2253,195 @@ function renderScopeBody() {
           )
         : null,
     ),
+    excludedSection(),
+  );
+}
+
+/* ---- exclusions: grouped out-of-scope domains ---- */
+
+/** Which exclusion groups are expanded on the Scope screen. */
+const X = { open: {} };
+
+const groupStateLabel = { on: 'On', partial: 'Some', off: 'Off' };
+
+async function reloadExclusions(ex) {
+  if (ex) S.exclusions = ex;
+  // Group changes add or drop reject rules, so refresh the rest of the screen too.
+  await loadScope();
+  renderScopeBody();
+}
+
+async function toggleGroup(id, on) {
+  try {
+    const ex = await api('/api/scope/exclusions/group', { method: 'POST', body: { id, on } });
+    toast(on ? 'Excluded the group' : 'Removed the group from exclusions', on ? 'ok' : '');
+    await reloadExclusions(ex);
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+async function toggleExcludedDomain(id, host, on) {
+  try {
+    const ex = await api('/api/scope/exclusions/domain', { method: 'POST', body: { id, host, on } });
+    await reloadExclusions(ex);
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+function groupCard(g) {
+  const open = !!X.open[g.id];
+  const count = g.domains.filter((d) => d.excluded).length;
+  const header = h(
+    'div',
+    { class: 'top' },
+    h(
+      'button',
+      { class: 'disclose', title: open ? 'Hide domains' : 'Show domains', onclick: () => ((X.open[g.id] = !open), renderScopeBody()) },
+      h('span', { class: 'caret', text: open ? '▾' : '▸' }),
+      h('span', { class: 'dom', text: g.name }),
+    ),
+    h('span', { class: 'meta', text: `${count}/${g.domains.length} excluded${g.builtin ? '' : ' · custom'}` }),
+    h(
+      'span',
+      { class: 'acts' },
+      h('span', { class: 'tag ' + (g.state === 'off' ? 'out' : g.state === 'on' ? 'rej' : ''), text: groupStateLabel[g.state] }),
+      h('button', { class: 'btn sm', text: g.state === 'on' ? 'Turn off' : 'Exclude all', onclick: () => toggleGroup(g.id, g.state !== 'on') }),
+      g.builtin ? null : h('button', { class: 'btn sm danger', text: 'Delete', title: 'Delete this custom group', onclick: () => removeCustomGroup(g) }),
+    ),
+  );
+  const desc = g.description ? h('div', { class: 'gdesc muted', text: g.description }) : null;
+  const list = open
+    ? h(
+        'div',
+        { class: 'domlist' },
+        g.domains.map((d) =>
+          h(
+            'label',
+            { class: 'domrow' },
+            h('input', { type: 'checkbox', checked: d.excluded, onchange: (e) => toggleExcludedDomain(g.id, d.host, e.target.checked) }),
+            h('span', { class: 'mono', text: d.host }),
+          ),
+        ),
+      )
+    : null;
+  return h('div', { class: 'card group' }, header, desc, list);
+}
+
+function newGroupForm() {
+  const name = h('input', { type: 'text', placeholder: 'Group name, e.g. Vendor widgets', spellcheck: 'false' });
+  const domains = h('textarea', { placeholder: 'One domain per line, or comma-separated', rows: '3', spellcheck: 'false' });
+  const create = async () => {
+    const list = domains.value
+      .split(/[\s,]+/)
+      .map((d) => d.trim())
+      .filter(Boolean);
+    if (!name.value.trim()) return name.focus();
+    if (!list.length) return domains.focus();
+    try {
+      const res = await api('/api/scope/exclusions/custom', { method: 'POST', body: { id: '', name: name.value.trim(), domains: list } });
+      name.value = '';
+      domains.value = '';
+      toast('Created the group. Turn it on to exclude its domains.', 'ok');
+      await reloadExclusions(res.exclusions);
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  };
+  return h(
+    'div',
+    { class: 'card newgroup' },
+    h('div', { class: 'caph', text: 'New group' }),
+    name,
+    domains,
+    h('div', { class: 'row end' }, h('button', { class: 'btn primary', text: 'Create group', onclick: create })),
+  );
+}
+
+function removeCustomGroup(g) {
+  modal(
+    'Delete group',
+    h('p', null, 'Delete the custom group ', h('b', { text: g.name }), ' and remove any exclusions it added? This cannot be undone.'),
+    [
+      h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }),
+      h('button', {
+        class: 'btn danger',
+        text: 'Delete group',
+        onclick: async () => {
+          closeModal();
+          try {
+            const ex = await api('/api/scope/exclusions/custom', { method: 'DELETE', body: { id: g.id } });
+            toast('Deleted the group');
+            await reloadExclusions(ex);
+          } catch (e) {
+            toast(e.message, 'err');
+          }
+        },
+      }),
+    ],
+  );
+}
+
+function excludedSection() {
+  const groups = (S.exclusions && S.exclusions.groups) || [];
+  const total = groups.reduce((n, g) => n + g.domains.filter((d) => d.excluded).length, 0);
+  return h(
+    'div',
+    { class: 'excluded' },
+    h(
+      'div',
+      { class: 'sechead' },
+      h('h3', { text: `Excluded domains (${total})` }),
+      h('span', { class: 'hint', text: 'Hosts you never want captured as targets. They are never suggested and never sent to.' }),
+    ),
+    groups.length ? groups.map(groupCard) : h('div', { class: 'card' }, h('div', { class: 'empty', text: 'No exclusion groups.' })),
+    newGroupForm(),
+  );
+}
+
+/** First run: offer to exclude common third-party domains, once per project. */
+function maybeAskExclusions() {
+  if (!S.exclusions || S.exclusions.asked || S.askedExclusionsThisSession) return;
+  const groups = S.exclusions.groups || [];
+  if (!groups.length) return;
+  S.askedExclusionsThisSession = true;
+  const picks = {};
+  groups.forEach((g) => (picks[g.id] = true));
+  const rows = groups.map((g) =>
+    h(
+      'label',
+      { class: 'domrow' },
+      h('input', { type: 'checkbox', checked: true, onchange: (e) => (picks[g.id] = e.target.checked) }),
+      h('span', null, h('b', { text: g.name }), ' ', h('span', { class: 'muted', text: `(${g.domains.length} domains)` })),
+    ),
+  );
+  const finish = async (enable) => {
+    closeModal();
+    try {
+      if (enable) {
+        for (const g of groups) if (picks[g.id]) await api('/api/scope/exclusions/group', { method: 'POST', body: { id: g.id, on: true } });
+      }
+      await api('/api/scope/exclusions/asked', { method: 'POST' });
+      await loadScope();
+      if (S.view === 'scope') renderScopeBody();
+      if (enable) toast('Common domains excluded. Edit them anytime on the Scope screen.', 'ok');
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  };
+  modal(
+    'Exclude common domains?',
+    h(
+      'div',
+      null,
+      h('p', { class: 'muted', text: 'Plonix can keep common third parties — analytics, ads, payments, CDNs and the like — out of your target scope, so they are never suggested or sent to. Pick the groups to exclude; you can change these anytime on the Scope screen.' }),
+      h('div', { class: 'domlist' }, rows),
+    ),
+    [
+      h('button', { class: 'btn', text: 'Not now', onclick: () => finish(false) }),
+      h('button', { class: 'btn primary', text: 'Exclude selected', onclick: () => finish(true) }),
+    ],
   );
 }
 

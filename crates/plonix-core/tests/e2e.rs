@@ -666,3 +666,79 @@ async fn api_opens_the_capture_browser() {
     assert!(args.contains(&format!("--ignore-certificate-errors-spki-list={}", r.engine.ca.spki_sha256())), "{args}");
     assert!(args.ends_with("https://shop.test/login\n"), "{args}");
 }
+
+#[tokio::test]
+async fn exclusions_groups_domains_and_custom() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let r = start(&home, None).await;
+    let base = format!("http://{}", r.api_addr);
+    let token = r.token.clone();
+
+    tokio::task::spawn_blocking(move || {
+        let auth = format!("Bearer {token}");
+        let get = |path: &str| match ureq::get(&format!("{base}{path}")).set("Authorization", &auth).call() {
+            Ok(r) => (r.status(), r.into_json::<serde_json::Value>().unwrap()),
+            Err(ureq::Error::Status(c, r)) => (c, r.into_json::<serde_json::Value>().unwrap()),
+            Err(e) => panic!("{e}"),
+        };
+        let post = |path: &str, body: serde_json::Value| match ureq::post(&format!("{base}{path}")).set("Authorization", &auth).send_json(body) {
+            Ok(r) => (r.status(), r.into_json::<serde_json::Value>().unwrap()),
+            Err(ureq::Error::Status(c, r)) => (c, r.into_json::<serde_json::Value>().unwrap()),
+            Err(e) => panic!("{e}"),
+        };
+
+        // The one-time prompt starts unanswered, and the built-in groups are offered.
+        let (code, ex) = get("/api/scope/exclusions");
+        assert_eq!(code, 200);
+        assert_eq!(ex["asked"], false);
+        let groups = ex["groups"].as_array().unwrap();
+        let analytics = groups.iter().find(|g| g["id"] == "analytics").unwrap();
+        assert_eq!(analytics["state"], "off");
+
+        // Turning a group on excludes every member.
+        let (code, ex) = post("/api/scope/exclusions/group", serde_json::json!({ "id": "analytics", "on": true }));
+        assert_eq!(code, 200);
+        let analytics = ex["groups"].as_array().unwrap().iter().find(|g| g["id"] == "analytics").unwrap().clone();
+        assert_eq!(analytics["state"], "on");
+        assert!(analytics["domains"].as_array().unwrap().iter().all(|d| d["excluded"] == true));
+
+        // An excluded host is out of scope: the engine refuses to send to it.
+        let send = serde_json::json!({ "method": "GET", "url": "https://google-analytics.com/collect" });
+        let (code, body) = match ureq::post(&format!("{base}/api/send")).set("Authorization", &auth).send_json(send) {
+            Ok(r) => (r.status(), r.into_json::<serde_json::Value>().unwrap()),
+            Err(ureq::Error::Status(c, r)) => (c, r.into_json().unwrap()),
+            Err(e) => panic!("{e}"),
+        };
+        assert_eq!((code, body["code"].as_str()), (403, Some("out_of_scope")));
+
+        // Turning one member off makes the group partial.
+        let (_, ex) = post("/api/scope/exclusions/domain", serde_json::json!({ "id": "analytics", "host": "google-analytics.com", "on": false }));
+        let analytics = ex["groups"].as_array().unwrap().iter().find(|g| g["id"] == "analytics").unwrap().clone();
+        assert_eq!(analytics["state"], "partial");
+
+        // A custom group can be created, enabled and deleted.
+        let (code, res) = post("/api/scope/exclusions/custom", serde_json::json!({ "id": "", "name": "Vendor widgets", "domains": ["widget.vendor.test", "cdn.vendor.test"] }));
+        assert_eq!(code, 200);
+        let gid = res["group"]["id"].as_str().unwrap().to_string();
+        assert_eq!(gid, "vendor-widgets");
+        assert!(res["exclusions"]["groups"].as_array().unwrap().iter().any(|g| g["id"] == "vendor-widgets" && g["builtin"] == false));
+
+        let (_, ex) = post("/api/scope/exclusions/group", serde_json::json!({ "id": gid, "on": true }));
+        let custom = ex["groups"].as_array().unwrap().iter().find(|g| g["id"] == "vendor-widgets").unwrap().clone();
+        assert_eq!(custom["state"], "on");
+
+        let del = match ureq::delete(&format!("{base}/api/scope/exclusions/custom")).set("Authorization", &auth).send_json(serde_json::json!({ "id": gid })) {
+            Ok(r) => r.into_json::<serde_json::Value>().unwrap(),
+            Err(ureq::Error::Status(_, r)) => r.into_json().unwrap(),
+            Err(e) => panic!("{e}"),
+        };
+        assert!(!del["groups"].as_array().unwrap().iter().any(|g| g["id"] == "vendor-widgets"));
+
+        // Marking the prompt answered sticks.
+        assert_eq!(post("/api/scope/exclusions/asked", serde_json::json!({})).0, 200);
+        assert_eq!(get("/api/scope/exclusions").1["asked"], true);
+    })
+    .await
+    .unwrap();
+}
