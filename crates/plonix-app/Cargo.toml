@@ -2,6 +2,7 @@
 name = "plonix-app"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 description = "Plonix for macOS: the Plonix window as a native app, with the engine built in"
 
 [[bin]]

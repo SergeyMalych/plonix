@@ -377,4 +377,4 @@ Use Plonix only against systems you are authorized to test.
 
 ## License
 
-To be announced.
+Plonix is licensed under the [Apache License, Version 2.0](LICENSE). Unless you state otherwise, any contribution you submit for inclusion in Plonix is licensed under the same terms, without any additional terms or conditions.
