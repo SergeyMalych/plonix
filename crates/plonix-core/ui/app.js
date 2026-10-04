@@ -93,6 +93,9 @@ const S = {
   engineUp: true,
   view: 'traffic',
   scope: { rules: [], suggestions: [] },
+  /** Named filters (is:id) from filter packs, for the filter builder and chips. */
+  named: [],
+  exclusions: { groups: [], asked: true },
 };
 
 async function api(path, { method = 'GET', body } = {}) {
@@ -246,6 +249,7 @@ const VIEWS = {
   map: { label: 'Map', ico: '⊞', render: renderMap },
   findings: { label: 'Findings', ico: '⚑', render: renderFindings },
   agents: { label: 'Agents', ico: '✦', render: renderAgents },
+  market: { label: 'Market', ico: '⬢', render: renderMarket },
   settings: { label: 'Settings', ico: '⚙', render: renderSettings, footer: true },
 };
 
@@ -522,6 +526,10 @@ async function loadFacets() {
   S.facetsBusy = true;
   try {
     S.facets = await api('/api/traffic/facets');
+    if (!S.namedAt || Date.now() - S.namedAt > 15000) {
+      S.named = (await api('/api/filters')).filters || [];
+      S.namedAt = Date.now();
+    }
   } catch (_) {
   } finally {
     S.facetsBusy = false;
@@ -534,10 +542,14 @@ async function loadScope() {
   try {
     S.scope = await api('/api/scope');
   } catch (_) {}
+  try {
+    S.exclusions = await api('/api/scope/exclusions');
+  } catch (_) {}
   updateChrome();
   renderRail();
   if (S.view === 'traffic') renderBanner();
   if (S.view === 'bench') renderScopeHint();
+  maybeAskExclusions();
 }
 
 /** Same rule as the engine: the most specific matching rule decides. */
@@ -642,6 +654,7 @@ const T = { text: '', filters: [], items: [], total: 0, sel: null, live: true, m
  * excludes are prefixed with "-".
  */
 const FILTER_FIELDS = {
+  is: 'Named filter',
   host: 'Host',
   path: 'Path',
   ext: 'Extension',
@@ -653,7 +666,7 @@ const FILTER_FIELDS = {
   source: 'Source',
   text: 'Text',
 };
-const FIELD_RE = /^(-?)(host|method|status|path|mime|scope|source|ext|kind):(.+)$/i;
+const FIELD_RE = /^(-?)(host|method|status|path|mime|scope|source|ext|kind|is):(.+)$/i;
 
 const fieldOf = (term) => (FIELD_RE.exec(term) || [])[2]?.toLowerCase() || 'text';
 const valueOf = (term) => (fieldOf(term) === 'text' ? term.replace(/^"|"$/g, '') : term.slice(term.indexOf(':') + 1));
@@ -711,6 +724,7 @@ function filterLabel(term) {
     'status:none': 'No response',
   }[term.toLowerCase()];
   if (named) return { key: '', value: named };
+  if (field === 'is') return { key: '', value: (S.named.find((n) => n.id === v.toLowerCase()) || {}).label || v };
   if (field === 'text') return { key: '', value: '“' + v + '”' };
   if (field === 'ext') return { key: 'ext', value: '.' + v.replace(/^\./, '') };
   if (field === 'mime') return { key: 'type', value: v };
@@ -1003,6 +1017,8 @@ function fieldValues(field) {
       return ['js', 'css', 'png', 'svg', 'woff2', 'map', 'json', 'html', 'php'];
     case 'kind':
       return ['static'];
+    case 'is':
+      return S.named.map((n) => n.id);
     case 'scope':
       return ['in', 'out'];
     case 'source':
@@ -1060,10 +1076,29 @@ function openFilterBuilder(anchor, preset = {}) {
   value.addEventListener('keydown', (e) => e.key === 'Enter' && add());
   drawSeg();
   fillValues();
+  // Named filters from filter packs: one click each, in the chosen mode.
+  const named = S.named.length
+    ? h(
+        'div',
+        { class: 'namedlist', 'aria-label': 'Named filters' },
+        S.named.map((n) =>
+          h('button', {
+            class: 'named',
+            text: n.label,
+            title: (n.description ? n.description + '\n' : '') + 'is:' + n.id + ' = ' + n.query + '\nfrom the ' + n.pack + ' filter pack',
+            onclick: () => {
+              closePopover();
+              addFilter('is:' + n.id, mode);
+            },
+          }),
+        ),
+      )
+    : null;
   const pop = h(
     'div',
     { class: 'popover', role: 'dialog', 'aria-label': 'Add filter' },
     seg,
+    named,
     h('div', { class: 'prow' }, field, value, list),
     err,
     h('div', { class: 'pfoot' }, h('button', { class: 'btn sm', text: 'Cancel', onclick: closePopover }), h('button', { class: 'btn sm primary', text: 'Add filter', onclick: add })),
@@ -2478,7 +2513,10 @@ function renderScopeBody() {
   };
   domain.addEventListener('keydown', (e) => e.key === 'Enter' && add('accept'));
   const sugg = stillPending(S.scope.suggestions);
-  const rules = (S.scope.rules || []).slice().sort((x, y) => x.decision.localeCompare(y.decision) || x.pattern.localeCompare(y.pattern));
+  const rules = (S.scope.rules || [])
+    .filter((r) => !(r.note || '').startsWith('group:'))
+    .slice()
+    .sort((x, y) => x.decision.localeCompare(y.decision) || x.pattern.localeCompare(y.pattern));
   clear(
     box,
     h(
@@ -2563,6 +2601,195 @@ function renderScopeBody() {
           )
         : null,
     ),
+    excludedSection(),
+  );
+}
+
+/* ---- exclusions: grouped out-of-scope domains ---- */
+
+/** Which exclusion groups are expanded on the Scope screen. */
+const X = { open: {} };
+
+const groupStateLabel = { on: 'On', partial: 'Some', off: 'Off' };
+
+async function reloadExclusions(ex) {
+  if (ex) S.exclusions = ex;
+  // Group changes add or drop reject rules, so refresh the rest of the screen too.
+  await loadScope();
+  renderScopeBody();
+}
+
+async function toggleGroup(id, on) {
+  try {
+    const ex = await api('/api/scope/exclusions/group', { method: 'POST', body: { id, on } });
+    toast(on ? 'Excluded the group' : 'Removed the group from exclusions', on ? 'ok' : '');
+    await reloadExclusions(ex);
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+async function toggleExcludedDomain(id, host, on) {
+  try {
+    const ex = await api('/api/scope/exclusions/domain', { method: 'POST', body: { id, host, on } });
+    await reloadExclusions(ex);
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+function groupCard(g) {
+  const open = !!X.open[g.id];
+  const count = g.domains.filter((d) => d.excluded).length;
+  const header = h(
+    'div',
+    { class: 'top' },
+    h(
+      'button',
+      { class: 'disclose', title: open ? 'Hide domains' : 'Show domains', onclick: () => ((X.open[g.id] = !open), renderScopeBody()) },
+      h('span', { class: 'caret', text: open ? '▾' : '▸' }),
+      h('span', { class: 'dom', text: g.name }),
+    ),
+    h('span', { class: 'meta', text: `${count}/${g.domains.length} excluded${g.builtin ? '' : ' · custom'}` }),
+    h(
+      'span',
+      { class: 'acts' },
+      h('span', { class: 'tag ' + (g.state === 'off' ? 'out' : g.state === 'on' ? 'rej' : ''), text: groupStateLabel[g.state] }),
+      h('button', { class: 'btn sm', text: g.state === 'on' ? 'Turn off' : 'Exclude all', onclick: () => toggleGroup(g.id, g.state !== 'on') }),
+      g.builtin ? null : h('button', { class: 'btn sm danger', text: 'Delete', title: 'Delete this custom group', onclick: () => removeCustomGroup(g) }),
+    ),
+  );
+  const desc = g.description ? h('div', { class: 'gdesc muted', text: g.description }) : null;
+  const list = open
+    ? h(
+        'div',
+        { class: 'domlist' },
+        g.domains.map((d) =>
+          h(
+            'label',
+            { class: 'domrow' },
+            h('input', { type: 'checkbox', checked: d.excluded, onchange: (e) => toggleExcludedDomain(g.id, d.host, e.target.checked) }),
+            h('span', { class: 'mono', text: d.host }),
+          ),
+        ),
+      )
+    : null;
+  return h('div', { class: 'card group' }, header, desc, list);
+}
+
+function newGroupForm() {
+  const name = h('input', { type: 'text', placeholder: 'Group name, e.g. Vendor widgets', spellcheck: 'false' });
+  const domains = h('textarea', { placeholder: 'One domain per line, or comma-separated', rows: '3', spellcheck: 'false' });
+  const create = async () => {
+    const list = domains.value
+      .split(/[\s,]+/)
+      .map((d) => d.trim())
+      .filter(Boolean);
+    if (!name.value.trim()) return name.focus();
+    if (!list.length) return domains.focus();
+    try {
+      const res = await api('/api/scope/exclusions/custom', { method: 'POST', body: { id: '', name: name.value.trim(), domains: list } });
+      name.value = '';
+      domains.value = '';
+      toast('Created the group. Turn it on to exclude its domains.', 'ok');
+      await reloadExclusions(res.exclusions);
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  };
+  return h(
+    'div',
+    { class: 'card newgroup' },
+    h('div', { class: 'caph', text: 'New group' }),
+    name,
+    domains,
+    h('div', { class: 'row end' }, h('button', { class: 'btn primary', text: 'Create group', onclick: create })),
+  );
+}
+
+function removeCustomGroup(g) {
+  modal(
+    'Delete group',
+    h('p', null, 'Delete the custom group ', h('b', { text: g.name }), ' and remove any exclusions it added? This cannot be undone.'),
+    [
+      h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }),
+      h('button', {
+        class: 'btn danger',
+        text: 'Delete group',
+        onclick: async () => {
+          closeModal();
+          try {
+            const ex = await api('/api/scope/exclusions/custom', { method: 'DELETE', body: { id: g.id } });
+            toast('Deleted the group');
+            await reloadExclusions(ex);
+          } catch (e) {
+            toast(e.message, 'err');
+          }
+        },
+      }),
+    ],
+  );
+}
+
+function excludedSection() {
+  const groups = (S.exclusions && S.exclusions.groups) || [];
+  const total = groups.reduce((n, g) => n + g.domains.filter((d) => d.excluded).length, 0);
+  return h(
+    'div',
+    { class: 'excluded' },
+    h(
+      'div',
+      { class: 'sechead' },
+      h('h3', { text: `Excluded domains (${total})` }),
+      h('span', { class: 'hint', text: 'Hosts you never want captured as targets. They are never suggested and never sent to.' }),
+    ),
+    groups.length ? groups.map(groupCard) : h('div', { class: 'card' }, h('div', { class: 'empty', text: 'No exclusion groups.' })),
+    newGroupForm(),
+  );
+}
+
+/** First run: offer to exclude common third-party domains, once per project. */
+function maybeAskExclusions() {
+  if (!S.exclusions || S.exclusions.asked || S.askedExclusionsThisSession) return;
+  const groups = S.exclusions.groups || [];
+  if (!groups.length) return;
+  S.askedExclusionsThisSession = true;
+  const picks = {};
+  groups.forEach((g) => (picks[g.id] = true));
+  const rows = groups.map((g) =>
+    h(
+      'label',
+      { class: 'domrow' },
+      h('input', { type: 'checkbox', checked: true, onchange: (e) => (picks[g.id] = e.target.checked) }),
+      h('span', null, h('b', { text: g.name }), ' ', h('span', { class: 'muted', text: `(${g.domains.length} domains)` })),
+    ),
+  );
+  const finish = async (enable) => {
+    closeModal();
+    try {
+      if (enable) {
+        for (const g of groups) if (picks[g.id]) await api('/api/scope/exclusions/group', { method: 'POST', body: { id: g.id, on: true } });
+      }
+      await api('/api/scope/exclusions/asked', { method: 'POST' });
+      await loadScope();
+      if (S.view === 'scope') renderScopeBody();
+      if (enable) toast('Common domains excluded. Edit them anytime on the Scope screen.', 'ok');
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  };
+  modal(
+    'Exclude common domains?',
+    h(
+      'div',
+      null,
+      h('p', { class: 'muted', text: 'Plonix can keep common third parties — analytics, ads, payments, CDNs and the like — out of your target scope, so they are never suggested or sent to. Pick the groups to exclude; you can change these anytime on the Scope screen.' }),
+      h('div', { class: 'domlist' }, rows),
+    ),
+    [
+      h('button', { class: 'btn', text: 'Not now', onclick: () => finish(false) }),
+      h('button', { class: 'btn primary', text: 'Exclude selected', onclick: () => finish(true) }),
+    ],
   );
 }
 
@@ -2729,12 +2956,13 @@ async function drawHostDetail() {
    ====================================================================== */
 
 function renderFindings(main) {
+  const exportBtn = h('button', { class: 'btn sm', text: 'Export ▾', title: 'Save the findings as a report, with their evidence requests', onclick: () => exportMenu(exportBtn) });
   clear(
     main,
     h(
       'div',
       { class: 'view' },
-      h('div', { class: 'toolbar' }, h('h2', { text: 'Findings' }), h('span', { class: 'hint', text: 'Reproducible issues, each tied to the requests that prove it.' }), h('button', { class: 'btn primary sm', text: 'New finding', onclick: () => newFinding([], '') })),
+      h('div', { class: 'toolbar' }, h('h2', { text: 'Findings' }), h('span', { class: 'hint', text: 'Reproducible issues, each tied to the requests that prove it.' }), exportBtn, h('button', { class: 'btn primary sm', text: 'New finding', onclick: () => newFinding([], '') })),
       h('div', { class: 'traffic' }, h('div', { class: 'pane' }, h('div', { class: 'stack', id: 'findbody' })), h('div', { id: 'inspslot' })),
     ),
   );
@@ -2742,6 +2970,8 @@ function renderFindings(main) {
 }
 
 const SEV_ORDER = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+const SEVERITIES = ['info', 'low', 'medium', 'high', 'critical'];
+const FINDING_STATUSES = { open: 'Open', confirmed: 'Confirmed', false_positive: 'False positive', fixed: 'Fixed' };
 
 async function loadFindings() {
   let list;
@@ -2760,43 +2990,167 @@ async function loadFindings() {
       h('div', { class: 'card' }, h('div', { class: 'empty' }, h('h3', { text: 'No findings yet' }), 'Open a request in Traffic or on the Bench and choose ', h('b', { text: 'New finding' }), ' to record what you found with the request as evidence.')),
     );
   }
-  list.sort((a, b) => (SEV_ORDER[a.severity] ?? 9) - (SEV_ORDER[b.severity] ?? 9) || b.created_at - a.created_at);
-  clear(
-    box,
-    list.map((f) =>
-      h(
-        'div',
-        { class: 'card finding' },
-        h('div', { class: 'fh' }, h('span', { class: 'sev ' + f.severity, text: f.severity }), h('span', { class: 'ft', text: f.title }), h('span', { class: 'fmeta', text: `#${f.id} · ${f.status} · by ${f.created_by} · ${fmtDate(f.created_at)}` }), askButton({ kind: 'finding', id: f.id })),
-        f.description || f.exchange_ids.length
-          ? h(
-              'div',
-              { class: 'fb' },
-              f.description || null,
-              f.exchange_ids.length ? h('div', { class: 'evid' }, f.exchange_ids.map((id) => h('button', { text: 'request #' + id, title: 'Open in the Lens', onclick: () => showExchange(id) }))) : null,
-            )
-          : null,
-      ),
+  // Closed findings (false positives, fixed) go below the ones still to deal with.
+  const closed = (f) => (f.status === 'false_positive' || f.status === 'fixed' ? 1 : 0);
+  list.sort((a, b) => closed(a) - closed(b) || (SEV_ORDER[a.severity] ?? 9) - (SEV_ORDER[b.severity] ?? 9) || b.created_at - a.created_at);
+  clear(box, list.map(findingCard));
+}
+
+function findingCard(f) {
+  const status = h(
+    'select',
+    { class: 'fstatus', 'aria-label': 'Status', title: 'Where this finding stands', onchange: () => setFindingStatus(f, status) },
+    Object.entries(FINDING_STATUSES).map(([v, label]) => h('option', { value: v, text: label, selected: v === f.status })),
+  );
+  const edited = f.updated_at > f.created_at ? ` · edited ${fmtDate(f.updated_at)}` : '';
+  return h(
+    'div',
+    { class: 'card finding' + (f.status === 'false_positive' || f.status === 'fixed' ? ' closed' : '') },
+    h(
+      'div',
+      { class: 'fh' },
+      h('span', { class: 'sev ' + f.severity, text: f.severity }),
+      h('span', { class: 'ft', text: f.title }),
+      h('span', { class: 'fmeta', text: `#${f.id} · by ${f.created_by} · ${fmtDate(f.created_at)}${edited}` }),
+      status,
+      askButton({ kind: 'finding', id: f.id }),
+      h('button', { class: 'btn sm', text: 'Edit', onclick: () => findingForm(f) }),
+      h('button', { class: 'btn sm danger', text: 'Delete…', onclick: () => confirmDeleteFinding(f) }),
     ),
+    f.description || f.exchange_ids.length
+      ? h(
+          'div',
+          { class: 'fb' },
+          f.description || null,
+          f.exchange_ids.length ? h('div', { class: 'evid' }, f.exchange_ids.map((id) => h('button', { text: 'request #' + id, title: 'Open in the Lens', onclick: () => showExchange(id) }))) : null,
+        )
+      : null,
   );
 }
 
+async function setFindingStatus(f, select) {
+  try {
+    await api(`/api/findings/${f.id}`, { method: 'PATCH', body: { status: select.value } });
+    toast(`Finding #${f.id}: ${FINDING_STATUSES[select.value]}`, 'ok');
+    loadFindings();
+  } catch (e) {
+    select.value = f.status;
+    toast(e.message, 'err');
+  }
+}
+
+function confirmDeleteFinding(f) {
+  const m = modal(
+    'Delete this finding?',
+    [h('p', { text: `#${f.id} ${f.title}` }), h('p', { class: 'muted', text: 'The finding is deleted for good. The requests it points to stay in Traffic. To keep it on record instead, set its status to False positive or Fixed.' })],
+    [
+      h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }),
+      h('button', {
+        class: 'btn primary',
+        text: 'Delete',
+        onclick: async () => {
+          try {
+            await api(`/api/findings/${f.id}`, { method: 'DELETE' });
+            closeModal();
+            toast(`Finding #${f.id} deleted`, 'ok');
+            loadFindings();
+          } catch (e) {
+            m.err.textContent = e.message;
+          }
+        },
+      }),
+    ],
+  );
+}
+
+/** The findings report, as the engine writes it (false positives left out). */
+async function fetchReport(format) {
+  let resp;
+  try {
+    resp = await fetch('/api/findings/export?format=' + format, { headers: { Authorization: 'Bearer ' + S.token, 'X-Plonix-Client': 'gui' }, cache: 'no-store' });
+  } catch (_) {
+    throw new ApiError(0, 'engine_down', 'The Plonix engine is not reachable.');
+  }
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => null);
+    throw new ApiError(resp.status, (data && data.code) || 'error', (data && data.error) || resp.statusText, data);
+  }
+  const name = ((resp.headers.get('content-disposition') || '').match(/filename="([^"]+)"/) || [])[1] || 'plonix-findings.' + format;
+  return { name, blob: await resp.blob() };
+}
+
+function exportMenu(anchor) {
+  closePopover();
+  const save = async (format) => {
+    closePopover();
+    try {
+      const { name, blob } = await fetchReport(format);
+      const url = URL.createObjectURL(blob);
+      const a = h('a', { href: url, download: name, hidden: true });
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      toast(`Exported ${name}`, 'ok');
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  };
+  const copy = async () => {
+    closePopover();
+    try {
+      copyText(await (await fetchReport('md')).blob.text());
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  };
+  const item = (label, run) => h('button', { role: 'menuitem', text: label, onclick: run });
+  const menu = h(
+    'div',
+    { class: 'ctxmenu', role: 'menu' },
+    item('Markdown (.md)', () => save('md')),
+    item('HTML page (.html)', () => save('html')),
+    item('JSON (.json)', () => save('json')),
+    h('div', { class: 'msep' }),
+    item('Copy as Markdown', copy),
+    h('div', { class: 'msep' }),
+    h('div', { class: 'mnote', text: 'False positives are left out. Choose findings with plonix findings export.' }),
+  );
+  showPopover(menu, anchor.getBoundingClientRect());
+}
+
 function newFinding(ids, title) {
-  const t = h('input', { value: title || '', placeholder: 'e.g. IDOR on /v2/orders/{id} exposes other users’ addresses' });
-  const sev = h('select', null, ['info', 'low', 'medium', 'high', 'critical'].map((s) => h('option', { value: s, text: s, selected: s === 'medium' })));
-  const desc = h('textarea', { placeholder: 'What happens, how to reproduce it, and why it matters.' });
-  const ex = h('input', { value: ids.join(', '), placeholder: 'Request ids, e.g. 14, 22' });
+  findingForm(null, ids, title);
+}
+
+/** Records a new finding, or edits `f`. */
+function findingForm(f, ids = [], title = '') {
+  const t = h('input', { value: f ? f.title : title || '', placeholder: 'e.g. IDOR on /v2/orders/{id} exposes other users’ addresses' });
+  const sev = h('select', null, SEVERITIES.map((s) => h('option', { value: s, text: s, selected: s === (f ? f.severity : 'medium') })));
+  const desc = h('textarea', { placeholder: 'What happens, how to reproduce it, and why it matters.', value: f ? f.description : '' });
+  const ex = f ? null : h('input', { value: ids.join(', '), placeholder: 'Request ids, e.g. 14, 22' });
   const save = async () => {
+    if (!t.value.trim()) return (m.err.textContent = 'Give the finding a title.');
+    if (f) {
+      try {
+        await api(`/api/findings/${f.id}`, { method: 'PATCH', body: { title: t.value.trim(), severity: sev.value, description: desc.value } });
+        closeModal();
+        toast(`Finding #${f.id} saved`, 'ok');
+        if (S.view === 'findings') loadFindings();
+      } catch (e) {
+        m.err.textContent = e.message;
+      }
+      return;
+    }
     const exchange_ids = ex.value
       .split(/[\s,]+/)
       .filter(Boolean)
       .map((x) => Number(x.replace('#', '')));
     if (exchange_ids.some((n) => !Number.isInteger(n))) return (m.err.textContent = 'Request ids must be numbers.');
-    if (!t.value.trim()) return (m.err.textContent = 'Give the finding a title.');
     try {
-      const f = await api('/api/findings', { method: 'POST', body: { title: t.value.trim(), severity: sev.value, description: desc.value, exchange_ids } });
+      const created = await api('/api/findings', { method: 'POST', body: { title: t.value.trim(), severity: sev.value, description: desc.value, exchange_ids } });
       closeModal();
-      toast(`Finding #${f.id} recorded`, 'ok');
+      toast(`Finding #${created.id} recorded`, 'ok');
       S.findingsCount = (S.findingsCount || 0) + 1;
       updateChrome();
       if (S.view === 'findings') loadFindings();
@@ -2805,9 +3159,9 @@ function newFinding(ids, title) {
     }
   };
   const m = modal(
-    'New finding',
-    [h('label', null, 'Title', t), h('label', null, 'Severity', sev), h('label', null, 'Description', desc), h('label', null, 'Evidence (request ids)', ex)],
-    [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), h('button', { class: 'btn primary', text: 'Save finding', onclick: save })],
+    f ? `Edit finding #${f.id}` : 'New finding',
+    [h('label', null, 'Title', t), h('label', null, 'Severity', sev), h('label', null, 'Description', desc), ex ? h('label', null, 'Evidence (request ids)', ex) : null],
+    [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), h('button', { class: 'btn primary', text: f ? 'Save' : 'Save finding', onclick: save })],
   );
   m.el.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save();
@@ -2929,6 +3283,8 @@ async function loadAgents() {
       { class: 'muted fine' },
       'The engine enforces this: agents sign in with their own token, and anything outside this list is refused. Captured traffic never leaves this Mac through Plonix, but it can hold passwords and session tokens, so connect only agents you trust.',
     ),
+    h('div', { class: 'sechead' }, h('h3', { text: 'Skills' }), h('button', { class: 'btn sm ghost', text: 'Get more in the Market', onclick: () => leaveTo('market') })),
+    h('div', { class: 'card', id: 'agentskills' }, h('div', { class: 'ab muted', text: 'Loading skills…' })),
     h('div', { class: 'sechead' }, h('h3', { text: 'Try asking' })),
     h(
       'div',
@@ -2937,6 +3293,360 @@ async function loadAgents() {
     ),
   );
   if (fresh) renderAgentSettings(settingsCard);
+  loadAgentSkills();
+}
+
+/** Skills on the Agents screen: what agents are offered, and what is switched off. */
+async function loadAgentSkills() {
+  let r;
+  try {
+    r = await api('/api/skills');
+  } catch (e) {
+    return;
+  }
+  const box = $('#agentskills');
+  if (!box) return;
+  const skills = r.skills || [];
+  clear(
+    box,
+    h('div', { class: 'ab muted', text: 'Playbooks agents follow for a job in Plonix. Claude Code offers them as slash commands; any MCP client sees them as prompts.' }),
+    skills.map((sk) =>
+      h(
+        'div',
+        { class: 'skillrow' + (sk.available ? '' : ' off') },
+        h('div', { class: 'sk-main' }, h('b', { text: sk.title }), h('span', { class: 'muted', text: sk.description })),
+        h('code', { class: 'sk-cmd', text: '/mcp__plonix__' + sk.name }),
+        trustBadge(sk.verification, false),
+        sk.available
+          ? h('span', { class: 'tag in', text: 'offered' })
+          : h('span', { class: 'tag out', title: 'Uses ' + sk.missing.map(groupLabel).join(', ') + ', which is switched off in Settings', text: 'off' }),
+      ),
+    ),
+  );
+}
+
+/* ======================================================================
+   Market: skills, rules, filters, bundles and extensions from a signed catalog
+   ====================================================================== */
+
+const KIND_INFO = {
+  skill: { label: 'Skills', one: 'Skill', ico: '✦' },
+  rules: { label: 'Rules', one: 'Rule pack', ico: '◎' },
+  filters: { label: 'Filters', one: 'Filter pack', ico: '⧩' },
+  bundle: { label: 'Bundles', one: 'Bundle', ico: '❖' },
+  extension: { label: 'Extensions', one: 'Extension', ico: '⬡' },
+};
+
+const GROUP_LABELS = { traffic: 'Traffic', insights: 'Insights', map: 'Map', scope: 'Scope', findings: 'Findings', scan: 'Scans' };
+const groupLabel = (g) => GROUP_LABELS[g] || g;
+
+const MK = { data: null, kind: 'all', q: '', sel: null, busy: null };
+
+function renderMarket(main) {
+  const q = h('input', {
+    id: 'mq',
+    placeholder: 'Search skills, rules, filters, bundles and extensions',
+    spellcheck: 'false',
+    autocomplete: 'off',
+    value: MK.q,
+    oninput: (e) => {
+      MK.q = e.target.value;
+      closePackage();
+      drawMarket();
+    },
+  });
+  clear(
+    main,
+    h(
+      'div',
+      { class: 'view market' },
+      h(
+        'div',
+        { class: 'toolbar' },
+        h('h2', { text: 'Market' }),
+        h('div', { class: 'search' }, h('span', { class: 'mg', text: '⌕' }), q),
+        h('button', { class: 'btn sm', id: 'mupdate', hidden: true, onclick: updateAll }),
+        h('button', { class: 'btn sm', text: 'Add from a file or link', title: 'Add a skill, rule pack or filter pack from outside the Market. It is marked Not verified.', onclick: addExternal }),
+        h('button', { class: 'iconbtn', title: 'Check the Market again', text: '↻', onclick: () => loadMarket(true) }),
+      ),
+      h('div', { class: 'mtrust', id: 'mtrust' }),
+      h('div', { class: 'filterchips mkinds', id: 'mkinds' }),
+      h('div', { class: 'mbody', id: 'mbody' }, h('div', { class: 'pane' }, h('div', { class: 'mgrid', id: 'mgrid' }, h('div', { class: 'muted', text: 'Loading the Market…' }))), h('div', { id: 'mdetail' })),
+    ),
+  );
+  loadMarket(false);
+}
+
+async function loadMarket(refresh) {
+  try {
+    MK.data = await api('/api/market' + (refresh ? '?refresh=true' : ''));
+  } catch (e) {
+    const grid = $('#mgrid');
+    if (grid) clear(grid, h('div', { class: 'empty' }, h('h3', { text: 'The Market is not available' }), h('p', { text: e.message })));
+    return;
+  }
+  if (S.view !== 'market') return;
+  drawMarket();
+  if (MK.sel) showPackage(MK.sel);
+}
+
+/** The trust mark shown next to every package: verified, built in, not verified, or changed. */
+function trustBadge(v, full) {
+  if (!v) return null;
+  const cls = { verified: 'ok', built_in: 'in', unverified: 'warn', changed: 'bad' }[v.level] || 'warn';
+  const mark = v.level === 'verified' || v.level === 'built_in' ? '✓' : '!';
+  return h('span', { class: 'trust ' + cls, title: v.detail }, h('i', { text: mark }), full ? v.label : v.level === 'verified' ? 'Verified' : v.level === 'built_in' ? 'Built in' : v.level === 'changed' ? 'Changed' : 'Not verified');
+}
+
+const isUnverified = (p) => p.verification && ['unverified', 'changed'].includes(p.verification.level);
+
+function marketStatus(p) {
+  const st = p.status.state;
+  if (st === 'built_in') return { text: 'Built in', cls: 'tag in', action: null };
+  if (st === 'installed') return { text: 'Installed', cls: 'tag in', action: 'remove' };
+  if (st === 'update') return { text: 'Update ' + p.status.installed + ' → ' + p.version, cls: 'tag upd', action: 'update' };
+  if (st === 'needs_runtime') return { text: 'Coming soon', cls: 'tag out', action: null };
+  return { text: 'Available', cls: 'tag out', action: 'install' };
+}
+
+function drawMarket() {
+  const d = MK.data;
+  if (!d) return;
+  const trust = $('#mtrust');
+  if (trust) {
+    const ok = d.trust && d.trust.state === 'verified';
+    clear(
+      trust,
+      h('span', { class: 'mshield' + (ok ? ' ok' : ' bad'), text: ok ? '✓' : '!' }),
+      h('b', { text: ok ? 'Signed by ' + d.trust.publisher : 'Not signed' }),
+      h('span', { class: 'muted', text: ok ? ' · every package is checked against the signed list before it installs' : ' · nobody vouches for this list' }),
+      d.offline_reason ? h('span', { class: 'muted', title: d.offline_reason, text: ' · showing the copy built into Plonix' }) : null,
+    );
+  }
+  const counts = { all: d.packages.length };
+  for (const p of d.packages) counts[p.kind] = (counts[p.kind] || 0) + 1;
+  counts.installed = d.packages.filter((p) => ['installed', 'update'].includes(p.status.state)).length;
+  counts.unverified = d.packages.filter(isUnverified).length;
+  const kinds = $('#mkinds');
+  if (kinds) {
+    const chip = (key, label) =>
+      h('button', { class: 'chip' + (MK.kind === key ? ' on' : ''), onclick: () => ((MK.kind = key), drawMarket()) }, h('span', { text: label }), h('span', { class: 'n', text: counts[key] || 0 }));
+    clear(kinds, chip('all', 'All'), Object.entries(KIND_INFO).map(([k, v]) => chip(k, v.label)), h('span', { class: 'fsep' }), chip('installed', 'Installed'), counts.unverified ? chip('unverified', 'Not verified') : null);
+  }
+  const updates = d.packages.filter((p) => p.status.state === 'update');
+  const ub = $('#mupdate');
+  if (ub) {
+    ub.hidden = !updates.length;
+    ub.textContent = updates.length === 1 ? 'Install 1 update' : `Install ${updates.length} updates`;
+  }
+  const q = MK.q.trim().toLowerCase();
+  const list = d.packages.filter(
+    (p) =>
+      (MK.kind === 'all' || p.kind === MK.kind || (MK.kind === 'installed' && ['installed', 'update'].includes(p.status.state)) || (MK.kind === 'unverified' && isUnverified(p))) &&
+      (!q || p.name.includes(q) || p.description.toLowerCase().includes(q) || (KIND_INFO[p.kind] || {}).one.toLowerCase().includes(q)),
+  );
+  const grid = $('#mgrid');
+  if (!grid) return;
+  if (!list.length) return clear(grid, h('div', { class: 'empty', text: MK.kind === 'installed' ? 'Nothing installed from the Market yet.' : 'Nothing matches.' }));
+  clear(
+    grid,
+    list.map((p) => {
+      const st = marketStatus(p);
+      const k = KIND_INFO[p.kind] || { one: p.kind, ico: '•' };
+      return h(
+        'div',
+        { class: 'mpkg' + (MK.sel === p.name ? ' sel' : '') + (isUnverified(p) ? ' unv' : ''), tabindex: 0, onclick: () => showPackage(p.name), onkeydown: (e) => e.key === 'Enter' && showPackage(p.name) },
+        h('div', { class: 'mph' }, h('span', { class: 'mico k-' + p.kind, text: k.ico }), h('div', { class: 'mpn' }, h('b', { text: p.name }), h('span', { class: 'muted', text: k.one + ' · ' + p.version + (p.local ? ' · added by you' : '') })), h('span', { class: st.cls, text: st.text })),
+        h('div', { class: 'mpd', text: p.description }),
+        p.includes && p.includes.length ? h('div', { class: 'mpinc muted', text: 'Includes ' + p.includes.join(', ') }) : null,
+        h(
+          'div',
+          { class: 'mpf' },
+          trustBadge(p.verification, false),
+          st.action ? marketButton(p, st.action, true) : null,
+        ),
+      );
+    }),
+  );
+}
+
+function marketButton(p, action, small) {
+  const label = { install: p.kind === 'bundle' ? 'Install all' : 'Install', update: 'Update', remove: 'Remove' }[action];
+  const busy = MK.busy === p.name;
+  return h('button', {
+    class: 'btn' + (small ? ' sm' : '') + (action === 'remove' ? ' danger ghost' : ' primary'),
+    disabled: busy,
+    text: busy ? 'Working…' : label,
+    onclick: (e) => {
+      e.stopPropagation();
+      marketAction(p, action);
+    },
+  });
+}
+
+async function marketAction(p, action) {
+  if (action === 'remove' && p.kind === 'bundle' && !confirm(`Remove ${p.name} and the packages it installed?`)) return;
+  MK.busy = p.name;
+  drawMarket();
+  try {
+    const r = await api('/api/market/' + (action === 'remove' ? 'remove' : 'install'), { method: 'POST', body: { name: p.name } });
+    const changed = (r.changes || []).filter((c) => c.action !== 'unchanged');
+    const verb = action === 'remove' ? 'Removed' : action === 'update' ? 'Updated' : 'Installed';
+    toast(changed.length > 1 ? `${verb} ${p.name} with ${changed.length - 1} more` : `${verb} ${p.name}`, 'ok');
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+  MK.busy = null;
+  await loadMarket(false);
+  loadFacets();
+}
+
+/** Adds a file from outside the Market: look at it first, then confirm. It is always marked Not verified. */
+function addExternal() {
+  const input = h('input', { placeholder: 'https://example.com/skill.md  or  /path/to/pack.json', spellcheck: 'false', autocomplete: 'off' });
+  const preview = h('div', { class: 'xpreview' });
+  const check = h('button', { class: 'btn', text: 'Look at it' });
+  const confirmBtn = h('button', { class: 'btn primary', text: 'Add it, not verified', hidden: true });
+  const m = modal(
+    'Add from a file or link',
+    [
+      h('p', { class: 'muted mnote', text: 'A skill (Markdown), rule pack or filter pack. Plonix checks it in full, shows you what it does, and adds it only after you confirm. Nobody vouches for it, so it is marked Not verified.' }),
+      h('label', null, 'Address or path', input),
+      preview,
+    ],
+    [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), check, confirmBtn],
+  );
+  const run = async (confirm) => {
+    m.err.textContent = '';
+    const source = input.value.trim();
+    if (!source) return input.focus();
+    check.disabled = confirmBtn.disabled = true;
+    try {
+      const r = await api('/api/market/add', { method: 'POST', body: { source, confirm } });
+      if (r.added) {
+        closeModal();
+        toast(`Added ${r.file.name} (not verified)`, 'ok');
+        MK.kind = 'unverified';
+        await loadMarket(true);
+        return showPackage(r.file.name);
+      }
+      const f = r.file;
+      clear(
+        preview,
+        h('div', { class: 'xhead' }, h('b', { class: 'mono', text: f.name }), h('span', { class: 'muted', text: ` ${KIND_INFO[f.kind].one} · ${f.version} · ${f.author}` })),
+        h('p', { text: f.description }),
+        f.effects.map((e) => h('div', { class: 'mcap' }, h('span', { text: '•' }), e)),
+        f.replaces ? h('p', { class: 'muted', text: `This replaces ${f.name} ${f.replaces}, which is installed.` }) : null,
+        h('div', { class: 'mtrustbox warn' }, h('span', { class: 'trust warn' }, h('i', { text: '!' }), 'Not verified'), h('p', { text: 'It did not come from a signed Market. It is checked and cannot run code, but nobody has reviewed what it says or does.' })),
+        h('p', { class: 'muted fine mono', text: 'sha256 ' + f.sha256 }),
+      );
+      confirmBtn.hidden = false;
+    } catch (e) {
+      m.err.textContent = e.message;
+      confirmBtn.hidden = true;
+      clear(preview);
+    }
+    check.disabled = confirmBtn.disabled = false;
+  };
+  check.onclick = () => run(false);
+  confirmBtn.onclick = () => run(true);
+  input.addEventListener('input', () => ((confirmBtn.hidden = true), clear(preview)));
+  input.addEventListener('keydown', (e) => e.key === 'Enter' && run(false));
+}
+
+async function updateAll() {
+  try {
+    const r = await api('/api/market/update', { method: 'POST', body: {} });
+    toast(`Updated ${(r.changes || []).length} package(s)`, 'ok');
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+  loadMarket(false);
+}
+
+function closePackage() {
+  MK.sel = null;
+  const body = $('#mbody');
+  if (body) body.classList.remove('paged');
+  const slot = $('#mdetail');
+  if (slot) clear(slot);
+  for (const c of document.querySelectorAll('.mpkg')) c.classList.remove('sel');
+}
+
+/** An item's own page: what it is, what it does, what it needs, who made it and how far to trust it. */
+async function showPackage(name) {
+  MK.sel = name;
+  const mbody = $('#mbody');
+  if (mbody) mbody.classList.add('paged');
+  for (const c of document.querySelectorAll('.mpkg')) c.classList.toggle('sel', c.querySelector('b').textContent === name);
+  const slot = $('#mdetail');
+  if (!slot) return;
+  const p = MK.data && MK.data.packages.find((x) => x.name === name);
+  if (!p) return;
+  const panel = h('article', { class: 'mside mpage' }, h('div', { class: 'muted', text: 'Loading…' }));
+  clear(slot, panel);
+  let d;
+  try {
+    d = await api('/api/market/' + encodeURIComponent(name));
+  } catch (e) {
+    return clear(panel, h('div', { class: 'perr', text: e.message }));
+  }
+  if (MK.sel !== name) return;
+  const k = KIND_INFO[p.kind] || { one: p.kind, ico: '•' };
+  const st = marketStatus(p);
+  const det = d.detail || {};
+  const sec = (title, ...kids) => h('div', { class: 'msec' }, h('h4', { text: title }), kids);
+  const parts = [];
+  const about = p.about && p.about.length ? p.about : [p.description];
+  parts.push(sec('About', about.map((t) => h('p', { class: 'mabout', text: t }))));
+  const rows = [
+    ['Type', k.one],
+    ['Version', p.version + (st.action === 'update' ? ` (you have ${p.status.installed})` : '')],
+    ['Made by', p.author + (p.local ? ' · added by you' : '')],
+    ['Status', st.text],
+    p.sha256 ? ['Checksum', h('span', { class: 'mono fine', text: 'sha256 ' + p.sha256 })] : null,
+    p.url ? ['Source', h('span', { class: 'mono fine', text: p.url })] : null,
+    p.homepage ? ['Homepage', h('a', { class: 'link', href: p.homepage, target: '_blank', rel: 'noopener', text: p.homepage })] : null,
+  ].filter(Boolean);
+  parts.push(sec('Details', h('dl', { class: 'mdl' }, rows.map(([a, b]) => [h('dt', { text: a }), h('dd', null, b)]))));
+  const within = (MK.data.packages || []).filter((x) => x.kind === 'bundle' && (x.includes || []).includes(name) && x.name !== name);
+  if (within.length) parts.push(sec('Part of', h('div', { class: 'mchips' }, within.map((b) => h('button', { class: 'chip', text: b.name, onclick: () => showPackage(b.name) })))));
+  if (p.includes && p.includes.length) {
+    parts.push(sec(p.kind === 'bundle' ? 'Installs' : 'Also installs', h('div', { class: 'mchips' }, p.includes.map((n) => h('button', { class: 'chip', text: n, onclick: () => showPackage(n) })))));
+  }
+  if (det.skill) {
+    const sk = det.skill;
+    parts.push(
+      sec(
+        'What agents can read with it',
+        h('div', { class: 'mchips' }, sk.uses.map((g) => h('span', { class: 'chip' + (sk.missing.includes(g) ? ' k-neg' : ''), text: groupLabel(g) }))),
+        h('p', { class: 'muted fine', text: sk.available ? 'Read-only, like every agent tool. A skill never gives an agent more than your agent settings allow.' : 'Agents will not be offered this skill: ' + sk.missing.map(groupLabel).join(', ') + ' is switched off in Settings › AI agents.' }),
+      ),
+    );
+    if (sk.arguments.length) parts.push(sec('Asks for', sk.arguments.map((a) => h('div', { class: 'marg' }, h('code', { text: a.name }), h('span', { class: 'muted', text: (a.required ? '' : '(optional) ') + a.description })))));
+    parts.push(sec('Instructions', h('pre', { class: 'mpre', text: sk.instructions })));
+    parts.push(h('p', { class: 'muted fine' }, 'In Claude Code, run ', h('code', { text: '/mcp__plonix__' + p.name }), ' once it is installed.'));
+  }
+  if (det.extension) {
+    parts.push(
+      sec(
+        'Would be allowed to',
+        det.extension.capabilities.map((c) => h('div', { class: 'mcap' + (c.sensitive ? ' warn' : '') }, h('span', { text: c.sensitive ? '!' : '✓' }), c.what)),
+        h('p', { class: 'muted fine', text: 'Extensions that run code need the sandboxed extension runtime, which is not in this version of Plonix yet. Until then they are listed so you can see what is coming.' }),
+      ),
+    );
+  }
+  if (det.rules) parts.push(sec(`Detects ${det.rules.count} technologies`, h('div', { class: 'mchips' }, det.rules.detects.map((n) => h('span', { class: 'chip', text: n })))));
+  if (det.filters) parts.push(sec('Filters', det.filters.map((f) => h('div', { class: 'marg' }, h('code', { text: 'is:' + f.id }), h('span', { class: 'muted', text: f.label + ' · ' + f.query })))));
+  clear(
+    panel,
+    h('div', { class: 'mback' }, h('button', { class: 'btn sm', text: '← Market', title: 'Back to the list', onclick: () => (closePackage(), drawMarket()) })),
+    h('div', { class: 'mside-h' }, h('span', { class: 'mico big k-' + p.kind, text: k.ico }), h('div', null, h('h3', { text: p.name }), h('div', { class: 'muted', text: `${k.one} · ${p.version} · ${p.author}` }))),
+    h('p', { class: 'mdesc', text: p.description }),
+    h('div', { class: 'mact' }, h('span', { class: st.cls, text: st.text }), st.action ? marketButton(p, st.action, false) : null, st.action === 'update' ? marketButton(p, 'remove', false) : null),
+    h('div', { class: 'mtrustbox ' + ({ verified: 'ok', built_in: 'ok', unverified: 'warn', changed: 'bad' }[p.verification.level] || 'warn') }, trustBadge(p.verification, true), h('p', { text: p.verification.detail })),
+    parts,
+  );
 }
 
 /* ======================================================================
@@ -3086,7 +3796,7 @@ async function askClaude(subject) {
   await rebuild();
 }
 
-/** Claude Code settings: on or off, what it may see, and how much context to hand over. */
+/** What agents may do, in one line, with the way to change it: Settings › AI agents. */
 async function renderAgentSettings(box) {
   let cfg;
   try {
@@ -3096,44 +3806,21 @@ async function renderAgentSettings(box) {
   }
   S.agentSettings = cfg;
   const st = cfg.settings;
-  const save = async (patch) => {
-    try {
-      S.agentSettings = await api('/api/agents/settings', { method: 'PUT', body: { ...S.agentSettings.settings, ...patch } });
-      toast('Saved', 'ok');
-    } catch (e) {
-      toast(e.message, 'err');
-    }
-    for (const b of document.querySelectorAll('.askbtn')) b.hidden = !agentsOn();
-    renderAgentSettings(box);
+  const on = cfg.groups.filter((g) => g.on).length;
+  const summary = st.enabled
+    ? `Agents see ${st.data === 'all' ? 'everything captured' : 'in-scope hosts only'} · ${on} of ${cfg.groups.length} kinds of data · Ask Claude up to ${fmtTok(st.context_budget)} tokens`
+    : 'Agent access is off: every agent request is refused.';
+  const open = () => {
+    S.settingsSection = 'agents';
+    leaveTo('settings');
   };
-  const on = h('input', { type: 'checkbox', checked: st.enabled, onchange: () => save({ enabled: on.checked }) });
-  const radio = (value, label, note) =>
-    h('label', { class: 'opt' }, h('input', { type: 'radio', name: 'agentdata', checked: st.data === value, disabled: !st.enabled, onchange: () => save({ data: value }) }), h('span', null, h('b', { text: label }), h('small', { text: note })));
-  const budget = h('select', { disabled: !st.enabled, onchange: () => save({ context_budget: Number(budget.value) }) }, cfg.budgets.map((n) => h('option', { value: n, text: `${fmtTok(n)} tokens`, selected: n === st.context_budget })));
-  const clip = h('select', { disabled: !st.enabled, onchange: () => save({ max_body_chars: Number(clip.value) }) }, [1000, 2000, 4000, 8000, 16000].map((n) => h('option', { value: n, text: `${fmtTok(n)} characters`, selected: n === st.max_body_chars })));
   clear(
     box,
-    h('div', { class: 'ab setrow' }, h('label', { class: 'switch' }, on, h('span', { text: st.enabled ? 'Claude Code and other agents can read this project' : 'Agent access is off: every agent request is refused' })), h('span', { class: 'mode', text: 'Read-only' })),
     h(
       'div',
-      { class: 'setgrid' + (st.enabled ? '' : ' disabled') },
-      h('div', null, h('div', { class: 'caph', text: 'What agents can see' }), radio('in_scope', 'In-scope hosts only', 'Requests, hosts and technologies for hosts you accepted into scope'), radio('all', 'Everything captured', 'Also third-party and out-of-scope traffic')),
-      h(
-        'div',
-        null,
-        h('div', { class: 'caph', text: 'Tools agents get' }),
-        cfg.groups.map((g) => {
-          const c = h('input', { type: 'checkbox', checked: g.on, disabled: !st.enabled, onchange: () => save({ off: c.checked ? st.off.filter((x) => x !== g.group) : [...st.off, g.group] }) });
-          return h('label', { class: 'opt' }, c, h('span', { text: g.label }));
-        }),
-      ),
-      h(
-        'div',
-        null,
-        h('div', { class: 'caph', text: 'Ask Claude' }),
-        h('label', { class: 'opt col' }, h('span', { text: 'Warn me before sending more than' }), budget),
-        h('label', { class: 'opt col' }, h('span', { text: 'Clip each request and response body to' }), clip),
-      ),
+      { class: 'ab setrow' },
+      h('span', null, h('b', { text: 'Agent settings' }), h('br'), h('span', { class: 'muted', text: summary })),
+      h('button', { class: 'btn sm', text: 'Change in Settings…', onclick: open }),
     ),
   );
 }
@@ -3160,7 +3847,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   const keys = Object.keys(VIEWS).filter((k) => !VIEWS[k].footer);
-  if (/^[1-6]$/.test(e.key)) return go(keys[Number(e.key) - 1]);
+  if (/^[1-9]$/.test(e.key) && keys[Number(e.key) - 1]) return go(keys[Number(e.key) - 1]);
   if (e.key === '\\') return toggleSidebar();
   if (S.view !== 'traffic') return;
   if (e.key === '/') {
@@ -3188,11 +3875,15 @@ async function renderSettings(main) {
     return;
   }
   if (S.view !== 'settings') return;
-  PlonixSettings.render(box, data, {
+  const host = h('div', { style: { flex: '1', minHeight: '0', display: 'flex' } });
+  const back = backButton();
+  clear(box, back ? h('div', { class: 'toolbar' }, back) : null, host);
+  PlonixSettings.render(host, data, {
     select: S.settingsSection || 'proxy',
     onSelect: (id) => (S.settingsSection = id),
     save: async (section, values) => {
       const r = await api('/api/settings/' + section, { method: 'PUT', body: { values } });
+      if (section === 'agents') loadAgentSettings();
       if (section === 'proxy') {
         S.status = await api('/api/status');
         updateChrome();

@@ -4,17 +4,65 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Mutex;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OptionalExtension, Row, params, params_from_iter};
 
 use crate::codec;
 use crate::model::*;
 use crate::query::Query;
+use crate::exclude::Group;
 use crate::scope::{Decision, Evidence, EvidenceKind, NewEvidence, Rule, ScopeRules, Suggestion};
 
-const SCHEMA: &str = r#"
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
+/// Connection settings, applied every time a database is opened. They are
+/// not part of the schema and cannot run inside a transaction.
+const PRAGMAS: &str = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;";
+
+/// One step of the database schema, moving it from `version - 1` to
+/// `version`. A step runs in a transaction together with the version bump,
+/// so it either completes or leaves the database as it was. Steps must be
+/// idempotent: a database a crashed or older build left half-way still
+/// migrates cleanly.
+#[derive(Clone, Copy)]
+pub struct Migration {
+    pub version: i64,
+    pub what: &'static str,
+    pub run: fn(&rusqlite::Transaction) -> Result<()>,
+}
+
+/// Every schema change, oldest first. Append new steps at the end with the
+/// next version number; never edit or reorder a step that has shipped.
+pub const MIGRATIONS: &[Migration] = &[
+    Migration { version: 1, what: "traffic, scope, evidence, findings and view state", run: v1_initial },
+    Migration { version: 2, what: "when findings were last edited", run: v2_finding_updated_at },
+];
+
+/// The schema version this build reads and writes.
+pub const SCHEMA_VERSION: i64 = MIGRATIONS[MIGRATIONS.len() - 1].version;
+
+/// Version 1 is the schema from before databases were versioned. Every
+/// statement is `IF NOT EXISTS`, so a database from that time, which has the
+/// tables but `user_version` 0, is taken up as version 1 with its data as is.
+fn v1_initial(tx: &rusqlite::Transaction) -> Result<()> {
+    tx.execute_batch(V1_SCHEMA)?;
+    Ok(())
+}
+
+/// Findings can be edited: record when, starting from their creation time.
+fn v2_finding_updated_at(tx: &rusqlite::Transaction) -> Result<()> {
+    if !has_column(tx, "findings", "updated_at")? {
+        tx.execute_batch("ALTER TABLE findings ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0")?;
+    }
+    tx.execute_batch("UPDATE findings SET updated_at = created_at WHERE updated_at = 0")?;
+    Ok(())
+}
+
+fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let names = stmt.query_map([], |r| r.get::<_, String>(1))?.collect::<Result<Vec<_>, _>>()?;
+    Ok(names.iter().any(|n| n == column))
+}
+
+const V1_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS exchanges (
     id INTEGER PRIMARY KEY,
     ts INTEGER NOT NULL,
@@ -76,7 +124,15 @@ CREATE TABLE IF NOT EXISTS view_state (
     view TEXT PRIMARY KEY,
     state TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS exclude_groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    domains TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
 "#;
+
 
 pub struct Store {
     conn: Mutex<Connection>,
@@ -94,10 +150,16 @@ impl Store {
         Self::init(Connection::open_in_memory()?)
     }
 
-    fn init(conn: Connection) -> Result<Self> {
+    fn init(mut conn: Connection) -> Result<Self> {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
-        conn.execute_batch(SCHEMA)?;
+        conn.execute_batch(PRAGMAS)?;
+        migrate(&mut conn, MIGRATIONS)?;
         Ok(Self { conn: Mutex::new(conn) })
+    }
+
+    /// The schema version of the open database.
+    pub fn schema_version(&self) -> Result<i64> {
+        Ok(schema_version(&self.conn.lock().unwrap())?)
     }
 
     // ---- traffic ---------------------------------------------------------
@@ -383,6 +445,69 @@ impl Store {
         Ok(self.conn.lock().unwrap().execute("DELETE FROM scope_rules WHERE pattern = ?1", [pattern])? > 0)
     }
 
+    /// Inserts or updates several scope rules in one transaction.
+    pub fn put_rules(&self, rules: &[Rule]) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        for rule in rules {
+            tx.execute(
+                "INSERT INTO scope_rules (pattern, include_subdomains, decision, created_at, note) VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(pattern) DO UPDATE SET include_subdomains = ?2, decision = ?3, note = ?5",
+                params![rule.pattern, rule.include_subdomains, rule.decision.as_str(), rule.created_at, rule.note],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Removes the exclusion rule for one host (a rule an exclusion group owns),
+    /// leaving any manually added rule for the same host untouched.
+    pub fn delete_group_rule(&self, pattern: &str) -> Result<bool> {
+        Ok(self
+            .conn
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM scope_rules WHERE pattern = ?1 AND note LIKE 'group:%'", [pattern])?
+            > 0)
+    }
+
+    /// Removes every exclusion rule a group owns.
+    pub fn delete_group_rules(&self, group_id: &str) -> Result<usize> {
+        Ok(self.conn.lock().unwrap().execute("DELETE FROM scope_rules WHERE note = ?1", [format!("group:{group_id}")])?)
+    }
+
+    // ---- custom exclusion groups ----------------------------------------
+
+    pub fn custom_groups(&self) -> Result<Vec<Group>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id, name, description, domains FROM exclude_groups ORDER BY created_at")?;
+        let rows = stmt.query_map([], |r| {
+            let domains: String = r.get(3)?;
+            Ok(Group {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                description: r.get(2)?,
+                domains: serde_json::from_str(&domains).unwrap_or_default(),
+                builtin: false,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub fn put_custom_group(&self, g: &Group, created_at: i64) -> Result<()> {
+        let domains = serde_json::to_string(&g.domains)?;
+        self.conn.lock().unwrap().execute(
+            "INSERT INTO exclude_groups (id, name, description, domains, created_at) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(id) DO UPDATE SET name = ?2, description = ?3, domains = ?4",
+            params![g.id, g.name, g.description, domains, created_at],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_custom_group(&self, id: &str) -> Result<bool> {
+        Ok(self.conn.lock().unwrap().execute("DELETE FROM exclude_groups WHERE id = ?1", [id])? > 0)
+    }
+
     pub fn add_tokens(&self, hashes: &[String], host: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         for h in hashes {
@@ -518,8 +643,8 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let now = now_ms();
         conn.execute(
-            "INSERT INTO findings (created_at, title, severity, status, description, exchange_ids, created_by)
-             VALUES (?1, ?2, ?3, 'open', ?4, ?5, ?6)",
+            "INSERT INTO findings (created_at, title, severity, status, description, exchange_ids, created_by, updated_at)
+             VALUES (?1, ?2, ?3, 'open', ?4, ?5, ?6, ?1)",
             params![now, f.title, f.severity, f.description, serde_json::to_string(&f.exchange_ids)?, created_by],
         )?;
         Ok(Finding {
@@ -531,28 +656,88 @@ impl Store {
             description: f.description.clone(),
             exchange_ids: f.exchange_ids.clone(),
             created_by: created_by.into(),
+            updated_at: now,
         })
     }
 
     pub fn findings(&self) -> Result<Vec<Finding>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, created_at, title, severity, status, description, exchange_ids, created_by FROM findings ORDER BY id",
-        )?;
-        let rows = stmt.query_map([], |r| {
-            Ok(Finding {
-                id: r.get(0)?,
-                created_at: r.get(1)?,
-                title: r.get(2)?,
-                severity: r.get(3)?,
-                status: r.get(4)?,
-                description: r.get(5)?,
-                exchange_ids: serde_json::from_str(&r.get::<_, String>(6)?).unwrap_or_default(),
-                created_by: r.get(7)?,
-            })
-        })?;
+        let mut stmt = conn.prepare(&format!("SELECT {FINDING_COLS} FROM findings ORDER BY id"))?;
+        let rows = stmt.query_map([], row_to_finding)?;
         rows.collect::<Result<_, _>>().map_err(Into::into)
     }
+
+    pub fn finding(&self, id: i64) -> Result<Option<Finding>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(&format!("SELECT {FINDING_COLS} FROM findings WHERE id = ?1"), [id], row_to_finding).optional().map_err(Into::into)
+    }
+
+    /// Applies a checked edit (see [`FindingEdit::checked`]). `None` when
+    /// there is no such finding.
+    pub fn update_finding(&self, id: i64, edit: &FindingEdit) -> Result<Option<Finding>> {
+        {
+            let conn = self.conn.lock().unwrap();
+            let changed = conn.execute(
+                "UPDATE findings SET title = coalesce(?2, title), severity = coalesce(?3, severity), status = coalesce(?4, status),
+                    description = coalesce(?5, description), updated_at = ?6 WHERE id = ?1",
+                params![id, edit.title, edit.severity, edit.status, edit.description, now_ms()],
+            )?;
+            if changed == 0 {
+                return Ok(None);
+            }
+        }
+        self.finding(id)
+    }
+
+    /// Deletes a finding. The requests it pointed to stay in the traffic.
+    pub fn delete_finding(&self, id: i64) -> Result<bool> {
+        Ok(self.conn.lock().unwrap().execute("DELETE FROM findings WHERE id = ?1", [id])? > 0)
+    }
+}
+
+const FINDING_COLS: &str = "id, created_at, title, severity, status, description, exchange_ids, created_by, updated_at";
+
+fn row_to_finding(r: &Row) -> rusqlite::Result<Finding> {
+    Ok(Finding {
+        id: r.get(0)?,
+        created_at: r.get(1)?,
+        title: r.get(2)?,
+        severity: r.get(3)?,
+        status: r.get(4)?,
+        description: r.get(5)?,
+        exchange_ids: serde_json::from_str(&r.get::<_, String>(6)?).unwrap_or_default(),
+        created_by: r.get(7)?,
+        updated_at: r.get(8)?,
+    })
+}
+
+fn schema_version(conn: &Connection) -> rusqlite::Result<i64> {
+    conn.query_row("PRAGMA user_version", [], |r| r.get(0))
+}
+
+/// Brings a database up to the last of `steps`, one step at a time. Each
+/// step runs in its own write transaction that first re-reads the version,
+/// so two processes opening the same file never apply a step twice. A
+/// database from a newer build is refused rather than half understood.
+fn migrate(conn: &mut Connection, steps: &[Migration]) -> Result<()> {
+    let latest = steps.last().map_or(0, |m| m.version);
+    let found = schema_version(conn)?;
+    if found > latest {
+        bail!(
+            "this project's database was written by a newer version of Plonix (schema version {found}; this version knows up to {latest}). \
+             Update Plonix to open it; the file was not changed"
+        );
+    }
+    for step in steps.iter().filter(|m| m.version > found) {
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if schema_version(&tx)? >= step.version {
+            continue;
+        }
+        (step.run)(&tx).with_context(|| format!("upgrading the database to schema version {} ({})", step.version, step.what))?;
+        tx.pragma_update(None, "user_version", step.version)?;
+        tx.commit()?;
+    }
+    Ok(())
 }
 
 fn row_to_exchange(r: &Row) -> rusqlite::Result<Exchange> {
@@ -866,6 +1051,140 @@ mod tests {
         assert_eq!(s.prune_decided(&s.rules().unwrap()).unwrap(), 1);
         assert_eq!(s.prune_decided(&s.rules().unwrap()).unwrap(), 0);
         assert!(s.suggestions(&s.rules().unwrap()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn fresh_database_gets_the_latest_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("traffic.db");
+        let s = Store::open(&path).unwrap();
+        assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
+        s.insert_exchange(&sample("www.example.com", "GET", "/", 200, "hi")).unwrap();
+        drop(s);
+        // Opening again changes nothing and keeps the data.
+        let s = Store::open(&path).unwrap();
+        assert_eq!((s.schema_version().unwrap(), s.count().unwrap()), (SCHEMA_VERSION, 1));
+    }
+
+    #[test]
+    fn unversioned_database_is_taken_up_without_losing_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("traffic.db");
+        {
+            // A project from before schema versions: the tables, user_version 0.
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(V1_SCHEMA).unwrap();
+            conn.execute(
+                "INSERT INTO findings (created_at, title, severity, status, description, exchange_ids, created_by)
+                 VALUES (5, 'Old finding', 'low', 'open', 'kept', '[1]', 'cli')",
+                [],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO scope_rules (pattern, include_subdomains, decision, created_at) VALUES ('example.com', 1, 'accepted', 1)", [])
+                .unwrap();
+            assert_eq!(schema_version(&conn).unwrap(), 0);
+        }
+        let s = Store::open(&path).unwrap();
+        assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
+        let f = &s.findings().unwrap()[0];
+        assert_eq!((f.title.as_str(), f.description.as_str(), f.exchange_ids.clone()), ("Old finding", "kept", vec![1]));
+        assert_eq!(f.updated_at, 5, "edit time starts at the creation time");
+        assert!(s.rules().unwrap().in_scope("www.example.com"));
+        s.insert_exchange(&sample("www.example.com", "GET", "/", 200, "hi")).unwrap();
+    }
+
+    #[test]
+    fn newer_database_is_refused_and_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("traffic.db");
+        drop(Store::open(&path).unwrap());
+        Connection::open(&path).unwrap().pragma_update(None, "user_version", SCHEMA_VERSION + 1).unwrap();
+        let e = format!("{:#}", Store::open(&path).err().expect("a newer schema must be refused"));
+        assert!(e.contains("newer version of Plonix") && e.contains(&format!("schema version {}", SCHEMA_VERSION + 1)), "{e}");
+        assert_eq!(schema_version(&Connection::open(&path).unwrap()).unwrap(), SCHEMA_VERSION + 1);
+    }
+
+    #[test]
+    fn each_migration_step_runs_once_and_in_order() {
+        fn one(tx: &rusqlite::Transaction) -> Result<()> {
+            tx.execute_batch("CREATE TABLE IF NOT EXISTS ran (step INTEGER); INSERT INTO ran VALUES (1);")?;
+            Ok(())
+        }
+        fn two(tx: &rusqlite::Transaction) -> Result<()> {
+            tx.execute_batch("INSERT INTO ran VALUES (2);")?;
+            Ok(())
+        }
+        fn broken(tx: &rusqlite::Transaction) -> Result<()> {
+            tx.execute_batch("INSERT INTO ran VALUES (3);")?;
+            bail!("step failed")
+        }
+        let steps = [Migration { version: 1, what: "one", run: one }, Migration { version: 2, what: "two", run: two }];
+        let mut conn = Connection::open_in_memory().unwrap();
+        let ran = |c: &Connection| -> Vec<i64> {
+            let mut st = c.prepare("SELECT step FROM ran ORDER BY rowid").unwrap();
+            st.query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
+        };
+        migrate(&mut conn, &steps[..1]).unwrap();
+        assert_eq!((schema_version(&conn).unwrap(), ran(&conn)), (1, vec![1]));
+        migrate(&mut conn, &steps).unwrap();
+        migrate(&mut conn, &steps).unwrap();
+        assert_eq!((schema_version(&conn).unwrap(), ran(&conn)), (2, vec![1, 2]));
+
+        // A failing step is rolled back whole and leaves the version alone.
+        let with_broken = [steps[0], steps[1], Migration { version: 3, what: "broken", run: broken }];
+        let e = format!("{:#}", migrate(&mut conn, &with_broken).unwrap_err());
+        assert!(e.contains("schema version 3 (broken)") && e.contains("step failed"), "{e}");
+        assert_eq!((schema_version(&conn).unwrap(), ran(&conn)), (2, vec![1, 2]));
+    }
+
+    #[test]
+    fn finding_edit_time_migration_is_idempotent() {
+        // A version 1 database where the column already exists (a step that
+        // was interrupted after the change, or added by hand) still upgrades.
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate(&mut conn, &MIGRATIONS[..1]).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE findings ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+             INSERT INTO findings (created_at, title, severity, status, description, exchange_ids, created_by) VALUES (7, 't', 'low', 'open', '', '[]', 'cli');",
+        )
+        .unwrap();
+        migrate(&mut conn, MIGRATIONS).unwrap();
+        assert_eq!(schema_version(&conn).unwrap(), SCHEMA_VERSION);
+        assert_eq!(conn.query_row("SELECT updated_at FROM findings", [], |r| r.get::<_, i64>(0)).unwrap(), 7);
+    }
+
+    #[test]
+    fn findings_can_be_edited_and_deleted() {
+        let s = Store::open_in_memory().unwrap();
+        let f = s.add_finding(&NewFinding { title: "XSS".into(), severity: "low".into(), description: "first".into(), exchange_ids: vec![3] }, "gui").unwrap();
+        let edit = FindingEdit { status: Some("false positive".into()), ..Default::default() }.checked().unwrap();
+        let g = s.update_finding(f.id, &edit).unwrap().unwrap();
+        assert_eq!((g.status.as_str(), g.title.as_str(), g.severity.as_str(), g.description.as_str()), ("false_positive", "XSS", "low", "first"));
+        assert!(g.updated_at >= f.updated_at);
+        let edit = FindingEdit { title: Some("  Stored XSS ".into()), severity: Some("High".into()), description: Some(String::new()), status: None };
+        let g = s.update_finding(f.id, &edit.checked().unwrap()).unwrap().unwrap();
+        assert_eq!((g.status.as_str(), g.title.as_str(), g.severity.as_str(), g.description.as_str()), ("false_positive", "Stored XSS", "high", ""));
+        assert_eq!(g.exchange_ids, vec![3]);
+        assert!(s.update_finding(f.id + 1, &edit_status("fixed")).unwrap().is_none());
+        assert!(s.delete_finding(f.id).unwrap());
+        assert!(!s.delete_finding(f.id).unwrap());
+        assert!(s.finding(f.id).unwrap().is_none() && s.findings().unwrap().is_empty());
+    }
+
+    fn edit_status(st: &str) -> FindingEdit {
+        FindingEdit { status: Some(st.into()), ..Default::default() }.checked().unwrap()
+    }
+
+    #[test]
+    fn finding_edits_are_checked() {
+        let bad = |e: FindingEdit| e.checked().unwrap_err();
+        assert!(bad(FindingEdit::default()).contains("nothing to change"));
+        assert!(bad(FindingEdit { title: Some("  ".into()), ..Default::default() }).contains("title"));
+        assert!(bad(FindingEdit { severity: Some("urgent".into()), ..Default::default() }).contains("severity must be one of"));
+        assert!(bad(FindingEdit { status: Some("done".into()), ..Default::default() }).contains("open, confirmed, false_positive, fixed"));
+        for (typed, stored) in [("Confirmed", "confirmed"), ("false-positive", "false_positive"), ("fp", "false_positive"), (" fixed ", "fixed")] {
+            assert_eq!(edit_status(typed).status.as_deref(), Some(stored));
+        }
     }
 
     #[test]

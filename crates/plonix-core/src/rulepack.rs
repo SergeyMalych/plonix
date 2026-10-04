@@ -13,14 +13,15 @@
 //! ```
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::detect::{self, Detector, Rule, RuleDef, check_text, clean};
-use crate::paths::{Home, write_private};
+use crate::paths::Home;
+use crate::shelf::Shelf;
 
 pub const FORMAT_VERSION: u32 = 1;
 pub const MAX_PACK_BYTES: usize = 1024 * 1024;
@@ -205,22 +206,9 @@ pub fn newer(candidate: &str, installed: &str) -> bool {
 
 // ---- installed packs -------------------------------------------------------
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct Lock {
-    packs: BTreeMap<String, LockEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct LockEntry {
-    version: String,
-    sha256: String,
-    source: String,
-    installed_at: i64,
-}
-
 /// Packs installed in a Plonix home directory, plus the built-in ones.
 pub struct Library {
-    dir: PathBuf,
+    shelf: Shelf,
 }
 
 /// Everything that loaded, and what was skipped and why.
@@ -238,91 +226,45 @@ impl Loaded {
 
 impl Library {
     pub fn new(home: &Home) -> Self {
-        Self { dir: home.root.join("rules") }
+        Self::at(&home.root.join("rules"))
     }
 
     pub fn at(dir: &Path) -> Self {
-        Self { dir: dir.to_path_buf() }
-    }
-
-    fn lock_path(&self) -> PathBuf {
-        self.dir.join("lock.json")
-    }
-
-    fn pack_path(&self, name: &str) -> PathBuf {
-        // `name` is validated by check_pack_name, so it cannot contain `/` or `..`.
-        self.dir.join("packs").join(format!("{name}.json"))
-    }
-
-    fn read_lock(&self) -> Result<Lock> {
-        match std::fs::read(self.lock_path()) {
-            Ok(b) => serde_json::from_slice(&b).context("reading rules/lock.json"),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Lock::default()),
-            Err(e) => Err(e).context("reading rules/lock.json"),
-        }
-    }
-
-    fn write_lock(&self, lock: &Lock) -> Result<()> {
-        std::fs::create_dir_all(&self.dir)?;
-        let tmp = self.dir.join("lock.json.tmp");
-        write_private(&tmp, &serde_json::to_vec_pretty(lock)?)?;
-        std::fs::rename(&tmp, self.lock_path())?;
-        Ok(())
+        Self { shelf: Shelf::new(dir, "rule pack", "rules", MAX_INSTALLED_PACKS) }
     }
 
     /// A value that changes whenever installed packs change, for caching.
     pub fn stamp(&self) -> Option<std::time::SystemTime> {
-        std::fs::metadata(self.lock_path()).and_then(|m| m.modified()).ok()
+        self.shelf.stamp()
     }
 
     /// Validates and installs a pack. When `expected_sha256` is given, the
     /// bytes must hash to it. Returns the pack and the version it replaced.
     pub fn install(&self, bytes: &[u8], source: &str, expected_sha256: Option<&str>) -> Result<(Pack, Option<String>)> {
-        let actual = sha256_hex(bytes);
-        if let Some(want) = expected_sha256 {
-            let want = want.trim().to_ascii_lowercase();
-            if want != actual {
-                bail!("checksum mismatch: expected sha256 {want}, got {actual}. The pack was not installed.");
-            }
-        }
+        Shelf::check_sha(bytes, expected_sha256, "pack")?;
         let pack = parse(bytes).map_err(|e| anyhow!(e))?;
         let name = pack.doc.name.clone();
         if BUILTIN.iter().any(|(n, _)| *n == name) {
             bail!("`{name}` is the name of a built-in pack; give the pack a different name");
         }
-        let mut lock = self.read_lock()?;
-        if !lock.packs.contains_key(&name) && lock.packs.len() >= MAX_INSTALLED_PACKS {
-            bail!("too many rule packs installed (limit {MAX_INSTALLED_PACKS}); remove some first");
-        }
-        std::fs::create_dir_all(self.dir.join("packs"))?;
-        let tmp = self.dir.join("packs").join(format!(".{name}.tmp"));
-        write_private(&tmp, bytes)?;
-        std::fs::rename(&tmp, self.pack_path(&name))?;
-        let previous = lock.packs.insert(
-            name,
-            LockEntry { version: pack.doc.version.clone(), sha256: actual, source: source.to_string(), installed_at: crate::model::now_ms() },
-        );
-        self.write_lock(&lock)?;
-        Ok((pack, previous.map(|p| p.version)))
+        let previous = self.shelf.put(&name, &pack.doc.version, bytes, source)?;
+        Ok((pack, previous))
     }
 
     pub fn remove(&self, name: &str) -> Result<bool> {
         if BUILTIN.iter().any(|(n, _)| *n == name) {
             bail!("`{name}` is built in and cannot be removed");
         }
-        check_pack_name(name).map_err(|e| anyhow!(e))?;
-        let mut lock = self.read_lock()?;
-        let existed = lock.packs.remove(name).is_some();
-        let _ = std::fs::remove_file(self.pack_path(name));
-        if existed {
-            self.write_lock(&lock)?;
-        }
-        Ok(existed)
+        self.shelf.remove(name)
     }
 
     /// Installed version of a pack, if any.
     pub fn installed_version(&self, name: &str) -> Option<String> {
-        self.read_lock().ok()?.packs.get(name).map(|e| e.version.clone())
+        self.shelf.installed_version(name)
+    }
+
+    pub fn installed(&self) -> Vec<crate::shelf::Installed> {
+        self.shelf.installed()
     }
 
     /// Built-in packs, then installed ones. A pack that no longer matches
@@ -338,38 +280,16 @@ impl Library {
                 Err(e) => out.problems.push(format!("built-in pack {name}: {e}")),
             }
         }
-        let lock = match self.read_lock() {
-            Ok(l) => l,
-            Err(e) => {
-                out.problems.push(format!("{e:#}"));
-                return out;
-            }
-        };
-        for (name, entry) in lock.packs {
-            if check_pack_name(&name).is_err() {
-                out.problems.push(format!("lock.json lists an invalid pack name `{}`", clean(&name, 64)));
-                continue;
-            }
-            let bytes = match std::fs::read(self.pack_path(&name)) {
-                Ok(b) => b,
-                Err(e) => {
-                    out.problems.push(format!("pack {name}: {e}"));
-                    continue;
-                }
-            };
-            if sha256_hex(&bytes) != entry.sha256 {
-                out.problems.push(format!(
-                    "pack {name}: file changed since it was installed (checksum mismatch); not loaded. Reinstall it with `plonix rules add`."
-                ));
-                continue;
-            }
-            match parse(&bytes) {
-                Ok(p) if p.doc.name == name => {
-                    let info = p.info(&entry.source, false, Some(entry.installed_at));
+        let (verified, problems) = self.shelf.verified();
+        out.problems.extend(problems);
+        for v in verified {
+            match parse(&v.bytes) {
+                Ok(p) if p.doc.name == v.name => {
+                    let info = p.info(&v.entry.source, false, Some(v.entry.installed_at));
                     out.packs.push((p, info));
                 }
-                Ok(_) => out.problems.push(format!("pack {name}: name inside the file does not match")),
-                Err(e) => out.problems.push(format!("pack {name}: {e}")),
+                Ok(_) => out.problems.push(format!("pack {}: name inside the file does not match", v.name)),
+                Err(e) => out.problems.push(format!("pack {}: {e}", v.name)),
             }
         }
         out

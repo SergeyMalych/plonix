@@ -8,6 +8,8 @@ mod client;
 mod community;
 mod connect;
 mod engine_ctl;
+mod findings;
+mod market;
 mod mcp;
 mod open;
 mod render;
@@ -41,6 +43,7 @@ Get started:
   plonix scope                     review domains Plonix thinks belong in scope
   plonix replay 42 -H 'X-Debug: 1'
   plonix tech                      technologies detected on each host
+  plonix findings                  what you found; `plonix findings export -o report.html` for a report
   plonix store                     community detection rule packs
   plonix connect claude            let Claude Code read this project (read-only MCP)
 
@@ -105,7 +108,7 @@ enum Cmd {
     /// Search captured traffic, newest first
     #[command(
         visible_alias = "s",
-        after_help = "Filters: host:example.com  method:POST  status:404|5xx|none  path:/api  mime:json  ext:js\n         kind:static  scope:in|out  source:proxy|replay  \"quoted phrase\"  free text\nInclude and exclude: a term shows only what matches, -term hides it; commas match any value:\n  plonix search status:4xx,5xx -kind:static -host:cdn.example.com\nPut options such as -n before the query: everything after the first term is search text."
+        after_help = "Filters: host:example.com  method:POST  status:404|5xx|none  path:/api  mime:json  ext:js\n         kind:static  scope:in|out  source:proxy|replay  \"quoted phrase\"  free text\n         is:graphql  is:auth  -is:trackers   named filters from filter packs (`plonix filters`)\nInclude and exclude: a term shows only what matches, -term hides it; commas match any value:\n  plonix search status:4xx,5xx -kind:static -host:cdn.example.com\nPut options such as -n before the query: everything after the first term is search text."
     )]
     Search(SearchArgs),
     /// Print new traffic as it is captured (Ctrl-C to stop)
@@ -143,6 +146,11 @@ enum Cmd {
     },
     /// Crawl a host to discover endpoints, parameters and forms
     Crawl(scan::CrawlArgs),
+    /// Findings: list, show, add, edit, set status, delete, export a report
+    Findings {
+        #[command(subcommand)]
+        cmd: Option<findings::FindingsCmd>,
+    },
     /// Bench: run payloads through marked positions of a request
     Bench {
         #[command(subcommand)]
@@ -153,8 +161,19 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<community::RulesCmd>,
     },
-    /// Browse and install community rule packs
-    Store(community::StoreArgs),
+    /// Named Traffic filters (is:name): list, add from a file or URL, remove, check
+    Filters {
+        #[command(subcommand)]
+        cmd: Option<community::FiltersCmd>,
+    },
+    /// The Market: install skills, rules, filters, bundles and extensions from a signed catalog
+    #[command(visible_alias = "store")]
+    Market(market::MarketArgs),
+    /// Agent skills: playbooks agents find through MCP
+    Skills {
+        #[command(subcommand)]
+        cmd: Option<market::SkillsCmd>,
+    },
     /// Connect an AI agent to Plonix (read-only)
     Connect {
         #[command(subcommand)]
@@ -412,9 +431,12 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Cmd::Tech { host } => community::tech_cmd(&ctx, host)?,
         Cmd::Scan { cmd } => scan::scan_cmd(&ctx, cmd)?,
         Cmd::Crawl(a) => scan::crawl_cmd(&ctx, a)?,
+        Cmd::Findings { cmd } => findings::findings_cmd(&ctx, cmd.unwrap_or(findings::FindingsCmd::List { status: None }))?,
         Cmd::Bench { cmd } => bench::bench_cmd(&ctx, cmd)?,
         Cmd::Rules { cmd } => community::rules_cmd(&ctx, cmd.unwrap_or(community::RulesCmd::List))?,
-        Cmd::Store(a) => community::store_cmd(&ctx, a)?,
+        Cmd::Filters { cmd } => community::filters_cmd(&ctx, cmd.unwrap_or(community::FiltersCmd::List))?,
+        Cmd::Market(a) => market::market_cmd(&ctx, a)?,
+        Cmd::Skills { cmd } => market::skills_cmd(&ctx, cmd.unwrap_or(market::SkillsCmd::List))?,
         Cmd::Connect { cmd } => connect::connect_cmd(&ctx, cmd)?,
         Cmd::Mcp => mcp::serve(ctx.home.clone())?,
         Cmd::Ca { cmd } => ca_cmd(&ctx, cmd.unwrap_or(CaCmd::Show))?,

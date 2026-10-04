@@ -162,6 +162,20 @@ impl Problem {
 /// Cross-field checks a section runs after each field is type-checked.
 pub type Validator = fn(&Values) -> Vec<Problem>;
 
+/// Where a global section keeps its values when it is not `settings.json`:
+/// a feature that already has its own file reads and writes it here.
+#[derive(Clone, Copy)]
+pub struct Storage {
+    pub load: fn(&Home) -> Values,
+    pub save: fn(&Home, &Values) -> Result<()>,
+}
+
+impl std::fmt::Debug for Storage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Storage")
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Section {
     pub id: String,
@@ -175,6 +189,8 @@ pub struct Section {
     pub fields: Vec<Field>,
     #[serde(skip)]
     pub validate: Option<Validator>,
+    #[serde(skip)]
+    pub storage: Option<Storage>,
 }
 
 impl Section {
@@ -188,6 +204,7 @@ impl Section {
             order: 100,
             fields: vec![],
             validate: None,
+            storage: None,
         }
     }
     pub fn describe(mut self, d: &str) -> Self {
@@ -208,6 +225,11 @@ impl Section {
     }
     pub fn validator(mut self, v: Validator) -> Self {
         self.validate = Some(v);
+        self
+    }
+    /// Keeps this global section's values in the feature's own file.
+    pub fn stored_by(mut self, load: fn(&Home) -> Values, save: fn(&Home, &Values) -> Result<()>) -> Self {
+        self.storage = Some(Storage { load, save });
         self
     }
 
@@ -297,7 +319,7 @@ fn check_field(f: &Field, v: &Value) -> Result<Value, String> {
 
 fn registry() -> &'static RwLock<Vec<Section>> {
     static REGISTRY: OnceLock<RwLock<Vec<Section>>> = OnceLock::new();
-    REGISTRY.get_or_init(|| RwLock::new(vec![proxy_section(), storage_section(), interface_section()]))
+    REGISTRY.get_or_init(|| RwLock::new(vec![proxy_section(), storage_section(), interface_section(), crate::access::settings_section(), crate::market::settings_section()]))
 }
 
 /// Adds a section, or replaces the one with the same id.
@@ -336,17 +358,29 @@ fn read_global(home: &Home) -> GlobalFile {
 
 /// The stored values of every global section, as written.
 pub fn global_values(home: &Home) -> Map<String, Value> {
-    read_global(home).sections
+    let mut all = read_global(home).sections;
+    for s in sections() {
+        if let Some(st) = s.storage {
+            all.insert(s.id.clone(), Value::Object((st.load)(home)));
+        }
+    }
+    all
 }
 
 /// One global section's values, defaults filled in.
 pub fn global(home: &Home, id: &str) -> Values {
-    let file = read_global(home);
-    section(id).map(|s| s.resolve(file.sections.get(id))).unwrap_or_default()
+    let Some(s) = section(id) else { return Values::new() };
+    match s.storage {
+        Some(st) => s.resolve(Some(&Value::Object((st.load)(home)))),
+        None => s.resolve(read_global(home).sections.get(id)),
+    }
 }
 
 pub fn save_global(home: &Home, id: &str, values: &Values) -> Result<()> {
     home.ensure()?;
+    if let Some(st) = section(id).and_then(|s| s.storage) {
+        return (st.save)(home, values);
+    }
     let mut file = read_global(home);
     file.sections.insert(id.to_string(), Value::Object(values.clone()));
     write_atomic(&global_path(home), &serde_json::to_vec_pretty(&file)?)
@@ -440,12 +474,6 @@ fn interface_section() -> Section {
             Field::choice("open_projects_in", "Open projects in", "window", &[("window", "A Plonix window"), ("browser", "My web browser")])
                 .help("The web version is the same Plonix, at a local address only this computer can open."),
         )
-        .field(Field::choice(
-            "on_launch",
-            "When Plonix starts",
-            "start",
-            &[("start", "Show the Start screen"), ("last", "Reopen the last project")],
-        ))
 }
 
 // ---- typed views -----------------------------------------------------------
@@ -519,13 +547,11 @@ impl StorageSettings {
 pub struct InterfaceSettings {
     /// True: open projects in the user's web browser instead of a window.
     pub open_in_browser: bool,
-    /// True: reopen the last project on launch instead of the Start screen.
-    pub reopen_last: bool,
 }
 
 impl InterfaceSettings {
     pub fn from_values(v: &Values) -> Self {
-        Self { open_in_browser: s(v, "open_projects_in") == "browser", reopen_last: s(v, "on_launch") == "last" }
+        Self { open_in_browser: s(v, "open_projects_in") == "browser" }
     }
     pub fn load(home: &Home) -> Self {
         Self::from_values(&global(home, INTERFACE))
@@ -616,6 +642,6 @@ mod tests {
     fn interface_defaults_to_a_window() {
         let home = Home { root: tempfile::tempdir().unwrap().keep() };
         let i = InterfaceSettings::load(&home);
-        assert!(!i.open_in_browser && !i.reopen_last);
+        assert!(!i.open_in_browser);
     }
 }

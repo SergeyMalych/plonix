@@ -2,7 +2,7 @@
 
 Plonix lets an AI agent work with your live project: the traffic you captured, the map of the target, detected technologies, scope and findings. It does this through MCP, the protocol coding agents such as Claude Code use for tools.
 
-Agents get **read-only** access. They can look at everything the project holds and cannot send requests, change scope or record findings. The engine enforces this, not the agent.
+Agents get **read-only** access. They can look at everything the project holds and cannot send requests, change scope or record, edit or delete findings. The engine enforces this, not the agent.
 
 ## Connect Claude Code
 
@@ -18,11 +18,11 @@ Plonix · connect Claude Code
   ✓ Claude Code  added MCP server "plonix" for all your projects: /Users/you/.cargo/bin/plonix mcp
 
 What the agent can do (read-only):
-  status · search_traffic · get_request · get_insights · list_hosts · list_endpoints · detected_tech · get_scope · list_findings
+  status · search_traffic · get_request · get_insights · list_hosts · list_endpoints · detected_tech · get_scope · list_findings · findings_report
 Not allowed:
   ✗ Send or replay requests
   ✗ Accept, reject or remove scope rules
-  ✗ Record or change findings
+  ✗ Record, edit or delete findings
   ✗ Open browsers, sign in to the window or stop the engine
 ```
 
@@ -69,7 +69,8 @@ Set `PLONIX_HOME` in the server's environment if your data is not in `~/.plonix`
 | `list_endpoints` | Methods, paths, statuses and parameter names seen on a host |
 | `detected_tech` | Technologies detected per host, with confidence and evidence |
 | `get_scope` | Scope rules and suggested domains with their evidence |
-| `list_findings` | Findings with severity, description and evidence request ids |
+| `list_findings` | Findings with severity, status, description and evidence request ids |
+| `findings_report` | The findings as a Markdown report with their evidence requests and responses (bodies clipped); false positives left out unless asked for. Evidence on hosts outside scope is left out when agents see in-scope traffic only |
 
 Every tool is marked read-only in its MCP annotations.
 
@@ -86,7 +87,7 @@ The Plonix window has an **Ask Claude** button on a request (the Lens), a findin
 
 ## Settings
 
-The **Agents** screen has a Claude Code settings section (`$PLONIX_HOME/agents.json`):
+**Settings › AI agents** holds these choices, for all projects (stored in `$PLONIX_HOME/agents.json`, so a change made in one window reaches every open project). The Agents screen shows a summary and a link there:
 
 - **On/off.** Turn agent access off and every agent request is refused (`agents_disabled`).
 - **What agents can see.** *In-scope hosts only* (the default) limits traffic, hosts, endpoints and technologies to hosts you accepted into scope; *Everything captured* includes out-of-scope and third-party traffic.
@@ -108,8 +109,12 @@ Captured traffic can include passwords, session cookies and API keys. Whatever t
 
 The access model is built to grow one step, without loosening anything that exists today:
 
-1. A new `AgentMode::Active`, switched on by you in the Agents screen or the CLI, stored per project. An agent can never switch it on itself.
+1. A new `AgentMode::Active`, switched on by you in Settings › AI agents or the CLI, stored per project. An agent can never switch it on itself.
 2. In that mode only, `POST /api/send` and `POST /api/replay` join the allowed routes. Both already go through scope enforcement, so an agent could only reach hosts you accepted into scope.
 3. Matching MCP tools appear only when the engine reports that mode.
 
 Changing scope, recording findings and controlling the engine stay with you in every mode. Active mode is not built yet.
+
+## Skills
+
+Skills are playbooks for one job in Plonix (get to know a host, explain a request, draft a finding). `plonix mcp` offers them as MCP prompts, so Claude Code lists them as `/mcp__plonix__<name>` commands, and as the `list_skills` and `get_skill` tools. A skill can only use what these settings allow: when a capability it reads is switched off, agents are not offered it. More skills come from the Market. See [market.md](market.md#skills).

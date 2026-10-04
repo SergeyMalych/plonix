@@ -18,9 +18,11 @@ use crate::ca::CertAuthority;
 use crate::detect::{self, Detection, Detector, HostTech};
 use crate::model::{Exchange, Headers, Source, now_ms};
 use crate::paths::{EngineInfo, Home};
+use crate::filterpack::{FilterLibrary, FilterSet};
 use crate::project::PruneReport;
 use crate::rulepack::{Library, PackInfo};
 use crate::crawl;
+use crate::exclude::{self, ExcludedDomain, Exclusions, Group, GroupStatus};
 use crate::runs;
 use crate::scan;
 use crate::scope::{self, Decision, Rule, ScopeRules};
@@ -48,6 +50,7 @@ pub struct Engine {
     recorder: mpsc::UnboundedSender<Exchange>,
     recorder_rx: Mutex<Option<mpsc::UnboundedReceiver<Exchange>>>,
     detection: Mutex<DetectionState>,
+    filters: Mutex<FilterState>,
     /// The listen address last asked for in the settings.
     applied_listen: Mutex<Option<SocketAddr>>,
     overrides: Mutex<UpstreamOptions>,
@@ -78,6 +81,14 @@ struct Interception {
 pub struct ProjectRef {
     pub id: String,
     pub dir: std::path::PathBuf,
+}
+
+/// Named Traffic filters in effect, reloaded when filter packs change.
+#[derive(Default)]
+struct FilterState {
+    library: Option<FilterLibrary>,
+    loaded_stamp: Option<Option<std::time::SystemTime>>,
+    set: Arc<FilterSet>,
 }
 
 /// Detection rules currently in effect. Reloaded when installed packs change
@@ -165,6 +176,7 @@ impl Engine {
             interception: RwLock::new(Interception { decrypt: true, passthrough: vec![] }),
             project_ref: OnceLock::new(),
             detection: Mutex::new(DetectionState::default()),
+            filters: Mutex::new(FilterState::default()),
             applied_listen: Mutex::new(None),
             overrides: Mutex::default(),
         }))
@@ -314,6 +326,32 @@ impl Engine {
 
     /// Loads installed rule packs from this library (built-in packs are
     /// always loaded).
+    /// Loads installed filter packs from this library (built-in packs are
+    /// always loaded).
+    pub fn set_filter_library(&self, library: FilterLibrary) {
+        let mut f = self.filters.lock().unwrap();
+        f.library = Some(library);
+        f.loaded_stamp = None;
+    }
+
+    /// Named filters in effect (`is:name`), reloading them if packs changed.
+    pub fn filters(&self) -> Arc<FilterSet> {
+        let mut f = self.filters.lock().unwrap();
+        let stamp = f.library.as_ref().and_then(FilterLibrary::stamp);
+        if f.loaded_stamp != Some(stamp) {
+            let set = match &f.library {
+                Some(lib) => lib.load(),
+                None => FilterLibrary::at(std::path::Path::new("/nonexistent")).load(),
+            };
+            for p in &set.problems {
+                tracing::warn!("filters: {p}");
+            }
+            f.set = Arc::new(set);
+            f.loaded_stamp = Some(stamp);
+        }
+        f.set.clone()
+    }
+
     pub fn set_rule_library(&self, library: Library) {
         let mut d = self.detection.lock().unwrap();
         d.library = Some(library);
@@ -447,6 +485,91 @@ impl Engine {
             self.store.prune_decided(&self.rules())?;
         }
         Ok(rule)
+    }
+
+    // ---- exclusions ------------------------------------------------------
+
+    /// The built-in groups followed by the user's custom groups.
+    pub fn exclusion_groups(&self) -> Result<Vec<Group>> {
+        let mut groups = exclude::builtin_groups();
+        groups.extend(self.store.custom_groups()?);
+        Ok(groups)
+    }
+
+    /// A snapshot of every group with each domain's current on/off state.
+    pub fn exclusions(&self) -> Result<Exclusions> {
+        let rules = self.rules();
+        let groups = self
+            .exclusion_groups()?
+            .into_iter()
+            .map(|g| {
+                let state = exclude::group_state(&rules, &g);
+                let domains = g.domains.iter().map(|d| ExcludedDomain { host: d.clone(), excluded: exclude::is_excluded(&rules, d) }).collect();
+                GroupStatus { state, domains, id: g.id, name: g.name, description: g.description, builtin: g.builtin }
+            })
+            .collect();
+        Ok(Exclusions { groups, asked: self.exclusions_asked()? })
+    }
+
+    /// Switches a whole group on (exclude every member) or off.
+    pub fn set_group_excluded(&self, group_id: &str, on: bool) -> Result<()> {
+        let group = self.exclusion_groups()?.into_iter().find(|g| g.id == group_id).context("unknown exclusion group")?;
+        if on {
+            let now = now_ms();
+            let rules: Vec<Rule> = group.domains.iter().map(|d| exclude::exclusion_rule(d, group_id, now)).collect();
+            self.store.put_rules(&rules)?;
+        } else {
+            self.store.delete_group_rules(group_id)?;
+        }
+        *self.rules.write().unwrap() = self.store.rules()?;
+        self.store.prune_decided(&self.rules())?;
+        Ok(())
+    }
+
+    /// Switches one member of a group on or off.
+    pub fn set_domain_excluded(&self, group_id: &str, host: &str, on: bool) -> Result<()> {
+        if on {
+            self.store.put_rules(&[exclude::exclusion_rule(host, group_id, now_ms())])?;
+        } else {
+            self.store.delete_group_rule(&scope::normalize_host(host))?;
+        }
+        *self.rules.write().unwrap() = self.store.rules()?;
+        self.store.prune_decided(&self.rules())?;
+        Ok(())
+    }
+
+    /// Creates or replaces a custom group. Enabling it is a separate step.
+    pub fn save_custom_group(&self, mut group: Group) -> Result<Group> {
+        group.id = exclude::normalize_group_id(&group.id, &group.name);
+        anyhow::ensure!(!group.id.is_empty(), "a group needs a name");
+        anyhow::ensure!(!exclude::builtin_groups().iter().any(|g| g.id == group.id), "that name clashes with a built-in group");
+        group.builtin = false;
+        group.domains = group.domains.iter().map(|d| scope::normalize_host(d)).filter(|d| !d.is_empty()).collect();
+        self.store.put_custom_group(&group, now_ms())?;
+        Ok(group)
+    }
+
+    /// Deletes a custom group and any exclusions it owns.
+    pub fn remove_custom_group(&self, id: &str) -> Result<()> {
+        self.store.delete_group_rules(id)?;
+        self.store.delete_custom_group(id)?;
+        *self.rules.write().unwrap() = self.store.rules()?;
+        Ok(())
+    }
+
+    /// Whether the one-time "exclude common domains?" prompt has been answered.
+    pub fn exclusions_asked(&self) -> Result<bool> {
+        Ok(self
+            .store
+            .view_state("exclusions")?
+            .and_then(|v| v.get("asked").and_then(|a| a.as_bool()))
+            .unwrap_or(false))
+    }
+
+    /// Records that the one-time prompt has been answered, so it is not shown again.
+    pub fn mark_exclusions_asked(&self) -> Result<()> {
+        self.store.set_view_state("exclusions", &serde_json::json!({ "asked": true }))?;
+        Ok(())
     }
 
     pub fn remove_rule(&self, domain: &str) -> Result<bool> {
@@ -898,6 +1021,7 @@ pub async fn start(config: &EngineConfig) -> Result<Running> {
     let upstream = Upstream::new(config.insecure_upstream, vec![])?;
     let engine = Engine::new(project.name(), store, ca, upstream)?;
     engine.set_rule_library(Library::new(&config.home));
+    engine.set_filter_library(FilterLibrary::new(&config.home));
     start_with(engine, config).await
 }
 

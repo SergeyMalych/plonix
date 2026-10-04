@@ -46,9 +46,11 @@ Plonix has a handful of tools, each with its own name. They are the same in the 
 | **Bench** | Where you experiment: edit a request, send it, branch it and compare responses side by side. Each tab is one experiment | `plonix replay <id>` |
 | **Scope** | Adaptive scope: the domains Plonix thinks belong to your target, with the evidence, to accept or reject | `plonix scope` |
 | **Map** | Hosts, the technologies behind them and their endpoints and parameters | `plonix hosts`, `plonix tech` |
-| **Findings** | What you found, with the requests that prove it attached as evidence | the window, or `/api/findings` |
+| **Findings** | What you found, with the requests that prove it attached as evidence. Edit, confirm, close and export them as a report | `plonix findings` |
 | **Agents** | Which AI agents are connected to the project, what they may do, and how to connect one | `plonix connect claude`, `plonix mcp` |
-| **Rules** and the **Store** | Community rule packs that teach Plonix to recognise technologies | `plonix rules`, `plonix store` |
+| **Market** | One signed catalog of skills, rule packs, filter packs, bundles and extensions | `plonix market`, ⌘7 |
+| **Skills** | Playbooks AI agents follow for a job in Plonix, offered over MCP | `plonix skills` |
+| **Rules** | Community rule packs that teach Plonix to recognise technologies | `plonix rules` |
 
 ## What works today
 
@@ -99,8 +101,9 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 
 ### Technology detection, maintained by the community
 - Plonix recognises what runs behind every host (servers, frameworks, CMSs, CDNs and WAFs, identity providers, exposed admin consoles) and shows the evidence for each detection, down to the exchange.
-- Detection is driven by declarative **rule packs** that anyone can write and share. Install them from a file, a URL or the **store**, a JSON index hosted anywhere. New rules apply to traffic you already captured.
+- Detection is driven by declarative **rule packs** that anyone can write and share. Install them from a file, a URL or the **Market**. New rules apply to traffic you already captured.
 - Packs are untrusted data: strictly validated, linear-time patterns only, pinned by SHA-256 and re-verified on load. They can't run code, reach the network or touch scope. See [docs/detection-rules.md](docs/detection-rules.md) and the extension design in [docs/extensions.md](docs/extensions.md).
+- **Filter packs** add named filters such as `is:auth`, `is:graphql` or `-is:trackers` to search, the CLI and the **+ Filter** builder in Traffic. Plonix ships a `common` pack, and the Market has more. See [docs/filters.md](docs/filters.md).
 
 ### Projects, side by side
 - **A project is a folder you choose.** It holds the project's traffic, scope and findings (`traffic.db`), its settings (`plonix-project.json`) and its own capture-browser profile. Move or copy the folder and open it again; it just works. New projects go in `~/Plonix` unless you pick another folder.
@@ -111,7 +114,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 ### Settings
 - **Proxy** (per project, applies right away): listen address and port (use 0.0.0.0 to capture from phones and other devices), next-free-port fallback, HTTPS decryption on or off, hosts that are never decrypted (for apps that pin certificates), server certificate checks, an upstream HTTP or SOCKS5 proxy with login and a list of hosts to reach directly, and timeouts.
 - **Storage** (per project): keep only in-scope traffic, with a count of what it would delete and a button to delete it now.
-- **Interface** (all projects): open projects in a Plonix window or in your web browser, and show the Start screen or reopen the last project when Plonix starts.
+- **Interface** (all projects): open projects in a Plonix window or in your web browser.
 - Settings are a registry: a feature adds a section by describing its fields, and the Settings screens draw it with validation and storage included (see [docs/projects.md](docs/projects.md#adding-a-settings-section)).
 
 ### The Plonix app
@@ -121,6 +124,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - Native menu bar and shortcuts: ⌘N new project, ⇧⌘P the Start screen, ⌘, Settings, ⌘1 to ⌘6 switch between Traffic, Bench, Scope, Map, Findings and Agents, ⌃⌘S shows or hides the sidebar. Light and dark follow the system.
 - `plonix` commands in a terminal talk to the same sessions while the app is open (`-p` picks the project), and projects started from a terminal show up on the Start screen. Quitting the app closes the projects it opened.
 - The same window also runs in any browser with `plonix ui`, served by the engine itself.
+- **Updates are your call.** Plonix asks once whether to check for new versions (daily, weekly, at launch or only when you ask) and never installs anything by itself: downloading and installing each need a click, and closing a dialog means no. See [docs/updates.md](docs/updates.md).
 
 ### The Plonix window
 - **Sidebar:** navigation, Open target, the scope suggestions waiting on you (accept or reject in one click) and the hosts in scope with their request counts (click one to filter Traffic). Collapse it to icons with ⌃⌘S, or `\` in a browser.
@@ -130,14 +134,14 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - **Bench:** edit any request and send it (press `b` or double-click a row in Traffic), keep a history per tab, restore or branch any earlier send into a new tab, and compare two sends side by side (response or request diff). Sends go through the engine's scope enforcement: out-of-scope hosts are refused, and you can accept the host right there.
 - **Scope:** every suggested domain with its evidence, accept (with or without subdomains) or reject, and the rule list.
 - **Map:** hosts with their scope state, detected technologies with the evidence behind them, and endpoints with statuses and parameters.
-- **Findings:** record a finding from any request, with the requests that prove it linked as evidence.
-- **Agents:** which AI agents are connected right now and every request they made, a Claude Code settings panel (on/off, in-scope-only or everything, which tools, and the Ask-Claude context limit), the one command that connects Claude Code, and prompts to try.
+- **Findings:** record a finding from any request, with the requests that prove it linked as evidence. Edit its title, severity and description, set its status (open, confirmed, false positive, fixed) and delete it after a confirmation. **Export** saves the findings as a report in Markdown, a self-contained HTML page or JSON, each finding with its evidence requests and responses (bodies clipped to 4,000 characters). Reports leave false positives out unless you ask for them.
+- **Agents:** which AI agents are connected right now and every request they made, a summary of what agents may read (changed in Settings › AI agents: on/off, in-scope-only or everything, which kinds of data, and the Ask-Claude context limit), the one command that connects Claude Code, and prompts to try.
 - **Suggested filters** come from the traffic you captured: in-scope only, server and client errors, the write methods in use, JSON, the busiest API paths and hosts, requests sent from the Bench, and one chip that hides static files. Each shows how many requests it matches, and a filter only appears when something matches it.
 - The page signs in through a one-time link (the app and `plonix ui` create it), so the API token never appears in a URL. It is locked down with a strict Content-Security-Policy, and captured content is only ever rendered as text.
 
 ### AI agents over MCP
-- `plonix connect claude` adds Plonix to Claude Code as an MCP server. From then on Claude Code can search your captured traffic, read requests and responses, see hosts, endpoints and detected technologies, review scope suggestions and read findings, on the live project.
-- Access is **read-only and enforced by the engine**: agents sign in with their own token (`~/.plonix/agent-token`), and anything but reading (sending or replaying requests, changing scope, recording findings) is refused.
+- `plonix connect claude` adds Plonix to Claude Code as an MCP server. From then on Claude Code can search your captured traffic, read requests and responses, see hosts, endpoints and detected technologies, review scope suggestions, and read findings or export them as a report, on the live project.
+- Access is **read-only and enforced by the engine**: agents sign in with their own token (`~/.plonix/agent-token`), and anything but reading (sending or replaying requests, changing scope, recording, editing or deleting findings) is refused.
 - **Ask Claude Code** buttons on a request, finding, host or scope suggestion hand Claude Code just that spot's context as a prompt you review first. Plonix clips the bodies, shows what will be shared, and warns before sending more than your context limit.
 - Any other MCP client can run `plonix mcp` as a stdio server. Captured data stays on your machine. See [docs/agents.md](docs/agents.md).
 
@@ -220,10 +224,20 @@ plonix scope accept '*.example-cdn.com'    # or: reject, remove
 
 plonix replay 42 -H 'Authorization: Bearer other-user' -t '/api/users/2'
 
+plonix findings                            # what you found, most severe first
+plonix findings add 'IDOR on /api/users' -s high -r 42,43
+plonix findings show 1                     # one finding with its evidence requests
+plonix findings edit 1 -d @notes.md        # or --title, --severity
+plonix findings status 1 confirmed         # open, confirmed, false-positive, fixed
+plonix findings rm 2                       # asks first; the requests stay
+plonix findings export -o report.html      # or .md, .json; false positives left out
+
 plonix rules                               # detection rule packs in effect
 plonix rules add ./my-pack.json            # or an https:// URL, optionally --sha256
-plonix store                               # browse community packs
-plonix store install admin-panels          # verified against the store's sha256
+plonix filters                             # named filters: is:auth, is:graphql, -is:trackers
+plonix market                              # skills, rules, filters, bundles, extensions
+plonix market install api-kit              # a bundle: verified against the signed index
+plonix skills                              # playbooks your agent can follow
 plonix stop                                # captured traffic is kept
 
 plonix start -p shop                       # open another project; it gets its own proxy
@@ -273,11 +287,14 @@ The API listens on port 8090 when it is free; `plonix status` shows the actual a
 | GET | `/api/hosts/{host}/endpoints` | Endpoints seen on a host |
 | GET | `/api/tech` · `/api/tech/{host}` | Detected technologies per host, with evidence |
 | GET | `/api/rules` | Detection rule packs in effect |
+| GET | `/api/filters` | Named filters (`is:name`) in effect, and their packs |
 | GET | `/api/scope` | Scope rules and pending suggestions |
 | POST | `/api/scope/accept` · `reject` · `remove` | Decide on a domain |
 | POST | `/api/send` | Send a new request (in-scope hosts only) |
 | POST | `/api/replay` | Replay a captured exchange, optionally modified |
 | GET / POST | `/api/findings` | List or record findings |
+| GET / PATCH / DELETE | `/api/findings/{id}` | One finding; change its `title`, `severity`, `status` or `description`; delete it (user only for changes) |
+| GET | `/api/findings/export?format=md\|html\|json` | The findings as a report with their evidence; `ids=1,2` and `status=open,confirmed` choose which (default: all but false positives) |
 | GET | `/api/settings` | Settings sections, with their fields and values |
 | PUT | `/api/settings/{section}` | Save a section (`{"values": {...}}`); proxy changes apply at once |
 | GET | `/api/storage` | How much traffic is out of scope, and the storage policy |
@@ -304,19 +321,19 @@ Each open project has its own API address. `$PLONIX_HOME/sessions/` lists them, 
       store,     scope, tech   reproducible)
       search)    detection)
                     ▲
-          rule packs · store       untrusted, declarative, verified
+          rule packs · Market      untrusted, declarative, verified
 ```
 
 The engine is a headless background process. Every front end talks to it the same way, so the Mac app, your shell scripts and your AI agent always see the same project.
 
 ```text
 crates/
-├── plonix-core   engine: proxy, CA, store, search, scope, detection, rule packs, store index, local API,
+├── plonix-core   engine: proxy, CA, store, search, scope, detection, rule packs, skills, Market, local API,
 │   │             projects, sessions, settings and the Start screen
 │   └── ui/       the Plonix window and Start screen: plain HTML, CSS and JavaScript embedded in the binary
-├── plonix-cli    the `plonix` command: engine control, onboarding, search, scope, replay, rules, store, MCP server
+├── plonix-cli    the `plonix` command: engine control, onboarding, search, scope, replay, rules, Market, skills, MCP server
 └── plonix-app    Plonix.app: the window as a desktop app, with the engine built in
-store/            community store: index.json and rule packs
+store/            the Market: signed index.json, skills, rule packs, filter packs, extension manifests
 docs/             detection rules, agents and MCP, extension design
 ```
 
@@ -331,7 +348,9 @@ docs/             detection rules, agents and MCP, extension design
 - [x] Token-authenticated, loopback-only local API
 - [x] `plonix` CLI: search, inspect, watch, replay and manage scope from the terminal
 - [x] `plonix open <target>`: one command from nothing to captured traffic, in a pre-configured browser
-- [x] Technology detection from community rule packs, with a store (`plonix tech`, `plonix rules`, `plonix store`)
+- [x] Technology detection from community rule packs (`plonix tech`, `plonix rules`)
+- [x] The Market: a signed catalog of skills, rule packs, filter packs, bundles and extensions (`plonix market`)
+- [x] Agent skills, offered to MCP clients as prompts (`plonix skills`)
 - [x] The Plonix window (`plonix ui`): live traffic, the Bench with branch and compare, adaptive scope review, map with technologies, findings
 - [x] Plonix.app for macOS: the window as a desktop app with the engine built in, Open target from the app, native menu bar
 - [x] Read-only MCP server (`plonix mcp`), `plonix connect claude` and the Agents screen
@@ -352,7 +371,7 @@ Plonix is early, and this is a good time to shape it. Issues and discussions abo
 2. Keep pull requests focused, and include tests for engine behavior.
 3. Run `cargo fmt`, `cargo clippy --workspace` and `cargo test --workspace` before pushing.
 
-The easiest way to contribute is a **detection rule pack**: no Rust needed. Write one, check it with `plonix rules check`, and open a pull request that adds it to `store/`. See [docs/detection-rules.md](docs/detection-rules.md#contributing-a-pack).
+The easiest way to contribute is a **detection rule pack**: no Rust needed. Write one, check it with `plonix rules check`, and open a pull request that adds it to `store/`. Skills work the same way: Markdown with a short header ([docs/market.md](docs/market.md#writing-a-skill)). See [docs/detection-rules.md](docs/detection-rules.md#contributing-a-pack).
 
 Use Plonix only against systems you are authorized to test.
 
