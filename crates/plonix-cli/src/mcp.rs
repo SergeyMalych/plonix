@@ -29,8 +29,8 @@ the user's browser while they test a web application, learns which domains belon
 (scope), detects technologies and keeps the user's findings.
 
 These tools give you read-only access to that live project: search and read captured requests, see \
-hosts, endpoints and detected technologies, review scope and its suggestions, and read findings. You \
-cannot send or replay requests, change scope or record findings; suggest those steps to the user instead. \
+hosts, endpoints and detected technologies, review scope and its suggestions, and read findings or export them \
+as a report. You cannot send or replay requests, change scope or record, edit or delete findings; suggest those steps to the user instead. \
 The user decides what you can see: by default only hosts accepted into scope, and some tools may be switched off.
 
 The user can install skills: playbooks for a job in Plonix (get to know a host, explain a request, \
@@ -251,6 +251,28 @@ Each has a name, what it is for and the arguments it takes. Read one with get_sk
                     v["skill"]["instructions"].as_str().unwrap_or("")
                 )),
             }
+        },
+    },
+    Tool {
+        name: "findings_report",
+        route: "/api/findings/export",
+        title: "Findings report",
+        description: "The user's findings as a Markdown report, most severe first, each with its evidence requests and responses (bodies clipped). \
+By default false positives are left out; pass ids or statuses (open, confirmed, false_positive, fixed) to choose.",
+        schema: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "ids": { "type": "array", "items": { "type": "integer" }, "description": "Only these finding ids" },
+                    "status": { "type": "string", "description": "Comma-separated statuses, e.g. open,confirmed" }
+                },
+                "additionalProperties": false
+            })
+        },
+        call: |c, a| {
+            let ids: Vec<String> = a["ids"].as_array().into_iter().flatten().filter_map(Value::as_i64).map(|i| i.to_string()).collect();
+            let status = a["status"].as_str().unwrap_or("");
+            c.get_text(&format!("/api/findings/export?format=md&ids={}&status={}", encode(&ids.join(",")), encode(status)))
         },
     },
 ];

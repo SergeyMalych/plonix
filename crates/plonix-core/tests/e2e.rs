@@ -533,6 +533,75 @@ async fn agent_token_is_read_only() {
     r.engine.shutdown.notify_waiters();
 }
 
+/// The user edits, closes, deletes and exports findings; agents can read and
+/// export them but not change them, and only see in-scope evidence.
+#[tokio::test]
+async fn findings_can_be_finished_by_the_user_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let up = serve_http().await;
+    let r = start(&home, None).await;
+    via_proxy(r.proxy_addr, &format!("http://localhost:{}/", up.port()), &[]).await;
+    wait_for_count(&r.engine, 1).await;
+    let base = format!("http://{}", r.api_addr);
+    let (user, agent) = (format!("Bearer {}", r.token), format!("Bearer {}", r.agent_token));
+
+    tokio::task::spawn_blocking(move || {
+        let json = |r: Result<ureq::Response, ureq::Error>| match r {
+            Ok(r) => (r.status(), r.into_json::<serde_json::Value>().unwrap()),
+            Err(ureq::Error::Status(c, r)) => (c, r.into_json::<serde_json::Value>().unwrap()),
+            Err(e) => panic!("{e}"),
+        };
+        let text = |path: &str, auth: &str| {
+            let r = ureq::get(&format!("{base}{path}")).set("Authorization", auth).call().unwrap();
+            (r.header("content-type").unwrap_or("").to_string(), r.header("content-disposition").unwrap_or("").to_string(), r.into_string().unwrap())
+        };
+        let req = |method: &str, path: &str, auth: &str| ureq::request(method, &format!("{base}{path}")).set("Authorization", auth);
+
+        let (code, f) = json(req("POST", "/api/findings", &user).send_json(serde_json::json!({ "title": "Open redirect", "severity": "Medium", "exchange_ids": [1] })));
+        assert_eq!((code, f["severity"].as_str(), f["status"].as_str()), (201, Some("medium"), Some("open")));
+        let id = f["id"].as_i64().unwrap();
+        let path = format!("/api/findings/{id}");
+
+        // Agents read and export, and cannot edit or delete.
+        assert_eq!(json(req("GET", &path, &agent).call()).1["title"], "Open redirect");
+        for method in ["PATCH", "PUT", "DELETE"] {
+            let (code, body) = json(req(method, &path, &agent).send_json(serde_json::json!({ "status": "fixed" })));
+            assert_eq!((code, body["code"].as_str()), (403, Some("agent_not_allowed")), "{method}");
+        }
+        // localhost is not in scope, so an agent's report leaves the request out.
+        let (_, _, md) = text("/api/findings/export?format=md", &agent);
+        assert!(md.contains("Open redirect") && md.contains("agents may see in-scope traffic only") && !md.contains("welcome home"), "{md}");
+
+        // The user edits it.
+        let (code, body) = json(req("PATCH", &path, &user).send_json(serde_json::json!({ "status": "nonsense" })));
+        assert_eq!((code, body["code"].as_str()), (400, Some("bad_request")));
+        let (code, f) = json(req("PATCH", &path, &user).send_json(serde_json::json!({ "title": "Open redirect on /", "status": "confirmed", "description": "Steps" })));
+        assert_eq!((code, f["title"].as_str(), f["status"].as_str(), f["severity"].as_str()), (200, Some("Open redirect on /"), Some("confirmed"), Some("medium")));
+        assert_eq!(json(req("PATCH", "/api/findings/999", &user).send_json(serde_json::json!({ "status": "fixed" }))).0, 404);
+
+        let (ctype, disposition, html) = text("/api/findings/export?format=html", &user);
+        assert!(ctype.starts_with("text/html") && disposition.contains("attachment; filename=\"plonix-findings-"));
+        assert!(html.contains("Open redirect on /") && html.contains("welcome home") && html.contains("Steps"));
+        let (_, _, js) = text(&format!("/api/findings/export?format=json&ids={id}"), &user);
+        let v: serde_json::Value = serde_json::from_str(&js).unwrap();
+        assert_eq!(v["findings"][0]["evidence"][0]["method"], "GET");
+        assert_eq!(json(req("GET", "/api/findings/export?format=pdf", &user).call()).0, 400);
+
+        // A false positive leaves the default report.
+        json(req("PATCH", &path, &user).send_json(serde_json::json!({ "status": "false positive" })));
+        assert!(!text("/api/findings/export", &user).2.contains("Open redirect"));
+
+        assert_eq!(json(req("DELETE", &path, &user).call()).1["deleted"], id);
+        assert_eq!(json(req("DELETE", &path, &user).call()).0, 404);
+        assert_eq!(json(req("GET", &path, &user).call()).0, 404);
+        assert!(json(req("GET", "/api/findings", &user).call()).1.as_array().unwrap().is_empty());
+    })
+    .await
+    .unwrap();
+    r.engine.shutdown.notify_waiters();
+}
+
 /// The user narrows agent access with settings, and "Ask Claude Code"
 /// bundles just one spot's context, clipped and within the budget.
 #[tokio::test]

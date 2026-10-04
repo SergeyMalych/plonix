@@ -6,9 +6,9 @@
 //! [`AgentMode`], so the limit holds even if the agent's client is changed.
 //!
 //! Today the only mode is [`AgentMode::ReadOnly`]: agents can look at
-//! traffic, the map, detected technologies, scope and findings, and cannot
-//! send or replay requests, change scope, record findings or control the
-//! engine.
+//! traffic, the map, detected technologies, scope and findings (and export
+//! findings as a report), and cannot send or replay requests, change scope,
+//! record, edit or delete findings or control the engine.
 //!
 //! # Adding an active mode later
 //!
@@ -116,6 +116,8 @@ const READ_ONLY: &[Capability] = &[
     cap("/api/tech/{host}", "Technologies detected on each host", Group::Map),
     cap("/api/scope", "Scope rules and suggested domains", Group::Scope),
     cap("/api/findings", "Recorded findings", Group::Findings),
+    cap("/api/findings/{id}", "One finding", Group::Findings),
+    cap("/api/findings/export", "Findings as a report with their evidence requests", Group::Findings),
     cap("/api/scan/catalog", "Available scan detectors and tactics", Group::Scan),
     cap("/api/scan/suggest/{host}", "Suggested scan profile for a host (read-only advice)", Group::Scan),
     cap("/api/agents", "This access policy", Group::Basics),
@@ -356,7 +358,7 @@ pub fn not_allowed(mode: AgentMode) -> &'static [&'static str] {
         AgentMode::ReadOnly => &[
             "Send or replay requests",
             "Accept, reject or remove scope rules",
-            "Record or change findings",
+            "Record, edit or delete findings",
             "Open browsers, sign in to the window or stop the engine",
             "Install, update or remove anything from the Market",
         ],
@@ -452,6 +454,8 @@ mod tests {
             ("GET", "/api/tech/example.com"),
             ("GET", "/api/scope"),
             ("GET", "/api/findings"),
+            ("GET", "/api/findings/3"),
+            ("GET", "/api/findings/export"),
             ("GET", "/api/scan/catalog"),
             ("GET", "/api/scan/suggest/example.com"),
             ("GET", "/api/agents"),
@@ -480,6 +484,11 @@ mod tests {
             ("GET", "/api/rules"),
             ("POST", "/api/traffic"),
             ("DELETE", "/api/findings"),
+            ("PATCH", "/api/findings/3"),
+            ("PUT", "/api/findings/3"),
+            ("DELETE", "/api/findings/3"),
+            ("POST", "/api/findings/3"),
+            ("GET", "/api/findings/3/x"),
         ] {
             assert!(!allowed(m, method, path), "{method} {path} should be refused");
         }

@@ -46,7 +46,7 @@ Plonix has a handful of tools, each with its own name. They are the same in the 
 | **Bench** | Where you experiment: edit a request, send it, branch it and compare responses side by side. Each tab is one experiment | `plonix replay <id>` |
 | **Scope** | Adaptive scope: the domains Plonix thinks belong to your target, with the evidence, to accept or reject | `plonix scope` |
 | **Map** | Hosts, the technologies behind them and their endpoints and parameters | `plonix hosts`, `plonix tech` |
-| **Findings** | What you found, with the requests that prove it attached as evidence | the window, or `/api/findings` |
+| **Findings** | What you found, with the requests that prove it attached as evidence. Edit, confirm, close and export them as a report | `plonix findings` |
 | **Agents** | Which AI agents are connected to the project, what they may do, and how to connect one | `plonix connect claude`, `plonix mcp` |
 | **Market** | One signed catalog of skills, rule packs, filter packs, bundles and extensions | `plonix market`, ⌘7 |
 | **Skills** | Playbooks AI agents follow for a job in Plonix, offered over MCP | `plonix skills` |
@@ -134,14 +134,14 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - **Bench:** edit any request and send it (press `b` or double-click a row in Traffic), keep a history per tab, restore or branch any earlier send into a new tab, and compare two sends side by side (response or request diff). Sends go through the engine's scope enforcement: out-of-scope hosts are refused, and you can accept the host right there.
 - **Scope:** every suggested domain with its evidence, accept (with or without subdomains) or reject, and the rule list.
 - **Map:** hosts with their scope state, detected technologies with the evidence behind them, and endpoints with statuses and parameters.
-- **Findings:** record a finding from any request, with the requests that prove it linked as evidence.
+- **Findings:** record a finding from any request, with the requests that prove it linked as evidence. Edit its title, severity and description, set its status (open, confirmed, false positive, fixed) and delete it after a confirmation. **Export** saves the findings as a report in Markdown, a self-contained HTML page or JSON, each finding with its evidence requests and responses (bodies clipped to 4,000 characters). Reports leave false positives out unless you ask for them.
 - **Agents:** which AI agents are connected right now and every request they made, a summary of what agents may read (changed in Settings › AI agents: on/off, in-scope-only or everything, which kinds of data, and the Ask-Claude context limit), the one command that connects Claude Code, and prompts to try.
 - **Suggested filters** come from the traffic you captured: in-scope only, server and client errors, the write methods in use, JSON, the busiest API paths and hosts, requests sent from the Bench, and one chip that hides static files. Each shows how many requests it matches, and a filter only appears when something matches it.
 - The page signs in through a one-time link (the app and `plonix ui` create it), so the API token never appears in a URL. It is locked down with a strict Content-Security-Policy, and captured content is only ever rendered as text.
 
 ### AI agents over MCP
-- `plonix connect claude` adds Plonix to Claude Code as an MCP server. From then on Claude Code can search your captured traffic, read requests and responses, see hosts, endpoints and detected technologies, review scope suggestions and read findings, on the live project.
-- Access is **read-only and enforced by the engine**: agents sign in with their own token (`~/.plonix/agent-token`), and anything but reading (sending or replaying requests, changing scope, recording findings) is refused.
+- `plonix connect claude` adds Plonix to Claude Code as an MCP server. From then on Claude Code can search your captured traffic, read requests and responses, see hosts, endpoints and detected technologies, review scope suggestions, and read findings or export them as a report, on the live project.
+- Access is **read-only and enforced by the engine**: agents sign in with their own token (`~/.plonix/agent-token`), and anything but reading (sending or replaying requests, changing scope, recording, editing or deleting findings) is refused.
 - **Ask Claude Code** buttons on a request, finding, host or scope suggestion hand Claude Code just that spot's context as a prompt you review first. Plonix clips the bodies, shows what will be shared, and warns before sending more than your context limit.
 - Any other MCP client can run `plonix mcp` as a stdio server. Captured data stays on your machine. See [docs/agents.md](docs/agents.md).
 
@@ -224,6 +224,14 @@ plonix scope accept '*.example-cdn.com'    # or: reject, remove
 
 plonix replay 42 -H 'Authorization: Bearer other-user' -t '/api/users/2'
 
+plonix findings                            # what you found, most severe first
+plonix findings add 'IDOR on /api/users' -s high -r 42,43
+plonix findings show 1                     # one finding with its evidence requests
+plonix findings edit 1 -d @notes.md        # or --title, --severity
+plonix findings status 1 confirmed         # open, confirmed, false-positive, fixed
+plonix findings rm 2                       # asks first; the requests stay
+plonix findings export -o report.html      # or .md, .json; false positives left out
+
 plonix rules                               # detection rule packs in effect
 plonix rules add ./my-pack.json            # or an https:// URL, optionally --sha256
 plonix filters                             # named filters: is:auth, is:graphql, -is:trackers
@@ -285,6 +293,8 @@ The API listens on port 8090 when it is free; `plonix status` shows the actual a
 | POST | `/api/send` | Send a new request (in-scope hosts only) |
 | POST | `/api/replay` | Replay a captured exchange, optionally modified |
 | GET / POST | `/api/findings` | List or record findings |
+| GET / PATCH / DELETE | `/api/findings/{id}` | One finding; change its `title`, `severity`, `status` or `description`; delete it (user only for changes) |
+| GET | `/api/findings/export?format=md\|html\|json` | The findings as a report with their evidence; `ids=1,2` and `status=open,confirmed` choose which (default: all but false positives) |
 | GET | `/api/settings` | Settings sections, with their fields and values |
 | PUT | `/api/settings/{section}` | Save a section (`{"values": {...}}`); proxy changes apply at once |
 | GET | `/api/storage` | How much traffic is out of scope, and the storage policy |

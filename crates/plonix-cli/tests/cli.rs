@@ -262,6 +262,57 @@ fn capture_search_show_scope_and_replay() {
     assert!(!p.home.path().join("engine.json").exists());
 }
 
+#[test]
+fn findings_from_record_to_report() {
+    let p = Plonix::new();
+    let target = serve_target();
+    let proxy = p.start();
+    via_proxy(&proxy, &format!("http://localhost:{target}/echo?id=7"), &[]);
+    let id = p.search_until("", 1)["items"][0]["id"].as_i64().unwrap().to_string();
+
+    assert!(p.run(&["findings"]).ok().stdout().contains("No findings yet"));
+    let out = p.run(&["findings", "add", "IDOR on /echo", "-s", "high", "-r", &id, "-d", "Change the id"]).ok().stdout();
+    assert!(out.contains("Recorded finding #1: IDOR on /echo"), "{out}");
+    p.run(&["findings", "add", "Verbose banner", "-s", "low"]).ok();
+
+    let out = p.run(&["findings"]).ok().stdout();
+    let lines: Vec<&str> = out.lines().collect();
+    assert!(lines[1].contains("high") && lines[1].contains("IDOR on /echo") && lines[2].contains("Verbose banner"), "most severe first:\n{out}");
+
+    let out = p.run(&["findings", "show", "1"]).ok().stdout();
+    assert!(out.contains("#1 IDOR on /echo") && out.contains("Change the id") && out.contains("GET /echo?id=7 HTTP/1.1") && out.contains("HTTP/1.1 200"), "{out}");
+    assert_eq!(p.run(&["findings", "show", "9"]).code(), 5);
+
+    let out = p.run(&["findings", "edit", "1", "--title", "IDOR on /echo?id=", "-s", "critical"]).ok().stdout();
+    assert!(out.contains("Updated finding #1: IDOR on /echo?id= (critical, open)"), "{out}");
+    assert_eq!(p.run(&["findings", "edit", "1", "-s", "urgent"]).code(), 2);
+    assert_eq!(p.run(&["findings", "edit", "1"]).code(), 1);
+    assert!(p.run(&["findings", "status", "1", "confirmed"]).ok().stdout().contains("Finding #1 is now confirmed."));
+    assert!(p.run(&["findings", "status", "2", "false-positive"]).ok().stdout().contains("now false positive"));
+    assert_eq!(p.run(&["findings", "status", "1", "later"]).code(), 2);
+    assert_eq!(p.run(&["findings", "status", "9", "fixed"]).code(), 5);
+    let out = p.run(&["findings", "list", "--status", "confirmed"]).ok().stdout();
+    assert!(out.contains("IDOR") && !out.contains("Verbose banner"), "{out}");
+
+    // Reports: false positives stay out unless asked for.
+    let dir = tempfile::tempdir().unwrap();
+    let html = dir.path().join("report.html");
+    p.run(&["findings", "export", "-o", html.to_str().unwrap()]).ok();
+    let doc = std::fs::read_to_string(&html).unwrap();
+    assert!(doc.starts_with("<!doctype html>") && doc.contains("IDOR on /echo?id=") && doc.contains("GET /echo?id=7") && !doc.contains("Verbose banner"), "{doc}");
+    let md = p.run(&["findings", "export", "--status", "false-positive"]).ok().stdout();
+    assert!(md.starts_with("# Findings: cli-test") && md.contains("Verbose banner") && !md.contains("IDOR"), "{md}");
+    let v: serde_json::Value = serde_json::from_str(&p.run(&["--json", "findings", "export", "1"]).ok().stdout()).unwrap();
+    assert_eq!(v["findings"][0]["evidence"][0]["method"], "GET");
+    assert_eq!(p.run(&["findings", "export", "-f", "pdf"]).code(), 2);
+
+    let out = p.run(&["findings", "rm", "2"]).ok().stdout();
+    assert!(out.contains("Deleted finding #2."), "{out}");
+    assert_eq!(p.run(&["findings", "rm", "2"]).code(), 5);
+    let v: serde_json::Value = serde_json::from_str(&p.run(&["--json", "findings"]).ok().stdout()).unwrap();
+    assert_eq!(v.as_array().unwrap().len(), 1);
+}
+
 fn fake_browser(dir: &Path) -> PathBuf {
     fake_program(dir, "fake-chrome", "browser-args.txt")
 }
@@ -731,6 +782,11 @@ fn mcp_server_gives_agents_read_only_access() {
     assert!(!err && text.contains("localhost"), "{text}");
     let (err, text) = m.tool("get_request", serde_json::json!({ "id": 999 }));
     assert!(err && text.contains("not found"), "{text}");
+
+    // Findings the user recorded can be read as a report, with their evidence.
+    p.run(&["findings", "add", "Echo leaks the user id", "-s", "high", "-r", &id.to_string()]).ok();
+    let (err, text) = m.tool("findings_report", serde_json::json!({}));
+    assert!(!err && text.contains("## #1 Echo leaks the user id") && text.contains("GET /echo?user=7 HTTP/1.1"), "{text}");
 
     // There is no tool that changes anything, and the engine refuses the agent token for it anyway.
     let v = m.request("tools/call", serde_json::json!({ "name": "replay", "arguments": { "id": id } }));

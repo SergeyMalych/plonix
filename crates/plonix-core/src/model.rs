@@ -175,6 +175,62 @@ pub struct Finding {
     pub description: String,
     pub exchange_ids: Vec<i64>,
     pub created_by: String,
+    /// When the finding was last edited (its creation time if never).
+    #[serde(default)]
+    pub updated_at: i64,
+}
+
+/// Changes to a finding; fields left out stay as they are.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FindingEdit {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub severity: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+impl FindingEdit {
+    /// Trims and checks the edit, spelling the status the way it is stored.
+    pub fn checked(mut self) -> Result<Self, String> {
+        if let Some(t) = &self.title {
+            if t.trim().is_empty() {
+                return Err("title cannot be empty".into());
+            }
+            self.title = Some(t.trim().to_string());
+        }
+        if let Some(s) = &self.severity {
+            self.severity = Some(check_severity(s)?);
+        }
+        if let Some(s) = &self.status {
+            self.status = Some(parse_status(s).ok_or_else(|| format!("status must be one of {}", FINDING_STATUSES.join(", ")))?.to_string());
+        }
+        if self.title.is_none() && self.severity.is_none() && self.status.is_none() && self.description.is_none() {
+            return Err("nothing to change: give a title, severity, status or description".into());
+        }
+        Ok(self)
+    }
+}
+
+pub const SEVERITIES: &[&str] = &["info", "low", "medium", "high", "critical"];
+
+/// Where a finding stands: `open` until the user has looked at it, then
+/// `confirmed` (it is real), `false_positive` (it is not) or `fixed`.
+pub const FINDING_STATUSES: &[&str] = &["open", "confirmed", "false_positive", "fixed"];
+
+/// A status as people type it (`false positive`, `false-positive`, `fp`), as stored.
+pub fn parse_status(s: &str) -> Option<&'static str> {
+    let s = s.trim().to_ascii_lowercase().replace(['-', ' '], "_");
+    let s = if s == "fp" { "false_positive".to_string() } else { s };
+    FINDING_STATUSES.iter().find(|x| **x == s).copied()
+}
+
+pub fn check_severity(s: &str) -> Result<String, String> {
+    let s = s.trim().to_ascii_lowercase();
+    if SEVERITIES.contains(&s.as_str()) { Ok(s) } else { Err(format!("severity must be one of {}", SEVERITIES.join(", "))) }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,8 +247,6 @@ pub struct NewFinding {
 fn default_severity() -> String {
     "info".into()
 }
-
-pub const SEVERITIES: &[&str] = &["info", "low", "medium", "high", "critical"];
 
 /// Bodies travel as base64 in JSON so binary content survives.
 mod body_b64 {

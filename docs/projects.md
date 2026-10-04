@@ -17,6 +17,8 @@ A project is a folder. Plonix creates new ones in `~/Plonix/<name>` unless you c
 
 Projects that an earlier Plonix kept as `~/.plonix/projects/<name>.db` move into a folder of their own (`~/.plonix/projects/<name>/`) the first time they are opened by name.
 
+`traffic.db` records its schema version. When a newer Plonix opens a project, it upgrades the file in place, one step at a time, each step all or nothing, and keeps everything in it. An older Plonix refuses to open a project a newer one has upgraded, and says so, rather than risk misreading it: update Plonix to open it.
+
 A local folder works best. Captured traffic changes constantly, which syncs poorly, so Plonix warns about folders that a cloud storage service syncs.
 
 ## Sessions
