@@ -16,6 +16,7 @@ use crate::detect::{self, Detection, Detector, HostTech};
 use crate::model::{Exchange, Headers, Source, now_ms};
 use crate::paths::{EngineInfo, Home};
 use crate::rulepack::{Library, PackInfo};
+use crate::exclude::{self, ExcludedDomain, Exclusions, Group, GroupStatus};
 use crate::scope::{self, Decision, Rule, ScopeRules};
 use crate::store::Store;
 use crate::upstream::{OutboundRequest, Upstream};
@@ -258,6 +259,91 @@ impl Engine {
             self.store.prune_decided(&self.rules())?;
         }
         Ok(rule)
+    }
+
+    // ---- exclusions ------------------------------------------------------
+
+    /// The built-in groups followed by the user's custom groups.
+    pub fn exclusion_groups(&self) -> Result<Vec<Group>> {
+        let mut groups = exclude::builtin_groups();
+        groups.extend(self.store.custom_groups()?);
+        Ok(groups)
+    }
+
+    /// A snapshot of every group with each domain's current on/off state.
+    pub fn exclusions(&self) -> Result<Exclusions> {
+        let rules = self.rules();
+        let groups = self
+            .exclusion_groups()?
+            .into_iter()
+            .map(|g| {
+                let state = exclude::group_state(&rules, &g);
+                let domains = g.domains.iter().map(|d| ExcludedDomain { host: d.clone(), excluded: exclude::is_excluded(&rules, d) }).collect();
+                GroupStatus { state, domains, id: g.id, name: g.name, description: g.description, builtin: g.builtin }
+            })
+            .collect();
+        Ok(Exclusions { groups, asked: self.exclusions_asked()? })
+    }
+
+    /// Switches a whole group on (exclude every member) or off.
+    pub fn set_group_excluded(&self, group_id: &str, on: bool) -> Result<()> {
+        let group = self.exclusion_groups()?.into_iter().find(|g| g.id == group_id).context("unknown exclusion group")?;
+        if on {
+            let now = now_ms();
+            let rules: Vec<Rule> = group.domains.iter().map(|d| exclude::exclusion_rule(d, group_id, now)).collect();
+            self.store.put_rules(&rules)?;
+        } else {
+            self.store.delete_group_rules(group_id)?;
+        }
+        *self.rules.write().unwrap() = self.store.rules()?;
+        self.store.prune_decided(&self.rules())?;
+        Ok(())
+    }
+
+    /// Switches one member of a group on or off.
+    pub fn set_domain_excluded(&self, group_id: &str, host: &str, on: bool) -> Result<()> {
+        if on {
+            self.store.put_rules(&[exclude::exclusion_rule(host, group_id, now_ms())])?;
+        } else {
+            self.store.delete_group_rule(&scope::normalize_host(host))?;
+        }
+        *self.rules.write().unwrap() = self.store.rules()?;
+        self.store.prune_decided(&self.rules())?;
+        Ok(())
+    }
+
+    /// Creates or replaces a custom group. Enabling it is a separate step.
+    pub fn save_custom_group(&self, mut group: Group) -> Result<Group> {
+        group.id = exclude::normalize_group_id(&group.id, &group.name);
+        anyhow::ensure!(!group.id.is_empty(), "a group needs a name");
+        anyhow::ensure!(!exclude::builtin_groups().iter().any(|g| g.id == group.id), "that name clashes with a built-in group");
+        group.builtin = false;
+        group.domains = group.domains.iter().map(|d| scope::normalize_host(d)).filter(|d| !d.is_empty()).collect();
+        self.store.put_custom_group(&group, now_ms())?;
+        Ok(group)
+    }
+
+    /// Deletes a custom group and any exclusions it owns.
+    pub fn remove_custom_group(&self, id: &str) -> Result<()> {
+        self.store.delete_group_rules(id)?;
+        self.store.delete_custom_group(id)?;
+        *self.rules.write().unwrap() = self.store.rules()?;
+        Ok(())
+    }
+
+    /// Whether the one-time "exclude common domains?" prompt has been answered.
+    pub fn exclusions_asked(&self) -> Result<bool> {
+        Ok(self
+            .store
+            .view_state("exclusions")?
+            .and_then(|v| v.get("asked").and_then(|a| a.as_bool()))
+            .unwrap_or(false))
+    }
+
+    /// Records that the one-time prompt has been answered, so it is not shown again.
+    pub fn mark_exclusions_asked(&self) -> Result<()> {
+        self.store.set_view_state("exclusions", &serde_json::json!({ "asked": true }))?;
+        Ok(())
     }
 
     pub fn remove_rule(&self, domain: &str) -> Result<bool> {

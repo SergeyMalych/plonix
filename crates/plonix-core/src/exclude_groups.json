@@ -1,0 +1,82 @@
+[
+  {
+    "id": "analytics",
+    "name": "Analytics",
+    "description": "Usage and product analytics.",
+    "domains": [
+      "google-analytics.com", "analytics.google.com", "googletagmanager.com",
+      "segment.io", "segment.com", "mixpanel.com", "amplitude.com",
+      "hotjar.com", "fullstory.com", "heap.io", "mouseflow.com",
+      "statcounter.com", "plausible.io", "matomo.cloud"
+    ]
+  },
+  {
+    "id": "ads",
+    "name": "Ads",
+    "description": "Advertising and tracking networks.",
+    "domains": [
+      "doubleclick.net", "googlesyndication.com", "googleadservices.com",
+      "adservice.google.com", "adsrvr.org", "criteo.com", "taboola.com",
+      "outbrain.com", "scorecardresearch.com", "adnxs.com", "pubmatic.com",
+      "rubiconproject.com"
+    ]
+  },
+  {
+    "id": "payments",
+    "name": "Payments",
+    "description": "Payment processors and billing widgets.",
+    "domains": [
+      "stripe.com", "js.stripe.com", "paypal.com", "paypalobjects.com",
+      "braintreegateway.com", "checkout.com", "adyen.com", "squareup.com",
+      "klarna.com"
+    ]
+  },
+  {
+    "id": "telemetry",
+    "name": "Telemetry & crash reporting",
+    "description": "Error, crash and performance telemetry.",
+    "domains": [
+      "sentry.io", "bugsnag.com", "datadoghq.com",
+      "browser-intake-datadoghq.com", "newrelic.com", "nr-data.net",
+      "rollbar.com", "raygun.io", "honeycomb.io", "logrocket.com"
+    ]
+  },
+  {
+    "id": "social",
+    "name": "Social widgets",
+    "description": "Social share buttons and embeds.",
+    "domains": [
+      "connect.facebook.net", "facebook.net", "platform.twitter.com",
+      "platform.linkedin.com", "youtube.com", "ytimg.com", "instagram.com"
+    ]
+  },
+  {
+    "id": "cdn",
+    "name": "CDNs & asset hosts",
+    "description": "Shared content-delivery and library hosts.",
+    "domains": [
+      "cdnjs.cloudflare.com", "jsdelivr.net", "cdn.jsdelivr.net", "unpkg.com",
+      "gstatic.com", "fonts.googleapis.com", "fonts.gstatic.com",
+      "ajax.googleapis.com", "bootstrapcdn.com", "cloudfront.net", "akamaihd.net"
+    ]
+  },
+  {
+    "id": "auth",
+    "name": "Auth & SSO providers",
+    "description": "Identity and single-sign-on providers.",
+    "domains": [
+      "accounts.google.com", "apis.google.com", "login.microsoftonline.com",
+      "okta.com", "auth0.com", "onelogin.com", "pingidentity.com",
+      "duosecurity.com"
+    ]
+  },
+  {
+    "id": "tools",
+    "name": "Internal tools & SaaS",
+    "description": "Common dashboards, support and SaaS widgets.",
+    "domains": [
+      "retool.com", "tryretool.com", "intercom.io", "intercomcdn.com",
+      "zendesk.com", "zdassets.com", "drift.com", "hubspot.com", "hs-scripts.com"
+    ]
+  }
+]

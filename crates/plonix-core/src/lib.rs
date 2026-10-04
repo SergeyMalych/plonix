@@ -12,6 +12,7 @@ pub mod ca;
 pub mod codec;
 pub mod detect;
 pub mod engine;
+pub mod exclude;
 pub mod insight;
 pub mod extension;
 pub mod model;
