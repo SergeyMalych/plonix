@@ -1,0 +1,699 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Plonix</title>
+<meta name="description" content="Plonix is an open-source, macOS-native web security workbench: intercept, adaptive scope, fast search, scriptable API, AI-native.">
+<meta property="og:title" content="Plonix">
+<meta property="og:description" content="Open-source, macOS-native web security workbench: intercept, adaptive scope, fast search, scriptable API, AI-native.">
+<meta property="og:image" content="assets/window.webp">
+<meta name="theme-color" content="#0b0d17">
+<link rel="icon" href="assets/plonix-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one dark optical bench. A live "lens" over raw traffic opens the page;
+   below it the real app, then the five-step loop, then each tool shown as it is. */
+:root {
+  --ink: #0b0d17;          /* page ground, indigo-biased near-black */
+  --ink-2: #11142a;        /* raised surfaces */
+  --ink-3: #181c38;
+  --line: #262b52;
+  --fg: #e9eaf5;
+  --muted: #9a9fc2;
+  --faint: #6a6f96;
+  --indigo: #7c84ff;       /* brand indigo, lifted for a dark ground */
+  --indigo-deep: #4b55d6;  /* the logo's own indigo */
+  --amber: #f5bd55;        /* "spotted" highlight, as in the Lens */
+  --green: #45d197;
+  --red: #ff7a7a;
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body: "Hanken Grotesk", -apple-system, "Helvetica Neue", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --wrap: 1180px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0; background: var(--ink); color: var(--fg);
+  font: 400 17px/1.6 var(--body);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+img { max-width: 100%; height: auto; display: block; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--indigo); outline-offset: 3px; border-radius: 6px; }
+.wrap { max-width: var(--wrap); margin: 0 auto; padding-inline: 24px; }
+@media (max-width: 520px) { .wrap { padding-inline: 16px; } }
+h1, h2, h3 { font-family: var(--display); font-weight: 800; letter-spacing: -0.02em; text-wrap: balance; margin: 0; line-height: 1.04; }
+h2 { font-size: clamp(2rem, 4.4vw, 3.4rem); }
+h3 { font-size: 1.35rem; font-weight: 600; letter-spacing: -0.01em; line-height: 1.2; }
+p { margin: 0; }
+.lede { color: var(--muted); font-size: 1.12rem; max-width: 60ch; }
+.eyebrow {
+  font: 500 0.78rem/1 var(--mono); text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--indigo); display: inline-flex; gap: 10px; align-items: center;
+}
+.eyebrow::before { content: ""; width: 9px; height: 9px; border: 2px solid currentColor; border-radius: 50%; }
+code, .mono { font-family: var(--mono); font-size: 0.9em; }
+
+/* ---------- nav ---------- */
+.nav {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
+  background: color-mix(in srgb, var(--ink) 82%, transparent);
+  backdrop-filter: blur(14px) saturate(140%); -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+}
+.nav .wrap { display: flex; align-items: center; gap: 28px; height: 62px; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; font: 800 1.2rem var(--display); letter-spacing: -0.02em; }
+.brand svg { width: 28px; height: 28px; }
+.nav-links { display: flex; gap: 22px; margin-left: auto; font-size: 0.95rem; color: var(--muted); }
+.nav-links a { text-decoration: none; }
+.nav-links a:hover { color: var(--fg); }
+.btn {
+  display: inline-flex; align-items: center; gap: 9px; height: 46px; padding-inline: 20px;
+  border-radius: 12px; font: 600 0.98rem var(--body); text-decoration: none; cursor: pointer;
+  border: 1px solid var(--line); background: var(--ink-2); color: var(--fg);
+  transition: transform .15s ease, background .15s ease, border-color .15s ease;
+}
+.btn:hover { border-color: var(--indigo); transform: translateY(-1px); }
+.btn.primary { background: var(--indigo-deep); border-color: var(--indigo-deep); color: #fff; box-shadow: 0 8px 30px -8px color-mix(in srgb, var(--indigo-deep) 80%, transparent); }
+.btn.primary:hover { background: #5862e6; }
+.btn.small { height: 36px; padding-inline: 14px; font-size: 0.9rem; border-radius: 10px; }
+.btn svg { width: 18px; height: 18px; flex: none; }
+@media (max-width: 760px) { .nav-links { display: none; } .nav .btn.small { margin-left: auto; } }
+
+/* ---------- hero ---------- */
+.hero { position: relative; padding-block: 76px 40px; }
+.hero::before {
+  content: ""; position: absolute; inset: -120px 0 auto 0; height: 780px; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(520px 380px at 78% 38%, color-mix(in srgb, var(--indigo-deep) 34%, transparent), transparent 70%),
+    radial-gradient(420px 300px at 12% 10%, color-mix(in srgb, var(--indigo-deep) 16%, transparent), transparent 70%);
+}
+.hero-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr); gap: 56px; align-items: center; }
+.hero h1 { font-size: clamp(2.6rem, 5.3vw, 4.5rem); margin-top: 22px; }
+.hero h1 .ring { color: var(--indigo); }
+.hero .lede { margin-top: 24px; font-size: 1.2rem; }
+.cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; }
+.meta-row { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 26px; color: var(--faint); font: 0.82rem var(--mono); }
+.meta-row span { display: inline-flex; gap: 7px; align-items: center; }
+.meta-row span::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+@media (max-width: 940px) { .hero-grid { grid-template-columns: minmax(0, 1fr); gap: 44px; } .hero { padding-block: 48px 24px; } }
+
+/* the lens demo */
+.lensbox {
+  position: relative; border-radius: 18px; background: var(--ink-2); border: 1px solid var(--line);
+  box-shadow: 0 40px 90px -30px #000, 0 0 0 1px color-mix(in srgb, var(--indigo) 8%, transparent) inset;
+  overflow: hidden; touch-action: pan-y; cursor: none;
+}
+.lensbox-bar {
+  display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line);
+  font: 0.78rem var(--mono); color: var(--faint); cursor: default;
+}
+.lensbox-bar b { color: var(--muted); font-weight: 500; letter-spacing: .08em; }
+.lensbox-bar .st { margin-left: auto; color: var(--green); }
+.pane { position: relative; }
+.http {
+  margin: 0; padding: 18px 20px 22px; font: 400 0.8rem/1.85 var(--mono); color: #c9cbe3;
+}
+.http div { white-space: nowrap; overflow: hidden; text-overflow: clip; }
+.http .k { color: #a99bff; }
+.http .m { color: var(--indigo); font-weight: 500; }
+.http .enc { color: #8d92b8; }
+.http.decoded { position: absolute; inset: 0; background: #151937; color: var(--fg);
+  clip-path: circle(var(--r, 92px) at var(--x, 70%) var(--y, 38%)); }
+.http.decoded .dec { color: #1a1300; background: var(--amber); border-radius: 4px; padding: 1px 5px; font-weight: 500; }
+.http.decoded .tag { color: var(--amber); font-size: .72rem; letter-spacing: .06em; margin-left: 6px; }
+.ring-el {
+  position: absolute; left: 0; top: 0; width: calc(var(--r, 92px) * 2); height: calc(var(--r, 92px) * 2);
+  transform: translate(calc(var(--x, 70%) - var(--r, 92px)), calc(var(--y, 38%) - var(--r, 92px)));
+  border: 5px solid var(--indigo); border-radius: 50%; pointer-events: none;
+  box-shadow: 0 0 0 1px #0006, 0 18px 50px -10px #000, inset 0 0 24px #7c84ff40;
+}
+.ring-el::after { content: ""; position: absolute; left: 50%; top: 50%; width: 9px; height: 9px; margin: -4.5px; border-radius: 50%; background: var(--indigo); opacity: .9; }
+.lens-caption { margin-top: 14px; color: var(--faint); font-size: 0.88rem; display: flex; gap: 10px; align-items: center; }
+.lens-caption kbd { font: 0.75rem var(--mono); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; color: var(--muted); }
+
+/* ---------- window shot ---------- */
+.shot {
+  border-radius: 14px; overflow: hidden; border: 1px solid var(--line); background: var(--ink-2);
+  box-shadow: 0 50px 120px -40px #000, 0 0 0 1px #ffffff08 inset;
+}
+.shot .bar { display: flex; gap: 8px; align-items: center; padding: 11px 14px; background: #171a33; border-bottom: 1px solid var(--line); }
+.shot .bar i { width: 12px; height: 12px; border-radius: 50%; background: #3a3f68; }
+.shot .bar i:nth-child(1) { background: #ff6159; } .shot .bar i:nth-child(2) { background: #ffbd2e; } .shot .bar i:nth-child(3) { background: #28c941; }
+.shot .bar span { margin-inline: auto; font: 0.78rem var(--mono); color: var(--faint); transform: translateX(-26px); }
+.showcase { padding-block: 40px 30px; perspective: 1600px; }
+.showcase .shot { transform: rotateX(8deg) scale(.98); transform-origin: 50% 0; transition: transform .9s cubic-bezier(.2,.7,.2,1); }
+.showcase.flat .shot { transform: none; }
+@media (prefers-reduced-motion: reduce) { .showcase .shot { transform: none; transition: none; } }
+.shot-caption { text-align: center; color: var(--faint); font-size: .9rem; margin-top: 18px; }
+
+/* ---------- loop ---------- */
+section.block { padding-block: 110px; }
+@media (max-width: 700px) { section.block { padding-block: 72px; } }
+.head { display: grid; gap: 18px; max-width: 760px; }
+.loop { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: 56px; border-top: 1px solid var(--line); }
+.loop li { list-style: none; padding: 26px 22px 6px 0; position: relative; }
+.loop li + li { padding-left: 22px; border-left: 1px solid var(--line); }
+.loop li::before { content: ""; position: absolute; top: -6px; left: 0; width: 11px; height: 11px; border-radius: 50%; background: var(--ink); border: 2px solid var(--indigo); }
+.loop li + li::before { left: -6px; }
+.loop .step { font: 600 1.45rem var(--display); letter-spacing: -.01em; }
+.loop .tool { font: 0.78rem var(--mono); color: var(--indigo); margin-top: 6px; }
+.loop p { color: var(--muted); font-size: .95rem; margin-top: 12px; }
+.loop { padding: 0; }
+@media (max-width: 900px) {
+  .loop { grid-template-columns: minmax(0, 1fr); border-top: 0; border-left: 1px solid var(--line); margin-left: 6px; }
+  .loop li, .loop li + li { padding: 0 0 30px 28px; border-left: 0; }
+  .loop li::before, .loop li + li::before { top: 8px; left: -7px; }
+}
+
+/* ---------- feature rows ---------- */
+.feature { display: grid; grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); gap: 64px; align-items: center; }
+.feature.flip { grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); }
+.feature.flip .copy { order: 2; }
+.feature + .feature { margin-top: 130px; }
+.copy { display: grid; gap: 20px; align-content: start; min-width: 0; }
+.copy h2 { font-size: clamp(1.9rem, 3.4vw, 2.7rem); }
+.copy p { color: var(--muted); }
+.ticks { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 12px; }
+.ticks li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; color: var(--fg); font-size: .98rem; }
+.ticks li::before { content: ""; width: 10px; height: 10px; margin-top: 8px; border-radius: 50%; border: 2px solid var(--indigo); }
+.ticks li span { color: var(--muted); }
+.light-shot { border-radius: 14px; overflow: hidden; border: 1px solid var(--line); box-shadow: 0 40px 90px -36px #000; background: #f4f5f9; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { font: 0.8rem var(--mono); padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--ink-2); display: inline-flex; align-items: center; gap: 7px; }
+.chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--c, var(--indigo)); }
+@media (max-width: 900px) {
+  .feature, .feature.flip { grid-template-columns: minmax(0, 1fr); gap: 36px; }
+  .feature.flip .copy { order: 0; }
+  .feature + .feature { margin-top: 90px; }
+}
+
+/* ---------- search playground ---------- */
+.search-band { background: linear-gradient(180deg, transparent, var(--ink-2) 22%, var(--ink-2) 78%, transparent); }
+.qbox { margin-top: 44px; border: 1px solid var(--line); border-radius: 16px; background: var(--ink); overflow: hidden; }
+.qbar { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+.qbar svg { width: 18px; height: 18px; color: var(--faint); flex: none; }
+.qbar input {
+  flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; color: var(--fg);
+  font: 500 1rem var(--mono);
+}
+.qbar .count { font: 0.8rem var(--mono); color: var(--faint); white-space: nowrap; }
+.qexamples { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.qexamples button { font: 0.78rem var(--mono); padding: 6px 11px; border-radius: 8px; border: 1px solid var(--line); background: var(--ink-2); color: var(--muted); cursor: pointer; }
+.qexamples button:hover, .qexamples button[aria-pressed="true"] { color: var(--fg); border-color: var(--indigo); }
+.qparse { list-style: none; margin: 0; padding: 8px 0; }
+.qparse li { display: grid; grid-template-columns: minmax(150px, 280px) minmax(0, 1fr); gap: 20px; padding: 10px 18px; align-items: baseline; }
+.qparse li + li { border-top: 1px dashed color-mix(in srgb, var(--line) 70%, transparent); }
+.tok { font: 500 0.88rem var(--mono); justify-self: start; padding: 3px 9px; border-radius: 7px; background: color-mix(in srgb, var(--indigo) 16%, transparent); color: #c8ccff; word-break: break-all; }
+.tok.ex { background: color-mix(in srgb, var(--red) 14%, transparent); color: #ffc2c2; }
+.tok.txt { background: color-mix(in srgb, var(--amber) 14%, transparent); color: #ffe2a8; }
+.qparse .what { color: var(--muted); font-size: .95rem; }
+.qparse .what b { color: var(--fg); font-weight: 600; }
+@media (max-width: 600px) { .qparse li { grid-template-columns: minmax(0, 1fr); gap: 6px; } }
+
+/* ---------- agents ---------- */
+.agents { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; margin-top: 52px; align-items: start; }
+.term {
+  border-radius: 14px; border: 1px solid var(--line); background: #080a14; overflow: hidden; min-width: 0;
+  box-shadow: 0 30px 80px -40px #000;
+}
+.term .bar { display: flex; gap: 7px; align-items: center; padding: 11px 14px; border-bottom: 1px solid var(--line); font: 0.75rem var(--mono); color: var(--faint); }
+.term .bar i { width: 10px; height: 10px; border-radius: 50%; background: #2c3158; }
+.term .bar span { margin-left: 8px; }
+.term pre { margin: 0; padding: 18px 20px 22px; font: 0.84rem/1.8 var(--mono); color: #cfd1ea; overflow-x: auto; }
+.term .p { color: var(--indigo); user-select: none; }
+.term .c { color: var(--faint); }
+.term .ok { color: var(--green); }
+.term .q { color: var(--amber); }
+.guard { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin-top: 28px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.guard div { padding: 20px 22px; display: grid; gap: 6px; }
+.guard div + div { border-left: 1px solid var(--line); }
+.guard b { font: 600 1.05rem var(--display); }
+.guard span { color: var(--muted); font-size: .93rem; }
+@media (max-width: 900px) {
+  .agents { grid-template-columns: minmax(0, 1fr); }
+  .guard { grid-template-columns: minmax(0, 1fr); }
+  .guard div + div { border-left: 0; border-top: 1px solid var(--line); }
+}
+
+/* ---------- code tabs ---------- */
+.tabs { display: flex; gap: 4px; padding: 6px; border-bottom: 1px solid var(--line); }
+.tabs button { font: 500 0.8rem var(--mono); padding: 7px 12px; border-radius: 8px; border: 0; background: transparent; color: var(--faint); cursor: pointer; }
+.tabs button[aria-selected="true"] { background: var(--ink-3); color: var(--fg); }
+.tabs .copybtn { margin-left: auto; color: var(--muted); }
+.tabs .copybtn:hover { color: var(--fg); }
+
+/* ---------- principles ---------- */
+.principles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 44px 56px; margin-top: 60px; }
+.principles div { display: grid; gap: 10px; align-content: start; }
+.principles b { font: 600 1.3rem var(--display); letter-spacing: -.01em; }
+.principles span { color: var(--muted); }
+@media (max-width: 860px) { .principles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .principles { grid-template-columns: minmax(0, 1fr); gap: 30px; } }
+
+/* ---------- start ---------- */
+.start { position: relative; border: 1px solid var(--line); border-radius: 24px; padding: 64px 56px; overflow: hidden; background: var(--ink-2); }
+.start::before {
+  content: ""; position: absolute; right: -140px; top: -140px; width: 460px; height: 460px; border-radius: 50%;
+  border: 46px solid color-mix(in srgb, var(--indigo-deep) 30%, transparent); pointer-events: none;
+}
+.start::after {
+  content: ""; position: absolute; right: 70px; top: 70px; width: 46px; height: 46px; border-radius: 50%;
+  background: color-mix(in srgb, var(--indigo-deep) 45%, transparent); pointer-events: none;
+}
+.start-grid { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 48px; align-items: start; }
+.start h2 { font-size: clamp(2.2rem, 4.6vw, 3.6rem); }
+.start .note { color: var(--faint); font-size: .9rem; margin-top: 18px; max-width: 46ch; }
+@media (max-width: 900px) { .start { padding: 40px 22px; } .start-grid { grid-template-columns: minmax(0, 1fr); } }
+
+footer { border-top: 1px solid var(--line); margin-top: 110px; padding-block: 40px 56px; color: var(--faint); font-size: .9rem; }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 18px 32px; align-items: center; }
+footer nav { display: flex; flex-wrap: wrap; gap: 22px; margin-left: auto; }
+footer a { text-decoration: none; color: var(--muted); }
+footer a:hover { color: var(--fg); }
+
+.reveal { transition: opacity .7s ease, transform .7s ease; }
+.reveal.pre { opacity: .001; transform: translateY(18px); }
+@media (prefers-reduced-motion: reduce) { .reveal, .reveal.pre { opacity: 1; transform: none; transition: none; } }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Plonix home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>
+      Plonix
+    </a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#loop">How it works</a>
+      <a href="#scope">Adaptive scope</a>
+      <a href="#search">Search</a>
+      <a href="#agents">Agents</a>
+      <a href="#cli">CLI &amp; API</a>
+    </nav>
+    <a class="btn small" href="https://github.com/SergeyMalych/plonix">
+      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      GitHub
+    </a>
+  </div>
+</header>
+
+<main id="top">
+
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="eyebrow">Open source · Native on macOS</span>
+      <h1>Look closer at every request.</h1>
+      <p class="lede">Plonix is a web security workbench for the Mac. It captures everything your browser does, learns the real shape of the target while you explore it, and helps you search, replay and prove what you find. From a window, a terminal, or an AI agent.</p>
+      <div class="cta-row">
+        <a class="btn primary" href="#start">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M6 10l6 6 6-6M5 20h14"/></svg>
+          Get Plonix for Mac
+        </a>
+        <a class="btn" href="https://github.com/SergeyMalych/plonix">Star on GitHub</a>
+      </div>
+      <div class="meta-row" aria-label="Facts">
+        <span>Apache-2.0</span><span>Rust engine</span><span>CLI + local API</span><span>Built-in MCP</span>
+      </div>
+    </div>
+
+    <div>
+      <div class="lensbox" id="lensbox" aria-label="Interactive demo: a captured request. Moving the lens over it shows what Plonix decodes.">
+        <div class="lensbox-bar"><b>LENS</b> GET api.acme.test/v2/me <span class="st">200 · in scope</span></div>
+        <div class="pane">
+          <pre class="http" aria-hidden="false"><div><span class="m">GET</span> /v2/me?next=<span class="enc">%252Faccount%252Fsettings</span> HTTP/1.1</div><div><span class="k">host</span>: api.acme.test</div><div><span class="k">authorization</span>: Bearer <span class="enc">eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMDQyIiwiZW1haWwiOiJib2JAYWNtZS50ZXN0In0</span></div><div><span class="k">x-trace</span>: <span class="enc">6f726465722d73657276696365</span></div><div><span class="k">cookie</span>: prefs=<span class="enc">eyJyb2xlIjoidXNlciIsInRlYW0iOiJiaWxsaW5nIn0=</span></div><div><span class="k">x-forwarded-for</span>: <span class="enc">10.20.4.17</span></div><div><span class="k">origin</span>: https://shop.acme.test</div><div><span class="k">referer</span>: https://shop.acme.test/account</div><div><span class="k">accept</span>: application/json</div><div><span class="k">sec-fetch-site</span>: same-site</div></pre>
+          <pre class="http decoded" aria-hidden="true"><div><span class="m">GET</span> /v2/me?next=<span class="dec">/account/settings</span><span class="tag">URL-ENCODED ×2</span></div><div><span class="k">host</span>: api.acme.test</div><div><span class="k">authorization</span>: Bearer <span class="dec">{"alg":"HS256"} {"sub":"1042","email":"bob@acme.test"}</span><span class="tag">JWT</span></div><div><span class="k">x-trace</span>: <span class="dec">order-service</span><span class="tag">HEX</span></div><div><span class="k">cookie</span>: prefs=<span class="dec">{"role":"user","team":"billing"}</span><span class="tag">BASE64</span></div><div><span class="k">x-forwarded-for</span>: <span class="dec">10.20.4.17</span><span class="tag">INTERNAL IP</span></div><div><span class="k">origin</span>: https://shop.acme.test</div><div><span class="k">referer</span>: https://shop.acme.test/account</div><div><span class="k">accept</span>: application/json</div><div><span class="k">sec-fetch-site</span>: same-site</div></pre>
+          <div class="ring-el" aria-hidden="true"></div>
+        </div>
+      </div>
+      <p class="lens-caption">Move the lens over the request. Plonix decodes what it spots, right where it sits.</p>
+    </div>
+  </div>
+</section>
+
+<section class="showcase" id="showcase">
+  <div class="wrap">
+    <div class="shot">
+      <div class="bar"><i></i><i></i><i></i><span>Plonix · shop.acme.test</span></div>
+      <img src="assets/window.webp" width="1440" height="900" alt="The Plonix window: live traffic with a search filter, a suggestion to add a new domain to scope with its evidence, and the Lens showing a request and its response.">
+    </div>
+    <p class="shot-caption">The Plonix window, capturing. A new domain is suggested for scope with the evidence behind it.</p>
+  </div>
+</section>
+
+<section class="block" id="loop">
+  <div class="wrap">
+    <div class="head reveal">
+      <span class="eyebrow">How it works</span>
+      <h2>One loop, five steps, no weight.</h2>
+      <p class="lede">Most of a web assessment is the same loop. Plonix gives each step one tool, with the same name in the window, the terminal and the docs.</p>
+    </div>
+    <ol class="loop reveal">
+      <li><div class="step">Capture</div><div class="tool">Traffic</div><p>Every request and response through the proxy, HTTPS included, stored per project.</p></li>
+      <li><div class="step">Discover</div><div class="tool">Scope · Map</div><p>Related domains, hosts, endpoints, parameters and the technology behind them.</p></li>
+      <li><div class="step">Investigate</div><div class="tool">Search · Lens</div><p>A query language you can type, and an inspector that decodes as you read.</p></li>
+      <li><div class="step">Experiment</div><div class="tool">Bench</div><p>Edit, send, branch and compare. Each tab is one experiment.</p></li>
+      <li><div class="step">Validate</div><div class="tool">Findings</div><p>Write it up with the requests that prove it attached as evidence.</p></li>
+    </ol>
+  </div>
+</section>
+
+<section class="block" id="scope" style="padding-top:0">
+  <div class="wrap">
+    <div class="feature reveal">
+      <div class="copy">
+        <span class="eyebrow">Adaptive scope</span>
+        <h2>Scope that learns the target while you browse.</h2>
+        <p>Static allow-lists assume you already know every domain an app uses. You find out by using it. Plonix records everything, then suggests domains to bring into scope, each one backed by evidence you can click.</p>
+        <ul class="ticks">
+          <li><div>Called from an in-scope page <span>· Referer or Origin</span></div></li>
+          <li><div>Redirected or linked <span>· Location, page links, CSP</span></div></li>
+          <li><div>Shares a session or a certificate <span>· tokens and TLS SANs</span></div></li>
+          <li><div>Enforced in one place <span>· replays, sends and agents can only reach accepted hosts</span></div></li>
+        </ul>
+      </div>
+      <div class="light-shot"><img src="assets/scope.webp" width="1600" height="893" alt="The Scope screen: four suggested domains, each with the evidence that it was called from an in-scope page, and buttons to accept or reject."></div>
+    </div>
+
+    <div class="feature flip reveal" id="lens">
+      <div class="copy">
+        <span class="eyebrow">Lens</span>
+        <h2>It points at what matters before you go looking.</h2>
+        <p>The Lens shows the selected request and its response, decoded and pretty-printed. Above them, Plonix lists what it spotted. Click one to highlight it in place, copy the decoded value, or find it across everything you captured.</p>
+        <div class="chips">
+          <span class="chip">JWT</span>
+          <span class="chip" style="--c:var(--amber)">Base64 · hex · URL-encoded</span>
+          <span class="chip" style="--c:var(--red)">Leaked secrets</span>
+          <span class="chip" style="--c:var(--green)">Emails · card numbers</span>
+          <span class="chip" style="--c:#b48cff">Basic auth</span>
+          <span class="chip" style="--c:#6fc3ff">Internal IPs</span>
+        </div>
+        <p style="font-size:.93rem">Detection runs locally, on traffic you already captured. A token's signature is never claimed valid.</p>
+      </div>
+      <div class="light-shot"><img src="assets/lens.webp" width="1108" height="550" alt="The Lens with a JWT spotted in the authorization header, its header and payload decoded, and the token highlighted in the request."></div>
+    </div>
+
+    <div class="feature reveal" id="bench">
+      <div class="copy">
+        <span class="eyebrow">Bench</span>
+        <h2>Experiments, kept and comparable.</h2>
+        <p>Press <code>b</code> on any request to take it to the Bench. Edit it, send it, and every send stays in that tab's history. Restore or branch any earlier send into a new tab, and put two sends side by side to see what changed.</p>
+        <ul class="ticks">
+          <li><div>Side-by-side response and request diff</div></li>
+          <li><div>Sends only reach in-scope hosts <span>· accept a host right there</span></div></li>
+          <li><div>Turn a send into a finding in one click</div></li>
+        </ul>
+      </div>
+      <div class="light-shot"><img src="assets/bench.webp" width="1108" height="747" alt="The Bench: a POST request on the left, its JSON response on the right, and the send history below with Restore, Branch and Finding buttons."></div>
+    </div>
+  </div>
+</section>
+
+<section class="block search-band" id="search">
+  <div class="wrap">
+    <div class="head reveal">
+      <span class="eyebrow">Search</span>
+      <h2>Filters you can type.</h2>
+      <p class="lede">A small query language over URLs, headers and decoded bodies. Search stays quick as a project grows, because every project has its own database. The same query works in the window, the CLI and the API.</p>
+    </div>
+    <div class="qbox reveal">
+      <label class="qbar" for="q">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" type="text" spellcheck="false" autocomplete="off" value="host:api.acme.com method:POST status:5xx -logout" aria-label="Try a query">
+        <span class="count" id="qcount"></span>
+      </label>
+      <div class="qexamples" role="group" aria-label="Example queries">
+        <button type="button">host:api.acme.com method:POST status:5xx -logout</button>
+        <button type="button">scope:in mime:json path:/api</button>
+        <button type="button">status:4xx,5xx -kind:static -host:cdn.acme.com</button>
+        <button type="button">"set-cookie: sid" source:proxy</button>
+        <button type="button">ext:js passw</button>
+      </div>
+      <ul class="qparse" id="qparse" aria-live="polite"></ul>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="agents">
+  <div class="wrap">
+    <div class="head reveal">
+      <span class="eyebrow">AI-native</span>
+      <h2>Claude Code can see your project. You decide how much.</h2>
+      <p class="lede">Plonix has a built-in MCP server. One command connects Claude Code to the live project: it can search traffic, read requests and responses, see hosts, endpoints and technologies, and review scope and findings. Any other MCP client can run <code>plonix mcp</code>.</p>
+    </div>
+    <div class="agents reveal">
+      <div class="term">
+        <div class="bar"><i></i><i></i><i></i><span>Terminal</span></div>
+<pre><span class="p">$ </span>plonix open acme.test        <span class="c"># capture while you browse</span>
+<span class="ok">✓</span> Proxy   127.0.0.1:8080
+<span class="ok">✓</span> Scope   acme.test (+ subdomains)
+<span class="p">$ </span>plonix connect claude        <span class="c"># once</span>
+<span class="ok">✓</span> Plonix added to Claude Code (read-only)
+<span class="p">$ </span>claude
+<span class="q">&gt; Use Plonix to find in-scope API endpoints that
+  returned errors, then read the most interesting
+  request and tell me what stands out.</span></pre>
+      </div>
+      <div class="light-shot"><img src="assets/ask.webp" width="1520" height="950" alt="The Ask Claude Code dialog: a question, the request, response, spotted values and detected technologies it will share, each with a token count, and a context limit."></div>
+    </div>
+    <div class="guard reveal">
+      <div><b>Read-only by default</b><span>Agents sign in with their own token. Anything but reading is refused by the engine.</span></div>
+      <div><b>You see what is shared</b><span>Ask Claude Code on a request, host or finding shows exactly what goes, with a size limit you set.</span></div>
+      <div><b>Same scope rules as you</b><span>Every agent request passes the same scope check as yours, and shows up on the Agents screen.</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="projects" style="padding-top:0">
+  <div class="wrap">
+    <div class="feature flip reveal">
+      <div class="copy">
+        <span class="eyebrow">Projects</span>
+        <h2>Several targets open, nothing colliding.</h2>
+        <p>A project is a folder you choose. It holds its own traffic, scope, findings and settings. Open several at once: each gets its own window, proxy port, API and database. Trust the certificate once and it covers them all.</p>
+        <p style="font-size:.93rem">Turn on <b style="color:var(--fg);font-weight:600">Keep only in-scope traffic</b> and out-of-scope requests are deleted from disk when the project closes.</p>
+      </div>
+      <div class="light-shot"><img src="assets/projects.webp" width="1600" height="432" alt="The Projects screen with two open projects, Shop API on proxy port 8081 and Acme staging on port 8080."></div>
+    </div>
+  </div>
+</section>
+
+<section class="block search-band" id="cli">
+  <div class="wrap">
+    <div class="feature reveal">
+      <div class="copy">
+        <span class="eyebrow">Programmable everywhere</span>
+        <h2>Anything you can click, you can script.</h2>
+        <p>The window, the <code>plonix</code> command and agents are equal clients of one local API. Every command takes <code>--json</code>, and exit codes tell a script what happened, down to a request refused by scope.</p>
+        <p style="font-size:.93rem">The API listens on loopback only and needs a token from <code>~/.plonix/api-token</code>.</p>
+      </div>
+      <div class="term">
+        <div class="tabs" role="tablist" aria-label="Examples">
+          <button type="button" role="tab" aria-selected="true" data-tab="cli">CLI</button>
+          <button type="button" role="tab" aria-selected="false" data-tab="api">API</button>
+          <button type="button" class="copybtn" id="copy">Copy</button>
+        </div>
+<pre data-panel="cli"><span class="p">$ </span>plonix search host:acme.test status:5xx
+<span class="p">$ </span>plonix show 42
+<span class="p">$ </span>plonix watch scope:in
+<span class="p">$ </span>plonix scope review
+<span class="p">$ </span>plonix scope accept '*.acme-cdn.test'
+<span class="p">$ </span>plonix replay 42 -H 'Authorization: Bearer other-user' -t /api/users/2
+<span class="p">$ </span>plonix -p shop search status:5xx --json</pre>
+<pre data-panel="api" hidden><span class="p">$ </span>TOKEN=$(cat ~/.plonix/api-token)
+<span class="p">$ </span>API=http://127.0.0.1:8090/api
+
+<span class="p">$ </span>curl -H "Authorization: Bearer $TOKEN" -G "$API/traffic" \
+    --data-urlencode 'q=host:acme.test status:2xx'
+<span class="p">$ </span>curl -H "Authorization: Bearer $TOKEN" "$API/scope"
+<span class="p">$ </span>curl -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+    -d '{"domain":"*.acme.test"}' "$API/scope/accept"</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="wrap">
+    <div class="head reveal">
+      <span class="eyebrow">Principles</span>
+      <h2>Simple by default. Powerful when you need it.</h2>
+    </div>
+    <div class="principles reveal">
+      <div><b>Fast</b><span>A native Rust core and one SQLite database per project. Large projects stay quick to search.</span></div>
+      <div><b>Native</b><span>A real Mac app with its own window, menu bar, shortcuts and Dock icon. Light and dark follow the system.</span></div>
+      <div><b>Minimal</b><span>A few workflows done well. No screen you will never open.</span></div>
+      <div><b>Friendly first</b><span>From download to captured traffic in under a minute. One command sets up the certificate, proxy, scope and browser.</span></div>
+      <div><b>Open</b><span>Apache-2.0, no paid tier holding back the good parts. Detection rules are community packs anyone can write.</span></div>
+      <div><b>Yours</b><span>Captured data stays on your Mac. Agents get scoped, read-only access you can see and switch off.</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="start">
+  <div class="wrap">
+    <div class="start reveal">
+      <div class="start-grid">
+        <div>
+          <span class="eyebrow">Get started</span>
+          <h2 style="margin-top:18px">Captured traffic in under a minute.</h2>
+          <div class="cta-row">
+            <a class="btn primary" href="https://github.com/SergeyMalych/plonix/releases">Download for Mac</a>
+            <a class="btn" href="https://github.com/SergeyMalych/plonix#quickstart">Read the quickstart</a>
+          </div>
+          <p class="note">Plonix is in early development. Signed releases are on the way; until then, build it from source in a few commands or use the app attached to each CI build.</p>
+        </div>
+        <div class="term">
+          <div class="bar"><i></i><i></i><i></i><span>Build from source</span></div>
+<pre><span class="p">$ </span>git clone https://github.com/SergeyMalych/plonix.git
+<span class="p">$ </span>cd plonix
+<span class="p">$ </span>cargo install --path crates/plonix-cli
+<span class="p">$ </span>plonix open example.com
+<span class="ok">✓</span> Certificate  ~/.plonix/ca.pem  (created)
+<span class="ok">✓</span> Proxy        127.0.0.1:8080
+<span class="ok">✓</span> Scope        example.com (+ subdomains)
+<span class="ok">✓</span> Browser      isolated profile, trusts Plonix
+<span class="c">Capturing. Browse the site.</span></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Plonix home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>
+      Plonix
+    </a>
+    <span>Open-source web security workbench for macOS. Apache-2.0.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/SergeyMalych/plonix">GitHub</a>
+      <a href="https://github.com/SergeyMalych/plonix/tree/main/docs">Docs</a>
+      <a href="https://github.com/SergeyMalych/plonix/releases">Releases</a>
+      <a href="https://github.com/SergeyMalych/plonix/issues">Issues</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+(() => {
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---- the lens ---- */
+  const box = document.getElementById('lensbox');
+  const pane = box.querySelector('.pane');
+  let target = null, pos = null, auto = !reduce, t = 0, idle;
+  const set = (x, y) => { pane.style.setProperty('--x', x + 'px'); pane.style.setProperty('--y', y + 'px'); };
+  const home = () => { const r = pane.getBoundingClientRect(); return { x: Math.min(r.width * 0.62, 360), y: 92 }; };
+  pos = home(); set(pos.x, pos.y);
+  const setR = () => pane.style.setProperty('--r', (pane.clientWidth < 460 ? 70 : 92) + 'px');
+  setR(); addEventListener('resize', setR);
+  const move = (e) => {
+    const r = pane.getBoundingClientRect();
+    target = { x: e.clientX - r.left, y: e.clientY - r.top }; auto = false;
+    clearTimeout(idle); idle = setTimeout(() => { auto = !reduce; }, 2600);
+    if (reduce) { pos = target; set(pos.x, pos.y); }
+  };
+  pane.addEventListener('pointermove', move);
+  pane.addEventListener('pointerdown', move);
+  if (!reduce) {
+    const tick = () => {
+      const r = pane.getBoundingClientRect();
+      if (auto) {
+        t += 0.0065;
+        target = { x: r.width * (0.5 + 0.34 * Math.sin(t * 1.3)), y: r.height * (0.42 + 0.3 * Math.sin(t * 2.1 + 1)) };
+      }
+      if (target) { pos.x += (target.x - pos.x) * 0.12; pos.y += (target.y - pos.y) * 0.12; set(pos.x, pos.y); }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  /* ---- showcase flattens as it scrolls in ---- */
+  const show = document.getElementById('showcase');
+  const flat = () => { const r = show.getBoundingClientRect(); if (r.top < innerHeight * 0.55) { show.classList.add('flat'); removeEventListener('scroll', flat); } };
+  addEventListener('scroll', flat, { passive: true }); flat();
+
+  /* ---- reveal on scroll (visible by default; only hidden once JS knows it's below the fold) ---- */
+  if (!reduce && 'IntersectionObserver' in window) {
+    const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.remove('pre'); io.unobserve(e.target); } }), { rootMargin: '0px 0px -8% 0px' });
+    document.querySelectorAll('.reveal').forEach((el) => {
+      if (el.getBoundingClientRect().top > innerHeight) { el.classList.add('pre'); io.observe(el); }
+    });
+  }
+
+  /* ---- query playground ---- */
+  const FIELDS = {
+    host: (v) => `host is <b>${v}</b> or any subdomain`,
+    method: (v) => `HTTP method is <b>${v.toUpperCase()}</b>`,
+    status: (v) => `response status ${v.split(',').map((s) => /x/i.test(s) ? `in the <b>${s}</b> class` : s === 'none' ? '<b>missing</b>' : `is <b>${s}</b>`).join(' or ')}`,
+    path: (v) => `path starts with <b>${v}</b>`,
+    ext: (v) => `file extension is <b>.${v}</b>`,
+    kind: (v) => v === 'static' ? 'images, fonts, stylesheets, scripts and media' : `kind is <b>${v}</b>`,
+    mime: (v) => `response content type contains <b>${v}</b>`,
+    scope: (v) => v === 'in' ? 'host is <b>in scope</b>' : 'host is <b>out of scope</b>',
+    source: (v) => v === 'replay' ? 'sent from the <b>Bench</b> or the API' : 'captured by the <b>proxy</b>',
+  };
+  const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const q = document.getElementById('q'), out = document.getElementById('qparse'), count = document.getElementById('qcount');
+  const btns = [...document.querySelectorAll('.qexamples button')];
+  const render = () => {
+    const toks = q.value.match(/-?"[^"]*"?|\S+/g) || [];
+    out.innerHTML = '';
+    toks.forEach((raw) => {
+      const neg = raw.startsWith('-') && raw.length > 1;
+      const body = neg ? raw.slice(1) : raw;
+      const m = body.match(/^([a-z]+):(.+)$/i);
+      let cls = 'tok', what;
+      if (m && FIELDS[m[1].toLowerCase()]) {
+        what = FIELDS[m[1].toLowerCase()](esc(m[2]));
+        what = neg ? 'Hide where ' + what : 'Show only where ' + what;
+        if (neg) cls += ' ex';
+      } else {
+        const phrase = esc(body.replace(/^"|"$/g, ''));
+        what = (neg ? 'Hide' : 'Show only') + ` requests containing <b>${phrase}</b> in the URL, headers or decoded body`;
+        cls += neg ? ' ex' : ' txt';
+      }
+      const li = document.createElement('li');
+      li.innerHTML = `<span class="${cls}">${esc(raw)}</span><span class="what">${what}</span>`;
+      out.appendChild(li);
+    });
+    if (!toks.length) out.innerHTML = '<li><span class="tok txt">…</span><span class="what">Type a filter, or pick an example above.</span></li>';
+    count.textContent = toks.length ? toks.length + (toks.length === 1 ? ' term' : ' terms') : '';
+    btns.forEach((b) => b.setAttribute('aria-pressed', String(b.textContent === q.value)));
+  };
+  btns.forEach((b) => b.addEventListener('click', () => { q.value = b.textContent; render(); }));
+  q.addEventListener('input', render);
+  render();
+
+  /* ---- CLI / API tabs + copy ---- */
+  const tabs = [...document.querySelectorAll('[data-tab]')];
+  const panels = [...document.querySelectorAll('[data-panel]')];
+  tabs.forEach((tb) => tb.addEventListener('click', () => {
+    tabs.forEach((x) => x.setAttribute('aria-selected', String(x === tb)));
+    panels.forEach((p) => { p.hidden = p.dataset.panel !== tb.dataset.tab; });
+  }));
+  const copy = document.getElementById('copy');
+  copy.addEventListener('click', () => {
+    const p = panels.find((x) => !x.hidden);
+    const text = p.innerText.split('\n').map((l) => l.replace(/^\$ /, '')).join('\n').trim();
+    const done = () => { copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy'; }, 1400); };
+    const fallback = () => { const s = getSelection(), r = document.createRange(); r.selectNodeContents(p); s.removeAllRanges(); s.addRange(r); copy.textContent = 'Press ⌘C'; };
+    try { navigator.clipboard.writeText(text).then(done, fallback); } catch (e) { fallback(); }
+  });
+})();
+</script>
+</body>
+</html>
