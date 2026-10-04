@@ -1193,3 +1193,31 @@ fn external_files_can_be_added_but_stay_unverified() {
         .unwrap_err();
     assert!(matches!(err, ureq::Error::Status(403, _)), "{err}");
 }
+
+#[test]
+fn replace_rules_change_traffic_through_the_proxy() {
+    let p = Plonix::new();
+    let target = serve_target();
+    let proxy = p.start();
+    assert!(p.run(&["replace"]).ok().stdout().contains("No match-and-replace rules"));
+
+    p.run(&["replace", "add", "request-header", "(?i)^user-agent: .*$", "User-Agent: plonix-test", "--regex", "--note", "agent"]).ok();
+    p.run(&["replace", "add", "response-body", "welcome", "hello"]).ok();
+    let r = p.run(&["replace", "add", "request-body", "(", "--regex"]);
+    assert_ne!(r.code(), 0);
+    assert!(r.stderr().contains("regular expression"), "{}", r.stderr());
+    let out = p.run(&["replace", "list"]).ok().stdout();
+    assert!(out.contains("request-header") && out.contains("[regex]") && out.contains("# agent") && out.contains("response-body"), "{out}");
+
+    let echo = format!("http://localhost:{target}/echo");
+    assert!(via_proxy(&proxy, &echo, &[]).to_ascii_lowercase().contains("user-agent: plonix-test"));
+    assert!(via_proxy(&proxy, &format!("http://localhost:{target}/"), &[]).contains("hello to the target"));
+    let v: serde_json::Value = serde_json::from_str(&p.run(&["replace", "--json"]).ok().stdout()).unwrap();
+    let first = v["rules"][0]["id"].as_i64().unwrap().to_string();
+
+    assert!(p.run(&["replace", "disable", &first]).ok().stdout().contains("is off"));
+    assert!(p.run(&["replace"]).ok().stdout().contains("[off, regex]"));
+    assert!(!via_proxy(&proxy, &echo, &[]).contains("plonix-test"));
+    p.run(&["replace", "rm", &first]).ok();
+    assert_eq!(p.run(&["replace", "rm", &first]).code(), 5, "not found");
+}

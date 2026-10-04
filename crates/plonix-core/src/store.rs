@@ -10,6 +10,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params, params_from_iter};
 use crate::codec;
 use crate::model::*;
 use crate::query::Query;
+use crate::replace::Rule as ReplaceRule;
 use crate::exclude::Group;
 use crate::scope::{Decision, Evidence, EvidenceKind, NewEvidence, Rule, ScopeRules, Suggestion};
 
@@ -35,6 +36,8 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 1, what: "traffic, scope, evidence, findings and view state", run: v1_initial },
     Migration { version: 2, what: "when findings were last edited", run: v2_finding_updated_at },
     Migration { version: 3, what: "how much of long bodies was kept, WebSocket messages and the HTTP version", run: v3_proxy_transport },
+    Migration { version: 4, what: "requests and responses edited in Intercept, with their originals", run: v4_intercept_edits },
+    Migration { version: 5, what: "match-and-replace rules, and which rules changed an exchange", run: v5_replace_rules },
 ];
 
 /// The schema version this build reads and writes.
@@ -88,6 +91,39 @@ fn v3_proxy_transport(tx: &rusqlite::Transaction) -> Result<()> {
         );
         CREATE INDEX IF NOT EXISTS ws_messages_exchange ON ws_messages(exchange_id, id);",
     )?;
+    Ok(())
+}
+
+/// Requests and responses can be edited in flight (see intercept.rs): mark
+/// such exchanges and keep what arrived before the edit.
+fn v4_intercept_edits(tx: &rusqlite::Transaction) -> Result<()> {
+    let columns = [("edited", "INTEGER NOT NULL DEFAULT 0"), ("original_request", "TEXT"), ("original_response", "TEXT")];
+    for (column, decl) in columns {
+        if !has_column(tx, "exchanges", column)? {
+            tx.execute_batch(&format!("ALTER TABLE exchanges ADD COLUMN {column} {decl}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Match-and-replace rules (see replace.rs), and the rules that changed
+/// each exchange.
+fn v5_replace_rules(tx: &rusqlite::Transaction) -> Result<()> {
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS replace_rules (
+            id INTEGER PRIMARY KEY,
+            target TEXT NOT NULL,
+            pattern TEXT NOT NULL,
+            replacement TEXT NOT NULL DEFAULT '',
+            regex INTEGER NOT NULL DEFAULT 0,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            in_scope_only INTEGER NOT NULL DEFAULT 0,
+            note TEXT NOT NULL DEFAULT ''
+        );",
+    )?;
+    if !has_column(tx, "exchanges", "replaced")? {
+        tx.execute_batch("ALTER TABLE exchanges ADD COLUMN replaced TEXT")?;
+    }
     Ok(())
 }
 
@@ -172,7 +208,7 @@ pub struct Store {
     conn: Mutex<Connection>,
 }
 
-const SUMMARY_COLS: &str = "e.id, e.ts, e.method, e.scheme, e.host, e.port, e.path, e.query, e.status, e.mime, e.resp_len, e.duration_ms, e.source";
+const SUMMARY_COLS: &str = "e.id, e.ts, e.method, e.scheme, e.host, e.port, e.path, e.query, e.status, e.mime, e.resp_len, e.duration_ms, e.source, e.edited";
 
 /// The ORDER BY for a Traffic column sort (see [`Store::search_sorted`]).
 /// Only known columns map to SQL, so the value is never spliced in raw.
@@ -200,7 +236,8 @@ fn sort_clause(sort: Option<&str>) -> String {
 
 /// The columns [`row_to_exchange`] reads, in order.
 const EXCHANGE_COLS: &str = "id, ts, scheme, host, port, method, path, query, req_headers, req_body, status, resp_headers,
-    resp_body, duration_ms, error, tls_sans, source, initiator, req_truncated, req_size, resp_truncated, resp_size, http_version";
+    resp_body, duration_ms, error, tls_sans, source, initiator, req_truncated, req_size, resp_truncated, resp_size, http_version,
+    edited, original_request, original_response, replaced";
 
 impl Store {
     pub fn open(path: &Path) -> Result<Self> {
@@ -246,8 +283,8 @@ impl Store {
         tx.execute(
             "INSERT INTO exchanges (ts, scheme, host, port, method, path, query, req_headers, req_body, status,
                 resp_headers, resp_body, resp_len, mime, duration_ms, error, tls_sans, source, initiator,
-                req_truncated, req_size, resp_truncated, resp_size, http_version)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
+                req_truncated, req_size, resp_truncated, resp_size, http_version, edited, original_request, original_response, replaced)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
             params![
                 ex.ts,
                 ex.scheme,
@@ -273,6 +310,10 @@ impl Store {
                 ex.resp_truncated,
                 ex.resp_size,
                 ex.http_version,
+                ex.edited,
+                ex.original_request,
+                ex.original_response,
+                if ex.replaced.is_empty() { None } else { Some(serde_json::to_string(&ex.replaced)?) },
             ],
         )?;
         let id = tx.last_insert_rowid();
@@ -399,6 +440,7 @@ impl Store {
                 resp_len: r.get(10)?,
                 duration_ms: r.get(11)?,
                 source: r.get(12)?,
+                edited: r.get(13)?,
             })
         })?;
         Ok((rows.collect::<Result<_, _>>()?, total))
@@ -800,6 +842,60 @@ impl Store {
     pub fn delete_finding(&self, id: i64) -> Result<bool> {
         Ok(self.conn.lock().unwrap().execute("DELETE FROM findings WHERE id = ?1", [id])? > 0)
     }
+
+    // ---- match and replace -------------------------------------------------
+
+    /// Every match-and-replace rule, in the order they apply.
+    pub fn replace_rules(&self) -> Result<Vec<ReplaceRule>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(&format!("SELECT {RULE_COLS} FROM replace_rules ORDER BY id"))?;
+        let rows = stmt.query_map([], row_to_rule)?;
+        rows.collect::<Result<_, _>>().map_err(Into::into)
+    }
+
+    pub fn replace_rule(&self, id: i64) -> Result<Option<ReplaceRule>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(&format!("SELECT {RULE_COLS} FROM replace_rules WHERE id = ?1"), [id], row_to_rule).optional().map_err(Into::into)
+    }
+
+    /// Adds a checked rule (see [`crate::replace::RuleInput::new_rule`]) at the end.
+    pub fn add_replace_rule(&self, r: &ReplaceRule) -> Result<ReplaceRule> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO replace_rules (target, pattern, replacement, regex, enabled, in_scope_only, note) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![r.target.as_str(), r.pattern, r.replace, r.regex, r.enabled, r.in_scope_only, r.note],
+        )?;
+        Ok(ReplaceRule { id: conn.last_insert_rowid(), ..r.clone() })
+    }
+
+    /// Saves a changed rule. False when there is no such rule.
+    pub fn update_replace_rule(&self, r: &ReplaceRule) -> Result<bool> {
+        let changed = self.conn.lock().unwrap().execute(
+            "UPDATE replace_rules SET target = ?2, pattern = ?3, replacement = ?4, regex = ?5, enabled = ?6, in_scope_only = ?7, note = ?8 WHERE id = ?1",
+            params![r.id, r.target.as_str(), r.pattern, r.replace, r.regex, r.enabled, r.in_scope_only, r.note],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn delete_replace_rule(&self, id: i64) -> Result<bool> {
+        Ok(self.conn.lock().unwrap().execute("DELETE FROM replace_rules WHERE id = ?1", [id])? > 0)
+    }
+}
+
+const RULE_COLS: &str = "id, target, pattern, replacement, regex, enabled, in_scope_only, note";
+
+fn row_to_rule(r: &Row) -> rusqlite::Result<ReplaceRule> {
+    let target: String = r.get(1)?;
+    Ok(ReplaceRule {
+        id: r.get(0)?,
+        target: crate::replace::Target::parse(&target).unwrap_or(crate::replace::Target::RequestHeader),
+        pattern: r.get(2)?,
+        replace: r.get(3)?,
+        regex: r.get(4)?,
+        enabled: r.get(5)?,
+        in_scope_only: r.get(6)?,
+        note: r.get(7)?,
+    })
 }
 
 const FINDING_COLS: &str = "id, created_at, title, severity, status, description, exchange_ids, created_by, updated_at";
@@ -873,6 +969,10 @@ fn row_to_exchange(r: &Row) -> rusqlite::Result<Exchange> {
         resp_truncated: r.get(20)?,
         resp_size: r.get(21)?,
         http_version: r.get(22)?,
+        edited: r.get(23)?,
+        original_request: r.get(24)?,
+        original_response: r.get(25)?,
+        replaced: r.get::<_, Option<String>>(26)?.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default(),
     })
 }
 
