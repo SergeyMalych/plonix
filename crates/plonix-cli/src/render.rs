@@ -59,14 +59,15 @@ pub fn exchange(v: &Value, max_body: usize) -> String {
         Some(q) => format!("{}?{}", v["path"].as_str().unwrap_or(""), q),
         None => v["path"].as_str().unwrap_or("").to_string(),
     };
-    out.push_str(&format!("{} {} HTTP/1.1\n", v["method"].as_str().unwrap_or(""), target));
+    let version = v["http_version"].as_str().filter(|s| !s.is_empty()).unwrap_or("HTTP/1.1");
+    out.push_str(&format!("{} {} {version}\n", v["method"].as_str().unwrap_or(""), target));
     out.push_str(&headers(&v["req_headers"]));
     out.push_str(&body(&v["req_text"], &v["req_body"], max_body));
     out.push_str(&cut_note(v, "req"));
     out.push_str("\n――――――――――――――――――――――――――――――――――――――――\n");
     match v["status"].as_u64() {
         Some(s) => {
-            out.push_str(&format!("HTTP/1.1 {s}\n"));
+            out.push_str(&format!("{version} {s}\n"));
             out.push_str(&headers(&v["resp_headers"]));
             out.push_str(&body(&v["resp_text"], &v["resp_body"], max_body));
             out.push_str(&cut_note(v, "resp"));
@@ -260,6 +261,9 @@ mod tests {
         let out = exchange(&v, 4000);
         assert!(out.contains("[body cut: the first 5 B of 3.0 MB were kept]"), "{out}");
         assert_eq!(out.matches("body cut").count(), 1, "the request was not cut");
+        assert!(out.contains("GET /big HTTP/1.1\n") && out.contains("HTTP/1.1 200\n"), "older captures read as HTTP/1.1: {out}");
+        let out = exchange(&json!({ "method": "GET", "path": "/", "status": 204, "http_version": "HTTP/2" }), 4000);
+        assert!(out.contains("GET / HTTP/2\n") && out.contains("HTTP/2 204\n"), "{out}");
     }
 
     #[test]

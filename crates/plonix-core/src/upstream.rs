@@ -1,7 +1,9 @@
-//! Outbound HTTP/1.1 client used by the proxy and for active requests.
+//! Outbound HTTP client used by the proxy and for active requests.
 //!
 //! Connects directly, or through an upstream proxy (HTTP `CONNECT` or
-//! SOCKS5) when the project's proxy settings name one.
+//! SOCKS5) when the project's proxy settings name one. HTTPS servers that
+//! offer HTTP/2 are spoken to in HTTP/2, others in HTTP/1.1; plain HTTP is
+//! always HTTP/1.1.
 //!
 //! [`Upstream::send`] reads the whole response; [`Upstream::open`] returns
 //! as soon as the response head arrives and leaves the body streaming, which
@@ -16,7 +18,7 @@ use bytes::Bytes;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use rustls::ClientConfig;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
@@ -60,6 +62,8 @@ pub struct InboundResponse {
     pub headers: Headers,
     pub body: Bytes,
     pub tls_sans: Vec<String>,
+    /// The protocol spoken with the server, such as `HTTP/2`.
+    pub version: String,
 }
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -94,6 +98,18 @@ pub struct StreamingResponse {
     pub headers: Headers,
     pub body: Incoming,
     pub tls_sans: Vec<String>,
+    pub version: String,
+}
+
+/// How a protocol version is shown and recorded.
+pub fn version_name(v: http::Version) -> &'static str {
+    match v {
+        http::Version::HTTP_09 => "HTTP/0.9",
+        http::Version::HTTP_10 => "HTTP/1.0",
+        http::Version::HTTP_2 => "HTTP/2",
+        http::Version::HTTP_3 => "HTTP/3",
+        _ => "HTTP/1.1",
+    }
 }
 
 /// Another proxy that outbound connections go through.
@@ -206,7 +222,10 @@ pub fn host_matches(host: &str, patterns: &[String]) -> bool {
 }
 
 pub struct Upstream {
+    /// Offers HTTP/2 and HTTP/1.1.
     tls: TlsConnector,
+    /// Offers HTTP/1.1 only, for connections that switch protocols.
+    tls_http1: TlsConnector,
     pub connect_timeout: Duration,
     pub total_timeout: Duration,
     proxy: Option<ProxyServer>,
@@ -243,7 +262,9 @@ impl Upstream {
             builder.with_root_certificates(roots).with_no_client_auth()
         };
         config.alpn_protocols = vec![b"http/1.1".to_vec()];
-        Ok(Self { tls: TlsConnector::from(Arc::new(config)), connect_timeout, total_timeout, proxy, bypass, insecure })
+        let tls_http1 = TlsConnector::from(Arc::new(config.clone()));
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+        Ok(Self { tls: TlsConnector::from(Arc::new(config)), tls_http1, connect_timeout, total_timeout, proxy, bypass, insecure })
     }
 
     /// The upstream proxy used for `host`, if any.
@@ -281,7 +302,7 @@ impl Upstream {
         let fut = async {
             let r = self.open_inner(req, None).await?;
             let body = r.body.collect().await.context("reading response body")?.to_bytes();
-            Ok(InboundResponse { status: r.status, headers: r.headers, body, tls_sans: r.tls_sans })
+            Ok(InboundResponse { status: r.status, headers: r.headers, body, tls_sans: r.tls_sans, version: r.version })
         };
         tokio::time::timeout(self.total_timeout, fut)
             .await
@@ -309,7 +330,7 @@ impl Upstream {
             let tcp = self.connect(&req.host, req.port).await?;
             let (resp, tls_sans) = if req.scheme == "https" {
                 let name = ServerName::try_from(req.host.clone()).map_err(|_| anyhow!("invalid server name {}", req.host))?;
-                let tls = self.tls.connect(name, tcp).await.with_context(|| format!("TLS handshake with {}", req.host))?;
+                let tls = self.tls_http1.connect(name, tcp).await.with_context(|| format!("TLS handshake with {}", req.host))?;
                 let sans = tls.get_ref().1.peer_certificates().and_then(|c| c.first()).map(cert_dns_names).unwrap_or_default();
                 (send_http1(TokioIo::new(tls), req, None).await?, sans)
             } else {
@@ -353,7 +374,13 @@ impl Upstream {
             let name = ServerName::try_from(req.host.clone()).map_err(|_| anyhow!("invalid server name {}", req.host))?;
             let tls = self.tls.connect(name, tcp).await.with_context(|| format!("TLS handshake with {}", req.host))?;
             let sans = tls.get_ref().1.peer_certificates().and_then(|c| c.first()).map(cert_dns_names).unwrap_or_default();
-            let mut resp = exchange(TokioIo::new(tls), req, body).await?;
+            let mut resp = if tls.get_ref().1.alpn_protocol() == Some(b"h2") {
+                let resp = send_http2(TokioIo::new(tls), req, body).await?;
+                let (status, headers) = head_of(&resp);
+                StreamingResponse { status, headers, body: resp.into_body(), tls_sans: vec![], version: "HTTP/2".into() }
+            } else {
+                exchange(TokioIo::new(tls), req, body).await?
+            };
             resp.tls_sans = sans;
             Ok(resp)
         } else {
@@ -368,7 +395,8 @@ where
 {
     let resp = send_http1(io, req, body).await?;
     let (status, headers) = head_of(&resp);
-    Ok(StreamingResponse { status, headers, body: resp.into_body(), tls_sans: vec![] })
+    let version = version_name(resp.version()).to_string();
+    Ok(StreamingResponse { status, headers, body: resp.into_body(), tls_sans: vec![], version })
 }
 
 fn head_of<B>(resp: &http::Response<B>) -> (u16, Headers) {
@@ -384,7 +412,6 @@ async fn send_http1<T>(io: TokioIo<T>, req: OutboundRequest, body: Option<Stream
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
-    let streaming = body.is_some();
     let (mut sender, conn) = hyper::client::conn::http1::Builder::new()
         .handshake::<_, StreamBody>(io)
         .await
@@ -392,14 +419,48 @@ where
     tokio::spawn(async move {
         let _ = conn.with_upgrades().await;
     });
+    sender.send_request(build_request(req, body, false)?).await.context("sending request")
+}
 
-    let mut builder = http::Request::builder().method(req.method.as_str()).uri(&req.target);
+async fn send_http2<T>(io: TokioIo<T>, req: OutboundRequest, body: Option<StreamBody>) -> Result<http::Response<Incoming>>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let (mut sender, conn) = hyper::client::conn::http2::Builder::new(TokioExecutor::new())
+        .handshake::<_, StreamBody>(io)
+        .await
+        .context("HTTP/2 handshake")?;
+    tokio::spawn(async move {
+        let _ = conn.await;
+    });
+    sender.send_request(build_request(req, body, true)?).await.context("sending request")
+}
+
+/// `host`, or `host:port` when the port is not the scheme's default.
+fn authority(scheme: &str, host: &str, port: u16) -> String {
+    let host = if host.contains(':') { format!("[{host}]") } else { host.to_string() };
+    let default = (scheme == "https" && port == 443) || (scheme == "http" && port == 80);
+    if default { host } else { format!("{host}:{port}") }
+}
+
+/// The request as sent. Headers that only describe one connection are left
+/// out. In HTTP/2 the `Host` header (as captured or edited) becomes the
+/// `:authority`, and is not sent as a header.
+fn build_request(req: OutboundRequest, body: Option<StreamBody>, http2: bool) -> Result<http::Request<StreamBody>> {
+    let streaming = body.is_some();
+    let host = crate::model::header(&req.headers, "host").map(str::to_string).unwrap_or_else(|| authority(&req.scheme, &req.host, req.port));
+    let mut builder = if http2 {
+        http::Request::builder().version(http::Version::HTTP_2).uri(format!("{}://{host}{}", req.scheme, req.target))
+    } else {
+        http::Request::builder().uri(&req.target)
+    }
+    .method(req.method.as_str());
     let mut has_host = false;
     for (k, v) in &req.headers {
         let lk = k.to_ascii_lowercase();
         // Length is recomputed from the (possibly edited) body; a streamed
         // body is passed on unchanged, so its length still holds.
-        if HOP_BY_HOP.contains(&lk.as_str()) || (lk == "content-length" && !streaming) {
+        if HOP_BY_HOP.contains(&lk.as_str()) || (lk == "content-length" && !streaming) || (lk == "host" && http2) || lk.starts_with(':') {
             continue;
         }
         has_host |= lk == "host";
@@ -408,9 +469,7 @@ where
     for (k, v) in &req.extra_headers {
         builder = builder.header(k.as_str(), v.as_str());
     }
-    if !has_host {
-        let default = (req.scheme == "https" && req.port == 443) || (req.scheme == "http" && req.port == 80);
-        let host = if default { req.host.clone() } else { format!("{}:{}", req.host, req.port) };
+    if !http2 && !has_host {
         builder = builder.header("host", host);
     }
     let send_len = !req.body.is_empty() || matches!(req.method.as_str(), "POST" | "PUT" | "PATCH");
@@ -418,8 +477,7 @@ where
         builder = builder.header("content-length", req.body.len());
     }
     let body = body.unwrap_or_else(|| full_body(req.body));
-    let request = builder.body(body).context("building request")?;
-    sender.send_request(request).await.context("sending request")
+    builder.body(body).context("building request")
 }
 
 /// Opens a tunnel through an HTTP proxy with `CONNECT`.

@@ -686,6 +686,7 @@ impl Engine {
                 ex.resp_headers = up.headers;
                 ex.resp_body = up.body.to_vec();
                 ex.tls_sans = up.tls_sans;
+                ex.http_version = up.version;
             }
             Err(e) => ex.error = Some(format!("{e:#}")),
         }

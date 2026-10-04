@@ -2,7 +2,8 @@
 //!
 //! Plain HTTP requests arrive in absolute form and are forwarded. `CONNECT`
 //! tunnels are terminated with a leaf certificate minted by the local CA, and
-//! the HTTP/1.1 requests inside are forwarded over a fresh TLS connection.
+//! the requests inside (HTTP/2 or HTTP/1.1, as the client chooses) are
+//! forwarded over a fresh TLS connection, in HTTP/2 when the server offers it.
 //! Every request/response pair is recorded, regardless of scope.
 //!
 //! Bodies stream through: the client gets each part of a response as the
@@ -65,12 +66,9 @@ where
     I: hyper::rt::Read + hyper::rt::Write + Unpin + Send + 'static,
 {
     let svc = service_fn(move |req| handle(req, ctx.clone()));
-    if let Err(e) = hyper::server::conn::http1::Builder::new()
-        .preserve_header_case(true)
-        .serve_connection(io, svc)
-        .with_upgrades()
-        .await
-    {
+    let mut builder = hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new());
+    builder.http1().preserve_header_case(true);
+    if let Err(e) = builder.serve_connection_with_upgrades(io, svc).await {
         tracing::debug!("proxy connection ended: {e}");
     }
 }
@@ -105,11 +103,15 @@ async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<ProxyResponse, Infal
         Some(pq) => pq.as_str().to_string(),
         None => "/".to_string(),
     };
-    let req_headers: Headers = req
+    let mut req_headers: Headers = req
         .headers()
         .iter()
         .map(|(k, v)| (k.as_str().to_string(), String::from_utf8_lossy(v.as_bytes()).into_owned()))
         .collect();
+    if req.version() == http::Version::HTTP_2 {
+        from_http2(&mut req_headers, req.uri().authority().map(|a| a.as_str()));
+    }
+    let client_version = crate::upstream::version_name(req.version()).to_string();
     let limit = ctx.engine.body_limit();
     let req_cap = Arc::new(Mutex::new(Captured::new(limit)));
     let mut outbound = OutboundRequest {
@@ -127,7 +129,19 @@ async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<ProxyResponse, Infal
         started,
         req: req_cap.clone(),
         resp: Arc::new(Mutex::new(Captured::new(limit))),
-        ex: Exchange { ts, scheme, host, port, method, path, query, req_headers, source: Some(Source::Proxy), ..Default::default() },
+        ex: Exchange {
+            ts,
+            scheme,
+            host,
+            port,
+            method,
+            path,
+            query,
+            req_headers,
+            source: Some(Source::Proxy),
+            http_version: client_version,
+            ..Default::default()
+        },
         taken: false,
     };
 
@@ -158,10 +172,29 @@ async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<ProxyResponse, Infal
     Ok(match ctx.engine.upstream().open(outbound, stream).await {
         Ok(up) => {
             pending.ex.tls_sans = up.tls_sans;
+            pending.ex.http_version = up.version;
             forward(up.status, up.headers, up.body, pending)
         }
         Err(e) => unreachable(e, pending),
     })
+}
+
+/// Records an HTTP/2 request's headers the way HTTP/1.1 writes them, which is
+/// also how they are forwarded to an HTTP/1.1 server and replayed: the
+/// `:authority` becomes `Host`, and cookies split over several fields are
+/// joined into one `Cookie` header.
+fn from_http2(headers: &mut Headers, authority: Option<&str>) {
+    let cookies: Vec<String> = headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("cookie")).map(|(_, v)| v.clone()).collect();
+    if cookies.len() > 1 {
+        let at = headers.iter().position(|(k, _)| k.eq_ignore_ascii_case("cookie")).unwrap_or(0);
+        headers.retain(|(k, _)| !k.eq_ignore_ascii_case("cookie"));
+        headers.insert(at.min(headers.len()), ("cookie".into(), cookies.join("; ")));
+    }
+    if let Some(a) = authority
+        && !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("host"))
+    {
+        headers.insert(0, ("host".into(), a.to_string()));
+    }
 }
 
 /// Answers the client with the server's response, streaming its body.
@@ -204,6 +237,7 @@ async fn websocket(mut req: Request<Incoming>, ctx: Ctx, outbound: OutboundReque
         Err(e) => return unreachable(e, pending),
     };
     pending.ex.tls_sans = up.tls_sans;
+    pending.ex.http_version = "HTTP/1.1".into();
     let server = match up.outcome {
         Upgrade::Refused(body) => return forward(up.status, up.headers, body, pending),
         Upgrade::Switched(server) => server,
@@ -387,7 +421,7 @@ fn connect(req: Request<Incoming>, ctx: Ctx) -> ProxyResponse {
                 return;
             }
         };
-        config.alpn_protocols = vec![b"http/1.1".to_vec()];
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
         let tls = match TlsAcceptor::from(Arc::new(config)).accept(TokioIo::new(upgraded)).await {
             Ok(t) => t,
             Err(e) => {
@@ -474,5 +508,15 @@ mod tests {
         c.add(b"abcde");
         c.done = true;
         assert_eq!(c.take(), (b"abcde".to_vec(), false, None), "a body that fits is not cut");
+    }
+
+    #[test]
+    fn http2_headers_are_recorded_like_http1() {
+        let mut h: Headers = vec![("cookie".into(), "a=1".into()), ("accept".into(), "*/*".into()), ("cookie".into(), "b=2".into())];
+        from_http2(&mut h, Some("app.test:8443"));
+        assert_eq!(
+            h,
+            vec![("host".into(), "app.test:8443".into()), ("cookie".into(), "a=1; b=2".into()), ("accept".into(), "*/*".into())]
+        );
     }
 }

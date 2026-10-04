@@ -620,14 +620,14 @@ function cutTag(truncated, size, b64) {
 }
 
 function requestText(ex) {
-  const lines = [`${ex.method} ${target(ex)} HTTP/1.1`, ...ex.req_headers.map(([k, v]) => `${k}: ${v}`)];
+  const lines = [`${ex.method} ${target(ex)} ${ex.http_version || 'HTTP/1.1'}`, ...ex.req_headers.map(([k, v]) => `${k}: ${v}`)];
   const b = bodyOf(ex.req_text, ex.req_body, false);
   return { lines, body: b };
 }
 
 function responseText(ex, pretty) {
   if (ex.status == null) return { lines: [], body: { note: ex.error ? 'No response: ' + ex.error : 'No response' } };
-  const lines = [`HTTP/1.1 ${ex.status}`, ...ex.resp_headers.map(([k, v]) => `${k}: ${v}`)];
+  const lines = [`${ex.http_version || 'HTTP/1.1'} ${ex.status}`, ...ex.resp_headers.map(([k, v]) => `${k}: ${v}`)];
   return { lines, body: bodyOf(ex.resp_text, ex.resp_body, pretty, header(ex.resp_headers, 'content-type')) };
 }
 
@@ -1354,6 +1354,7 @@ async function openInspector(id) {
         h('span', { class: statusClass(ex.status), text: ex.status == null ? 'no response' : ex.status }),
         h('span', { text: ex.duration_ms + ' ms' }),
         h('span', { text: fmtSize(ex.resp_size != null ? ex.resp_size : b64len(ex.resp_body)) }),
+        ex.http_version ? h('span', { text: ex.http_version, title: 'The protocol spoken with the server' }) : null,
         h('span', { class: 'tag ' + scopeTag(decide(ex.host)), text: scopeLabel(decide(ex.host)) }),
       ),
       h('button', { class: 'btn sm primary', text: 'Send to Bench', title: 'Edit and re-send on the Bench (b, or double-click a row)', onclick: () => sendToBench(id) }),

@@ -12,8 +12,8 @@ bytes = "1.12.1"
 flate2 = "1.1.10"
 http = "1.5.0"
 http-body-util = "0.1.5"
-hyper = { version = "1.11.1", features = ["http1", "server", "client"] }
-hyper-util = { version = "0.1.21", features = ["tokio"] }
+hyper = { version = "1.11.1", features = ["http1", "http2", "server", "client"] }
+hyper-util = { version = "0.1.21", features = ["tokio", "server-auto"] }
 rcgen = { version = "0.14.10", features = ["x509-parser", "pem", "ring"] }
 regex = "1.13.1"
 ring = "0.17.14"

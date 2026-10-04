@@ -34,7 +34,7 @@ pub struct Migration {
 pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 1, what: "traffic, scope, evidence, findings and view state", run: v1_initial },
     Migration { version: 2, what: "when findings were last edited", run: v2_finding_updated_at },
-    Migration { version: 3, what: "how much of long bodies was kept, and WebSocket messages", run: v3_proxy_transport },
+    Migration { version: 3, what: "how much of long bodies was kept, WebSocket messages and the HTTP version", run: v3_proxy_transport },
 ];
 
 /// The schema version this build reads and writes.
@@ -59,13 +59,16 @@ fn v2_finding_updated_at(tx: &rusqlite::Transaction) -> Result<()> {
 
 /// Bodies longer than the recording limit are kept in part (see proxy.rs):
 /// whether each body was cut, and its full size. WebSocket messages are
-/// stored against the handshake exchange that opened their connection.
+/// stored against the handshake exchange that opened their connection. Each
+/// exchange notes the HTTP version spoken with the server.
 fn v3_proxy_transport(tx: &rusqlite::Transaction) -> Result<()> {
     let columns = [
         ("exchanges", "req_truncated", "INTEGER NOT NULL DEFAULT 0"),
         ("exchanges", "req_size", "INTEGER"),
         ("exchanges", "resp_truncated", "INTEGER NOT NULL DEFAULT 0"),
         ("exchanges", "resp_size", "INTEGER"),
+        // HTTP/1.1 or HTTP/2.
+        ("exchanges", "http_version", "TEXT NOT NULL DEFAULT ''"),
     ];
     for (table, column, decl) in columns {
         if !has_column(tx, table, column)? {
@@ -173,7 +176,7 @@ const SUMMARY_COLS: &str = "e.id, e.ts, e.method, e.scheme, e.host, e.port, e.pa
 
 /// The columns [`row_to_exchange`] reads, in order.
 const EXCHANGE_COLS: &str = "id, ts, scheme, host, port, method, path, query, req_headers, req_body, status, resp_headers,
-    resp_body, duration_ms, error, tls_sans, source, initiator, req_truncated, req_size, resp_truncated, resp_size";
+    resp_body, duration_ms, error, tls_sans, source, initiator, req_truncated, req_size, resp_truncated, resp_size, http_version";
 
 impl Store {
     pub fn open(path: &Path) -> Result<Self> {
@@ -219,8 +222,8 @@ impl Store {
         tx.execute(
             "INSERT INTO exchanges (ts, scheme, host, port, method, path, query, req_headers, req_body, status,
                 resp_headers, resp_body, resp_len, mime, duration_ms, error, tls_sans, source, initiator,
-                req_truncated, req_size, resp_truncated, resp_size)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+                req_truncated, req_size, resp_truncated, resp_size, http_version)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
             params![
                 ex.ts,
                 ex.scheme,
@@ -245,6 +248,7 @@ impl Store {
                 ex.req_size,
                 ex.resp_truncated,
                 ex.resp_size,
+                ex.http_version,
             ],
         )?;
         let id = tx.last_insert_rowid();
@@ -836,6 +840,7 @@ fn row_to_exchange(r: &Row) -> rusqlite::Result<Exchange> {
         req_size: r.get(19)?,
         resp_truncated: r.get(20)?,
         resp_size: r.get(21)?,
+        http_version: r.get(22)?,
     })
 }
 
@@ -969,8 +974,10 @@ mod tests {
         let mut ex = sample("www.example.com", "GET", "/big", 200, "<b>start of a long page");
         ex.resp_truncated = true;
         ex.resp_size = Some(50_000_000);
+        ex.http_version = "HTTP/2".into();
         let id = s.insert_exchange(&ex).unwrap();
         let got = s.get_exchange(id).unwrap().unwrap();
+        assert_eq!(got.http_version, "HTTP/2");
         assert!(got.resp_truncated && !got.req_truncated);
         assert_eq!((got.resp_size, got.req_size), (Some(50_000_000), None));
         let (hits, _) = s.search(&Query::parse("start of a long").unwrap(), &ScopeRules::default(), 10, 0).unwrap();
@@ -1021,7 +1028,8 @@ mod tests {
         let s = Store::open(&path).unwrap();
         assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
         let old = s.get_exchange(1).unwrap().unwrap();
-        assert!(!old.resp_truncated && old.resp_size.is_none(), "older captures read as whole");
+        assert!(!old.resp_truncated && old.resp_size.is_none() && old.http_version.is_empty(), "older captures read as whole");
+        assert_eq!(s.ws_messages(1, 10, 0).unwrap().1, 0, "the messages table is there");
         s.insert_exchange(&sample("a.test", "GET", "/", 200, "x")).unwrap();
         drop(s);
         let s = Store::open(&path).unwrap();

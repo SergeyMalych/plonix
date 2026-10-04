@@ -59,6 +59,7 @@ Plonix has a handful of tools, each with its own name. They are the same in the 
 - Trust the CA once (`~/.plonix/ca.pem`) and every HTTPS site you visit through the proxy is captured.
 - Compressed bodies (gzip, deflate, brotli) are decoded for display and search.
 - Bodies stream through: event streams, long polls and large downloads reach the browser as the server sends them. Plonix keeps the first 10 MB of each body (Settings › Proxy › Keep bodies up to), and the Lens and `plonix show` say when a body was cut and how big it was.
+- HTTP/2 on both sides: browsers can speak HTTP/2 to the proxy inside decrypted HTTPS, and servers that offer HTTP/2 are reached over it (others over HTTP/1.1), through an upstream proxy too. Each request records the protocol it used, shown in the Lens and `plonix show`; replays from the Bench use it as well.
 - WebSockets work through the proxy, over plain HTTP and inside decrypted HTTPS. Every message (text, binary, ping, pong, close, in both directions) is recorded against its handshake: reassembled from fragments, unmasked and decompressed. The Lens lists them under the handshake, `plonix show` prints them, and `GET /api/traffic/{id}/messages` returns them.
 
 ### Full traffic capture

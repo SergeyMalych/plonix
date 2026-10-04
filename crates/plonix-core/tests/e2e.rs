@@ -222,6 +222,7 @@ async fn intercepts_https_with_minted_certificate() {
     assert_eq!((ex.scheme.as_str(), ex.method.as_str(), ex.path.as_str(), ex.query.as_str()), ("https", "POST", "/echo", "debug=1"));
     assert_eq!(ex.req_body, b"user=alice&pass=s3cret");
     assert_eq!(ex.tls_sans, vec!["localhost".to_string()]);
+    assert_eq!(ex.http_version, "HTTP/1.1", "the server only speaks HTTP/1.1");
     let (hits, _) = r.engine.store.search(&Query::parse("s3cret").unwrap(), &r.engine.rules(), 10, 0).unwrap();
     assert_eq!(hits.len(), 1);
 }
@@ -1288,4 +1289,107 @@ async fn websockets_in_hosts_never_decrypted_are_not_recorded() {
     tokio::time::timeout(Duration::from_secs(10), ws_session(&mut tls, "/ws", &host)).await.expect("session");
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(r.engine.store.count().unwrap(), 0);
+}
+
+/// An HTTPS server for `localhost` that speaks HTTP/2 only. `/echo` answers
+/// with the protocol, request line, headers and body it received.
+async fn serve_h2() -> (SocketAddr, CertificateDer<'static>) {
+    let (ca_pem, ca_key) = CertAuthority::generate_pem().unwrap();
+    let test_ca = CertAuthority::from_pem(&ca_pem, &ca_key).unwrap();
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut config = rustls::ServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_cert_resolver(Arc::new(Fixed(test_ca.leaf_for("localhost").unwrap())));
+    config.alpn_protocols = vec![b"h2".to_vec()];
+    let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    let handler = |req: Request<Incoming>| async move {
+        let (parts, body) = req.into_parts();
+        let body = body.collect().await.unwrap().to_bytes();
+        let mut text = format!("{:?} {} {}\n", parts.version, parts.method, parts.uri);
+        for (k, v) in &parts.headers {
+            text.push_str(&format!("{}: {}\n", k, v.to_str().unwrap_or("")));
+        }
+        text.push('\n');
+        text.push_str(&String::from_utf8_lossy(&body));
+        Ok::<_, Infallible>(Response::builder().header("content-type", "text/plain").body(Full::new(Bytes::from(text))).unwrap())
+    };
+    tokio::spawn(async move {
+        loop {
+            let (s, _) = l.accept().await.unwrap();
+            let acceptor = acceptor.clone();
+            tokio::spawn(async move {
+                if let Ok(tls) = acceptor.accept(s).await {
+                    let _ = hyper::server::conn::http2::Builder::new(hyper_util::rt::TokioExecutor::new())
+                        .serve_connection(TokioIo::new(tls), service_fn(handler))
+                        .await;
+                }
+            });
+        }
+    });
+    (addr, CertificateDer::from_pem_slice(ca_pem.as_bytes()).unwrap())
+}
+
+/// HTTP/2 on both sides: the browser can speak it to the proxy, the proxy
+/// speaks it to servers that offer it, and each exchange records which.
+#[tokio::test]
+async fn http2_is_spoken_on_both_sides_and_recorded() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let (up, root) = serve_h2().await;
+    let r = start(&home, Some(root)).await;
+    let host = format!("localhost:{}", up.port());
+
+    // An HTTP/2 client: the proxy agrees to HTTP/2 inside the tunnel.
+    let tls = tunnel(&r, &host, &[b"h2", b"http/1.1"]).await;
+    assert_eq!(tls.get_ref().1.alpn_protocol(), Some(&b"h2"[..]));
+    let (mut sender, conn) = hyper::client::conn::http2::handshake::<_, _, Full<Bytes>>(hyper_util::rt::TokioExecutor::new(), TokioIo::new(tls)).await.unwrap();
+    tokio::spawn(conn);
+    let req = Request::builder()
+        .uri(format!("https://{host}/echo?x=1"))
+        .header("cookie", "a=1")
+        .header("cookie", "b=2")
+        .body(Full::new(Bytes::new()))
+        .unwrap();
+    let resp = sender.send_request(req).await.unwrap();
+    assert_eq!((resp.status().as_u16(), resp.version()), (200, hyper::Version::HTTP_2));
+    let text = String::from_utf8_lossy(&resp.into_body().collect().await.unwrap().to_bytes()).into_owned();
+    assert!(text.starts_with(&format!("HTTP/2.0 GET https://{host}/echo?x=1")), "{text}");
+    assert!(text.contains("cookie: a=1; b=2"), "{text}");
+    wait_for_count(&r.engine, 1).await;
+    let ex = r.engine.store.get_exchange(1).unwrap().unwrap();
+    assert_eq!((ex.http_version.as_str(), ex.status, ex.query.as_str()), ("HTTP/2", Some(200), "x=1"));
+    assert_eq!(plonix_core::model::header(&ex.req_headers, "host"), Some(host.as_str()), "recorded like HTTP/1.1");
+
+    // An HTTP/1.1 client: the server is still reached over HTTP/2.
+    let tls = tunnel(&r, &host, &[b"http/1.1"]).await;
+    let (mut sender, conn) = hyper::client::conn::http1::handshake::<_, Full<Bytes>>(TokioIo::new(tls)).await.unwrap();
+    tokio::spawn(conn);
+    let req = Request::builder()
+        .method("POST")
+        .uri("/echo")
+        .header("host", &host)
+        .header("connection", "keep-alive")
+        .body(Full::new(Bytes::from_static(b"over h2")))
+        .unwrap();
+    let text = String::from_utf8_lossy(&sender.send_request(req).await.unwrap().into_body().collect().await.unwrap().to_bytes()).into_owned();
+    assert!(text.starts_with(&format!("HTTP/2.0 POST https://{host}/echo")) && text.ends_with("over h2"), "{text}");
+    assert!(!text.contains("connection:") && !text.contains("\nhost:"), "no connection headers in HTTP/2: {text}");
+    wait_for_count(&r.engine, 2).await;
+    assert_eq!(r.engine.store.get_exchange(2).unwrap().unwrap().http_version, "HTTP/2");
+
+    // Replays use HTTP/2 too.
+    r.engine.decide("localhost", Decision::Accepted, false, "").unwrap();
+    let ex = r.engine.replay(ReplayRequest { id: 2, body: Some("again".into()), ..Default::default() }, "test").await.unwrap();
+    assert_eq!(ex.http_version, "HTTP/2");
+    assert!(String::from_utf8_lossy(&ex.resp_body).ends_with("again"));
+    let ex = r
+        .engine
+        .send(SendRequest { method: "GET".into(), url: format!("https://{host}/echo"), headers: vec![("Host".into(), host.clone())], ..Default::default() }, "test")
+        .await
+        .unwrap();
+    assert_eq!((ex.status, ex.http_version.as_str()), (Some(200), "HTTP/2"));
 }

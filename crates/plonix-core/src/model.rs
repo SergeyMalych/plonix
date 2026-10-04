@@ -82,6 +82,10 @@ pub struct Exchange {
     pub resp_truncated: bool,
     #[serde(default)]
     pub resp_size: Option<i64>,
+    /// The protocol spoken with the server (`HTTP/1.1`, `HTTP/2`), or with
+    /// the client when the server was not reached. Empty in older captures.
+    #[serde(default)]
+    pub http_version: String,
 }
 
 impl Exchange {
