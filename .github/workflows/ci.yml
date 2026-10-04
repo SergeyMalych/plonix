@@ -24,6 +24,32 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install app libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev librsvg2-dev
+      # Bugs and suspicious code fail the build; style lints are reported as
+      # warnings for now.
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D clippy::correctness -D clippy::suspicious
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Advisories, licenses, duplicate crates and sources; see deny.toml.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
   macos-app:
     runs-on: macos-latest
     steps:
