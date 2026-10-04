@@ -10,13 +10,17 @@
 //! server sends it (event streams, long polls, large downloads), while the
 //! first [`Engine::body_limit`] bytes of each body are kept for the record.
 //! An exchange is recorded once its response has ended.
+//!
+//! While Intercept is on, a request can be held before it is sent, and a
+//! response before the client gets it (see [`crate::intercept`]).
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, ready};
-use std::time::Instant;
+use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use http::{Method, Request, Response, StatusCode};
@@ -28,7 +32,9 @@ use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 
 use crate::ca::LeafResolver;
+use crate::codec;
 use crate::engine::Engine;
+use crate::intercept::{self, Edit, HeldItem, HeldKind, Verdict};
 use crate::model::{Exchange, Headers, Source, now_ms};
 use crate::upstream::{BoxError, HOP_BY_HOP, OutboundRequest, StreamBody, Upgrade, full_body};
 
@@ -169,14 +175,238 @@ async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<ProxyResponse, Infal
         _ => Some(Tee::new(req.into_body(), req_cap, None).boxed()),
     };
 
+    if ctx.engine.intercept.is_on() && !hold_request(&ctx.engine, &mut outbound, &mut pending, stream.is_none(), limit).await {
+        return Ok(error_page(StatusCode::BAD_GATEWAY, "Plonix: this request was dropped in Intercept and was not sent."));
+    }
+
     Ok(match ctx.engine.upstream().open(outbound, stream).await {
         Ok(up) => {
             pending.ex.tls_sans = up.tls_sans;
             pending.ex.http_version = up.version;
-            forward(up.status, up.headers, up.body, pending)
+            respond(&ctx.engine, up.status, up.headers, up.body, pending).await
         }
         Err(e) => unreachable(e, pending),
     })
+}
+
+/// "1.5 MB", for notes about body sizes.
+fn size(n: usize) -> String {
+    match n {
+        n if n >= 1024 * 1024 => format!("{:.1} MB", n as f64 / (1024.0 * 1024.0)),
+        n if n >= 1024 => format!("{:.1} KB", n as f64 / 1024.0),
+        n => format!("{n} bytes"),
+    }
+}
+
+/// Holds a request in Intercept if the user wants it held, and applies
+/// their edits. Returns false when they dropped it. `buffered` says whether
+/// the whole body is in `outbound.body` (or still streaming).
+async fn hold_request(engine: &Arc<Engine>, outbound: &mut OutboundRequest, pending: &mut Pending, buffered: bool, limit: usize) -> bool {
+    let in_scope = engine.rules().in_scope(&pending.ex.host);
+    let probe = Exchange { req_body: outbound.body.to_vec(), ..pending.ex.clone() };
+    if !engine.intercept.wants(HeldKind::Request, &probe, in_scope) {
+        return true;
+    }
+    let editable = buffered && std::str::from_utf8(&outbound.body).is_ok();
+    let raw = intercept::request_raw(&outbound.method, &outbound.target, &outbound.headers, editable.then_some(&outbound.body[..]));
+    let note = if editable {
+        String::new()
+    } else if buffered {
+        format!("The body ({}) is not text, so only the start line and headers can be edited; the body goes through as it is.", size(outbound.body.len()))
+    } else {
+        format!("The body is longer than {} or still arriving, so it streams through as it is; only the start line and headers can be edited.", size(limit))
+    };
+    let item = HeldItem {
+        id: 0,
+        kind: HeldKind::Request,
+        held_at: 0,
+        expires_at: 0,
+        method: outbound.method.clone(),
+        url: probe.url(),
+        host: probe.host.clone(),
+        in_scope,
+        status: None,
+        http_version: probe.http_version.clone(),
+        raw: raw.clone(),
+        body_editable: editable,
+        note,
+    };
+    match engine.intercept.hold(item).await.0 {
+        Verdict::Drop => {
+            pending.ex.error = Some("dropped in Intercept: the request was not sent".into());
+            false
+        }
+        Verdict::Forward(Some(Edit::Request(e))) => {
+            if let Some(body) = e.body {
+                let mut cap = pending.req.lock().unwrap();
+                *cap = Captured::new(limit);
+                cap.add(&body);
+                cap.done = true;
+                outbound.body = Bytes::from(body);
+            }
+            (pending.ex.path, pending.ex.query) = match e.target.split_once('?') {
+                Some((p, q)) => (p.to_string(), q.to_string()),
+                None => (e.target.clone(), String::new()),
+            };
+            pending.ex.method = e.method.clone();
+            pending.ex.req_headers = e.headers.clone();
+            pending.ex.edited = true;
+            pending.ex.original_request = Some(raw);
+            outbound.method = e.method;
+            outbound.target = e.target;
+            outbound.headers = e.headers;
+            true
+        }
+        Verdict::Forward(_) => true,
+    }
+}
+
+/// Answers the client with the server's response: streaming it, or holding
+/// it in Intercept first when the user holds responses.
+async fn respond(engine: &Arc<Engine>, status: u16, headers: Headers, body: Incoming, pending: Pending) -> ProxyResponse {
+    if engine.intercept.is_on() {
+        let in_scope = engine.rules().in_scope(&pending.ex.host);
+        let probe = Exchange { status: Some(status), resp_headers: headers.clone(), ..pending.ex.clone() };
+        if engine.intercept.wants(HeldKind::Response, &probe, in_scope) {
+            return hold_response(engine, status, headers, body, pending, in_scope).await;
+        }
+    }
+    deliver(status, headers, RespBody::Stream(body), pending)
+}
+
+/// How long a held response's body may take to arrive in full before only
+/// its head is held and the body streams on as it comes.
+const BODY_WAIT: Duration = Duration::from_secs(10);
+
+/// A response body: still streaming, read in full, or partly read.
+enum RespBody {
+    Stream(Incoming),
+    Whole(Bytes),
+    /// These parts were read already; the rest is still coming.
+    Started(Vec<Bytes>, Incoming),
+}
+
+impl RespBody {
+    fn into_stream(self) -> StreamBody {
+        match self {
+            RespBody::Stream(b) => b.map_err(Into::into).boxed(),
+            RespBody::Whole(b) => full_body(b),
+            RespBody::Started(start, rest) => Resumed { start: start.into(), rest }.boxed(),
+        }
+    }
+}
+
+/// Reads a body when it ends within `limit` bytes and [`BODY_WAIT`];
+/// otherwise returns what was read and the rest.
+async fn read_body(mut body: Incoming, limit: usize) -> Result<RespBody, hyper::Error> {
+    if body.size_hint().exact().is_some_and(|n| n > limit as u64) {
+        return Ok(RespBody::Stream(body));
+    }
+    let deadline = tokio::time::Instant::now() + BODY_WAIT;
+    let (mut parts, mut read) = (Vec::new(), 0);
+    while !body.is_end_stream() {
+        match tokio::time::timeout_at(deadline, body.frame()).await {
+            Err(_) => return Ok(RespBody::Started(parts, body)),
+            Ok(None) => break,
+            Ok(Some(Err(e))) => return Err(e),
+            Ok(Some(Ok(frame))) => {
+                if let Ok(data) = frame.into_data() {
+                    read += data.len();
+                    parts.push(data);
+                    if read > limit {
+                        return Ok(RespBody::Started(parts, body));
+                    }
+                }
+            }
+        }
+    }
+    Ok(RespBody::Whole(parts.concat().into()))
+}
+
+/// Holds a response in Intercept and answers the client with it, edited or
+/// as it was, or with an error page when the user drops it.
+async fn hold_response(engine: &Arc<Engine>, status: u16, headers: Headers, body: Incoming, mut pending: Pending, in_scope: bool) -> ProxyResponse {
+    let limit = engine.body_limit();
+    let event_stream = crate::model::header(&headers, "content-type").is_some_and(|c| c.to_ascii_lowercase().contains("event-stream"));
+    let body = if event_stream { Ok(RespBody::Stream(body)) } else { read_body(body, limit).await };
+    let body = match body {
+        Ok(b) => b,
+        Err(e) => {
+            pending.ex.status = Some(status);
+            pending.ex.resp_headers = headers;
+            pending.ex.error = Some(format!("the response stopped early: {e}"));
+            return error_page(StatusCode::BAD_GATEWAY, &format!("Plonix: the response from {} stopped early: {e}", pending.ex.host));
+        }
+    };
+    // What the user sees: the body as text, decoded when it was compressed.
+    let not_text = "The body is not text, so only the status line and headers can be edited; the body goes through as it is.";
+    let (shown_headers, shown_body, note) = match &body {
+        RespBody::Whole(b) => match codec::decode_whole(&headers, b, limit) {
+            Some(d) if std::str::from_utf8(&d).is_ok() => {
+                let enc = crate::model::header(&headers, "content-encoding").unwrap_or("").to_string();
+                let shown: Headers = headers.iter().filter(|(k, _)| !k.eq_ignore_ascii_case("content-encoding")).cloned().collect();
+                (shown, Some(d), format!("Shown decoded from {enc}. If you change it, it is sent uncompressed."))
+            }
+            None if crate::model::header(&headers, "content-encoding").is_none() && std::str::from_utf8(b).is_ok() => {
+                (headers.clone(), Some(b.to_vec()), String::new())
+            }
+            _ => (headers.clone(), None, not_text.to_string()),
+        },
+        _ => (
+            headers.clone(),
+            None,
+            format!("The body is longer than {} or still arriving, so it streams through as it is; only the status line and headers can be edited.", size(limit)),
+        ),
+    };
+    let raw = intercept::response_raw(status, &shown_headers, shown_body.as_deref());
+    let item = HeldItem {
+        id: 0,
+        kind: HeldKind::Response,
+        held_at: 0,
+        expires_at: 0,
+        method: pending.ex.method.clone(),
+        url: pending.ex.url(),
+        host: pending.ex.host.clone(),
+        in_scope,
+        status: Some(status),
+        http_version: pending.ex.http_version.clone(),
+        raw: raw.clone(),
+        body_editable: shown_body.is_some(),
+        note,
+    };
+    match engine.intercept.hold(item).await.0 {
+        Verdict::Drop => {
+            pending.ex.status = Some(status);
+            pending.ex.resp_headers = headers;
+            if let RespBody::Whole(b) = &body {
+                let mut cap = pending.resp.lock().unwrap();
+                cap.add(b);
+                cap.done = true;
+            }
+            pending.ex.error = Some("dropped in Intercept: the client got an error instead of this response".into());
+            error_page(StatusCode::BAD_GATEWAY, "Plonix: this response was dropped in Intercept.")
+        }
+        Verdict::Forward(Some(Edit::Response(e))) => {
+            pending.ex.edited = true;
+            pending.ex.original_response = Some(raw);
+            let mut headers = e.headers;
+            let body = match e.body {
+                Some(b) => {
+                    set_length(&mut headers, b.len());
+                    RespBody::Whole(b.into())
+                }
+                None => body,
+            };
+            deliver(e.status, headers, body, pending)
+        }
+        Verdict::Forward(_) => deliver(status, headers, body, pending),
+    }
+}
+
+/// Sets `Content-Length` for a body that replaced the original.
+fn set_length(headers: &mut Headers, len: usize) {
+    headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-length") && !k.eq_ignore_ascii_case("transfer-encoding"));
+    headers.push(("content-length".into(), len.to_string()));
 }
 
 /// Records an HTTP/2 request's headers the way HTTP/1.1 writes them, which is
@@ -197,8 +427,8 @@ fn from_http2(headers: &mut Headers, authority: Option<&str>) {
     }
 }
 
-/// Answers the client with the server's response, streaming its body.
-fn forward(status: u16, headers: Headers, body: Incoming, mut pending: Pending) -> ProxyResponse {
+/// Answers the client with a response, streaming its body.
+fn deliver(status: u16, headers: Headers, body: RespBody, mut pending: Pending) -> ProxyResponse {
     pending.ex.status = Some(status);
     let mut builder = Response::builder().status(status);
     for (k, v) in &headers {
@@ -209,7 +439,7 @@ fn forward(status: u16, headers: Headers, body: Incoming, mut pending: Pending) 
     pending.ex.resp_headers = headers;
     let resp_cap = pending.resp.clone();
     builder
-        .body(Tee::new(body, resp_cap, Some(pending)).boxed())
+        .body(Tee::new(body.into_stream(), resp_cap, Some(pending)).boxed())
         .unwrap_or_else(|e| error_page(StatusCode::BAD_GATEWAY, &format!("invalid upstream response: {e}")))
 }
 
@@ -239,7 +469,7 @@ async fn websocket(mut req: Request<Incoming>, ctx: Ctx, outbound: OutboundReque
     pending.ex.tls_sans = up.tls_sans;
     pending.ex.http_version = "HTTP/1.1".into();
     let server = match up.outcome {
-        Upgrade::Refused(body) => return forward(up.status, up.headers, body, pending),
+        Upgrade::Refused(body) => return deliver(up.status, up.headers, RespBody::Stream(body), pending),
         Upgrade::Switched(server) => server,
     };
     let mut builder = Response::builder().status(StatusCode::SWITCHING_PROTOCOLS);
@@ -391,6 +621,28 @@ where
 
     fn size_hint(&self) -> SizeHint {
         self.inner.size_hint()
+    }
+}
+
+/// A body whose start was read already, followed by the rest as it arrives.
+struct Resumed {
+    start: VecDeque<Bytes>,
+    rest: Incoming,
+}
+
+impl Body for Resumed {
+    type Data = Bytes;
+    type Error = BoxError;
+
+    fn poll_frame(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Bytes>, BoxError>>> {
+        if let Some(b) = self.start.pop_front() {
+            return Poll::Ready(Some(Ok(Frame::data(b))));
+        }
+        Pin::new(&mut self.rest).poll_frame(cx).map(|f| f.map(|r| r.map_err(Into::into)))
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.start.is_empty() && self.rest.is_end_stream()
     }
 }
 

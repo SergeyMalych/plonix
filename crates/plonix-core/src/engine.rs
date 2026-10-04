@@ -20,6 +20,7 @@ use crate::model::{Exchange, Headers, Source, now_ms};
 use crate::paths::{EngineInfo, Home};
 use crate::filterpack::{FilterLibrary, FilterSet};
 use crate::listpack::{ListLibrary, ListSet};
+use crate::intercept::{InterceptOptions, Interceptor};
 use crate::project::PruneReport;
 use crate::rulepack::{Library, PackInfo};
 use crate::crawl;
@@ -58,6 +59,8 @@ pub struct Engine {
     overrides: Mutex<UpstreamOptions>,
     /// Bodies passing through the proxy are recorded up to this many bytes.
     body_limit: AtomicUsize,
+    /// Requests and responses held in the proxy for the user (see [`crate::intercept`]).
+    pub intercept: Interceptor,
 }
 
 /// How much of each body is recorded until the settings say otherwise.
@@ -199,6 +202,7 @@ impl Engine {
             applied_listen: Mutex::new(None),
             overrides: Mutex::default(),
             body_limit: AtomicUsize::new(DEFAULT_BODY_LIMIT),
+            intercept: Interceptor::default(),
         }))
     }
 
@@ -276,6 +280,13 @@ impl Engine {
         self.set_body_limit((p.max_body_mb as usize).saturating_mul(1024 * 1024));
         *self.interception.write().unwrap() = Interception { decrypt: p.intercept_tls, passthrough: p.passthrough_hosts.clone() };
         Ok(bound)
+    }
+
+    /// Applies Intercept's options. A filter that does not parse is refused.
+    pub fn set_intercept_options(&self, options: InterceptOptions) -> Result<()> {
+        let filter = self.filters().parse(&options.filter).context("the Intercept filter")?;
+        self.intercept.set_options(options, filter);
+        Ok(())
     }
 
     /// Upstream options that apply on top of the settings for this run

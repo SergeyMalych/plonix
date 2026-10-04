@@ -362,6 +362,7 @@ pub fn not_allowed(mode: AgentMode) -> &'static [&'static str] {
             "Record, edit or delete findings",
             "Open browsers, sign in to the window or stop the engine",
             "Install, update or remove anything from the Market",
+            "See, edit, forward or drop requests held in Intercept",
         ],
     }
 }
@@ -491,6 +492,11 @@ mod tests {
             ("DELETE", "/api/findings/3"),
             ("POST", "/api/findings/3"),
             ("GET", "/api/findings/3/x"),
+            ("GET", "/api/intercept"),
+            ("PUT", "/api/intercept"),
+            ("POST", "/api/intercept/1/forward"),
+            ("POST", "/api/intercept/1/drop"),
+            ("POST", "/api/intercept/forward-all"),
         ] {
             assert!(!allowed(m, method, path), "{method} {path} should be refused");
         }

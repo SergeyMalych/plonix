@@ -21,6 +21,7 @@ pub mod engine;
 pub mod exclude;
 pub mod insight;
 pub mod listpack;
+pub mod intercept;
 pub mod market;
 pub mod extension;
 pub mod filterpack;

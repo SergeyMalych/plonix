@@ -86,6 +86,16 @@ pub struct Exchange {
     /// the client when the server was not reached. Empty in older captures.
     #[serde(default)]
     pub http_version: String,
+    /// Changed by hand in Intercept before it went on: the request and
+    /// response fields above are what was actually sent.
+    #[serde(default)]
+    pub edited: bool,
+    /// The request as it arrived, in HTTP/1.1 text, when it was edited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_request: Option<String>,
+    /// The response as the server sent it, when it was edited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_response: Option<String>,
 }
 
 impl Exchange {
@@ -169,6 +179,8 @@ pub struct ExchangeSummary {
     pub duration_ms: i64,
     pub source: String,
     pub in_scope: bool,
+    #[serde(default)]
+    pub edited: bool,
 }
 
 /// What the captured traffic contains, for suggesting filters that matter.

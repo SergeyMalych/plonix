@@ -9,6 +9,7 @@ mod community;
 mod connect;
 mod engine_ctl;
 mod findings;
+mod intercept;
 mod market;
 mod mcp;
 mod open;
@@ -42,6 +43,7 @@ Get started:
   plonix show 42
   plonix scope                     review domains Plonix thinks belong in scope
   plonix replay 42 -H 'X-Debug: 1'
+  plonix intercept on              hold requests to in-scope hosts; `plonix intercept list` to see them
   plonix tech                      technologies detected on each host
   plonix findings                  what you found; `plonix findings export -o report.html` for a report
   plonix store                     community detection rule packs
@@ -127,6 +129,11 @@ enum Cmd {
     },
     /// Re-send a captured request, optionally modified (a Bench send; accepted hosts only)
     Replay(ReplayArgs),
+    /// Hold requests (and responses) in the proxy to forward, edit or drop them
+    Intercept {
+        #[command(subcommand)]
+        cmd: Option<intercept::InterceptCmd>,
+    },
     /// Review and change scope
     Scope {
         #[command(subcommand)]
@@ -449,6 +456,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Cmd::Crawl(a) => scan::crawl_cmd(&ctx, a)?,
         Cmd::Findings { cmd } => findings::findings_cmd(&ctx, cmd.unwrap_or(findings::FindingsCmd::List { status: None }))?,
         Cmd::Bench { cmd } => bench::bench_cmd(&ctx, cmd)?,
+        Cmd::Intercept { cmd } => intercept::intercept_cmd(&ctx, cmd.unwrap_or(intercept::InterceptCmd::Status))?,
         Cmd::Rules { cmd } => community::rules_cmd(&ctx, cmd.unwrap_or(community::RulesCmd::List))?,
         Cmd::Filters { cmd } => community::filters_cmd(&ctx, cmd.unwrap_or(community::FiltersCmd::List))?,
         Cmd::Market(a) => market::market_cmd(&ctx, a)?,

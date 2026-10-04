@@ -1393,3 +1393,212 @@ async fn http2_is_spoken_on_both_sides_and_recorded() {
         .unwrap();
     assert_eq!((ex.status, ex.http_version.as_str()), (Some(200), "HTTP/2"));
 }
+
+// ---- intercept ---------------------------------------------------------------
+
+/// Sends one request with a body through the proxy, as a browser would.
+fn send_via_proxy(proxy: SocketAddr, method: &str, url: &str, body: &str) -> impl std::future::Future<Output = (u16, String)> + Send + 'static {
+    send_via_proxy_owned(proxy, method.to_string(), url.to_string(), body.to_string())
+}
+
+async fn send_via_proxy_owned(proxy: SocketAddr, method: String, url: String, body: String) -> (u16, String) {
+    let (method, url, body) = (method.as_str(), url.as_str(), body.as_str());
+    let tcp = TcpStream::connect(proxy).await.unwrap();
+    let (mut sender, conn) = hyper::client::conn::http1::handshake::<_, Full<Bytes>>(TokioIo::new(tcp)).await.unwrap();
+    tokio::spawn(conn);
+    let uri: hyper::Uri = url.parse().unwrap();
+    let req = Request::builder()
+        .method(method)
+        .uri(url)
+        .header("host", uri.authority().unwrap().as_str())
+        .header("content-type", "text/plain")
+        .body(Full::new(Bytes::from(body.to_string())))
+        .unwrap();
+    let resp = sender.send_request(req).await.unwrap();
+    let status = resp.status().as_u16();
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    (status, String::from_utf8_lossy(&body).into_owned())
+}
+
+/// Calls the API with a token.
+async fn call_api(r: &Running, token: &str, method: &str, path: &str, body: serde_json::Value) -> (u16, serde_json::Value) {
+    let url = format!("http://{}{path}", r.api_addr);
+    let (auth, method) = (format!("Bearer {token}"), method.to_string());
+    tokio::task::spawn_blocking(move || {
+        let req = ureq::request(&method, &url).set("Authorization", &auth).set("X-Plonix-Client", "test");
+        let resp = if method == "GET" { req.call() } else { req.send_json(body) };
+        match resp {
+            Ok(r) => (r.status(), r.into_json::<serde_json::Value>().unwrap_or_default()),
+            Err(ureq::Error::Status(c, r)) => (c, r.into_json::<serde_json::Value>().unwrap_or_default()),
+            Err(e) => panic!("{e}"),
+        }
+    })
+    .await
+    .unwrap()
+}
+
+/// Waits until `n` items are held, and returns the queue.
+async fn wait_held(engine: &Engine, n: usize) -> Vec<plonix_core::intercept::HeldItem> {
+    for _ in 0..500 {
+        if engine.intercept.held() >= n {
+            return engine.intercept.queue();
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("expected {n} held items, have {}", engine.intercept.held());
+}
+
+#[tokio::test]
+async fn intercepted_requests_are_edited_forwarded_or_dropped() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let up = serve_http().await;
+    let r = start(&home, None).await;
+    r.engine.decide("localhost", Decision::Accepted, false, "").unwrap();
+    let (code, v) = call_api(&r, &r.token, "PUT", "/api/intercept", serde_json::json!({ "on": true })).await;
+    assert_eq!((code, v["on"].as_bool(), v["hold"].as_str()), (200, Some(true), Some("in_scope")), "{v}");
+
+    // Held, edited (start line, a header, the body), then forwarded.
+    let url = format!("http://localhost:{}/echo?x=1", up.port());
+    let client = tokio::spawn(send_via_proxy(r.proxy_addr, "POST", &url, "hello"));
+    let item = wait_held(&r.engine, 1).await.remove(0);
+    assert!(item.raw.starts_with("POST /echo?x=1 HTTP/1.1\n") && item.raw.ends_with("\n\nhello"), "{}", item.raw);
+    assert!(item.body_editable && item.in_scope);
+    let (_, v) = call_api(&r, &r.token, "GET", "/api/intercept", serde_json::json!(null)).await;
+    assert_eq!(v["queue"][0]["id"], item.id);
+    let (_, st) = call_api(&r, &r.token, "GET", "/api/status", serde_json::json!(null)).await;
+    assert_eq!(st["intercept"]["held"], 1);
+    let edited = item.raw.replace("x=1", "x=2").replace("content-type: text/plain", "content-type: text/plain\nx-edited: yes").replace("hello", "goodbye!");
+    let (code, v) = call_api(&r, &r.token, "POST", &format!("/api/intercept/{}/forward", item.id), serde_json::json!({ "raw": "nonsense" })).await;
+    assert_eq!((code, v["code"].as_str()), (400, Some("bad_edit")), "{v}");
+    let (code, _) = call_api(&r, &r.token, "POST", &format!("/api/intercept/{}/forward", item.id), serde_json::json!({ "raw": edited })).await;
+    assert_eq!(code, 200);
+    let (status, body) = client.await.unwrap();
+    assert_eq!(status, 200);
+    assert!(body.starts_with("POST /echo?x=2\n") && body.contains("x-edited: yes") && body.ends_with("\n\ngoodbye!"), "{body}");
+    wait_for_count(&r.engine, 1).await;
+    let ex = r.engine.store.get_exchange(1).unwrap().unwrap();
+    assert!(ex.edited);
+    assert_eq!((ex.query.as_str(), ex.req_body.as_slice()), ("x=2", &b"goodbye!"[..]), "the record shows what was sent");
+    let original = ex.original_request.unwrap();
+    assert!(original.contains("x=1") && original.ends_with("hello"), "{original}");
+
+    // Dropped: the server never sees it, the client gets an error page.
+    let client = tokio::spawn(send_via_proxy(r.proxy_addr, "POST", &url, "drop me"));
+    let item = wait_held(&r.engine, 1).await.remove(0);
+    let (code, _) = call_api(&r, &r.token, "POST", &format!("/api/intercept/{}/drop", item.id), serde_json::json!({})).await;
+    assert_eq!(code, 200);
+    let (status, body) = client.await.unwrap();
+    assert_eq!(status, 502);
+    assert!(body.contains("dropped in Intercept"), "{body}");
+    wait_for_count(&r.engine, 2).await;
+    let ex = r.engine.store.get_exchange(2).unwrap().unwrap();
+    assert!(ex.status.is_none() && ex.error.unwrap().contains("dropped"));
+    let (code, _) = call_api(&r, &r.token, "POST", &format!("/api/intercept/{}/drop", item.id), serde_json::json!({})).await;
+    assert_eq!(code, 404, "an answered item is gone");
+
+    // Out-of-scope hosts go straight through by default...
+    let (status, _) = send_via_proxy(r.proxy_addr, "GET", &format!("http://127.0.0.1:{}/echo", up.port()), "").await;
+    assert_eq!((status, r.engine.intercept.held()), (200, 0));
+    // ...and are held when the user holds everything.
+    let (code, _) = call_api(&r, &r.token, "PUT", "/api/intercept", serde_json::json!({ "hold": "everything", "filter": "method:GET" })).await;
+    assert_eq!(code, 200);
+    let client = tokio::spawn(send_via_proxy(r.proxy_addr, "GET", &format!("http://127.0.0.1:{}/echo", up.port()), ""));
+    let other = tokio::spawn(send_via_proxy(r.proxy_addr, "POST", &url, "not matching the filter"));
+    assert_eq!(other.await.unwrap().0, 200, "the filter lets a POST through");
+    let held = wait_held(&r.engine, 1).await;
+    assert!(!held[0].in_scope);
+    let (_, v) = call_api(&r, &r.token, "POST", "/api/intercept/forward-all", serde_json::json!({})).await;
+    assert_eq!(v["forwarded"], 1);
+    assert_eq!(client.await.unwrap().0, 200);
+
+    // A bad filter is refused and changes nothing.
+    let (code, v) = call_api(&r, &r.token, "PUT", "/api/intercept", serde_json::json!({ "filter": "status:abc" })).await;
+    assert_eq!((code, v["code"].as_str()), (400, Some("bad_settings")));
+    assert_eq!(r.engine.intercept.options().filter, "method:GET");
+}
+
+#[tokio::test]
+async fn intercept_times_out_and_turning_it_off_releases_the_queue() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let up = serve_http().await;
+    let r = start(&home, None).await;
+    r.engine.decide("localhost", Decision::Accepted, false, "").unwrap();
+    let url = format!("http://localhost:{}/echo", up.port());
+
+    // Nobody answers: the request goes on unchanged after the timeout.
+    let (code, _) = call_api(&r, &r.token, "PUT", "/api/intercept", serde_json::json!({ "on": true, "timeout_s": 1 })).await;
+    assert_eq!(code, 200);
+    let started = std::time::Instant::now();
+    let client = tokio::spawn(send_via_proxy(r.proxy_addr, "POST", &url, "slow"));
+    let item = wait_held(&r.engine, 1).await.remove(0);
+    assert!(item.expires_at - item.held_at <= 1000);
+    let (status, body) = client.await.unwrap();
+    assert_eq!((status, body.ends_with("slow")), (200, true));
+    assert!(started.elapsed() >= Duration::from_millis(900), "held until the timeout");
+    assert_eq!(r.engine.intercept.held(), 0);
+    wait_for_count(&r.engine, 1).await;
+    assert!(!r.engine.store.get_exchange(1).unwrap().unwrap().edited);
+
+    // Turning Intercept off sends everything held on.
+    call_api(&r, &r.token, "PUT", "/api/intercept", serde_json::json!({ "timeout_s": 300 })).await;
+    let a = tokio::spawn(send_via_proxy(r.proxy_addr, "POST", &url, "one"));
+    let b = tokio::spawn(send_via_proxy(r.proxy_addr, "POST", &url, "two"));
+    wait_held(&r.engine, 2).await;
+    let (_, v) = call_api(&r, &r.token, "PUT", "/api/intercept", serde_json::json!({ "on": false })).await;
+    assert_eq!((v["on"].as_bool(), v["released"].as_u64()), (Some(false), Some(2)));
+    assert_eq!((a.await.unwrap().0, b.await.unwrap().0), (200, 200));
+    let (status, _) = send_via_proxy(r.proxy_addr, "POST", &url, "three").await;
+    assert_eq!((status, r.engine.intercept.held()), (200, 0), "nothing is held while off");
+}
+
+#[tokio::test]
+async fn intercepted_responses_can_be_replaced() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let up = serve_http().await;
+    let r = start(&home, None).await;
+    r.engine.decide("localhost", Decision::Accepted, false, "").unwrap();
+    // Only responses: a filter on the status holds no request.
+    let (code, _) = call_api(&r, &r.token, "PUT", "/api/intercept", serde_json::json!({ "on": true, "responses": true, "filter": "status:200" })).await;
+    assert_eq!(code, 200);
+    let client = tokio::spawn(send_via_proxy(r.proxy_addr, "GET", &format!("http://localhost:{}/", up.port()), ""));
+    let item = wait_held(&r.engine, 1).await.remove(0);
+    assert_eq!((item.status, item.body_editable), (Some(200), true));
+    assert!(item.raw.starts_with("HTTP/1.1 200 OK\n") && item.raw.contains("welcome home"), "{}", item.raw);
+    let edited = item.raw.replace("HTTP/1.1 200 OK", "HTTP/1.1 201 Created").replace("welcome home", "edited in flight");
+    call_api(&r, &r.token, "POST", &format!("/api/intercept/{}/forward", item.id), serde_json::json!({ "raw": edited })).await;
+    let (status, body) = client.await.unwrap();
+    assert_eq!(status, 201);
+    assert!(body.contains("edited in flight") && !body.contains("welcome"), "{body}");
+    wait_for_count(&r.engine, 1).await;
+    let ex = r.engine.store.get_exchange(1).unwrap().unwrap();
+    assert_eq!((ex.edited, ex.status), (true, Some(201)));
+    assert!(String::from_utf8_lossy(&ex.resp_body).contains("edited in flight"));
+    assert!(ex.original_response.unwrap().contains("welcome home"));
+}
+
+/// Agents can neither see nor touch what is held.
+#[tokio::test]
+async fn agents_have_no_access_to_intercept() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let r = start(&home, None).await;
+    r.engine.intercept.set_on(true);
+    let agent = r.agent_token.clone();
+    for (method, path) in [
+        ("GET", "/api/intercept"),
+        ("PUT", "/api/intercept"),
+        ("POST", "/api/intercept/1/forward"),
+        ("POST", "/api/intercept/1/drop"),
+        ("POST", "/api/intercept/forward-all"),
+    ] {
+        let (code, v) = call_api(&r, &agent, method, path, serde_json::json!({ "on": false })).await;
+        assert_eq!((code, v["code"].as_str()), (403, Some("agent_not_allowed")), "{method} {path}");
+    }
+    assert!(r.engine.intercept.is_on(), "an agent cannot turn it off");
+    let (code, st) = call_api(&r, &agent, "GET", "/api/status", serde_json::json!(null)).await;
+    assert_eq!(code, 200);
+    assert!(st.get("intercept").is_none(), "agents learn nothing about the queue: {st}");
+}

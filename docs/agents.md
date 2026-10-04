@@ -100,7 +100,7 @@ Agents can read this policy (to explain a refusal) but can never change it: the 
 ## How access is enforced
 
 - `plonix mcp` signs in to the engine's local API with its own token, `~/.plonix/agent-token` (mode `0600`). It never reads the full API token.
-- The engine checks every request made with the agent token against a fixed list of allowed routes (`crates/plonix-core/src/access.rs`). Today that list contains only reads. Anything else (`/api/send`, `/api/replay`, `/api/scope/*`, `POST /api/findings`, `/api/ui/launch`, `/api/browser/open`, `/api/shutdown`) is refused with `403 agent_not_allowed`, and the refusal is shown on the Agents screen.
+- The engine checks every request made with the agent token against a fixed list of allowed routes (`crates/plonix-core/src/access.rs`). Today that list contains only reads. Anything else (`/api/send`, `/api/replay`, `/api/scope/*`, `POST /api/findings`, `/api/ui/launch`, `/api/browser/open`, `/api/shutdown`, every `/api/intercept` route) is refused with `403 agent_not_allowed`, and the refusal is shown on the Agents screen.
 - The API stays loopback-only. Plonix never sends captured traffic anywhere; the agent reads it on your machine.
 - The data-scope and capability settings are applied in the same middleware, so an agent sees only what you allow whatever it asks for.
 

@@ -537,7 +537,11 @@ function updateChrome() {
   $('#f-ca').textContent = (st.ca_fingerprint || '').slice(0, 23) + '…';
   $('#f-cap').textContent = st.exchanges;
   $('#f-ver').textContent = st.version;
-  $('#ct-traffic').textContent = st.exchanges || '';
+  const held = (st.intercept && st.intercept.held) || 0;
+  const ctTraffic = $('#ct-traffic');
+  ctTraffic.textContent = held || st.exchanges || '';
+  ctTraffic.classList.toggle('hot', held > 0);
+  ctTraffic.title = held ? held + ' held in Intercept, waiting for you' : '';
   const pending = stillPending(S.scope.suggestions).length;
   const pend = $('#ct-scope');
   pend.textContent = pending || '';
@@ -566,6 +570,7 @@ async function poll() {
       if (S.view === 'map' && st.exchanges !== prev.exchanges) M.dirty = true;
     }
     if (S.view === 'agents' && Date.now() - (S.agentsAt || 0) > 4000) loadAgents();
+    if (st.intercept && st.intercept.seq !== IC.seq) loadIntercept();
   } catch (e) {
     if (e.code === 'unauthorized') return;
     S.engineUp = false;
@@ -1029,15 +1034,20 @@ function renderTraffic(main) {
         h('div', { class: 'search', id: 'searchbox' }, h('span', { class: 'mg', text: '⌕' }), input, h('kbd', { text: '/' })),
         h('span', { class: 'count', id: 'tcount' }),
         liveBtn,
+        interceptButton(),
       ),
       h('div', { class: 'filterchips', id: 'chips' }),
       h('div', { class: 'qerr', id: 'qerr', hidden: true }),
       h('div', { id: 'bannerslot' }),
+      h('div', { id: 'icslot' }),
       h('div', { class: 'traffic' }, wrap, h('div', { id: 'inspslot' })),
     ),
   ]);
   renderChips();
   renderBanner();
+  IC.drawn = null;
+  drawInterceptPanel();
+  loadIntercept();
   T.refresh = refreshTraffic;
   loadTrafficView().then(() => {
     if (S.view !== 'traffic' || !input.isConnected) return;
@@ -1046,6 +1056,172 @@ function renderTraffic(main) {
     T.refresh(true);
   });
   if (T.sel) openInspector(T.sel);
+}
+
+/* ---------- intercept ---------- */
+
+/** Requests and responses held in the proxy, the one being edited, and unsent edits by id. */
+const IC = { on: false, queue: [], sel: null, drafts: {}, seq: -1, opts: {}, drawn: null };
+
+function interceptButton() {
+  const n = IC.queue.length;
+  return h(
+    'button',
+    {
+      class: 'btn sm icbtn' + (IC.on ? ' on' : ''),
+      id: 'icbtn',
+      title: IC.on
+        ? 'Intercept is on: matching requests wait for you. Turn it off to let everything held go on (i)'
+        : 'Intercept: hold requests to in-scope hosts to edit, forward or drop them (i)',
+      onclick: () => setIntercept(!IC.on),
+    },
+    h('span', { class: 'dot' }),
+    'Intercept',
+    n ? h('span', { class: 'qn', text: n }) : null,
+  );
+}
+
+async function setIntercept(on) {
+  try {
+    const r = await api('/api/intercept', { method: 'PUT', body: { on } });
+    if (!on && r.released) toast(`Intercept is off. ${r.released} held item(s) went on unchanged.`, 'ok');
+    applyIntercept(r);
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+async function loadIntercept() {
+  try {
+    applyIntercept(await api('/api/intercept'));
+  } catch (_) {}
+}
+
+function applyIntercept(r) {
+  Object.assign(IC, { on: r.on, queue: r.queue || [], seq: r.seq, opts: r });
+  const ids = new Set(IC.queue.map((i) => i.id));
+  for (const k of Object.keys(IC.drafts)) if (!ids.has(Number(k))) delete IC.drafts[k];
+  if (!ids.has(IC.sel)) IC.sel = IC.queue.length ? IC.queue[0].id : null;
+  const b = $('#icbtn');
+  if (b) b.replaceWith(interceptButton());
+  drawInterceptPanel();
+}
+
+const fmtSecs = (s) => (s >= 60 && s % 60 === 0 ? s / 60 + ' min' : s + ' s');
+
+function drawInterceptPanel() {
+  const slot = $('#icslot');
+  if (!slot) return;
+  const o = IC.opts;
+  // Redraw only when something changed, so typing in the editor is not interrupted.
+  const key = JSON.stringify([IC.on, IC.sel, IC.queue.map((i) => i.id), o.hold, o.filter, o.responses, o.timeout_s]);
+  if (IC.drawn === key && slot.firstChild) return;
+  IC.drawn = key;
+  if (!IC.on && !IC.queue.length) return clear(slot);
+  const what = (o.hold === 'everything' ? 'every host' : 'in-scope hosts') + (o.responses ? ', requests and responses' : ', requests only') + (o.filter ? ', matching ' + o.filter : '');
+  const head = h(
+    'div',
+    { class: 'ichead' },
+    h('b', { text: 'Intercept' }),
+    h('span', { class: 'muted', text: `Holding ${what}. Anything unanswered goes on after ${fmtSecs(o.timeout_s || 0)}.` }),
+    h('button', { class: 'btn sm ghost', text: 'Options…', onclick: () => ((S.settingsSection = 'intercept'), leaveTo('settings')) }),
+    h('button', { class: 'btn sm', text: 'Forward all', disabled: !IC.queue.length, title: 'Send everything held on, unchanged', onclick: forwardAllHeld }),
+  );
+  if (!IC.queue.length) return clear(slot, h('div', { class: 'icpanel' }, head, h('div', { class: 'icnone muted', text: 'Nothing held. Matching requests wait here until you forward or drop them.' })));
+  const list = h(
+    'div',
+    { class: 'iclist' },
+    IC.queue.map((it) =>
+      h(
+        'button',
+        { class: 'icitem' + (it.id === IC.sel ? ' sel' : ''), onclick: () => ((IC.sel = it.id), drawInterceptPanel()) },
+        h('span', { class: 'tag ' + (it.kind === 'response' ? 'pend' : 'replay'), text: it.kind === 'response' ? 'resp' : 'req' }),
+        h('span', { class: 'meth m-' + it.method, text: it.method }),
+        h('span', { class: 'icurl', text: it.url, title: it.url }),
+        it.status ? h('span', { class: statusClass(it.status), text: it.status }) : null,
+      ),
+    ),
+  );
+  const it = IC.queue.find((i) => i.id === IC.sel);
+  const focused = document.activeElement && document.activeElement.classList.contains('icedit') ? document.activeElement : null;
+  const ta = h('textarea', {
+    class: 'icedit',
+    spellcheck: 'false',
+    'aria-label': 'Held ' + it.kind + ' as text',
+    value: IC.drafts[it.id] != null ? IC.drafts[it.id] : it.raw,
+    oninput: () => (IC.drafts[it.id] = ta.value),
+    onkeydown: (e) => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        forwardHeld(it.id);
+      }
+      if (e.key === 'Escape') ta.blur();
+    },
+  });
+  const editor = h(
+    'div',
+    { class: 'iceditor' },
+    h('div', { class: 'lbl' }, it.kind === 'response' ? 'Response' : 'Request', h('span', { class: 'r', text: `${it.http_version} · goes on by itself at ${fmtTime(it.expires_at)}` })),
+    it.note ? h('div', { class: 'icnote', text: it.note }) : null,
+    ta,
+    h('div', { class: 'qerr', id: 'icerr' }),
+    h(
+      'div',
+      { class: 'icact' },
+      h('button', { class: 'btn sm', text: 'Revert', title: 'Undo your edits', onclick: () => (delete IC.drafts[it.id], (IC.drawn = null), drawInterceptPanel()) }),
+      h('button', { class: 'btn sm danger', text: 'Drop', title: 'Stop it here; the browser gets an error page (d)', onclick: () => dropHeld(it.id) }),
+      h('button', { class: 'btn sm primary', text: 'Forward', title: 'Send it on, with your edits (⌘↵, or f)', onclick: () => forwardHeld(it.id) }),
+    ),
+  );
+  clear(slot, h('div', { class: 'icpanel' }, head, h('div', { class: 'icbody' }, list, editor)));
+  if (focused) ta.focus();
+}
+
+async function forwardHeld(id) {
+  const it = IC.queue.find((i) => i.id === id);
+  if (!it) return;
+  const raw = IC.drafts[id];
+  try {
+    await api(`/api/intercept/${id}/forward`, { method: 'POST', body: raw != null && raw !== it.raw ? { raw } : {} });
+    delete IC.drafts[id];
+  } catch (e) {
+    const err = $('#icerr');
+    if (err && e.code === 'bad_edit') return (err.textContent = e.message);
+    toast(e.message, 'err');
+  }
+  loadIntercept();
+}
+
+async function dropHeld(id) {
+  try {
+    await api(`/api/intercept/${id}/drop`, { method: 'POST', body: {} });
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+  loadIntercept();
+}
+
+async function forwardAllHeld() {
+  try {
+    await api('/api/intercept/forward-all', { method: 'POST', body: {} });
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+  loadIntercept();
+}
+
+/** The request or response as it arrived, before it was edited in Intercept. */
+function showOriginal(ex) {
+  const block = (title, text) => (text ? [h('div', { class: 'lbl', text: title }), h('pre', { class: 'raw origraw', text })] : []);
+  modal(
+    'Before it was edited',
+    [
+      h('p', { class: 'muted mnote', text: 'This exchange was changed in Intercept. The Lens shows what was sent; this is what arrived.' }),
+      block('Original request', ex.original_request),
+      block('Original response', ex.original_response),
+    ],
+    [h('button', { class: 'btn', text: 'Close', onclick: closeModal })],
+  );
 }
 
 /**
@@ -1387,6 +1563,7 @@ function drawRows(freshAbove) {
   const rows = T.items.map((ex) => {
     const tags = [];
     if (ex.source === 'replay') tags.push(h('span', { class: 'tag replay', text: 'sent' }));
+    if (ex.edited) tags.push(h('span', { class: 'tag edited', text: 'edited', title: 'Changed in Intercept before it went on' }));
     const tr = h(
       'tr',
       {
@@ -1482,6 +1659,7 @@ async function openInspector(id) {
         h('span', { text: ex.duration_ms + ' ms' }),
         h('span', { text: fmtSize(ex.resp_size != null ? ex.resp_size : b64len(ex.resp_body)) }),
         ex.http_version ? h('span', { text: ex.http_version, title: 'The protocol spoken with the server' }) : null,
+        ex.edited ? h('button', { class: 'tag edited', text: 'edited', title: 'Changed in Intercept before it went on. Show the original', onclick: () => showOriginal(ex) }) : null,
         h('span', { class: 'tag ' + scopeTag(decide(ex.host)), text: scopeLabel(decide(ex.host)) }),
       ),
       h('button', { class: 'btn sm primary', text: 'Send to Bench', title: 'Edit and re-send on the Bench (b, or double-click a row)', onclick: () => sendToBench(id) }),
@@ -4552,6 +4730,9 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     selectRow(-1);
   } else if (e.key === 'b' && T.sel) sendToBench(T.sel);
+  else if (e.key === 'i') setIntercept(!IC.on);
+  else if (e.key === 'f' && IC.sel != null) forwardHeld(IC.sel);
+  else if (e.key === 'd' && IC.sel != null) dropHeld(IC.sel);
 });
 
 /* ---------- settings ---------- */
@@ -4576,6 +4757,7 @@ async function renderSettings(main) {
     save: async (section, values) => {
       const r = await api('/api/settings/' + section, { method: 'PUT', body: { values } });
       if (section === 'agents') loadAgentSettings();
+      if (section === 'intercept') loadIntercept();
       if (section === 'proxy') {
         S.status = await api('/api/status');
         updateChrome();
