@@ -2723,6 +2723,7 @@ function renderMarket(main) {
         h('h2', { text: 'Market' }),
         h('div', { class: 'search' }, h('span', { class: 'mg', text: '⌕' }), q),
         h('button', { class: 'btn sm', id: 'mupdate', hidden: true, onclick: updateAll }),
+        h('button', { class: 'btn sm', text: 'Add from a file or link', title: 'Add a skill, rule pack or filter pack from outside the Market. It is marked Not verified.', onclick: addExternal }),
         h('button', { class: 'iconbtn', title: 'Check the Market again', text: '↻', onclick: () => loadMarket(true) }),
       ),
       h('div', { class: 'mtrust', id: 'mtrust' }),
@@ -2855,6 +2856,59 @@ async function marketAction(p, action) {
   MK.busy = null;
   await loadMarket(false);
   loadFacets();
+}
+
+/** Adds a file from outside the Market: look at it first, then confirm. It is always marked Not verified. */
+function addExternal() {
+  const input = h('input', { placeholder: 'https://example.com/skill.md  or  /path/to/pack.json', spellcheck: 'false', autocomplete: 'off' });
+  const preview = h('div', { class: 'xpreview' });
+  const check = h('button', { class: 'btn', text: 'Look at it' });
+  const confirmBtn = h('button', { class: 'btn primary', text: 'Add it, not verified', hidden: true });
+  const m = modal(
+    'Add from a file or link',
+    [
+      h('p', { class: 'muted mnote', text: 'A skill (Markdown), rule pack or filter pack. Plonix checks it in full, shows you what it does, and adds it only after you confirm. Nobody vouches for it, so it is marked Not verified.' }),
+      h('label', null, 'Address or path', input),
+      preview,
+    ],
+    [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), check, confirmBtn],
+  );
+  const run = async (confirm) => {
+    m.err.textContent = '';
+    const source = input.value.trim();
+    if (!source) return input.focus();
+    check.disabled = confirmBtn.disabled = true;
+    try {
+      const r = await api('/api/market/add', { method: 'POST', body: { source, confirm } });
+      if (r.added) {
+        closeModal();
+        toast(`Added ${r.file.name} (not verified)`, 'ok');
+        MK.kind = 'unverified';
+        await loadMarket(true);
+        return showPackage(r.file.name);
+      }
+      const f = r.file;
+      clear(
+        preview,
+        h('div', { class: 'xhead' }, h('b', { class: 'mono', text: f.name }), h('span', { class: 'muted', text: ` ${KIND_INFO[f.kind].one} · ${f.version} · ${f.author}` })),
+        h('p', { text: f.description }),
+        f.effects.map((e) => h('div', { class: 'mcap' }, h('span', { text: '•' }), e)),
+        f.replaces ? h('p', { class: 'muted', text: `This replaces ${f.name} ${f.replaces}, which is installed.` }) : null,
+        h('div', { class: 'mtrustbox warn' }, h('span', { class: 'trust warn' }, h('i', { text: '!' }), 'Not verified'), h('p', { text: 'It did not come from a signed Market. It is checked and cannot run code, but nobody has reviewed what it says or does.' })),
+        h('p', { class: 'muted fine mono', text: 'sha256 ' + f.sha256 }),
+      );
+      confirmBtn.hidden = false;
+    } catch (e) {
+      m.err.textContent = e.message;
+      confirmBtn.hidden = true;
+      clear(preview);
+    }
+    check.disabled = confirmBtn.disabled = false;
+  };
+  check.onclick = () => run(false);
+  confirmBtn.onclick = () => run(true);
+  input.addEventListener('input', () => ((confirmBtn.hidden = true), clear(preview)));
+  input.addEventListener('keydown', (e) => e.key === 'Enter' && run(false));
 }
 
 async function updateAll() {

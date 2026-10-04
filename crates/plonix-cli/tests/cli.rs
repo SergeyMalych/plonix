@@ -1010,3 +1010,51 @@ fn agents_get_skills_as_mcp_prompts_within_their_settings() {
         .unwrap_err();
     assert!(matches!(err, ureq::Error::Status(403, _)), "{err}");
 }
+
+#[test]
+fn external_files_can_be_added_but_stay_unverified() {
+    let p = Plonix::new();
+    let dir = tempfile::tempdir().unwrap();
+    let skill = dir.path().join("notes.md");
+    std::fs::write(&skill, "---\nplonix_skill: 1\nname: acme-notes\nversion: 1.0.0\ntitle: Notes\ndescription: My notes.\nauthor: me\nuses: [traffic]\n---\nLook at traffic.\n").unwrap();
+    let path = skill.to_str().unwrap();
+
+    // Without --yes it only shows what it would do.
+    let r = p.run(&["market", "add", path]);
+    assert_eq!(r.code(), 1);
+    assert!(r.stdout().contains("NOT VERIFIED") && r.stdout().contains("agents stay read-only") || r.stdout().contains("Agents stay read-only"), "{}", r.stdout());
+    assert!(!p.run(&["skills"]).ok().stdout().contains("acme-notes"));
+
+    let out = p.run(&["market", "add", path, "--yes"]).ok().stdout();
+    assert!(out.contains("Installed acme-notes"), "{out}");
+    assert!(p.run(&["skills"]).ok().stdout().lines().find(|l| l.starts_with("acme-notes")).unwrap().contains("NOT VERIFIED"));
+
+    // Packs are detected by their contents; anything else is refused with a reason.
+    let pack = dir.path().join("pack.json");
+    std::fs::write(&pack, ACME_PACK).unwrap();
+    assert!(p.run(&["market", "add", pack.to_str().unwrap(), "--yes"]).ok().stdout().contains("rule pack"));
+    let junk = dir.path().join("junk.json");
+    std::fs::write(&junk, "{\"hello\": 1}").unwrap();
+    assert!(p.run(&["market", "add", junk.to_str().unwrap(), "--yes"]).stderr().contains("not a Plonix skill or pack"));
+    let index = dir.path().join("index.json");
+    std::fs::write(&index, "{\"plonix_index\": 2, \"packages\": []}").unwrap();
+    assert!(p.run(&["market", "add", index.to_str().unwrap(), "--yes"]).stderr().contains("Market list"));
+    assert_eq!(p.run(&["market", "add", "http://example.com/x.md", "--yes"]).code(), 1);
+
+    // The agent prompt for an unverified skill says so.
+    p.start();
+    let mut m = Mcp::start(&p);
+    m.request("initialize", serde_json::json!({ "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": { "name": "a" } }));
+    let (err, text) = m.tool("get_skill", serde_json::json!({ "name": "acme-notes" }));
+    assert!(!err && text.contains("this skill is not verified"), "{text}");
+    let (_, text) = m.tool("get_skill", serde_json::json!({ "name": "explain-request", "arguments": { "id": "1" } }));
+    assert!(!text.contains("not verified"), "{text}");
+
+    // Agents cannot add anything.
+    let token = std::fs::read_to_string(p.home.path().join("agent-token")).unwrap();
+    let err = ureq::post(&format!("{}/api/market/add", api_base(&p)))
+        .set("Authorization", &format!("Bearer {}", token.trim()))
+        .send_json(serde_json::json!({ "source": path, "confirm": true }))
+        .unwrap_err();
+    assert!(matches!(err, ureq::Error::Status(403, _)), "{err}");
+}

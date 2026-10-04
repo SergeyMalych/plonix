@@ -96,3 +96,19 @@ Build a short briefing on {{host}} for the user...
 - Instructions are at most 20,000 characters.
 
 To publish one in the Plonix Market, add it to `store/skills/` and its entry to `store/index.json` (see [store/README.md](../store/README.md)).
+
+## Adding things from outside the Market
+
+You can add a skill, rule pack or filter pack from a file or a link that is not in a signed Market:
+
+```
+plonix market add ./my-skill.md            # shows what it is and what it does
+plonix market add ./my-skill.md --yes      # adds it
+plonix market add https://example.com/pack.json --yes
+```
+
+In the app, use **Add from a file or link** on the Market screen. Plonix reads the file in full, shows its name, author, what it does and its checksum, and adds it only after you confirm.
+
+Anything added this way is marked **Not verified**: nobody has signed or reviewed it. It is still checked and cannot run code, and agents cannot add anything themselves. A skill that is not verified carries a note saying so when an agent uses it.
+
+To use a Market list that is not signed, turn on **Allow unsigned Market lists** in Settings › Market. Everything from it is then marked Not verified.

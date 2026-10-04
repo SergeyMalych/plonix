@@ -74,6 +74,10 @@ pub fn settings_section() -> Section {
                 .placeholder("ed25519:…")
                 .help("Public keys of other Markets you trust, one per line. A Market is only used when a trusted key signed it."),
         )
+        .field(
+            Field::toggle("allow_unsigned", "Allow Markets that are not signed", false)
+                .help("Off by default. When on, a Market list without a trusted signature can be used, and everything from it is marked Not verified."),
+        )
         .validator(|v| {
             let mut p = vec![];
             let index = v.get("index").and_then(Value::as_str).unwrap_or("").trim();
@@ -96,6 +100,7 @@ pub fn settings_section() -> Section {
 pub struct MarketSettings {
     pub index: String,
     pub trusted_keys: Vec<String>,
+    pub allow_unsigned: bool,
 }
 
 impl MarketSettings {
@@ -103,6 +108,7 @@ impl MarketSettings {
         let v = settings::global(home, SETTINGS);
         Self {
             index: v.get("index").and_then(Value::as_str).unwrap_or("").trim().to_string(),
+            allow_unsigned: v.get("allow_unsigned").and_then(Value::as_bool).unwrap_or(false),
             trusted_keys: v
                 .get("trusted_keys")
                 .and_then(Value::as_array)
@@ -219,7 +225,7 @@ pub fn open(home: &Home, opts: &OpenOptions) -> Result<Catalog> {
     let address = index_address(home, opts);
     let trusted = registry::trusted_keys(&MarketSettings::load(home).trusted_keys);
     let loc = registry::location(&address).map_err(|e| anyhow!(e))?;
-    match open_at(&loc, &trusted, opts.allow_unsigned) {
+    match open_at(&loc, &trusted, opts.allow_unsigned || MarketSettings::load(home).allow_unsigned) {
         Ok(c) => Ok(c),
         Err(e) if address == registry::DEFAULT_INDEX => {
             let mut c = bundled(&trusted)?;
@@ -526,6 +532,111 @@ impl Market {
             Trust::Verified { publisher, .. } => Verification::signed(publisher, p.kind != Kind::Bundle),
             Trust::Unverified => Verification::unsigned_catalog(),
         }
+    }
+
+    }
+
+/// A file someone wants to add from outside the Market, looked at but not installed.
+#[derive(Debug, Clone, Serialize)]
+pub struct External {
+    pub kind: Kind,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub author: String,
+    pub sha256: String,
+    pub source: String,
+    /// What installing it will do, in plain words.
+    pub effects: Vec<String>,
+    /// Installed already (so adding replaces it), with its version.
+    pub replaces: Option<String>,
+    #[serde(skip)]
+    bytes: Vec<u8>,
+}
+
+/// Which kind of package a file is, from its contents.
+pub fn detect_kind(bytes: &[u8]) -> Result<Kind, String> {
+    let text = std::str::from_utf8(bytes).map_err(|_| "that file is not text".to_string())?;
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    if text.starts_with("---") {
+        return Ok(Kind::Skill);
+    }
+    let v: Value = serde_json::from_str(text).map_err(|_| "that is not a Plonix skill (Markdown) or pack (JSON)".to_string())?;
+    if v.get("plonix_pack").is_some() {
+        Ok(Kind::Rules)
+    } else if v.get("plonix_filters").is_some() {
+        Ok(Kind::Filters)
+    } else if v.get("plonix_extension").is_some() {
+        Err("that is an extension. Extensions that run code cannot be installed until the sandboxed runtime exists".into())
+    } else if v.get("plonix_index").is_some() {
+        Err("that is a Market list, not a package. Add it as the Market address in Settings › Market".into())
+    } else {
+        Err("that is not a Plonix skill or pack".into())
+    }
+}
+
+impl Market {
+    /// Reads and fully validates a file from outside the Market. Nothing is installed.
+    pub fn inspect_external(&self, bytes: Vec<u8>, source: &str) -> Result<External, String> {
+        if bytes.len() > rulepack::MAX_PACK_BYTES.max(skill::MAX_SKILL_BYTES) {
+            return Err("that file is too large".into());
+        }
+        let kind = detect_kind(&bytes)?;
+        let (name, version) = describe(kind, &bytes)?;
+        let (description, author, effects) = match kind {
+            Kind::Skill => {
+                let sk = skill::parse(&bytes)?;
+                let uses: Vec<String> = sk.uses.iter().map(|g| format!("{g:?}").to_lowercase()).collect();
+                (
+                    sk.description,
+                    sk.author,
+                    vec![
+                        format!("Gives AI agents a playbook that reads: {}. Agents stay read-only.", uses.join(", ")),
+                        "A skill is instructions an agent follows, so read them first: a misleading skill can steer the agent.".into(),
+                    ],
+                )
+            }
+            Kind::Rules => {
+                let p = rulepack::parse(&bytes).map_err(|e| e.to_string())?;
+                (p.doc.description.clone(), p.doc.author.clone(), vec![format!("Adds {} technology detection rules. Data only; it cannot run code or send anything.", p.rules.len())])
+            }
+            Kind::Filters => {
+                let p = filterpack::parse(&bytes)?;
+                (
+                    p.doc.description.clone(),
+                    p.doc.author.clone(),
+                    vec![format!("Adds {} named Traffic filters. They can only narrow what you see.", p.doc.filters.len())],
+                )
+            }
+            _ => unreachable!(),
+        };
+        if Self::builtin(kind, &name) {
+            return Err(format!("`{name}` is the name of a built-in {}; give it a different name", kind.noun()));
+        }
+        let replaces = self.installed_version(kind, &name);
+        Ok(External { kind, name, version, description, author, sha256: sha256_hex(&bytes), source: source.to_string(), effects, replaces, bytes })
+    }
+
+    /// Installs a file from outside the Market. It is recorded as not verified.
+    pub fn add_external(&self, ext: &External) -> Result<Change> {
+        let src = ext.source.as_str();
+        let previous = match ext.kind {
+            Kind::Rules => self.rules.install(&ext.bytes, src, Some(&ext.sha256))?.1,
+            Kind::Filters => self.filters.install(&ext.bytes, src, Some(&ext.sha256))?.1,
+            Kind::Skill => self.skills.install(&ext.bytes, src, Some(&ext.sha256))?.1,
+            _ => bail!("only skills, rule packs and filter packs can be added"),
+        };
+        // Whatever the Market vouched for under this name no longer applies.
+        let mut lock = self.read_provenance();
+        lock.packages.remove(&format!("{}:{}", ext.kind.as_str(), ext.name));
+        self.write_provenance(&lock)?;
+        Ok(Change {
+            name: ext.name.clone(),
+            kind: ext.kind,
+            version: ext.version.clone(),
+            action: if previous.is_some() { Action::Updated } else { Action::Installed },
+            from: previous,
+        })
     }
 
     /// Installed packages that are not in the catalog: added by hand.

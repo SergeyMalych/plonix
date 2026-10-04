@@ -666,3 +666,6 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .mtrustbox.ok { background: var(--ok-soft); border-color: transparent; }
 .mtrustbox.warn { background: var(--warn-soft); border-color: transparent; }
 .mtrustbox.bad { background: var(--crit-soft); border-color: transparent; }
+.xpreview { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; max-height: 340px; overflow: auto; }
+.xpreview p { margin: 0; line-height: 1.45; }
+.xhead { font-size: 13px; }

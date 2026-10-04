@@ -53,6 +53,14 @@ enum MarketCmd {
         #[arg(required = true)]
         names: Vec<String>,
     },
+    /// Add a skill, rule pack or filter pack from a file or link, marked Not verified
+    Add {
+        /// Path or https:// address of the file
+        source: String,
+        /// Add it without asking (it is still marked Not verified)
+        #[arg(long)]
+        yes: bool,
+    },
     /// Trust another Market's publisher key (adds it to Settings › Market)
     Trust { key: String },
     /// For Market authors: validate an index and every package it lists
@@ -297,6 +305,36 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
             if ctx.json {
                 return ctx.print_json(&json!({ "changes": all }));
             }
+        }
+        MarketCmd::Add { source, yes } => {
+            let loc = registry::location(&source).map_err(|e| anyhow!(e))?;
+            let bytes = registry::fetch(&loc, plonix_core::rulepack::MAX_PACK_BYTES)?;
+            let label = match &loc {
+                registry::Location::File(p) => std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()).display().to_string(),
+                registry::Location::Url(u) => u.clone(),
+            };
+            let ext = m.inspect_external(bytes, &label).map_err(|e| anyhow!(e))?;
+            if !ctx.json {
+                println!("{} {} · {} by {}", ext.name, ext.version, ext.kind.noun(), ext.author);
+                println!("{}", ext.description);
+                for e in &ext.effects {
+                    println!("  - {e}");
+                }
+                println!("sha256 {}", ext.sha256);
+                println!("! NOT VERIFIED: it did not come from a signed Market, so nobody has vouched for it. It is validated and cannot run code.");
+            }
+            if !yes {
+                if ctx.json {
+                    return ctx.print_json(&json!({ "added": false, "file": ext }));
+                }
+                bail!("not added yet. Read the above, then run it again with --yes to add it");
+            }
+            let change = m.add_external(&ext)?;
+            if ctx.json {
+                return ctx.print_json(&json!({ "added": true, "file": ext, "change": change }));
+            }
+            print_changes(&[change], &ext.name);
+            println!("It shows as Not verified in the Market.");
         }
         MarketCmd::Trust { key } => {
             registry::parse_public_key(&key).map_err(|e| anyhow!(e))?;
