@@ -182,7 +182,12 @@ code, .mono { font-family: var(--mono); }
 .traffic { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .tablewrap { flex: 1; min-height: 80px; overflow: auto; }
 .ttable { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
-.ttable thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; text-align: left; font-weight: 600; color: var(--fg-3); font-size: 11px; padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.ttable thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; text-align: left; font-weight: 600; color: var(--fg-3); font-size: 11px; padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ttable .colgrip { position: absolute; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 2; }
+.ttable .colgrip.r { right: 0; }
+.ttable .colgrip.l { left: 0; }
+.ttable .colgrip::after { content: ''; position: absolute; top: 6px; bottom: 6px; left: 3px; width: 1px; background: var(--line); }
+.ttable .colgrip:hover::after { width: 2px; left: 3px; background: var(--accent); }
 .ttable td { padding: 0 8px; height: 30px; border-bottom: 1px solid var(--line-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ttable tbody tr { cursor: pointer; }
 .ttable tbody tr:hover { background: var(--surface-2); }
@@ -332,7 +337,7 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .cmpsum { font-size: 11.5px; color: var(--fg-2); padding: 7px 12px; border-bottom: 1px solid var(--line-2); }
 
 /* scope view */
-.stack { padding: 14px; display: flex; flex-direction: column; gap: 12px; max-width: 1100px; }
+.stack { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
 .sechead { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; }
 .sechead h3 { margin: 0; font-size: 12px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--fg-3); }
 .sugg .top { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line-2); }
@@ -398,6 +403,9 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .mcard input, .mcard select, .mcard textarea { border: 1px solid var(--line-2); background: var(--surface-2); border-radius: 7px; padding: 7px 10px; outline: 0; font-weight: 400; font-size: 12.5px; }
 .mcard input:focus, .mcard select:focus, .mcard textarea:focus { border-color: var(--accent); }
 .mcard textarea { min-height: 110px; resize: vertical; font-family: var(--ui); }
+.mcard label.domrow { flex-direction: row; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 400; color: var(--fg); }
+.mcard .domrow input { padding: 0; margin: 0; }
+.mcard .domlist { grid-template-columns: 1fr; padding: 4px 0 0; }
 .mcard .mf { padding: 12px 18px 16px; display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
 .mcard .mf .err { color: var(--crit); font-size: 12px; margin-right: auto; }
 
@@ -445,7 +453,7 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .slist button.on { background: var(--accent); color: var(--accent-fg); }
 .slist .sb { margin-left: auto; font-size: 10px; letter-spacing: .04em; text-transform: uppercase; opacity: .7; }
 .spane { flex: 1; min-width: 0; overflow: auto; }
-.sform { max-width: 640px; padding: 18px 22px 26px; }
+.sform { max-width: 960px; padding: 18px 22px 26px; }
 .shead { display: flex; align-items: center; gap: 10px; }
 .shead h2 { margin: 0; font-size: 17px; }
 .slevel { font-size: 10.5px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; padding: 2px 7px; border-radius: 5px; background: var(--accent-soft); color: var(--accent); }
@@ -619,6 +627,7 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .card.group .meta { color: var(--fg-3); font-size: 11.5px; }
 .card.group .acts { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .gdesc { padding: 8px 14px 0; font-size: 12px; }
+.gdesc:last-child { padding-bottom: 10px; }
 .domlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 2px 14px; padding: 10px 14px 12px; }
 .domrow { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--fg); padding: 3px 0; }
 .domrow .mono { font-family: var(--mono); }
@@ -758,6 +767,14 @@ input.num { width: 72px; }
 .runsel pre.raw { margin: 0; padding: 6px 14px; max-height: 42vh; overflow: auto; }
 
 /* ---------- scans ---------- */
+#scanbody .card { padding: 12px 16px 14px; }
+#scanbody .card > .empty:not(:only-child) { padding: 14px 0 6px; }
+#scanbody .card .stack { padding: 0; }
+#scanbody .sechead { margin: 0 0 4px; min-height: 26px; }
+#scanbody .sechead > .muted { font-size: 12px; }
+.scanrow select, .scanrow input:not([type]), .scanrow input[type='text'] { border: 1px solid var(--line-2); background: var(--surface-2); border-radius: 7px; padding: 5px 10px; outline: 0; font-size: 12.5px; color: var(--fg); }
+.scanrow input:not([type]), .scanrow input[type='text'] { font-family: var(--mono); font-size: 12px; }
+.scanrow select:focus, .scanrow input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .scanrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0 6px; }
 .scanrow select, .scanrow input[type='text'], .scanrow input:not([type]) { min-width: 220px; }
 .linklike { font-family: var(--mono); font-size: 11px; color: var(--accent); border: 1px solid var(--line-2); border-radius: 6px; padding: 2px 8px; background: var(--surface-2); }
@@ -767,10 +784,10 @@ input.num { width: 72px; }
 .scansig { display: flex; align-items: center; gap: 10px; font-size: 12px; }
 .scansig .scansigev { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scangroup { margin-top: 10px; }
-.scanglabel { display: flex; align-items: baseline; gap: 2px; font-size: 12px; margin: 4px 0 4px; }
+.scanglabel { display: flex; align-items: baseline; gap: 6px; font-size: 12px; margin: 4px 0 4px; }
 .scanglabel .muted { font-size: 11px; }
 .intrutoggle { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
-.scantactic { display: flex; align-items: center; gap: 10px; padding: 6px 2px; border-top: 1px solid var(--line-2); cursor: pointer; font-size: 12px; }
+.scantactic { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-top: 1px solid var(--line-2); cursor: pointer; font-size: 12px; }
 .scantactic:first-of-type { border-top: 0; }
 .scantactic .tt { font-weight: 600; }
 .scantactic .scanreq { margin-left: auto; font-size: 11px; white-space: nowrap; }
