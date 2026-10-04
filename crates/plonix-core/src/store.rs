@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Mutex;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OptionalExtension, Row, params, params_from_iter};
 
 use crate::codec;
@@ -12,9 +12,38 @@ use crate::model::*;
 use crate::query::Query;
 use crate::scope::{Decision, Evidence, EvidenceKind, NewEvidence, Rule, ScopeRules, Suggestion};
 
-const SCHEMA: &str = r#"
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
+/// Connection settings, applied every time a database is opened. They are
+/// not part of the schema and cannot run inside a transaction.
+const PRAGMAS: &str = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;";
+
+/// One step of the database schema, moving it from `version - 1` to
+/// `version`. A step runs in a transaction together with the version bump,
+/// so it either completes or leaves the database as it was. Steps must be
+/// idempotent: a database a crashed or older build left half-way still
+/// migrates cleanly.
+#[derive(Clone, Copy)]
+pub struct Migration {
+    pub version: i64,
+    pub what: &'static str,
+    pub run: fn(&rusqlite::Transaction) -> Result<()>,
+}
+
+/// Every schema change, oldest first. Append new steps at the end with the
+/// next version number; never edit or reorder a step that has shipped.
+pub const MIGRATIONS: &[Migration] = &[Migration { version: 1, what: "traffic, scope, evidence, findings and view state", run: v1_initial }];
+
+/// The schema version this build reads and writes.
+pub const SCHEMA_VERSION: i64 = MIGRATIONS[MIGRATIONS.len() - 1].version;
+
+/// Version 1 is the schema from before databases were versioned. Every
+/// statement is `IF NOT EXISTS`, so a database from that time, which has the
+/// tables but `user_version` 0, is taken up as version 1 with its data as is.
+fn v1_initial(tx: &rusqlite::Transaction) -> Result<()> {
+    tx.execute_batch(V1_SCHEMA)?;
+    Ok(())
+}
+
+const V1_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS exchanges (
     id INTEGER PRIMARY KEY,
     ts INTEGER NOT NULL,
@@ -78,6 +107,7 @@ CREATE TABLE IF NOT EXISTS view_state (
 );
 "#;
 
+
 pub struct Store {
     conn: Mutex<Connection>,
 }
@@ -94,10 +124,16 @@ impl Store {
         Self::init(Connection::open_in_memory()?)
     }
 
-    fn init(conn: Connection) -> Result<Self> {
+    fn init(mut conn: Connection) -> Result<Self> {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
-        conn.execute_batch(SCHEMA)?;
+        conn.execute_batch(PRAGMAS)?;
+        migrate(&mut conn, MIGRATIONS)?;
         Ok(Self { conn: Mutex::new(conn) })
+    }
+
+    /// The schema version of the open database.
+    pub fn schema_version(&self) -> Result<i64> {
+        Ok(schema_version(&self.conn.lock().unwrap())?)
     }
 
     // ---- traffic ---------------------------------------------------------
@@ -555,6 +591,35 @@ impl Store {
     }
 }
 
+fn schema_version(conn: &Connection) -> rusqlite::Result<i64> {
+    conn.query_row("PRAGMA user_version", [], |r| r.get(0))
+}
+
+/// Brings a database up to the last of `steps`, one step at a time. Each
+/// step runs in its own write transaction that first re-reads the version,
+/// so two processes opening the same file never apply a step twice. A
+/// database from a newer build is refused rather than half understood.
+fn migrate(conn: &mut Connection, steps: &[Migration]) -> Result<()> {
+    let latest = steps.last().map_or(0, |m| m.version);
+    let found = schema_version(conn)?;
+    if found > latest {
+        bail!(
+            "this project's database was written by a newer version of Plonix (schema version {found}; this version knows up to {latest}). \
+             Update Plonix to open it; the file was not changed"
+        );
+    }
+    for step in steps.iter().filter(|m| m.version > found) {
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if schema_version(&tx)? >= step.version {
+            continue;
+        }
+        (step.run)(&tx).with_context(|| format!("upgrading the database to schema version {} ({})", step.version, step.what))?;
+        tx.pragma_update(None, "user_version", step.version)?;
+        tx.commit()?;
+    }
+    Ok(())
+}
+
 fn row_to_exchange(r: &Row) -> rusqlite::Result<Exchange> {
     let json = |i: usize| -> rusqlite::Result<String> { r.get(i) };
     Ok(Exchange {
@@ -866,6 +931,89 @@ mod tests {
         assert_eq!(s.prune_decided(&s.rules().unwrap()).unwrap(), 1);
         assert_eq!(s.prune_decided(&s.rules().unwrap()).unwrap(), 0);
         assert!(s.suggestions(&s.rules().unwrap()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn fresh_database_gets_the_latest_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("traffic.db");
+        let s = Store::open(&path).unwrap();
+        assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
+        s.insert_exchange(&sample("www.example.com", "GET", "/", 200, "hi")).unwrap();
+        drop(s);
+        // Opening again changes nothing and keeps the data.
+        let s = Store::open(&path).unwrap();
+        assert_eq!((s.schema_version().unwrap(), s.count().unwrap()), (SCHEMA_VERSION, 1));
+    }
+
+    #[test]
+    fn unversioned_database_is_taken_up_without_losing_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("traffic.db");
+        {
+            // A project from before schema versions: the tables, user_version 0.
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(V1_SCHEMA).unwrap();
+            conn.execute(
+                "INSERT INTO findings (created_at, title, severity, status, description, exchange_ids, created_by)
+                 VALUES (5, 'Old finding', 'low', 'open', 'kept', '[1]', 'cli')",
+                [],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO scope_rules (pattern, include_subdomains, decision, created_at) VALUES ('example.com', 1, 'accepted', 1)", [])
+                .unwrap();
+            assert_eq!(schema_version(&conn).unwrap(), 0);
+        }
+        let s = Store::open(&path).unwrap();
+        assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
+        let f = &s.findings().unwrap()[0];
+        assert_eq!((f.title.as_str(), f.description.as_str(), f.exchange_ids.clone()), ("Old finding", "kept", vec![1]));
+        assert!(s.rules().unwrap().in_scope("www.example.com"));
+        s.insert_exchange(&sample("www.example.com", "GET", "/", 200, "hi")).unwrap();
+    }
+
+    #[test]
+    fn newer_database_is_refused_and_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("traffic.db");
+        drop(Store::open(&path).unwrap());
+        Connection::open(&path).unwrap().pragma_update(None, "user_version", SCHEMA_VERSION + 1).unwrap();
+        let e = format!("{:#}", Store::open(&path).err().expect("a newer schema must be refused"));
+        assert!(e.contains("newer version of Plonix") && e.contains(&format!("schema version {}", SCHEMA_VERSION + 1)), "{e}");
+        assert_eq!(schema_version(&Connection::open(&path).unwrap()).unwrap(), SCHEMA_VERSION + 1);
+    }
+
+    #[test]
+    fn each_migration_step_runs_once_and_in_order() {
+        fn one(tx: &rusqlite::Transaction) -> Result<()> {
+            tx.execute_batch("CREATE TABLE IF NOT EXISTS ran (step INTEGER); INSERT INTO ran VALUES (1);")?;
+            Ok(())
+        }
+        fn two(tx: &rusqlite::Transaction) -> Result<()> {
+            tx.execute_batch("INSERT INTO ran VALUES (2);")?;
+            Ok(())
+        }
+        fn broken(tx: &rusqlite::Transaction) -> Result<()> {
+            tx.execute_batch("INSERT INTO ran VALUES (3);")?;
+            bail!("step failed")
+        }
+        let steps = [Migration { version: 1, what: "one", run: one }, Migration { version: 2, what: "two", run: two }];
+        let mut conn = Connection::open_in_memory().unwrap();
+        let ran = |c: &Connection| -> Vec<i64> {
+            let mut st = c.prepare("SELECT step FROM ran ORDER BY rowid").unwrap();
+            st.query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
+        };
+        migrate(&mut conn, &steps[..1]).unwrap();
+        assert_eq!((schema_version(&conn).unwrap(), ran(&conn)), (1, vec![1]));
+        migrate(&mut conn, &steps).unwrap();
+        migrate(&mut conn, &steps).unwrap();
+        assert_eq!((schema_version(&conn).unwrap(), ran(&conn)), (2, vec![1, 2]));
+
+        // A failing step is rolled back whole and leaves the version alone.
+        let with_broken = [steps[0], steps[1], Migration { version: 3, what: "broken", run: broken }];
+        let e = format!("{:#}", migrate(&mut conn, &with_broken).unwrap_err());
+        assert!(e.contains("schema version 3 (broken)") && e.contains("step failed"), "{e}");
+        assert_eq!((schema_version(&conn).unwrap(), ran(&conn)), (2, vec![1, 2]));
     }
 
     #[test]
