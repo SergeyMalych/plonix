@@ -29,7 +29,7 @@ Where it happens:
 | --- | --- | --- |
 | CI (`.github/workflows/ci.yml`, job `macos-app`) | Pull requests, forks, or no signing secrets | Unsigned `Plonix-macOS` artifact, as before |
 | CI, job `macos-app` | Pushes to `main` with the signing secrets set | Signed, notarized and stapled `Plonix-macOS` artifact; the job fails if any check fails |
-| Release (`.github/workflows/release.yml`) | Pushing a `v*` tag | A GitHub release with the app and the update package (see [Cutting a release](#cutting-a-release)) |
+| Release (`.github/workflows/release.yml`) | Pushing a `v*` tag | A signed, notarized GitHub release with the app and the update package (see [Cutting a release](#cutting-a-release)) |
 
 Secrets are never given to workflows triggered by pull requests from forks, and CI only signs on pushes to `main`, so code from a pull request never runs with the certificate.
 
@@ -89,7 +89,7 @@ xcrun notarytool history --key AuthKey_ABC123DEF4.p8 --key-id ABC123DEF4 --issue
 
 ### 5. Create the update signing key
 
-Plonix.app checks for updates and only installs packages signed with its own update key. This key is separate from the Apple certificate. Follow [docs/updates.md](updates.md) (added with the updater) to create it with `cargo tauri signer generate`, put the public key in `plugins.updater.pubkey` in `crates/plonix-app/tauri.conf.json`, and add the two secrets listed below.
+Plonix.app checks for updates and only installs packages signed with its own update key. This key is separate from the Apple certificate. Follow [docs/updates.md](updates.md) to create it with `cargo tauri signer generate`, put the public key in `plugins.updater.pubkey` in `crates/plonix-app/tauri.conf.json`, and add the two secrets listed below.
 
 ### 6. Add the GitHub secrets
 
@@ -143,7 +143,7 @@ Once the signing and notarization secrets are in place, the next push to `main` 
    git push origin v0.2.0
    ```
 
-4. The **Release** workflow (added with the updater; it signs once it passes the signing secrets to the build like CI does) checks that the tag matches the version, builds a universal (Apple silicon and Intel) Plonix.app, signs and notarizes it, signs the update package, writes `latest.json` and publishes a GitHub release with all of them. It stops with an error if the tag and version differ or a key is missing.
+4. The **Release** workflow checks that the tag matches the version, builds a universal (Apple silicon and Intel) Plonix.app, signs and notarizes it, signs the update package, writes `latest.json` and publishes a GitHub release with all of them. It stops with an error if the tag and version differ or a key is missing.
 5. Edit the release notes on GitHub if needed, then download `Plonix-macOS.zip` from the release and check it on a Mac:
 
    ```sh
