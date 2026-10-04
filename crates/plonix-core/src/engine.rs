@@ -11,7 +11,7 @@ use base64::Engine as _;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
-use tokio::sync::{Notify, mpsc};
+use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::ca::CertAuthority;
@@ -47,8 +47,8 @@ pub struct Engine {
     pub project_ref: OnceLock<ProjectRef>,
     /// Captured exchanges are recorded in arrival order by one worker, so a
     /// response is always analyzed before requests that follow it.
-    recorder: mpsc::UnboundedSender<Exchange>,
-    recorder_rx: Mutex<Option<mpsc::UnboundedReceiver<Exchange>>>,
+    recorder: mpsc::UnboundedSender<Queued>,
+    recorder_rx: Mutex<Option<mpsc::UnboundedReceiver<Queued>>>,
     detection: Mutex<DetectionState>,
     filters: Mutex<FilterState>,
     /// The listen address last asked for in the settings.
@@ -67,6 +67,9 @@ pub struct StorageStats {
     pub out_of_scope: i64,
     pub in_scope_rules: usize,
 }
+
+/// An exchange waiting to be recorded, and who wants to know its id.
+type Queued = (Exchange, Option<oneshot::Sender<i64>>);
 
 #[derive(Default)]
 struct ProxyListener {
@@ -412,9 +415,25 @@ impl Engine {
 
     /// Queues a captured exchange for recording (see [`Engine::start_recorder`]).
     pub fn enqueue(self: &Arc<Self>, ex: Exchange) {
-        if let Err(mpsc::error::SendError(ex)) = self.recorder.send(ex) {
+        self.queue(ex, None);
+    }
+
+    /// Like [`Engine::enqueue`], and tells the exchange's id once it is
+    /// recorded (WebSocket messages are stored against their handshake).
+    pub fn enqueue_for_id(self: &Arc<Self>, ex: Exchange) -> oneshot::Receiver<i64> {
+        let (tx, rx) = oneshot::channel();
+        self.queue(ex, Some(tx));
+        rx
+    }
+
+    fn queue(self: &Arc<Self>, ex: Exchange, reply: Option<oneshot::Sender<i64>>) {
+        if let Err(mpsc::error::SendError((ex, reply))) = self.recorder.send((ex, reply)) {
             let engine = self.clone();
-            tokio::task::spawn_blocking(move || engine.record(ex));
+            tokio::task::spawn_blocking(move || {
+                if let (Ok(id), Some(reply)) = (engine.record(ex), reply) {
+                    let _ = reply.send(id);
+                }
+            });
         }
     }
 
@@ -425,9 +444,14 @@ impl Engine {
         std::thread::Builder::new()
             .name("plonix-recorder".into())
             .spawn(move || {
-                while let Some(ex) = rx.blocking_recv() {
-                    if let Err(e) = engine.record(ex) {
-                        tracing::error!("failed to record exchange: {e:#}");
+                while let Some((ex, reply)) = rx.blocking_recv() {
+                    match engine.record(ex) {
+                        Ok(id) => {
+                            if let Some(reply) = reply {
+                                let _ = reply.send(id);
+                            }
+                        }
+                        Err(e) => tracing::error!("failed to record exchange: {e:#}"),
                     }
                 }
             })

@@ -34,7 +34,7 @@ pub struct Migration {
 pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 1, what: "traffic, scope, evidence, findings and view state", run: v1_initial },
     Migration { version: 2, what: "when findings were last edited", run: v2_finding_updated_at },
-    Migration { version: 3, what: "how much of long bodies was kept", run: v3_proxy_transport },
+    Migration { version: 3, what: "how much of long bodies was kept, and WebSocket messages", run: v3_proxy_transport },
 ];
 
 /// The schema version this build reads and writes.
@@ -58,7 +58,8 @@ fn v2_finding_updated_at(tx: &rusqlite::Transaction) -> Result<()> {
 }
 
 /// Bodies longer than the recording limit are kept in part (see proxy.rs):
-/// whether each body was cut, and its full size.
+/// whether each body was cut, and its full size. WebSocket messages are
+/// stored against the handshake exchange that opened their connection.
 fn v3_proxy_transport(tx: &rusqlite::Transaction) -> Result<()> {
     let columns = [
         ("exchanges", "req_truncated", "INTEGER NOT NULL DEFAULT 0"),
@@ -71,6 +72,19 @@ fn v3_proxy_transport(tx: &rusqlite::Transaction) -> Result<()> {
             tx.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))?;
         }
     }
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS ws_messages (
+            id INTEGER PRIMARY KEY,
+            exchange_id INTEGER NOT NULL,
+            ts INTEGER NOT NULL,
+            direction TEXT NOT NULL,
+            opcode TEXT NOT NULL,
+            payload BLOB NOT NULL,
+            size INTEGER NOT NULL,
+            truncated INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ws_messages_exchange ON ws_messages(exchange_id, id);",
+    )?;
     Ok(())
 }
 
@@ -267,6 +281,43 @@ impl Store {
         let mut stmt = conn.prepare(&format!("SELECT {EXCHANGE_COLS} FROM exchanges WHERE host = ?1 ORDER BY id DESC LIMIT ?2"))?;
         let rows = stmt.query_map(params![host.to_ascii_lowercase(), limit as i64], row_to_exchange)?;
         rows.collect::<Result<_, _>>().map_err(Into::into)
+    }
+
+    /// Stores WebSocket messages, in the order given.
+    pub fn insert_ws_messages(&self, messages: &[WsMessage]) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        for m in messages {
+            tx.execute(
+                "INSERT INTO ws_messages (exchange_id, ts, direction, opcode, payload, size, truncated) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![m.exchange_id, m.ts, m.direction, m.opcode, m.payload, m.size, m.truncated],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// One connection's WebSocket messages in the order they were sent, and how many there are in all.
+    pub fn ws_messages(&self, exchange_id: i64, limit: usize, offset: usize) -> Result<(Vec<WsMessage>, i64)> {
+        let conn = self.conn.lock().unwrap();
+        let total = conn.query_row("SELECT count(*) FROM ws_messages WHERE exchange_id = ?1", [exchange_id], |r| r.get(0))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, exchange_id, ts, direction, opcode, payload, size, truncated FROM ws_messages
+             WHERE exchange_id = ?1 ORDER BY id LIMIT ?2 OFFSET ?3",
+        )?;
+        let rows = stmt.query_map(params![exchange_id, limit as i64, offset as i64], |r| {
+            Ok(WsMessage {
+                id: r.get(0)?,
+                exchange_id: r.get(1)?,
+                ts: r.get(2)?,
+                direction: r.get(3)?,
+                opcode: r.get(4)?,
+                payload: r.get(5)?,
+                size: r.get(6)?,
+                truncated: r.get(7)?,
+            })
+        })?;
+        Ok((rows.collect::<Result<_, _>>()?, total))
     }
 
     pub fn count(&self) -> Result<i64> {
@@ -596,6 +647,7 @@ impl Store {
         let n = tx.execute("DELETE FROM exchanges WHERE id IN (SELECT id FROM doomed)", [])?;
         tx.execute("DELETE FROM exchanges_fts WHERE rowid IN (SELECT id FROM doomed)", [])?;
         tx.execute("DELETE FROM evidence WHERE exchange_id IN (SELECT id FROM doomed)", [])?;
+        tx.execute("DELETE FROM ws_messages WHERE exchange_id IN (SELECT id FROM doomed)", [])?;
         tx.execute("DELETE FROM doomed", [])?;
         tx.commit()?;
         Ok(n as i64)
@@ -923,6 +975,31 @@ mod tests {
         assert_eq!((got.resp_size, got.req_size), (Some(50_000_000), None));
         let (hits, _) = s.search(&Query::parse("start of a long").unwrap(), &ScopeRules::default(), 10, 0).unwrap();
         assert_eq!(hits[0].resp_len, 50_000_000, "listings show the size as sent");
+    }
+
+    #[test]
+    fn websocket_messages_follow_their_exchange() {
+        let s = Store::open_in_memory().unwrap();
+        let keep = s.insert_exchange(&sample("www.example.com", "GET", "/socket", 101, "")).unwrap();
+        let gone = s.insert_exchange(&sample("cdn.other.test", "GET", "/socket", 101, "")).unwrap();
+        let msg = |exchange_id, direction: &str, payload: &[u8]| WsMessage {
+            exchange_id,
+            ts: now_ms(),
+            direction: direction.into(),
+            opcode: "text".into(),
+            payload: payload.to_vec(),
+            size: payload.len() as i64,
+            ..Default::default()
+        };
+        s.insert_ws_messages(&[msg(keep, "to_server", b"hello"), msg(keep, "to_client", b"hi"), msg(gone, "to_server", b"x")]).unwrap();
+        let (list, total) = s.ws_messages(keep, 10, 0).unwrap();
+        assert_eq!(total, 2);
+        assert_eq!((list[0].direction.as_str(), list[0].payload.as_slice()), ("to_server", &b"hello"[..]));
+        assert_eq!(list[1].text().as_deref(), Some("hi"));
+        assert_eq!(s.ws_messages(keep, 10, 1).unwrap().0.len(), 1);
+        s.delete_for_hosts(&["cdn.other.test".into()], &BTreeSet::new()).unwrap();
+        assert_eq!(s.ws_messages(gone, 10, 0).unwrap().1, 0, "deleting traffic deletes its messages");
+        assert_eq!(s.ws_messages(keep, 10, 0).unwrap().1, 2);
     }
 
     #[test]

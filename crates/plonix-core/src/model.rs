@@ -112,6 +112,42 @@ impl Exchange {
     }
 }
 
+/// One WebSocket message, captured on the connection a handshake exchange opened.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WsMessage {
+    pub id: i64,
+    /// The handshake exchange (status 101) this message belongs to.
+    pub exchange_id: i64,
+    /// Unix time in milliseconds when the message started.
+    pub ts: i64,
+    /// `to_server` (sent by the client) or `to_client`.
+    pub direction: String,
+    /// `text`, `binary`, `close`, `ping` or `pong`.
+    pub opcode: String,
+    /// The message as the application sees it: reassembled from its
+    /// fragments, unmasked and decompressed. Cut at the recording limit.
+    #[serde(with = "body_b64")]
+    pub payload: Vec<u8>,
+    /// Full payload size in bytes.
+    pub size: i64,
+    pub truncated: bool,
+}
+
+impl WsMessage {
+    /// Readable text of a text or close message.
+    pub fn text(&self) -> Option<String> {
+        match self.opcode.as_str() {
+            "text" => Some(String::from_utf8_lossy(&self.payload).into_owned()),
+            "close" if self.payload.len() >= 2 => {
+                let code = u16::from_be_bytes([self.payload[0], self.payload[1]]);
+                let reason = String::from_utf8_lossy(&self.payload[2..]);
+                Some(if reason.is_empty() { code.to_string() } else { format!("{code} {reason}") })
+            }
+            _ => None,
+        }
+    }
+}
+
 /// Compact row used for listings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExchangeSummary {

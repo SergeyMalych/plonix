@@ -72,6 +72,21 @@ pub fn full_body(b: impl Into<Bytes>) -> StreamBody {
     Full::new(b.into()).map_err(|never| match never {}).boxed()
 }
 
+/// The answer to a request to switch protocols (a WebSocket handshake).
+pub struct UpgradeResponse {
+    pub status: u16,
+    pub headers: Headers,
+    pub tls_sans: Vec<String>,
+    pub outcome: Upgrade,
+}
+
+pub enum Upgrade {
+    /// The server switched: the connection now carries the new protocol.
+    Switched(hyper::upgrade::Upgraded),
+    /// The server answered with an ordinary response instead.
+    Refused(Incoming),
+}
+
 /// A response whose head has arrived; the body is read as it comes.
 #[derive(Debug)]
 pub struct StreamingResponse {
@@ -283,6 +298,36 @@ impl Upstream {
             .map_err(|_| anyhow!("upstream timed out after {:?}", self.total_timeout))?
     }
 
+    /// Sends a request that asks to switch protocols (`Connection: Upgrade`
+    /// and `Upgrade: <protocol>` are added to `req`). The connection always
+    /// speaks HTTP/1.1 and, behind an HTTP upstream proxy, is tunneled with
+    /// `CONNECT` so the switch reaches the server.
+    pub async fn upgrade(&self, mut req: OutboundRequest, protocol: &str) -> Result<UpgradeResponse> {
+        req.extra_headers.push(("Connection".into(), "Upgrade".into()));
+        req.extra_headers.push(("Upgrade".into(), protocol.into()));
+        let fut = async {
+            let tcp = self.connect(&req.host, req.port).await?;
+            let (resp, tls_sans) = if req.scheme == "https" {
+                let name = ServerName::try_from(req.host.clone()).map_err(|_| anyhow!("invalid server name {}", req.host))?;
+                let tls = self.tls.connect(name, tcp).await.with_context(|| format!("TLS handshake with {}", req.host))?;
+                let sans = tls.get_ref().1.peer_certificates().and_then(|c| c.first()).map(cert_dns_names).unwrap_or_default();
+                (send_http1(TokioIo::new(tls), req, None).await?, sans)
+            } else {
+                (send_http1(TokioIo::new(tcp), req, None).await?, vec![])
+            };
+            let (status, headers) = head_of(&resp);
+            let outcome = if status == 101 {
+                Upgrade::Switched(hyper::upgrade::on(resp).await.context("switching protocols")?)
+            } else {
+                Upgrade::Refused(resp.into_body())
+            };
+            Ok(UpgradeResponse { status, headers, tls_sans, outcome })
+        };
+        tokio::time::timeout(self.total_timeout, fut)
+            .await
+            .map_err(|_| anyhow!("upstream timed out after {:?}", self.total_timeout))?
+    }
+
     async fn open_inner(&self, mut req: OutboundRequest, body: Option<StreamBody>) -> Result<StreamingResponse> {
         // Plain HTTP through an HTTP proxy uses absolute-form requests, which
         // every HTTP proxy accepts (not all allow CONNECT to port 80).
@@ -321,13 +366,31 @@ async fn exchange<T>(io: TokioIo<T>, req: OutboundRequest, body: Option<StreamBo
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
+    let resp = send_http1(io, req, body).await?;
+    let (status, headers) = head_of(&resp);
+    Ok(StreamingResponse { status, headers, body: resp.into_body(), tls_sans: vec![] })
+}
+
+fn head_of<B>(resp: &http::Response<B>) -> (u16, Headers) {
+    let headers = resp
+        .headers()
+        .iter()
+        .map(|(k, v)| (k.as_str().to_string(), String::from_utf8_lossy(v.as_bytes()).into_owned()))
+        .collect();
+    (resp.status().as_u16(), headers)
+}
+
+async fn send_http1<T>(io: TokioIo<T>, req: OutboundRequest, body: Option<StreamBody>) -> Result<http::Response<Incoming>>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
     let streaming = body.is_some();
     let (mut sender, conn) = hyper::client::conn::http1::Builder::new()
         .handshake::<_, StreamBody>(io)
         .await
         .context("HTTP handshake")?;
     tokio::spawn(async move {
-        let _ = conn.await;
+        let _ = conn.with_upgrades().await;
     });
 
     let mut builder = http::Request::builder().method(req.method.as_str()).uri(&req.target);
@@ -356,14 +419,7 @@ where
     }
     let body = body.unwrap_or_else(|| full_body(req.body));
     let request = builder.body(body).context("building request")?;
-    let resp = sender.send_request(request).await.context("sending request")?;
-    let status = resp.status().as_u16();
-    let headers = resp
-        .headers()
-        .iter()
-        .map(|(k, v)| (k.as_str().to_string(), String::from_utf8_lossy(v.as_bytes()).into_owned()))
-        .collect();
-    Ok(StreamingResponse { status, headers, body: resp.into_body(), tls_sans: vec![] })
+    sender.send_request(request).await.context("sending request")
 }
 
 /// Opens a tunnel through an HTTP proxy with `CONNECT`.

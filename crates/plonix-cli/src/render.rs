@@ -76,6 +76,30 @@ pub fn exchange(v: &Value, max_body: usize) -> String {
     out
 }
 
+/// WebSocket messages (as returned by `/api/traffic/{id}/messages`), one per
+/// line: ↑ sent by the client, ↓ by the server.
+pub fn messages(v: &Value, max: usize) -> String {
+    let items = v["items"].as_array().cloned().unwrap_or_default();
+    let total = v["total"].as_i64().unwrap_or(items.len() as i64);
+    let mut out = format!("\n――――――――――――――――――――――――――――――――――――――――\n{total} WebSocket message(s)\n");
+    for m in &items {
+        let arrow = if m["direction"] == "to_server" { "↑" } else { "↓" };
+        let size = m["size"].as_i64().unwrap_or(0);
+        let cut = if m["truncated"].as_bool() == Some(true) { format!(", first {} kept", human_size(b64_len(&m["payload"]) as i64)) } else { String::new() };
+        let shown = match m["text"].as_str() {
+            Some(t) if t.len() > max => format!("{}… [{} more bytes]", clip_bytes(t, max), t.len() - max),
+            Some(t) => t.to_string(),
+            None if size > 0 => format!("<{} of binary data>", human_size(size)),
+            None => String::new(),
+        };
+        out.push_str(&format!("{arrow} {:<6} {:>8}{cut}  {shown}\n", m["opcode"].as_str().unwrap_or(""), human_size(size)));
+    }
+    if (items.len() as i64) < total {
+        out.push_str(&format!("… and {} more\n", total - items.len() as i64));
+    }
+    out
+}
+
 /// A note for a body that was longer than the recording limit (`side` is `req` or `resp`).
 fn cut_note(v: &Value, side: &str) -> String {
     if v[format!("{side}_truncated")].as_bool() != Some(true) {
@@ -236,5 +260,18 @@ mod tests {
         let out = exchange(&v, 4000);
         assert!(out.contains("[body cut: the first 5 B of 3.0 MB were kept]"), "{out}");
         assert_eq!(out.matches("body cut").count(), 1, "the request was not cut");
+    }
+
+    #[test]
+    fn websocket_messages_one_per_line() {
+        let v = json!({ "total": 3, "items": [
+            { "direction": "to_server", "opcode": "text", "size": 5, "payload": "aGVsbG8=", "text": "hello", "truncated": false },
+            { "direction": "to_client", "opcode": "binary", "size": 2048, "payload": "AAE=", "truncated": true },
+        ]});
+        let out = messages(&v, 400);
+        assert!(out.contains("3 WebSocket message(s)"), "{out}");
+        assert!(out.contains("↑ text        5 B  hello"), "{out}");
+        assert!(out.contains("↓ binary   2.0 KB, first 2 B kept  <2.0 KB of binary data>"), "{out}");
+        assert!(out.ends_with("… and 1 more\n"), "{out}");
     }
 }

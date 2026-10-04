@@ -29,7 +29,7 @@ use tokio_rustls::TlsAcceptor;
 use crate::ca::LeafResolver;
 use crate::engine::Engine;
 use crate::model::{Exchange, Headers, Source, now_ms};
-use crate::upstream::{BoxError, HOP_BY_HOP, OutboundRequest, StreamBody, full_body};
+use crate::upstream::{BoxError, HOP_BY_HOP, OutboundRequest, StreamBody, Upgrade, full_body};
 
 type ProxyResponse = Response<StreamBody>;
 
@@ -112,70 +112,127 @@ async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<ProxyResponse, Infal
         .collect();
     let limit = ctx.engine.body_limit();
     let req_cap = Arc::new(Mutex::new(Captured::new(limit)));
-    // A body of known length within the limit is read first, as before, so a
-    // request that fails still shows what it carried. Longer and open-ended
-    // bodies (uploads, streams) go through as they arrive.
-    let (req_body, stream) = match req.body().size_hint().exact() {
-        Some(n) if n <= limit as u64 => match req.into_body().collect().await {
-            Ok(b) => {
-                let b = b.to_bytes();
-                req_cap.lock().unwrap().add(&b);
-                req_cap.lock().unwrap().done = true;
-                (b, None)
-            }
-            Err(e) => return Ok(error_page(StatusCode::BAD_REQUEST, &format!("could not read request body: {e}"))),
-        },
-        _ => (Bytes::new(), Some(Tee::new(req.into_body(), req_cap.clone(), None).boxed())),
-    };
-
-    let outbound = OutboundRequest {
+    let mut outbound = OutboundRequest {
         scheme: scheme.clone(),
         host: host.clone(),
         port,
         method: method.clone(),
         target,
         headers: req_headers.clone(),
-        body: req_body,
+        body: Bytes::new(),
         extra_headers: vec![],
     };
-    let result = ctx.engine.upstream().open(outbound, stream).await;
     let mut pending = Pending {
         engine: ctx.engine.clone(),
         started,
-        req: req_cap,
+        req: req_cap.clone(),
         resp: Arc::new(Mutex::new(Captured::new(limit))),
         ex: Exchange { ts, scheme, host, port, method, path, query, req_headers, source: Some(Source::Proxy), ..Default::default() },
+        taken: false,
     };
 
-    let response = match result {
-        Ok(up) => {
-            pending.ex.status = Some(up.status);
-            pending.ex.resp_headers = up.headers.clone();
-            pending.ex.tls_sans = up.tls_sans;
-            let mut builder = Response::builder().status(up.status);
-            for (k, v) in &up.headers {
-                if !HOP_BY_HOP.contains(&k.to_ascii_lowercase().as_str()) {
-                    builder = builder.header(k.as_str(), v.as_str());
-                }
+    if req.version() <= http::Version::HTTP_11 && crate::websocket::is_handshake(req.headers()) {
+        return Ok(websocket(req, ctx, outbound, pending).await);
+    }
+
+    // A body of known length within the limit is read first, as before, so a
+    // request that fails still shows what it carried. Longer and open-ended
+    // bodies (uploads, streams) go through as they arrive.
+    let stream = match req.body().size_hint().exact() {
+        Some(n) if n <= limit as u64 => match req.into_body().collect().await {
+            Ok(b) => {
+                outbound.body = b.to_bytes();
+                let mut cap = req_cap.lock().unwrap();
+                cap.add(&outbound.body);
+                cap.done = true;
+                None
             }
-            let resp_cap = pending.resp.clone();
-            builder
-                .body(Tee::new(up.body, resp_cap, Some(pending)).boxed())
-                .unwrap_or_else(|e| error_page(StatusCode::BAD_GATEWAY, &format!("invalid upstream response: {e}")))
-        }
-        Err(e) => {
-            let msg = format!("{e:#}");
-            pending.ex.error = Some(msg.clone());
-            let hint = if msg.contains("certificate") || msg.contains("UnknownIssuer") {
-                "\n\nThe upstream certificate is not trusted. For staging hosts with self-signed certificates, \
-                 turn off Settings > Proxy > Check server certificates."
-            } else {
-                ""
-            };
-            error_page(StatusCode::BAD_GATEWAY, &format!("Plonix could not reach {}: {msg}{hint}", pending.ex.host))
-        }
+            Err(e) => {
+                pending.ex.error = Some(format!("could not read the request body: {e}"));
+                return Ok(error_page(StatusCode::BAD_REQUEST, &format!("could not read request body: {e}")));
+            }
+        },
+        _ => Some(Tee::new(req.into_body(), req_cap, None).boxed()),
     };
-    Ok(response)
+
+    Ok(match ctx.engine.upstream().open(outbound, stream).await {
+        Ok(up) => {
+            pending.ex.tls_sans = up.tls_sans;
+            forward(up.status, up.headers, up.body, pending)
+        }
+        Err(e) => unreachable(e, pending),
+    })
+}
+
+/// Answers the client with the server's response, streaming its body.
+fn forward(status: u16, headers: Headers, body: Incoming, mut pending: Pending) -> ProxyResponse {
+    pending.ex.status = Some(status);
+    let mut builder = Response::builder().status(status);
+    for (k, v) in &headers {
+        if !HOP_BY_HOP.contains(&k.to_ascii_lowercase().as_str()) {
+            builder = builder.header(k.as_str(), v.as_str());
+        }
+    }
+    pending.ex.resp_headers = headers;
+    let resp_cap = pending.resp.clone();
+    builder
+        .body(Tee::new(body, resp_cap, Some(pending)).boxed())
+        .unwrap_or_else(|e| error_page(StatusCode::BAD_GATEWAY, &format!("invalid upstream response: {e}")))
+}
+
+/// Answers the client when the server could not be reached.
+fn unreachable(e: anyhow::Error, mut pending: Pending) -> ProxyResponse {
+    let msg = format!("{e:#}");
+    pending.ex.error = Some(msg.clone());
+    let hint = if msg.contains("certificate") || msg.contains("UnknownIssuer") {
+        "\n\nThe upstream certificate is not trusted. For staging hosts with self-signed certificates, \
+         turn off Settings > Proxy > Check server certificates."
+    } else {
+        ""
+    };
+    error_page(StatusCode::BAD_GATEWAY, &format!("Plonix could not reach {}: {msg}{hint}", pending.ex.host))
+}
+
+/// Forwards a WebSocket handshake. When the server switches protocols, the
+/// handshake is recorded right away and the connection is relayed, with its
+/// messages recorded against it (see [`crate::websocket`]).
+async fn websocket(mut req: Request<Incoming>, ctx: Ctx, outbound: OutboundRequest, mut pending: Pending) -> ProxyResponse {
+    let client_upgrade = hyper::upgrade::on(&mut req);
+    let protocol = crate::websocket::requested_protocol(&pending.ex.req_headers);
+    let up = match ctx.engine.upstream().upgrade(outbound, &protocol).await {
+        Ok(up) => up,
+        Err(e) => return unreachable(e, pending),
+    };
+    pending.ex.tls_sans = up.tls_sans;
+    let server = match up.outcome {
+        Upgrade::Refused(body) => return forward(up.status, up.headers, body, pending),
+        Upgrade::Switched(server) => server,
+    };
+    let mut builder = Response::builder().status(StatusCode::SWITCHING_PROTOCOLS);
+    for (k, v) in &up.headers {
+        if !HOP_BY_HOP.contains(&k.to_ascii_lowercase().as_str()) {
+            builder = builder.header(k.as_str(), v.as_str());
+        }
+    }
+    let switched_to = crate::model::header(&up.headers, "upgrade").unwrap_or(&protocol).to_string();
+    let response = builder.header("connection", "upgrade").header("upgrade", switched_to).body(full_body(Bytes::new()));
+    let response = match response {
+        Ok(r) => r,
+        Err(e) => return error_page(StatusCode::BAD_GATEWAY, &format!("invalid upstream response: {e}")),
+    };
+    pending.ex.status = Some(up.status);
+    pending.ex.resp_headers = up.headers.clone();
+    // Record the handshake now: the connection can stay open for hours.
+    let engine = ctx.engine.clone();
+    let Some(ex) = pending.take() else { return response };
+    let exchange_id = engine.enqueue_for_id(ex);
+    tokio::spawn(async move {
+        match client_upgrade.await {
+            Ok(client) => crate::websocket::relay(client, server, engine, exchange_id, &up.headers).await,
+            Err(e) => tracing::debug!("WebSocket upgrade with the client failed: {e}"),
+        }
+    });
+    response
 }
 
 /// The part of a body kept for the record, and how much went through.
@@ -219,15 +276,28 @@ struct Pending {
     req: Arc<Mutex<Captured>>,
     resp: Arc<Mutex<Captured>>,
     ex: Exchange,
+    taken: bool,
 }
 
-impl Drop for Pending {
-    fn drop(&mut self) {
+impl Pending {
+    /// The exchange as it stands. Once taken, dropping records nothing.
+    fn take(&mut self) -> Option<Exchange> {
+        if std::mem::replace(&mut self.taken, true) {
+            return None;
+        }
         let mut ex = std::mem::take(&mut self.ex);
         ex.duration_ms = self.started.elapsed().as_millis() as i64;
         (ex.req_body, ex.req_truncated, ex.req_size) = self.req.lock().unwrap().take();
         (ex.resp_body, ex.resp_truncated, ex.resp_size) = self.resp.lock().unwrap().take();
-        self.engine.enqueue(ex);
+        Some(ex)
+    }
+}
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        if let Some(ex) = self.take() {
+            self.engine.enqueue(ex);
+        }
     }
 }
 
