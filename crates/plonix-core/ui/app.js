@@ -250,6 +250,7 @@ const VIEWS = {
   findings: { label: 'Findings', ico: '⚑', render: renderFindings },
   agents: { label: 'Agents', ico: '✦', render: renderAgents },
   market: { label: 'Market', ico: '⬢', render: renderMarket },
+  scans: { label: 'Scans', ico: '⌖', render: renderScans },
   settings: { label: 'Settings', ico: '⚙', render: renderSettings, footer: true },
 };
 
@@ -3166,6 +3167,339 @@ function findingForm(f, ids = [], title = '') {
   m.el.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save();
   });
+}
+
+/* ======================================================================
+   Scans
+   ====================================================================== */
+
+/**
+ * Scans is target-first: pick an accepted host, Plonix fingerprints it and
+ * suggests only the checks that fit, and the user chooses what to run. Every
+ * request a scan or crawl sends goes through the same scope gate as the rest
+ * of Plonix, so nothing ever leaves the hosts you accepted. Any issue a scan
+ * records is a normal finding, editable on the Findings screen.
+ */
+const SC = { host: null, hosts: [], suggest: null, suggestErr: null, picks: null, intrusive: false, running: false, report: null, crawl: null, crawling: false, crawlStart: '/', crawlBrowser: false };
+
+const INTRU_LABEL = { passive: 'Passive', safe: 'Safe', active: 'Active', intrusive: 'Intrusive' };
+const INTRU_TAG = { passive: 'in', safe: 'in', active: 'upd', intrusive: 'rej' };
+
+function renderScans(main) {
+  clear(
+    main,
+    h(
+      'div',
+      { class: 'view' },
+      h(
+        'div',
+        { class: 'toolbar' },
+        h('h2', { text: 'Scans' }),
+        h('span', { class: 'hint', text: 'Pick an in-scope target. Plonix suggests checks from what it fingerprinted and runs only the ones you choose. Every request stays inside your scope.' }),
+      ),
+      h('div', { class: 'pane' }, h('div', { class: 'stack', id: 'scanbody' }, h('div', { class: 'muted', text: 'Loading…' }))),
+    ),
+  );
+  loadScans();
+}
+
+async function loadScans() {
+  let hosts;
+  try {
+    hosts = await api('/api/hosts');
+  } catch (e) {
+    return toast(e.message, 'err');
+  }
+  if (S.view !== 'scans') return;
+  SC.hosts = hosts.filter((x) => x.scope === 'accepted');
+  if (!SC.host || !SC.hosts.some((x) => x.host === SC.host)) {
+    SC.host = SC.hosts.length ? SC.hosts.slice().sort((a, b) => b.requests - a.requests)[0].host : null;
+    SC.suggest = null;
+    SC.report = null;
+    SC.crawl = null;
+  }
+  drawScans();
+  if (SC.host && !SC.suggest) loadSuggest();
+}
+
+async function loadSuggest() {
+  const host = SC.host;
+  if (!host) return;
+  SC.suggest = null;
+  SC.suggestErr = null;
+  drawScans();
+  let sug;
+  try {
+    sug = await api('/api/scan/suggest/' + encodeURIComponent(host));
+  } catch (e) {
+    if (SC.host === host) SC.suggestErr = e.message;
+    if (S.view === 'scans') drawScans();
+    return;
+  }
+  if (SC.host !== host || S.view !== 'scans') return;
+  SC.suggest = sug;
+  // Recommended checks start selected; intrusive ones stay off until opted in.
+  SC.picks = new Set(sug.recommended.map((t) => t.id));
+  SC.intrusive = false;
+  drawScans();
+}
+
+function drawScans() {
+  const box = $('#scanbody');
+  if (!box) return;
+  if (!SC.hosts.length) {
+    return clear(
+      box,
+      h(
+        'div',
+        { class: 'card' },
+        h(
+          'div',
+          { class: 'empty' },
+          h('h3', { text: 'No in-scope target yet' }),
+          'Scans and crawls only run against hosts you have accepted into scope. Open a target and accept it in ',
+          h('button', { class: 'btn sm', text: 'Scope', onclick: () => go('scope') }),
+          ' first, then come back here.',
+        ),
+      ),
+    );
+  }
+  const sel = h(
+    'select',
+    {
+      onchange: () => {
+        SC.host = sel.value;
+        SC.suggest = null;
+        SC.report = null;
+        SC.crawl = null;
+        loadSuggest();
+      },
+    },
+    SC.hosts.map((x) => h('option', { value: x.host, text: `${x.host}  (${x.requests} req)`, selected: x.host === SC.host })),
+  );
+  const targetCard = h(
+    'div',
+    { class: 'card' },
+    h('div', { class: 'sechead' }, h('h3', { text: 'Target' }), h('span', { class: 'shacts' }, askButton({ kind: 'host', host: SC.host }, 'Ask Claude Code to plan a scan for this host'))),
+    h('div', { class: 'scanrow' }, h('label', { class: 'muted', text: 'Host' }), sel),
+    h('p', { class: 'muted', text: 'Only accepted, in-scope hosts appear here.' }),
+  );
+  clear(box, targetCard, scanSuggestSection(), scanCrawlSection());
+}
+
+function scanSuggestSection() {
+  if (SC.suggestErr) return h('div', { class: 'card' }, h('div', { class: 'rerr', text: SC.suggestErr }));
+  if (!SC.suggest) return h('div', { class: 'card' }, h('div', { class: 'muted', text: 'Fingerprinting ' + SC.host + '…' }));
+  const sug = SC.suggest;
+  const wrap = h('div', { class: 'scansug' });
+
+  wrap.append(
+    h(
+      'div',
+      { class: 'card' },
+      h('div', { class: 'sechead' }, h('h3', { text: `What Plonix sees (${sug.signals.length})` })),
+      sug.signals.length
+        ? h('div', { class: 'stack scansigs' }, sug.signals.map(scanSignalRow))
+        : h('div', { class: 'empty', text: 'No technology signals yet. Browse the target a little more, or crawl it below, so Plonix has traffic to fingerprint.' }),
+    ),
+  );
+
+  const picks = SC.picks || new Set();
+  const runBtn = h('button', { class: 'btn primary', disabled: SC.running || !picks.size, onclick: runScan }, SC.running ? 'Scanning…' : 'Run scan');
+  const groups = [];
+  if (sug.recommended.length) {
+    groups.push(
+      h(
+        'div',
+        { class: 'scangroup' },
+        h('div', { class: 'scanglabel' }, h('b', { text: 'Recommended' }), h('span', { class: 'muted', text: ' fit this target, non-intrusive' })),
+        sug.recommended.map((t) => scanTacticRow(t, false)),
+      ),
+    );
+  }
+  if (sug.optional.length) {
+    groups.push(
+      h(
+        'div',
+        { class: 'scangroup' },
+        h(
+          'div',
+          { class: 'scanglabel' },
+          h('label', { class: 'intrutoggle' }, h('input', { type: 'checkbox', checked: SC.intrusive, onchange: (e) => toggleIntrusive(e.target.checked) }), h('b', { text: ' Intrusive checks' })),
+          h('span', { class: 'muted', text: ' off by default; may be heavier or state-touching' }),
+        ),
+        sug.optional.map((t) => scanTacticRow(t, true)),
+      ),
+    );
+  }
+  const checksCard = h(
+    'div',
+    { class: 'card' },
+    h(
+      'div',
+      { class: 'sechead' },
+      h('h3', { text: 'Checks' }),
+      groups.length
+        ? h(
+            'span',
+            { class: 'shacts' },
+            h('button', {
+              class: 'btn sm',
+              text: 'Select recommended',
+              onclick: () => {
+                SC.picks = new Set(sug.recommended.map((t) => t.id));
+                SC.intrusive = false;
+                drawScans();
+              },
+            }),
+            h('button', { class: 'btn sm', text: 'Clear', onclick: () => ((SC.picks = new Set()), drawScans()) }),
+          )
+        : null,
+    ),
+    groups.length
+      ? groups
+      : h('div', { class: 'empty', text: 'No checks apply to this target yet. A check unlocks only when a matching technology is detected, so browse or crawl the target first.' }),
+    sug.skipped ? h('p', { class: 'muted scanskip', text: `${sug.skipped} check${sug.skipped === 1 ? '' : 's'} in the catalog did not match this target's fingerprint.` }) : null,
+    h('div', { class: 'scanrunbar' }, h('span', { class: 'muted', text: `${picks.size} selected` }), runBtn),
+  );
+  wrap.append(checksCard);
+  if (SC.report) wrap.append(scanReportCard());
+  return wrap;
+}
+
+function scanSignalRow(s) {
+  return h(
+    'div',
+    { class: 'scansig' },
+    h('span', { class: 'techchip', text: s.signal }),
+    h('span', { class: 'muted scansigev', text: s.evidence }),
+    s.exchange_id != null ? h('button', { class: 'linklike', text: 'request #' + s.exchange_id, title: 'Open in the Lens', onclick: () => showExchange(s.exchange_id) }) : null,
+  );
+}
+
+function scanTacticRow(t, intrusive) {
+  const picks = SC.picks || new Set();
+  const cb = h('input', { type: 'checkbox', checked: picks.has(t.id), disabled: intrusive && !SC.intrusive, onchange: () => togglePick(t.id, cb.checked) });
+  return h(
+    'label',
+    { class: 'scantactic' + (intrusive ? ' intru' : '') },
+    cb,
+    h('span', { class: 'sev ' + t.severity, text: t.severity }),
+    h('span', { class: 'tt', text: t.title }),
+    t.variant ? h('span', { class: 'tag out', text: t.variant }) : null,
+    h('span', { class: 'tag ' + (INTRU_TAG[t.intrusiveness] || 'out'), text: INTRU_LABEL[t.intrusiveness] || t.intrusiveness }),
+    t.requires && t.requires.length ? h('span', { class: 'muted scanreq', text: 'needs ' + t.requires.join(', ') }) : null,
+  );
+}
+
+function togglePick(id, on) {
+  if (!SC.picks) SC.picks = new Set();
+  if (on) SC.picks.add(id);
+  else SC.picks.delete(id);
+  drawScans();
+}
+
+function toggleIntrusive(on) {
+  SC.intrusive = on;
+  if (!on && SC.suggest && SC.picks) for (const t of SC.suggest.optional) SC.picks.delete(t.id);
+  drawScans();
+}
+
+async function runScan() {
+  if (!SC.host || !SC.picks || !SC.picks.size) return;
+  const tactics = [...SC.picks];
+  SC.running = true;
+  SC.report = null;
+  drawScans();
+  try {
+    SC.report = await api('/api/scan', { method: 'POST', body: { host: SC.host, tactics, include_intrusive: SC.intrusive } });
+  } catch (e) {
+    SC.running = false;
+    drawScans();
+    return toast(e.code === 'out_of_scope' ? SC.host + ' is not in scope. Accept it in Scope first.' : e.message, 'err');
+  }
+  SC.running = false;
+  const n = SC.report.findings.length;
+  toast(n ? `Scan recorded ${n} finding${n === 1 ? '' : 's'}` : 'Scan finished — nothing to report', n ? 'ok' : '');
+  refreshFindingsCount();
+  drawScans();
+}
+
+function scanReportCard() {
+  const r = SC.report;
+  const findings = r.findings || [];
+  return h(
+    'div',
+    { class: 'card scanreport' },
+    h('div', { class: 'sechead' }, h('h3', { text: 'Last scan' }), h('span', { class: 'muted', text: `${r.tactics_run.length} check${r.tactics_run.length === 1 ? '' : 's'} run · ${r.requests_sent} request${r.requests_sent === 1 ? '' : 's'} sent` })),
+    findings.length
+      ? h(
+          'div',
+          { class: 'stack' },
+          findings.map((f) => h('div', { class: 'scanfinding' }, h('span', { class: 'sev ' + f.severity, text: f.severity }), h('span', { class: 'tt', text: f.title }), h('span', { class: 'fmeta', text: '#' + f.id }))),
+          h('button', { class: 'btn sm', text: 'View in Findings', onclick: () => go('findings') }),
+        )
+      : h('div', { class: 'empty', text: 'No issues found. The requests the scan sent are in Traffic.' }),
+    r.notes && r.notes.length ? h('div', { class: 'scannotes' }, r.notes.map((n) => h('p', { class: 'muted', text: n }))) : null,
+  );
+}
+
+function scanCrawlSection() {
+  const start = h('input', { value: SC.crawlStart, spellcheck: 'false', placeholder: '/', oninput: (e) => (SC.crawlStart = e.target.value) });
+  const browser = h('input', { type: 'checkbox', checked: SC.crawlBrowser, onchange: (e) => (SC.crawlBrowser = e.target.checked) });
+  const run = h('button', { class: 'btn', disabled: SC.crawling, text: SC.crawling ? 'Crawling…' : 'Crawl', onclick: () => runCrawl() });
+  return h(
+    'div',
+    { class: 'card' },
+    h('div', { class: 'sechead' }, h('h3', { text: 'Crawl' }), h('span', { class: 'muted', text: 'Walk the in-scope site to discover endpoints and forms. Bounded and read-only.' })),
+    h('div', { class: 'scanrow' }, h('label', { class: 'muted', text: 'Start path' }), start, h('label', { class: 'cbrowser' }, browser, ' with browser'), run),
+    h('p', { class: 'muted cbnote', text: 'Browser crawl (JS-rendered pages) is coming; until then a plain crawl runs and the report says so.' }),
+    SC.crawl ? crawlReportCard() : null,
+  );
+}
+
+async function runCrawl() {
+  if (!SC.host) return;
+  SC.crawling = true;
+  SC.crawl = null;
+  drawScans();
+  try {
+    SC.crawl = await api('/api/crawl', { method: 'POST', body: { host: SC.host, start: SC.crawlStart || '/', browser: !!SC.crawlBrowser } });
+  } catch (e) {
+    SC.crawling = false;
+    drawScans();
+    return toast(e.code === 'out_of_scope' ? SC.host + ' is not in scope.' : e.message, 'err');
+  }
+  SC.crawling = false;
+  drawScans();
+  // Fresh traffic can sharpen the fingerprint, so re-suggest.
+  loadSuggest();
+}
+
+function crawlReportCard() {
+  const r = SC.crawl;
+  return h(
+    'div',
+    { class: 'crawlreport' },
+    h('div', { class: 'sechead' }, h('h4', { text: 'Crawl result' }), h('span', { class: 'muted', text: `${r.pages_fetched} page${r.pages_fetched === 1 ? '' : 's'} · ${r.urls_found} URL${r.urls_found === 1 ? '' : 's'} · ${r.forms.length} form${r.forms.length === 1 ? '' : 's'}` })),
+    r.forms.length
+      ? h(
+          'table',
+          { class: 'grid scanforms' },
+          h('thead', null, h('tr', null, h('th', { text: 'Method' }), h('th', { text: 'Action' }), h('th', { text: 'Fields' }))),
+          h('tbody', null, r.forms.slice(0, 50).map((f) => h('tr', null, h('td', { text: f.method }), h('td', { text: f.action || '/' }), h('td', { text: f.fields.join(', ') || '—' })))),
+        )
+      : null,
+    r.notes && r.notes.length ? h('div', { class: 'scannotes' }, r.notes.map((n) => h('p', { class: 'muted', text: n }))) : null,
+  );
+}
+
+async function refreshFindingsCount() {
+  try {
+    const l = await api('/api/findings');
+    S.findingsCount = l.length;
+    updateChrome();
+  } catch (_) {}
 }
 
 /* ======================================================================

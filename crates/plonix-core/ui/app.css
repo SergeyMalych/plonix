@@ -747,3 +747,34 @@ input.num { width: 72px; }
 .rtrow .c-n { color: var(--fg-3); }
 .runsel { padding: 0 2px; }
 .runsel pre.raw { margin: 0; padding: 6px 14px; max-height: 42vh; overflow: auto; }
+
+/* ---------- scans ---------- */
+.scanrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0 6px; }
+.scanrow select, .scanrow input[type='text'], .scanrow input:not([type]) { min-width: 220px; }
+.linklike { font-family: var(--mono); font-size: 11px; color: var(--accent); border: 1px solid var(--line-2); border-radius: 6px; padding: 2px 8px; background: var(--surface-2); }
+.linklike:hover { border-color: var(--accent); }
+.scansug { display: flex; flex-direction: column; gap: 12px; }
+.scansigs { gap: 6px; }
+.scansig { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+.scansig .scansigev { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scangroup { margin-top: 10px; }
+.scanglabel { display: flex; align-items: baseline; gap: 2px; font-size: 12px; margin: 4px 0 4px; }
+.scanglabel .muted { font-size: 11px; }
+.intrutoggle { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.scantactic { display: flex; align-items: center; gap: 10px; padding: 6px 2px; border-top: 1px solid var(--line-2); cursor: pointer; font-size: 12px; }
+.scantactic:first-of-type { border-top: 0; }
+.scantactic .tt { font-weight: 600; }
+.scantactic .scanreq { margin-left: auto; font-size: 11px; white-space: nowrap; }
+.scantactic.intru { opacity: .92; }
+.scantactic input:disabled { opacity: .5; }
+.scanskip { font-size: 11px; margin: 8px 0 0; }
+.scanrunbar { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 12px; }
+.scanreport .scanfinding, .scanfinding { display: flex; align-items: center; gap: 10px; font-size: 12px; padding: 4px 0; }
+.scanfinding .tt { font-weight: 600; }
+.scanfinding .fmeta { margin-left: auto; color: var(--fg-3); font-size: 11px; }
+.scannotes p { margin: 4px 0 0; font-size: 11px; }
+.cbrowser { display: inline-flex; align-items: center; gap: 4px; }
+.cbnote { font-size: 11px; margin: 2px 0 0; }
+.crawlreport { margin-top: 10px; border-top: 1px solid var(--line-2); padding-top: 10px; }
+.crawlreport h4 { margin: 0; font-size: 12px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--fg-3); }
+.scanforms { margin-top: 8px; }
