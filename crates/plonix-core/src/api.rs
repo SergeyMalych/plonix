@@ -11,7 +11,7 @@
 //! files need no token, and the page obtains one through a launch code.
 
 use std::net::SocketAddr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -22,7 +22,7 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::access::{self, AgentActivity, AgentMode, AgentSettings, Caller, Group};
+use crate::access::{self, AgentActivity, AgentMode, AgentSettings, Caller, Group, SharedAgentSettings};
 use crate::ask::{self, AskError, AskRequest};
 use crate::browser;
 use crate::codec;
@@ -41,7 +41,7 @@ struct AppState {
     token: String,
     agent_token: String,
     agents: Arc<AgentActivity>,
-    agent_settings: Arc<RwLock<AgentSettings>>,
+    agent_settings: Arc<SharedAgentSettings>,
     api_addr: SocketAddr,
     launch_codes: Arc<LaunchCodes>,
     home: Home,
@@ -67,7 +67,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         token: tokens.user,
         agent_token: tokens.agent,
         agents: Arc::default(),
-        agent_settings: Arc::new(RwLock::new(AgentSettings::load(&home))),
+        agent_settings: Arc::new(SharedAgentSettings::new(&home)),
         api_addr,
         launch_codes: Arc::default(),
         home,
@@ -168,7 +168,7 @@ async fn guard(State(s): State<AppState>, req: Request, next: Next) -> Response 
     if caller == Caller::Agent {
         let mode = AgentMode::current();
         let (method, path) = (req.method().as_str().to_string(), req.uri().path().to_string());
-        let checked = access::check(mode, &s.agent_settings.read().unwrap(), &method, &path);
+        let checked = access::check(mode, &s.agent_settings.get(), &method, &path);
         s.agents.record(&initiator(req.headers()), &method, &path, checked.is_err());
         if let Err(refusal) = checked {
             return err(StatusCode::FORBIDDEN, refusal.code(), refusal.message());
@@ -183,14 +183,14 @@ type MaybeCaller = Option<axum::Extension<Caller>>;
 
 /// Whether this request comes from an agent that may only see in-scope hosts.
 fn agent_in_scope_only(s: &AppState, caller: &MaybeCaller) -> bool {
-    caller.as_ref().is_some_and(|c| c.0 == Caller::Agent) && s.agent_settings.read().unwrap().in_scope_only()
+    caller.as_ref().is_some_and(|c| c.0 == Caller::Agent) && s.agent_settings.get().in_scope_only()
 }
 
 fn outside_agent_data() -> Response {
     err(
         StatusCode::FORBIDDEN,
         "outside_agent_data",
-        "this host is not in scope, and the user lets agents see in-scope traffic only (Agents screen)",
+        "this host is not in scope, and the user lets agents see in-scope traffic only (Settings › AI agents)",
     )
 }
 
@@ -506,7 +506,7 @@ fn is_agent(caller: &MaybeCaller) -> bool {
 /// Skills, with whether agents can use each one under the current settings.
 /// Agents only see the ones they can use.
 async fn skills(State(s): State<AppState>, caller: MaybeCaller) -> Response {
-    let settings = s.agent_settings.read().unwrap().clone();
+    let settings = s.agent_settings.get();
     let home = s.home.clone();
     let home2 = s.home.clone();
     let agent = is_agent(&caller);
@@ -538,7 +538,7 @@ async fn skill_detail(
     Path(name): Path<String>,
     Query(args): Query<std::collections::BTreeMap<String, String>>,
 ) -> Response {
-    let settings = s.agent_settings.read().unwrap().clone();
+    let settings = s.agent_settings.get();
     let home = s.home.clone();
     let loaded = match tokio::task::spawn_blocking(move || skill::SkillLibrary::new(&home).load()).await {
         Ok(l) => l,
@@ -606,7 +606,7 @@ async fn market_list(State(s): State<AppState>, Query(p): Query<MarketParams>) -
 /// extension's requested capabilities, a pack's contents in brief.
 async fn market_detail(State(s): State<AppState>, Path(name): Path<String>) -> Response {
     let home = s.home.clone();
-    let settings = s.agent_settings.read().unwrap().clone();
+    let settings = s.agent_settings.get();
     let out = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<Value>> {
         let cat = market::open_cached(&home, false)?;
         let m = market::Market::new(&home);
@@ -940,7 +940,7 @@ async fn add_finding(State(s): State<AppState>, headers: HeaderMap, Json(f): Jso
 /// The agent access policy and which agents have connected.
 async fn agents(State(s): State<AppState>, caller: MaybeCaller) -> Response {
     let mode = AgentMode::current();
-    let settings = s.agent_settings.read().unwrap().clone();
+    let settings = s.agent_settings.get();
     let mut v = json!({
         "mode": mode,
         "enabled": settings.enabled,
@@ -960,7 +960,7 @@ async fn agents(State(s): State<AppState>, caller: MaybeCaller) -> Response {
 }
 
 async fn agent_settings(State(s): State<AppState>) -> Response {
-    let settings = s.agent_settings.read().unwrap().clone();
+    let settings = s.agent_settings.get();
     let groups: Vec<Value> = Group::SWITCHABLE.iter().map(|(g, label)| json!({ "group": g, "label": label, "on": settings.group_on(*g) })).collect();
     Json(json!({ "settings": settings, "groups": groups, "budgets": AgentSettings::BUDGETS })).into_response()
 }
@@ -968,19 +968,17 @@ async fn agent_settings(State(s): State<AppState>) -> Response {
 /// Changes agent access. Agents cannot reach this route (it is in no mode's
 /// capabilities), so only the user changes what agents may see.
 async fn put_agent_settings(State(s): State<AppState>, Json(new): Json<AgentSettings>) -> Response {
-    let new = new.sanitized();
-    if let Err(e) = new.save(&s.home) {
+    if let Err(e) = s.agent_settings.set(new) {
         return internal(e);
     }
-    *s.agent_settings.write().unwrap() = new;
     agent_settings(State(s)).await
 }
 
 /// Builds the context for "Ask Claude Code" about one request, finding or host.
 async fn agent_ask(State(s): State<AppState>, Json(req): Json<AskRequest>) -> Response {
-    let settings = s.agent_settings.read().unwrap().clone();
+    let settings = s.agent_settings.get();
     if !settings.enabled {
-        return err(StatusCode::FORBIDDEN, "agents_disabled", "agent access is turned off in the Agents screen");
+        return err(StatusCode::FORBIDDEN, "agents_disabled", "agent access is turned off in Settings › AI agents");
     }
     let engine = s.engine.clone();
     match tokio::task::spawn_blocking(move || ask::build(&engine, &req, &settings)).await {

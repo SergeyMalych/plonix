@@ -696,3 +696,14 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .mdl { display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px; margin: 0; }
 .mdl dt { color: var(--muted); font-size: 12px; }
 .mdl dd { margin: 0; overflow-wrap: anywhere; }
+
+/* ---------- Start screen: recent projects ---------- */
+.lsec { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3); margin: 10px 2px 2px; }
+.recent { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.rcard { display: flex; flex-direction: column; gap: 6px; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+.rcard:hover, .rcard:focus-within { border-color: var(--fg-3); }
+.rtop { display: flex; align-items: flex-start; justify-content: space-between; }
+.rname { font-weight: 650; font-size: 15px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rcard .ppath { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rfoot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.rfoot .pstate { overflow: hidden; text-overflow: ellipsis; }

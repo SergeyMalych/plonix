@@ -26,18 +26,21 @@
 //! # Settings
 //!
 //! Within the mode, the user narrows access further with [`AgentSettings`]
-//! (`$PLONIX_HOME/agents.json`, changed from the Agents screen): turn agent
+//! (`$PLONIX_HOME/agents.json`, changed in Settings › AI agents): turn agent
 //! access off, switch off groups of capabilities, and choose whether agents
 //! see all captured traffic or only in-scope hosts.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
+use std::time::SystemTime;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 use crate::model::now_ms;
 use crate::paths::{Home, write_private};
+use crate::settings::{Field, Level, Section, Values};
 
 /// Who is calling the API, decided by the bearer token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -183,6 +186,105 @@ impl AgentSettings {
     }
 }
 
+// ---- the AI agents section of Settings -----------------------------------
+
+pub const SETTINGS_SECTION: &str = "agents";
+
+/// The settings key for switching a capability group on or off.
+fn group_key(g: Group) -> String {
+    format!("allow_{}", serde_json::to_value(g).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default())
+}
+
+/// AI agent access as a Settings section. The values live in `agents.json`,
+/// where the engine has always kept them.
+pub fn settings_section() -> Section {
+    let mut s = Section::new(SETTINGS_SECTION, "AI agents", Level::Global)
+        .describe("What AI agents such as Claude Code may read from your projects, and how much an \"Ask Claude\" hand-off may carry. Agents can only read; they can never change these settings.")
+        .order(40)
+        .field(Field::toggle("enabled", "Let AI agents read projects", true).group("Access").help("When off, every agent request is refused."))
+        .field(
+            Field::choice("data", "Agents see", "in_scope", &[("in_scope", "In-scope hosts only"), ("all", "Everything captured")])
+                .group("Access")
+                .help("In-scope only keeps traffic to other sites away from agents."),
+        );
+    for (g, label) in Group::SWITCHABLE {
+        s = s.field(Field::toggle(&group_key(*g), label, true).group("What agents can read"));
+    }
+    s.field(
+        Field::number("context_budget", "Hand-off size limit", 8000, 500, 200_000)
+            .unit("tokens")
+            .group("Ask Claude")
+            .help("Above this, Plonix asks you to confirm or trim before handing context to Claude Code."),
+    )
+    .field(Field::number("max_body_chars", "Clip each body to", 4000, 200, 100_000).unit("characters").group("Ask Claude"))
+    .stored_by(|home| AgentSettings::load(home).to_values(), |home, v| AgentSettings::from_values(v).sanitized().save(home))
+}
+
+impl AgentSettings {
+    pub fn to_values(&self) -> Values {
+        let mut v = Values::new();
+        v.insert("enabled".into(), json!(self.enabled));
+        v.insert("data".into(), json!(if self.in_scope_only() { "in_scope" } else { "all" }));
+        for (g, _) in Group::SWITCHABLE {
+            v.insert(group_key(*g), json!(self.group_on(*g)));
+        }
+        v.insert("context_budget".into(), json!(self.context_budget));
+        v.insert("max_body_chars".into(), json!(self.max_body_chars));
+        v
+    }
+
+    pub fn from_values(v: &Values) -> Self {
+        let d = Self::default();
+        let num = |k: &str, def: usize| v.get(k).and_then(Value::as_u64).map(|n| n as usize).unwrap_or(def);
+        Self {
+            enabled: v.get("enabled").and_then(Value::as_bool).unwrap_or(d.enabled),
+            data: if v.get("data").and_then(Value::as_str) == Some("all") { DataScope::All } else { DataScope::InScope },
+            off: Group::SWITCHABLE.iter().filter(|(g, _)| v.get(&group_key(*g)).and_then(Value::as_bool) == Some(false)).map(|(g, _)| *g).collect(),
+            context_budget: num("context_budget", d.context_budget),
+            max_body_chars: num("max_body_chars", d.max_body_chars),
+        }
+    }
+}
+
+/// The agent settings as the engine applies them. Every open project reads
+/// the same file, so a change made in one window (or on the Start screen)
+/// reaches all of them on their next request.
+pub struct SharedAgentSettings {
+    home: Home,
+    cached: RwLock<(Option<(SystemTime, u64)>, AgentSettings)>,
+}
+
+impl SharedAgentSettings {
+    pub fn new(home: &Home) -> Self {
+        Self { home: home.clone(), cached: RwLock::new((Self::stamp(home), AgentSettings::load(home))) }
+    }
+
+    /// Changes when the file does: its modification time and size.
+    fn stamp(home: &Home) -> Option<(SystemTime, u64)> {
+        std::fs::metadata(home.agent_settings()).ok().and_then(|m| Some((m.modified().ok()?, m.len())))
+    }
+
+    pub fn get(&self) -> AgentSettings {
+        let stamp = Self::stamp(&self.home);
+        {
+            let c = self.cached.read().unwrap();
+            if c.0 == stamp {
+                return c.1.clone();
+            }
+        }
+        let fresh = AgentSettings::load(&self.home);
+        *self.cached.write().unwrap() = (stamp, fresh.clone());
+        fresh
+    }
+
+    pub fn set(&self, new: AgentSettings) -> Result<AgentSettings> {
+        let new = new.sanitized();
+        new.save(&self.home)?;
+        *self.cached.write().unwrap() = (Self::stamp(&self.home), new.clone());
+        Ok(new)
+    }
+}
+
 /// Why an agent request was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Refusal {
@@ -205,11 +307,11 @@ impl Refusal {
 
     pub fn message(self) -> &'static str {
         match self {
-            Refusal::Disabled => "agent access to Plonix is turned off; the user can turn it on in the Agents screen",
+            Refusal::Disabled => "agent access to Plonix is turned off; the user can turn it on in Settings › AI agents",
             Refusal::NotAllowed => {
                 "agents have read-only access: they can read traffic, the map, scope and findings, but not send requests or change anything"
             }
-            Refusal::SwitchedOff => "the user has switched this capability off for agents in the Agents screen",
+            Refusal::SwitchedOff => "the user has switched this capability off for agents in Settings › AI agents",
         }
     }
 }
@@ -424,5 +526,34 @@ mod tests {
         let c = &a.clients()[0];
         assert_eq!((c.requests, c.refused), (2, 1));
         assert_eq!(c.last_request, "POST /api/send");
+    }
+
+    #[test]
+    fn agent_settings_live_in_the_settings_hub() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = Home { root: dir.path().into() };
+        let shared = SharedAgentSettings::new(&home);
+        assert!(shared.get().enabled && shared.get().in_scope_only());
+
+        // Defaults show through the settings section.
+        let v = crate::settings::global(&home, SETTINGS_SECTION);
+        assert_eq!(v["data"], "in_scope");
+        assert_eq!(v["allow_traffic"], true);
+
+        // Saving the section writes agents.json, and engines pick it up.
+        let section = crate::settings::section(SETTINGS_SECTION).unwrap();
+        let new = section.check(&json!({ "data": "all", "allow_findings": false, "context_budget": 2000 }), &v).unwrap();
+        crate::settings::save_global(&home, SETTINGS_SECTION, &new).unwrap();
+        let saved = AgentSettings::load(&home);
+        assert_eq!(saved.data, DataScope::All);
+        assert_eq!(saved.off, vec![Group::Findings]);
+        assert_eq!(saved.context_budget, 2000);
+        let fresh = shared.get();
+        assert_eq!(fresh, saved);
+
+        // Values round-trip, and bad numbers are refused field by field.
+        assert_eq!(AgentSettings::from_values(&saved.to_values()), saved);
+        let bad = section.check(&json!({ "context_budget": 10 }), &v).unwrap_err();
+        assert_eq!(bad[0].field, "context_budget");
     }
 }

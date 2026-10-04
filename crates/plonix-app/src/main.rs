@@ -163,22 +163,8 @@ fn start(app: AppHandle) {
     match started.and_then(|u| Url::parse(&u).context("bad Start screen address")) {
         Ok(url) => {
             let _ = win.navigate(url);
-            reopen_last(&app);
         }
         Err(e) => show_error(&win, &format!("{e:#}")),
-    }
-}
-
-/// With "When Plonix starts: Reopen the last project", opens it right away.
-fn reopen_last(app: &AppHandle) {
-    let Some(host) = HOST.get() else { return };
-    if !InterfaceSettings::load(&host.hub.home).reopen_last {
-        return;
-    }
-    let Some(last) = plonix_core::project::list(&host.hub.home).into_iter().find(|e| e.last_opened > 0) else { return };
-    match host.runtime.block_on(host.hub.open(&last.id)) {
-        Ok(opened) => open_project_url(app, &opened.url),
-        Err(e) => tracing::warn!("could not reopen {}: {e:#}", last.name),
     }
 }
 

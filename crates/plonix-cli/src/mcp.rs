@@ -345,7 +345,7 @@ impl Server {
         Client::connect_agent(&self.home, &name)
     }
 
-    /// Tools the user has not switched off in the Agents screen. With no
+    /// Tools the user has not switched off in Settings › AI agents. With no
     /// engine to ask, every tool is listed; the engine still refuses calls.
     fn available(&self) -> impl Iterator<Item = &'static Tool> {
         let routes: Option<Vec<String>> = self.client().and_then(|c| c.get("/api/agents")).ok().map(|v| {

@@ -62,7 +62,8 @@ Settings come in sections. A section is either **global** (one value for all pro
 | --- | --- | --- |
 | Proxy | project | listen address and port, next-free-port fallback, decrypt HTTPS, hosts never decrypted, check server certificates, upstream proxy (`http://` or `socks5://`, with optional login), hosts reached directly, connect and request timeouts |
 | Storage | project | keep only in-scope traffic |
-| Interface | global | open projects in a Plonix window or the web browser; on launch, show the Start screen or reopen the last project |
+| Interface | global | open projects in a Plonix window or the web browser |
+| AI agents | global | let agents read projects or not, in-scope hosts only or everything, which kinds of data, and the Ask Claude size limits. Stored in `agents.json` through a section storage hook (`Section::stored_by`) |
 
 Proxy changes apply to a running session right away: the listener moves to the new address (connections already open keep working), and the upstream client is rebuilt. An address that cannot be bound is refused and nothing is saved. `plonix start --port` and `--insecure-upstream` override the settings for one session without changing them.
 
@@ -88,6 +89,8 @@ let values = settings::global(&home, "my-feature");
 ```
 
 Field types: `text`, `secret` (shown masked), `number` (with limits and a unit), `toggle`, `choice`, and `list` (one entry per line). `group` puts fields under a heading. Values of the wrong type in a file fall back to the default, and sections Plonix does not know are kept as they are.
+
+A global section can keep its values in a file of its own with `.stored_by(load, save)`; the AI agents section does this to keep using `agents.json`.
 
 ## The Start screen API
 

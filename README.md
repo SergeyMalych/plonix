@@ -114,7 +114,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 ### Settings
 - **Proxy** (per project, applies right away): listen address and port (use 0.0.0.0 to capture from phones and other devices), next-free-port fallback, HTTPS decryption on or off, hosts that are never decrypted (for apps that pin certificates), server certificate checks, an upstream HTTP or SOCKS5 proxy with login and a list of hosts to reach directly, and timeouts.
 - **Storage** (per project): keep only in-scope traffic, with a count of what it would delete and a button to delete it now.
-- **Interface** (all projects): open projects in a Plonix window or in your web browser, and show the Start screen or reopen the last project when Plonix starts.
+- **Interface** (all projects): open projects in a Plonix window or in your web browser.
 - Settings are a registry: a feature adds a section by describing its fields, and the Settings screens draw it with validation and storage included (see [docs/projects.md](docs/projects.md#adding-a-settings-section)).
 
 ### The Plonix app
@@ -135,7 +135,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - **Scope:** every suggested domain with its evidence, accept (with or without subdomains) or reject, and the rule list.
 - **Map:** hosts with their scope state, detected technologies with the evidence behind them, and endpoints with statuses and parameters.
 - **Findings:** record a finding from any request, with the requests that prove it linked as evidence.
-- **Agents:** which AI agents are connected right now and every request they made, a Claude Code settings panel (on/off, in-scope-only or everything, which tools, and the Ask-Claude context limit), the one command that connects Claude Code, and prompts to try.
+- **Agents:** which AI agents are connected right now and every request they made, a summary of what agents may read (changed in Settings › AI agents: on/off, in-scope-only or everything, which kinds of data, and the Ask-Claude context limit), the one command that connects Claude Code, and prompts to try.
 - **Suggested filters** come from the traffic you captured: in-scope only, server and client errors, the write methods in use, JSON, the busiest API paths and hosts, requests sent from the Bench, and one chip that hides static files. Each shows how many requests it matches, and a filter only appears when something matches it.
 - The page signs in through a one-time link (the app and `plonix ui` create it), so the API token never appears in a URL. It is locked down with a strict Content-Security-Policy, and captured content is only ever rendered as text.
 

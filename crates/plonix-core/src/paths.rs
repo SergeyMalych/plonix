@@ -5,7 +5,7 @@
 //! ├── ca.pem / ca.key        local certificate authority (trust once)
 //! ├── api-token              bearer token for the local API (0600)
 //! ├── agent-token            read-only token for AI agents (0600)
-//! ├── agents.json            what agents may see (Agents screen)
+//! ├── agents.json            what agents may see (Settings › AI agents)
 //! ├── engine.json            the current session's address (the last one opened)
 //! ├── sessions/<id>.json     one file per open project session
 //! ├── hub.json               address of the Start screen, while it runs
