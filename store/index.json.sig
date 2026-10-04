@@ -1,5 +1,5 @@
 {
   "plonix_signature": 1,
-  "key": "ed25519:7Mor6414QDIP6tzCRSMUjzBcYXizeooDsuiQ5dMuj0U=",
-  "signature": "/dsbNRr4ifw4hs185VxgnApEbRbQpt0v8IemNSNfgMMdRz41mvcKRBNf84+Uj7DxQpd8cuk3y+9XaZ/7/4KUCw=="
+  "key": "ed25519:YFvy3sdtk+OrkS3VEVogpHQ7cf4c1BY9Jmru8dckpcQ=",
+  "signature": "6tSUO0cDNtRsA2lPjpael0zQ+G22DrybAkrnYvhvm+SV9b2RZpNkgRRKo1s+03h+xGW2O5feV4tlyIk3Bp1yCg=="
 }

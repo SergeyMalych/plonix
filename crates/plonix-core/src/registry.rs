@@ -55,7 +55,7 @@ pub const DEFAULT_INDEX: &str = "https://raw.githubusercontent.com/SergeyMalych/
 
 /// The key that signs the Plonix Market index. Packages listed there are
 /// reviewed by the Plonix maintainers before the index is signed.
-pub const OFFICIAL_KEY: &str = "ed25519:7Mor6414QDIP6tzCRSMUjzBcYXizeooDsuiQ5dMuj0U=";
+pub const OFFICIAL_KEY: &str = "ed25519:YFvy3sdtk+OrkS3VEVogpHQ7cf4c1BY9Jmru8dckpcQ=";
 pub const OFFICIAL_PUBLISHER: &str = "Plonix maintainers";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
