@@ -1,0 +1,58 @@
+name: Bug report
+description: Something in Plonix doesn't work the way it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. If it's a security problem in Plonix itself, please don't file it here: see [SECURITY.md](https://github.com/SergeyMalych/plonix/security/policy).
+
+        Please remove tokens, cookies and other secrets from anything you paste.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. plonix open example.com
+        2. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where did you see it?
+      multiple: true
+      options:
+        - Plonix.app
+        - The Plonix window in a browser (plonix ui)
+        - The plonix CLI
+        - An AI agent over MCP
+        - The local API
+        - Building from source
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Plonix version or commit
+      description: "`plonix --version`, the app's About box, or the commit you built."
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: macOS version and Mac
+      placeholder: macOS 15.1, Apple silicon
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or output
+      description: Error messages, `plonix status --json`, or anything else that helps.
+      render: text

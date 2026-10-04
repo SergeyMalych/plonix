@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	Plonix.app is signed with the hardened runtime and is not sandboxed.
+	It needs one exception: "Ask Claude Code" opens Terminal through
+	osascript (Apple Events), which the hardened runtime blocks without this
+	entitlement. macOS still asks the user before Plonix may control Terminal
+	(see NSAppleEventsUsageDescription in Info.plist).
+
+	No JIT or unsigned-memory entitlements: the web view's JavaScript runs in
+	WebKit's own WebContent process, which carries its own entitlements.
+	-->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+</dict>
+</plist>

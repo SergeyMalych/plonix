@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest an idea or a change to a workflow.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you'd like
+      description: How would you like Plonix to help? Sketches of the workflow are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do now
+      description: Any workaround you use today.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: This would only send requests to hosts accepted into scope, and agents would stay read-only unless the user opts in.
