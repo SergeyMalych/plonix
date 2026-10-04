@@ -260,6 +260,7 @@ function demoBar() {
       { class: 'tour' },
       h('button', { class: 'btn sm', text: 'What Lens spots', title: 'An order with a token, an email and a card number in it', onclick: lensSample }),
       h('button', { class: 'btn sm', text: 'Scope suggestions', title: 'Hosts tied to the shop, with the evidence for each', onclick: () => go('scope') }),
+      h('button', { class: 'btn sm', text: 'Filters', title: 'Ready-made include and exclude filters, and how to write your own', onclick: filterTour }),
       h('button', { class: 'btn sm', text: 'Bench experiment', title: 'Order lookup: two sends ready to compare', onclick: () => go('bench') }),
       h('button', { class: 'btn sm', text: 'Findings', onclick: () => go('findings') }),
       h('button', { class: 'btn sm', text: 'Scans', title: 'Which checks fit this app, and why', onclick: () => go('scans') }),
@@ -275,6 +276,70 @@ function demoBar() {
     }),
   );
   return bar;
+}
+
+/** The demo's filters overview: views of its traffic, each one click away,
+ * and the search language at a glance. */
+async function filterTour() {
+  let views = [];
+  try {
+    views = (await api('/api/views/filter_tour')).views || [];
+  } catch (_) {}
+  const chip = (f) => {
+    const { key, value } = filterLabel(f.term);
+    return h('span', { class: 'fchip ' + f.mode }, h('span', { class: 'fbody' }, h('span', { class: 'fmode', text: f.mode === 'include' ? '+' : '−' }), key ? h('span', { class: 'fk', text: key }) : null, h('span', { class: 'fv', text: value })), h('span', { class: 'fpad' }));
+  };
+  const apply = (v) => {
+    closeModal();
+    T.filters = v.filters.map((f) => ({ ...f }));
+    T.text = '';
+    T.viewLoaded = true;
+    if (S.view === 'traffic') {
+      const q = $('#q');
+      if (q) q.value = '';
+      filtersChanged();
+    } else {
+      saveTrafficView();
+      go('traffic');
+    }
+    toast(v.title + ': ' + v.why);
+  };
+  const rows = views.map((v) => {
+    const n = h('span', { class: 'n muted' });
+    api('/api/traffic?limit=0&q=' + encodeURIComponent(queryFor(v.filters, '')))
+      .then((r) => (n.textContent = r.total + ' requests'))
+      .catch(() => {});
+    return h(
+      'div',
+      { class: 'ftour-row' },
+      h('div', { class: 'ftour-main' }, h('b', { text: v.title }), h('span', { class: 'muted', text: v.why }), h('span', { class: 'fgroup' }, v.filters.map(chip))),
+      n,
+      h('button', { class: 'btn sm', text: 'Apply', onclick: () => apply(v) }),
+    );
+  });
+  const lang = [
+    ['host:api.example.com', 'a host and its subdomains (globs: host:*.cdn.*)'],
+    ['-host:a.com,b.com', 'a leading minus hides; a comma list matches any value'],
+    ['status:4xx,5xx', 'status classes or codes; status:none for no response'],
+    ['method:POST', 'request method'],
+    ['path:/api', 'path prefix (globs: path:*admin*)'],
+    ['ext:js  mime:json', 'file extension, response type'],
+    ['kind:static', 'images, fonts, styles, scripts and media'],
+    ['scope:in  source:replay', 'in scope or not; captured or sent from the Bench'],
+    ['is:auth', 'a named filter from a filter pack (see + Filter)'],
+    ['"set-cookie: sid"', 'anything else is full text: URLs, headers, bodies'],
+  ];
+  const m = modal(
+    'Filters',
+    [
+      h('p', { class: 'muted', text: 'Filters narrow the traffic list. Each is a chip: + chips show only what matches, − chips hide it. Click a chip to flip it. Add them with + Filter, from the suggested chips under the search box, from a row’s right-click menu, or by typing a term such as host:api.example.com and pressing Enter. They are saved with the project.' }),
+      h('div', { class: 'ftour' }, rows.length ? rows : h('p', { class: 'muted', text: 'No examples in this project.' })),
+      h('h4', { class: 'ftour-h', text: 'The search language' }),
+      h('div', { class: 'ftour-lang' }, lang.map(([q, what]) => [h('code', { text: q }), h('span', { class: 'muted', text: what })])),
+    ],
+    [h('button', { class: 'btn', text: 'Clear filters', onclick: () => (closeModal(), clearFilters(), go('traffic')) }), h('button', { class: 'btn primary', text: 'Done', onclick: closeModal })],
+  );
+  m.el.querySelector('.mcard').classList.add('wide');
 }
 
 /* ---------- theme ---------- */
@@ -759,10 +824,14 @@ function liftFilters(q) {
 
 /** The query the filters and the search box make together. */
 function fullQuery() {
+  return queryFor(T.filters, T.text);
+}
+
+function queryFor(filters, text) {
   const parts = [];
   for (const mode of ['include', 'exclude']) {
     const groups = new Map();
-    for (const f of T.filters.filter((x) => x.mode === mode)) {
+    for (const f of filters.filter((x) => x.mode === mode)) {
       const field = fieldOf(f.term);
       if (field === 'text') {
         parts.push((mode === 'exclude' ? '-' : '') + f.term);
@@ -773,7 +842,7 @@ function fullQuery() {
     }
     for (const [field, values] of groups) parts.push((mode === 'exclude' ? '-' : '') + field + ':' + values.join(','));
   }
-  if (T.text.trim()) parts.push(T.text.trim());
+  if (text.trim()) parts.push(text.trim());
   return parts.join(' ');
 }
 
