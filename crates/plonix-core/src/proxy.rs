@@ -4,16 +4,23 @@
 //! tunnels are terminated with a leaf certificate minted by the local CA, and
 //! the HTTP/1.1 requests inside are forwarded over a fresh TLS connection.
 //! Every request/response pair is recorded, regardless of scope.
+//!
+//! Bodies stream through: the client gets each part of a response as the
+//! server sends it (event streams, long polls, large downloads), while the
+//! first [`Engine::body_limit`] bytes of each body are kept for the record.
+//! An exchange is recorded once its response has ended.
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll, ready};
 use std::time::Instant;
 
 use bytes::Bytes;
 use http::{Method, Request, Response, StatusCode};
-use http_body_util::{BodyExt, Full};
-use hyper::body::Incoming;
+use http_body_util::BodyExt;
+use hyper::body::{Body, Frame, Incoming, SizeHint};
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
@@ -22,7 +29,9 @@ use tokio_rustls::TlsAcceptor;
 use crate::ca::LeafResolver;
 use crate::engine::Engine;
 use crate::model::{Exchange, Headers, Source, now_ms};
-use crate::upstream::{HOP_BY_HOP, OutboundRequest};
+use crate::upstream::{BoxError, HOP_BY_HOP, OutboundRequest, StreamBody, full_body};
+
+type ProxyResponse = Response<StreamBody>;
 
 /// Requests to this host through the proxy are answered by Plonix itself.
 pub const MAGIC_HOST: &str = "plonix";
@@ -66,7 +75,7 @@ where
     }
 }
 
-async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<Response<Full<Bytes>>, Infallible> {
+async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<ProxyResponse, Infallible> {
     if req.method() == Method::CONNECT && ctx.tunnel.is_none() {
         return Ok(connect(req, ctx));
     }
@@ -101,9 +110,22 @@ async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<Response<Full<Bytes>
         .iter()
         .map(|(k, v)| (k.as_str().to_string(), String::from_utf8_lossy(v.as_bytes()).into_owned()))
         .collect();
-    let req_body = match req.into_body().collect().await {
-        Ok(b) => b.to_bytes(),
-        Err(e) => return Ok(error_page(StatusCode::BAD_REQUEST, &format!("could not read request body: {e}"))),
+    let limit = ctx.engine.body_limit();
+    let req_cap = Arc::new(Mutex::new(Captured::new(limit)));
+    // A body of known length within the limit is read first, as before, so a
+    // request that fails still shows what it carried. Longer and open-ended
+    // bodies (uploads, streams) go through as they arrive.
+    let (req_body, stream) = match req.body().size_hint().exact() {
+        Some(n) if n <= limit as u64 => match req.into_body().collect().await {
+            Ok(b) => {
+                let b = b.to_bytes();
+                req_cap.lock().unwrap().add(&b);
+                req_cap.lock().unwrap().done = true;
+                (b, None)
+            }
+            Err(e) => return Ok(error_page(StatusCode::BAD_REQUEST, &format!("could not read request body: {e}"))),
+        },
+        _ => (Bytes::new(), Some(Tee::new(req.into_body(), req_cap.clone(), None).boxed())),
     };
 
     let outbound = OutboundRequest {
@@ -113,59 +135,162 @@ async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<Response<Full<Bytes>
         method: method.clone(),
         target,
         headers: req_headers.clone(),
-        body: req_body.clone(),
+        body: req_body,
         extra_headers: vec![],
     };
-    let result = ctx.engine.upstream().send(outbound).await;
-    let mut ex = Exchange {
-        ts,
-        scheme,
-        host,
-        port,
-        method,
-        path,
-        query,
-        req_headers,
-        req_body: req_body.to_vec(),
-        source: Some(Source::Proxy),
-        ..Default::default()
+    let result = ctx.engine.upstream().open(outbound, stream).await;
+    let mut pending = Pending {
+        engine: ctx.engine.clone(),
+        started,
+        req: req_cap,
+        resp: Arc::new(Mutex::new(Captured::new(limit))),
+        ex: Exchange { ts, scheme, host, port, method, path, query, req_headers, source: Some(Source::Proxy), ..Default::default() },
     };
-    ex.duration_ms = started.elapsed().as_millis() as i64;
 
     let response = match result {
         Ok(up) => {
-            ex.status = Some(up.status);
-            ex.resp_headers = up.headers.clone();
-            ex.resp_body = up.body.to_vec();
-            ex.tls_sans = up.tls_sans;
+            pending.ex.status = Some(up.status);
+            pending.ex.resp_headers = up.headers.clone();
+            pending.ex.tls_sans = up.tls_sans;
             let mut builder = Response::builder().status(up.status);
             for (k, v) in &up.headers {
                 if !HOP_BY_HOP.contains(&k.to_ascii_lowercase().as_str()) {
                     builder = builder.header(k.as_str(), v.as_str());
                 }
             }
+            let resp_cap = pending.resp.clone();
             builder
-                .body(Full::new(up.body))
+                .body(Tee::new(up.body, resp_cap, Some(pending)).boxed())
                 .unwrap_or_else(|e| error_page(StatusCode::BAD_GATEWAY, &format!("invalid upstream response: {e}")))
         }
         Err(e) => {
             let msg = format!("{e:#}");
-            ex.error = Some(msg.clone());
+            pending.ex.error = Some(msg.clone());
             let hint = if msg.contains("certificate") || msg.contains("UnknownIssuer") {
                 "\n\nThe upstream certificate is not trusted. For staging hosts with self-signed certificates, \
                  turn off Settings > Proxy > Check server certificates."
             } else {
                 ""
             };
-            error_page(StatusCode::BAD_GATEWAY, &format!("Plonix could not reach {}: {msg}{hint}", ex.host))
+            error_page(StatusCode::BAD_GATEWAY, &format!("Plonix could not reach {}: {msg}{hint}", pending.ex.host))
         }
     };
-
-    ctx.engine.enqueue(ex);
     Ok(response)
 }
 
-fn connect(req: Request<Incoming>, ctx: Ctx) -> Response<Full<Bytes>> {
+/// The part of a body kept for the record, and how much went through.
+#[derive(Debug, Default)]
+struct Captured {
+    data: Vec<u8>,
+    limit: usize,
+    seen: u64,
+    truncated: bool,
+    /// The body ended normally, so `seen` is its full size.
+    done: bool,
+}
+
+impl Captured {
+    fn new(limit: usize) -> Self {
+        Self { limit, ..Default::default() }
+    }
+
+    fn add(&mut self, chunk: &[u8]) {
+        self.seen += chunk.len() as u64;
+        let room = self.limit.saturating_sub(self.data.len());
+        if chunk.len() > room {
+            self.truncated = true;
+        }
+        self.data.extend_from_slice(&chunk[..chunk.len().min(room)]);
+    }
+
+    /// Moves the kept part into an exchange: (body, truncated, full size).
+    fn take(&mut self) -> (Vec<u8>, bool, Option<i64>) {
+        let size = (self.truncated && self.done).then_some(self.seen as i64);
+        (std::mem::take(&mut self.data), self.truncated, size)
+    }
+}
+
+/// An exchange waiting for its response to end. Dropping it records the
+/// exchange, so it is recorded however the stream ends: normally, with an
+/// error, or because the client went away.
+struct Pending {
+    engine: Arc<Engine>,
+    started: Instant,
+    req: Arc<Mutex<Captured>>,
+    resp: Arc<Mutex<Captured>>,
+    ex: Exchange,
+}
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        let mut ex = std::mem::take(&mut self.ex);
+        ex.duration_ms = self.started.elapsed().as_millis() as i64;
+        (ex.req_body, ex.req_truncated, ex.req_size) = self.req.lock().unwrap().take();
+        (ex.resp_body, ex.resp_truncated, ex.resp_size) = self.resp.lock().unwrap().take();
+        self.engine.enqueue(ex);
+    }
+}
+
+/// Passes a body through unchanged while keeping its start in a [`Captured`].
+struct Tee<B> {
+    inner: B,
+    cap: Arc<Mutex<Captured>>,
+    /// Recorded when the body ends (response bodies only).
+    pending: Option<Pending>,
+}
+
+impl<B> Tee<B> {
+    fn new(inner: B, cap: Arc<Mutex<Captured>>, pending: Option<Pending>) -> Self {
+        Self { inner, cap, pending }
+    }
+}
+
+impl<B> Body for Tee<B>
+where
+    B: Body<Data = Bytes> + Unpin,
+    B::Error: Into<BoxError>,
+{
+    type Data = Bytes;
+    type Error = BoxError;
+
+    fn poll_frame(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Bytes>, BoxError>>> {
+        let this = &mut *self;
+        match ready!(Pin::new(&mut this.inner).poll_frame(cx)) {
+            Some(Ok(frame)) => {
+                if let Some(data) = frame.data_ref() {
+                    this.cap.lock().unwrap().add(data);
+                }
+                Poll::Ready(Some(Ok(frame)))
+            }
+            Some(Err(e)) => {
+                let e = e.into();
+                if let Some(mut p) = this.pending.take() {
+                    p.ex.error = Some(format!("the response stopped early: {e}"));
+                }
+                Poll::Ready(Some(Err(e)))
+            }
+            None => {
+                this.cap.lock().unwrap().done = true;
+                this.pending.take();
+                Poll::Ready(None)
+            }
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        let end = self.inner.is_end_stream();
+        if end {
+            self.cap.lock().unwrap().done = true;
+        }
+        end
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
+    }
+}
+
+fn connect(req: Request<Incoming>, ctx: Ctx) -> ProxyResponse {
     let Some(authority) = req.uri().authority().cloned() else {
         return error_page(StatusCode::BAD_REQUEST, "CONNECT needs host:port");
     };
@@ -204,11 +329,11 @@ fn connect(req: Request<Incoming>, ctx: Ctx) -> Response<Full<Bytes>> {
         let inner = Ctx { tunnel: Some((host, port)), ..ctx };
         serve_conn(TokioIo::new(tls), inner).await;
     });
-    Response::new(Full::new(Bytes::new()))
+    Response::new(full_body(Bytes::new()))
 }
 
 /// Tunnels a CONNECT without decrypting it. Nothing inside is recorded.
-fn passthrough(req: Request<Incoming>, ctx: Ctx, host: String, port: u16) -> Response<Full<Bytes>> {
+fn passthrough(req: Request<Incoming>, ctx: Ctx, host: String, port: u16) -> ProxyResponse {
     tokio::spawn(async move {
         let mut server = match ctx.engine.upstream().connect(&host, port).await {
             Ok(s) => s,
@@ -221,19 +346,19 @@ fn passthrough(req: Request<Incoming>, ctx: Ctx, host: String, port: u16) -> Res
         let mut client = TokioIo::new(upgraded);
         let _ = tokio::io::copy_bidirectional(&mut client, &mut server).await;
     });
-    Response::new(Full::new(Bytes::new()))
+    Response::new(full_body(Bytes::new()))
 }
 
 fn is_self(host: &str, port: u16, local: SocketAddr) -> bool {
     port == local.port() && matches!(host, "127.0.0.1" | "localhost" | "::1" | "0.0.0.0")
 }
 
-fn local_page(path: &str, ctx: &Ctx) -> Response<Full<Bytes>> {
+fn local_page(path: &str, ctx: &Ctx) -> ProxyResponse {
     match path {
         "/ca.pem" | "/ca.crt" | "/cert" => Response::builder()
             .header("content-type", "application/x-x509-ca-cert")
             .header("content-disposition", "attachment; filename=\"plonix-ca.pem\"")
-            .body(Full::new(Bytes::from(ctx.engine.ca.ca_pem().to_string())))
+            .body(full_body(ctx.engine.ca.ca_pem().to_string()))
             .unwrap(),
         _ => {
             let html = format!(
@@ -246,16 +371,38 @@ fn local_page(path: &str, ctx: &Ctx) -> Response<Full<Bytes>> {
                 ctx.engine.store.count().unwrap_or(0),
                 ctx.engine.ca.fingerprint()
             );
-            Response::builder().header("content-type", "text/html; charset=utf-8").body(Full::new(Bytes::from(html))).unwrap()
+            Response::builder().header("content-type", "text/html; charset=utf-8").body(full_body(html)).unwrap()
         }
     }
 }
 
-fn error_page(status: StatusCode, msg: &str) -> Response<Full<Bytes>> {
+fn error_page(status: StatusCode, msg: &str) -> ProxyResponse {
     Response::builder()
         .status(status)
         .header("content-type", "text/plain; charset=utf-8")
         .header("x-plonix-error", "1")
-        .body(Full::new(Bytes::from(msg.to_string())))
+        .body(full_body(msg.to_string()))
         .unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn captured_keeps_the_start_and_counts_the_rest() {
+        let mut c = Captured::new(5);
+        c.add(b"abc");
+        c.add(b"defg");
+        c.add(b"hi");
+        assert_eq!(c.take(), (b"abcde".to_vec(), true, None), "size unknown until the body ends");
+        let mut c = Captured::new(5);
+        c.add(b"abcdefgh");
+        c.done = true;
+        assert_eq!(c.take(), (b"abcde".to_vec(), true, Some(8)));
+        let mut c = Captured::new(5);
+        c.add(b"abcde");
+        c.done = true;
+        assert_eq!(c.take(), (b"abcde".to_vec(), false, None), "a body that fits is not cut");
+    }
 }

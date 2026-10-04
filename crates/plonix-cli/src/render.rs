@@ -62,16 +62,34 @@ pub fn exchange(v: &Value, max_body: usize) -> String {
     out.push_str(&format!("{} {} HTTP/1.1\n", v["method"].as_str().unwrap_or(""), target));
     out.push_str(&headers(&v["req_headers"]));
     out.push_str(&body(&v["req_text"], &v["req_body"], max_body));
+    out.push_str(&cut_note(v, "req"));
     out.push_str("\n――――――――――――――――――――――――――――――――――――――――\n");
     match v["status"].as_u64() {
         Some(s) => {
             out.push_str(&format!("HTTP/1.1 {s}\n"));
             out.push_str(&headers(&v["resp_headers"]));
             out.push_str(&body(&v["resp_text"], &v["resp_body"], max_body));
+            out.push_str(&cut_note(v, "resp"));
         }
         None => out.push_str(&format!("error: {}\n", v["error"].as_str().unwrap_or("unknown"))),
     }
     out
+}
+
+/// A note for a body that was longer than the recording limit (`side` is `req` or `resp`).
+fn cut_note(v: &Value, side: &str) -> String {
+    if v[format!("{side}_truncated")].as_bool() != Some(true) {
+        return String::new();
+    }
+    let kept = b64_len(&v[format!("{side}_body")]);
+    match v[format!("{side}_size")].as_i64() {
+        Some(size) => format!("[body cut: the first {} of {} were kept]\n", human_size(kept as i64), human_size(size)),
+        None => format!("[body cut: the first {} were kept]\n", human_size(kept as i64)),
+    }
+}
+
+fn b64_len(raw_b64: &Value) -> usize {
+    raw_b64.as_str().and_then(|b| base64::engine::general_purpose::STANDARD.decode(b).ok()).map(|b| b.len()).unwrap_or(0)
 }
 
 fn headers(h: &Value) -> String {
@@ -201,4 +219,22 @@ pub fn hosts(items: &[Value]) -> String {
         out.push_str(&format!("{:>7}  {:<5}  {}\n", h["requests"].as_i64().unwrap_or(0), scope, h["host"].as_str().unwrap_or("")));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn cut_bodies_say_how_much_was_kept() {
+        let v = json!({
+            "id": 3, "method": "GET", "url": "https://a.test/big", "path": "/big", "status": 200,
+            "req_headers": [], "req_body": "", "resp_headers": [], "resp_text": "start",
+            "resp_body": "c3RhcnQ=", "resp_truncated": true, "resp_size": 3145728,
+        });
+        let out = exchange(&v, 4000);
+        assert!(out.contains("[body cut: the first 5 B of 3.0 MB were kept]"), "{out}");
+        assert_eq!(out.matches("body cut").count(), 1, "the request was not cut");
+    }
 }

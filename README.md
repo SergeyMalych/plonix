@@ -58,6 +58,7 @@ Plonix has a handful of tools, each with its own name. They are the same in the 
 - HTTP and HTTPS interception. Plonix creates its own certificate authority on first run and mints per-host certificates on the fly.
 - Trust the CA once (`~/.plonix/ca.pem`) and every HTTPS site you visit through the proxy is captured.
 - Compressed bodies (gzip, deflate, brotli) are decoded for display and search.
+- Bodies stream through: event streams, long polls and large downloads reach the browser as the server sends them. Plonix keeps the first 10 MB of each body (Settings › Proxy › Keep bodies up to), and the Lens and `plonix show` say when a body was cut and how big it was.
 
 ### Full traffic capture
 - Every request and response is recorded into a per-project SQLite database, in scope or not, so nothing you browsed is lost.
@@ -112,7 +113,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - **Keep only in-scope traffic** (Settings › Storage, per project): when the project closes, Plonix deletes traffic to every host that is not in scope and compacts the file, so it is gone from disk. Requests your findings point to are kept, and if nothing is in scope yet, nothing is deleted. If Plonix quits unexpectedly, the clean-up runs the next time the project opens. See [docs/projects.md](docs/projects.md).
 
 ### Settings
-- **Proxy** (per project, applies right away): listen address and port (use 0.0.0.0 to capture from phones and other devices), next-free-port fallback, HTTPS decryption on or off, hosts that are never decrypted (for apps that pin certificates), server certificate checks, an upstream HTTP or SOCKS5 proxy with login and a list of hosts to reach directly, and timeouts.
+- **Proxy** (per project, applies right away): listen address and port (use 0.0.0.0 to capture from phones and other devices), next-free-port fallback, HTTPS decryption on or off, hosts that are never decrypted (for apps that pin certificates), server certificate checks, an upstream HTTP or SOCKS5 proxy with login and a list of hosts to reach directly, timeouts, and how much of each body to keep.
 - **Storage** (per project): keep only in-scope traffic, with a count of what it would delete and a button to delete it now.
 - **Interface** (all projects): open projects in a Plonix window or in your web browser.
 - Settings are a registry: a feature adds a section by describing its fields, and the Settings screens draw it with validation and storage included (see [docs/projects.md](docs/projects.md#adding-a-settings-section)).

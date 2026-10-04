@@ -608,6 +608,17 @@ function bodyOf(text, b64, pretty, contentType) {
   return { text };
 }
 
+/** Says how much of a body was kept, when it was longer than the recording limit. */
+function cutTag(truncated, size, b64) {
+  if (!truncated) return null;
+  const kept = fmtSize(b64len(b64));
+  return h('span', {
+    class: 'decodetag',
+    text: size != null ? `first ${kept} of ${fmtSize(size)} kept` : `first ${kept} kept`,
+    title: 'This body was longer than Settings > Proxy > Keep bodies up to. It went through in full; Plonix kept the start.',
+  });
+}
+
 function requestText(ex) {
   const lines = [`${ex.method} ${target(ex)} HTTP/1.1`, ...ex.req_headers.map(([k, v]) => `${k}: ${v}`)];
   const b = bodyOf(ex.req_text, ex.req_body, false);
@@ -1312,7 +1323,7 @@ async function openInspector(id) {
       : null;
     clear(
       respCol,
-      h('div', { class: 'lbl' }, 'Response', enc ? h('span', { class: 'decodetag', text: 'decoded · ' + enc }) : null, seg),
+      h('div', { class: 'lbl' }, 'Response', enc ? h('span', { class: 'decodetag', text: 'decoded · ' + enc }) : null, cutTag(ex.resp_truncated, ex.resp_size, ex.resp_body), seg),
       h('div', { class: 'spotslot' }),
       rawPre(responseText(ex, T.pretty)),
     );
@@ -1322,7 +1333,7 @@ async function openInspector(id) {
   const reqCol = h(
     'div',
     { class: 'col' },
-    h('div', { class: 'lbl' }, 'Request', h('span', { class: 'r', text: '#' + ex.id + ' · ' + fmtTime(ex.ts) + ' · ' + (ex.initiator || ex.source || 'proxy') })),
+    h('div', { class: 'lbl' }, 'Request', cutTag(ex.req_truncated, ex.req_size, ex.req_body), h('span', { class: 'r', text: '#' + ex.id + ' · ' + fmtTime(ex.ts) + ' · ' + (ex.initiator || ex.source || 'proxy') })),
     h('div', { class: 'spotslot' }),
     rawPre(requestText(ex)),
   );
@@ -1338,7 +1349,7 @@ async function openInspector(id) {
         { class: 'meta' },
         h('span', { class: statusClass(ex.status), text: ex.status == null ? 'no response' : ex.status }),
         h('span', { text: ex.duration_ms + ' ms' }),
-        h('span', { text: fmtSize(b64len(ex.resp_body)) }),
+        h('span', { text: fmtSize(ex.resp_size != null ? ex.resp_size : b64len(ex.resp_body)) }),
         h('span', { class: 'tag ' + scopeTag(decide(ex.host)), text: scopeLabel(decide(ex.host)) }),
       ),
       h('button', { class: 'btn sm primary', text: 'Send to Bench', title: 'Edit and re-send on the Bench (b, or double-click a row)', onclick: () => sendToBench(id) }),

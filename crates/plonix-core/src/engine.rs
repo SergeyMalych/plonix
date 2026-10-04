@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Instant;
 
@@ -54,7 +54,12 @@ pub struct Engine {
     /// The listen address last asked for in the settings.
     applied_listen: Mutex<Option<SocketAddr>>,
     overrides: Mutex<UpstreamOptions>,
+    /// Bodies passing through the proxy are recorded up to this many bytes.
+    body_limit: AtomicUsize,
 }
+
+/// How much of each body is recorded until the settings say otherwise.
+pub const DEFAULT_BODY_LIMIT: usize = 10 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct StorageStats {
@@ -179,7 +184,17 @@ impl Engine {
             filters: Mutex::new(FilterState::default()),
             applied_listen: Mutex::new(None),
             overrides: Mutex::default(),
+            body_limit: AtomicUsize::new(DEFAULT_BODY_LIMIT),
         }))
+    }
+
+    /// How many bytes of each body the proxy records.
+    pub fn body_limit(&self) -> usize {
+        self.body_limit.load(Ordering::Relaxed)
+    }
+
+    pub fn set_body_limit(&self, bytes: usize) {
+        self.body_limit.store(bytes.max(1), Ordering::Relaxed);
     }
 
     /// The client used for outbound requests.
@@ -244,6 +259,7 @@ impl Engine {
         let bound = if keep { current.unwrap() } else { self.bind_proxy(addr, p.port_fallback).await? };
         *self.applied_listen.lock().unwrap() = Some(addr);
         self.set_upstream(upstream);
+        self.set_body_limit((p.max_body_mb as usize).saturating_mul(1024 * 1024));
         *self.interception.write().unwrap() = Interception { decrypt: p.intercept_tls, passthrough: p.passthrough_hosts.clone() };
         Ok(bound)
     }
@@ -668,6 +684,13 @@ impl Engine {
         let target = req.target.clone().unwrap_or_else(|| {
             if orig.query.is_empty() { orig.path.clone() } else { format!("{}?{}", orig.path, orig.query) }
         });
+        if orig.req_truncated && req.body.is_none() {
+            return Err(SendError::BadRequest(format!(
+                "only the first {} bytes of request {}'s body were recorded, so it cannot be sent again as it was; give the body to send",
+                orig.req_body.len(),
+                orig.id
+            )));
+        }
         let url = Exchange { path: target, query: String::new(), ..orig.clone() }.url();
         let (body, body_base64) = match req.body {
             Some(b) => (Some(b), None),

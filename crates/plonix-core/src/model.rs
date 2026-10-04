@@ -70,6 +70,18 @@ pub struct Exchange {
     pub source: Option<Source>,
     /// Who initiated an active request (`cli`, `mcp`, `gui`...).
     pub initiator: Option<String>,
+    /// The request body was longer than the recording limit: it went through
+    /// in full, and `req_body` holds its start.
+    #[serde(default)]
+    pub req_truncated: bool,
+    /// Full size of a truncated request body, when all of it went through.
+    #[serde(default)]
+    pub req_size: Option<i64>,
+    /// Like `req_truncated`, for the response body.
+    #[serde(default)]
+    pub resp_truncated: bool,
+    #[serde(default)]
+    pub resp_size: Option<i64>,
 }
 
 impl Exchange {
@@ -85,6 +97,12 @@ impl Exchange {
             url.push_str(&self.query);
         }
         url
+    }
+
+    /// Size of the response body as sent, which is more than was kept when
+    /// the body was cut at the recording limit.
+    pub fn resp_len(&self) -> i64 {
+        self.resp_size.unwrap_or(self.resp_body.len() as i64)
     }
 
     pub fn mime(&self) -> String {

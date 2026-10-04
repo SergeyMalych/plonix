@@ -2,6 +2,10 @@
 //!
 //! Connects directly, or through an upstream proxy (HTTP `CONNECT` or
 //! SOCKS5) when the project's proxy settings name one.
+//!
+//! [`Upstream::send`] reads the whole response; [`Upstream::open`] returns
+//! as soon as the response head arrives and leaves the body streaming, which
+//! the proxy uses so event streams and downloads reach the client as they come.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,7 +13,9 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use base64::Engine as _;
 use bytes::Bytes;
+use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
+use hyper::body::Incoming;
 use hyper_util::rt::TokioIo;
 use rustls::ClientConfig;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
@@ -53,6 +59,25 @@ pub struct InboundResponse {
     pub status: u16,
     pub headers: Headers,
     pub body: Bytes,
+    pub tls_sans: Vec<String>,
+}
+
+pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+/// A request or response body that may still be arriving.
+pub type StreamBody = BoxBody<Bytes, BoxError>;
+
+/// A whole body, as a [`StreamBody`].
+pub fn full_body(b: impl Into<Bytes>) -> StreamBody {
+    Full::new(b.into()).map_err(|never| match never {}).boxed()
+}
+
+/// A response whose head has arrived; the body is read as it comes.
+#[derive(Debug)]
+pub struct StreamingResponse {
+    pub status: u16,
+    pub headers: Headers,
+    pub body: Incoming,
     pub tls_sans: Vec<String>,
 }
 
@@ -236,13 +261,29 @@ impl Upstream {
         Ok(tcp)
     }
 
+    /// Sends a request and reads the whole response, all within the request timeout.
     pub async fn send(&self, req: OutboundRequest) -> Result<InboundResponse> {
-        tokio::time::timeout(self.total_timeout, self.send_inner(req))
+        let fut = async {
+            let r = self.open_inner(req, None).await?;
+            let body = r.body.collect().await.context("reading response body")?.to_bytes();
+            Ok(InboundResponse { status: r.status, headers: r.headers, body, tls_sans: r.tls_sans })
+        };
+        tokio::time::timeout(self.total_timeout, fut)
             .await
             .map_err(|_| anyhow!("upstream timed out after {:?}", self.total_timeout))?
     }
 
-    async fn send_inner(&self, mut req: OutboundRequest) -> Result<InboundResponse> {
+    /// Sends a request and returns once the response head arrives; the
+    /// request timeout covers only that part, so long streams are not cut.
+    /// With `body`, the request body streams from it instead of `req.body`,
+    /// and the request's own `Content-Length` (if any) is kept.
+    pub async fn open(&self, req: OutboundRequest, body: Option<StreamBody>) -> Result<StreamingResponse> {
+        tokio::time::timeout(self.total_timeout, self.open_inner(req, body))
+            .await
+            .map_err(|_| anyhow!("upstream timed out after {:?}", self.total_timeout))?
+    }
+
+    async fn open_inner(&self, mut req: OutboundRequest, body: Option<StreamBody>) -> Result<StreamingResponse> {
         // Plain HTTP through an HTTP proxy uses absolute-form requests, which
         // every HTTP proxy accepts (not all allow CONNECT to port 80).
         if req.scheme == "http"
@@ -259,7 +300,7 @@ impl Upstream {
                 req.headers.retain(|(k, _)| !k.eq_ignore_ascii_case("proxy-authorization"));
                 req.extra_headers.push(("Proxy-Authorization".into(), format!("Basic {creds}")));
             }
-            return exchange(TokioIo::new(tcp), req).await;
+            return exchange(TokioIo::new(tcp), req, body).await;
         }
         let tcp = self.connect(&req.host, req.port).await?;
 
@@ -267,21 +308,22 @@ impl Upstream {
             let name = ServerName::try_from(req.host.clone()).map_err(|_| anyhow!("invalid server name {}", req.host))?;
             let tls = self.tls.connect(name, tcp).await.with_context(|| format!("TLS handshake with {}", req.host))?;
             let sans = tls.get_ref().1.peer_certificates().and_then(|c| c.first()).map(cert_dns_names).unwrap_or_default();
-            let mut resp = exchange(TokioIo::new(tls), req).await?;
+            let mut resp = exchange(TokioIo::new(tls), req, body).await?;
             resp.tls_sans = sans;
             Ok(resp)
         } else {
-            exchange(TokioIo::new(tcp), req).await
+            exchange(TokioIo::new(tcp), req, body).await
         }
     }
 }
 
-async fn exchange<T>(io: TokioIo<T>, req: OutboundRequest) -> Result<InboundResponse>
+async fn exchange<T>(io: TokioIo<T>, req: OutboundRequest, body: Option<StreamBody>) -> Result<StreamingResponse>
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
+    let streaming = body.is_some();
     let (mut sender, conn) = hyper::client::conn::http1::Builder::new()
-        .handshake::<_, Full<Bytes>>(io)
+        .handshake::<_, StreamBody>(io)
         .await
         .context("HTTP handshake")?;
     tokio::spawn(async move {
@@ -292,8 +334,9 @@ where
     let mut has_host = false;
     for (k, v) in &req.headers {
         let lk = k.to_ascii_lowercase();
-        // Length is recomputed from the (possibly edited) body.
-        if HOP_BY_HOP.contains(&lk.as_str()) || lk == "content-length" {
+        // Length is recomputed from the (possibly edited) body; a streamed
+        // body is passed on unchanged, so its length still holds.
+        if HOP_BY_HOP.contains(&lk.as_str()) || (lk == "content-length" && !streaming) {
             continue;
         }
         has_host |= lk == "host";
@@ -308,10 +351,11 @@ where
         builder = builder.header("host", host);
     }
     let send_len = !req.body.is_empty() || matches!(req.method.as_str(), "POST" | "PUT" | "PATCH");
-    if send_len {
+    if send_len && !streaming {
         builder = builder.header("content-length", req.body.len());
     }
-    let request = builder.body(Full::new(req.body)).context("building request")?;
+    let body = body.unwrap_or_else(|| full_body(req.body));
+    let request = builder.body(body).context("building request")?;
     let resp = sender.send_request(request).await.context("sending request")?;
     let status = resp.status().as_u16();
     let headers = resp
@@ -319,8 +363,7 @@ where
         .iter()
         .map(|(k, v)| (k.as_str().to_string(), String::from_utf8_lossy(v.as_bytes()).into_owned()))
         .collect();
-    let body = resp.into_body().collect().await.context("reading response body")?.to_bytes();
-    Ok(InboundResponse { status, headers, body, tls_sans: vec![] })
+    Ok(StreamingResponse { status, headers, body: resp.into_body(), tls_sans: vec![] })
 }
 
 /// Opens a tunnel through an HTTP proxy with `CONNECT`.

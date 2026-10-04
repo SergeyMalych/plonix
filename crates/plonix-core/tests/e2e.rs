@@ -884,3 +884,143 @@ async fn exclusions_groups_domains_and_custom() {
     .await
     .unwrap();
 }
+
+/// A response body fed by the test, one chunk at a time.
+struct ChunkBody(tokio::sync::mpsc::Receiver<Bytes>);
+
+impl hyper::body::Body for ChunkBody {
+    type Data = Bytes;
+    type Error = Infallible;
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<hyper::body::Frame<Bytes>, Infallible>>> {
+        self.0.poll_recv(cx).map(|c| c.map(|b| Ok(hyper::body::Frame::data(b))))
+    }
+}
+
+/// Serves `/events`, an event stream that sends its first event, waits for
+/// `go`, then sends the last one; and `/big`, a gzip-compressed page.
+async fn serve_streams(go: Arc<tokio::sync::Notify>) -> SocketAddr {
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let (s, _) = l.accept().await.unwrap();
+            let go = go.clone();
+            let svc = service_fn(move |req: Request<Incoming>| {
+                let go = go.clone();
+                async move {
+                    let resp = match req.uri().path() {
+                        "/events" => {
+                            let (tx, rx) = tokio::sync::mpsc::channel(4);
+                            tokio::spawn(async move {
+                                tx.send(Bytes::from_static(b"data: first\n\n")).await.unwrap();
+                                go.notified().await;
+                                tx.send(Bytes::from_static(b"data: last\n\n")).await.unwrap();
+                            });
+                            Response::builder().header("content-type", "text/event-stream").body(ChunkBody(rx).boxed())
+                        }
+                        _ => {
+                            use std::io::Write;
+                            let text: String = std::iter::once("plonix-start\n".to_string()).chain((0..5000).map(|i| format!("line {i}\n"))).collect();
+                            let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+                            enc.write_all(text.as_bytes()).unwrap();
+                            Response::builder()
+                                .header("content-type", "text/plain")
+                                .header("content-encoding", "gzip")
+                                .body(Full::new(Bytes::from(enc.finish().unwrap())).boxed())
+                        }
+                    };
+                    Ok::<_, Infallible>(resp.unwrap())
+                }
+            });
+            tokio::spawn(hyper::server::conn::http1::Builder::new().serve_connection(TokioIo::new(s), svc));
+        }
+    });
+    addr
+}
+
+/// Event streams reach the client as they are sent, and the exchange is
+/// recorded once the stream ends.
+#[tokio::test]
+async fn event_streams_pass_through_as_they_arrive() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let go = Arc::new(tokio::sync::Notify::new());
+    let up = serve_streams(go.clone()).await;
+    let r = start(&home, None).await;
+
+    let tcp = TcpStream::connect(r.proxy_addr).await.unwrap();
+    let (mut sender, conn) = hyper::client::conn::http1::handshake::<_, Full<Bytes>>(TokioIo::new(tcp)).await.unwrap();
+    tokio::spawn(conn);
+    let url = format!("http://localhost:{}/events", up.port());
+    let req = Request::builder().uri(&url).header("host", format!("localhost:{}", up.port())).body(Full::new(Bytes::new())).unwrap();
+    let resp = sender.send_request(req).await.unwrap();
+    assert_eq!(resp.headers()["content-type"], "text/event-stream");
+    let mut body = resp.into_body();
+    // The server holds the last event back until the client has the first,
+    // so a proxy that waits for the whole body never gets here.
+    let first = tokio::time::timeout(Duration::from_secs(5), body.frame()).await.expect("first event arrives before the stream ends");
+    let first = first.unwrap().unwrap().into_data().unwrap();
+    assert_eq!(&first[..], b"data: first\n\n");
+    assert_eq!(r.engine.store.count().unwrap(), 0, "recorded when the stream ends");
+    go.notify_one();
+    let rest = tokio::time::timeout(Duration::from_secs(5), body.collect()).await.unwrap().unwrap().to_bytes();
+    assert_eq!(&rest[..], b"data: last\n\n");
+
+    wait_for_count(&r.engine, 1).await;
+    let ex = r.engine.store.get_exchange(1).unwrap().unwrap();
+    assert_eq!(ex.resp_body, b"data: first\n\ndata: last\n\n");
+    assert!(!ex.resp_truncated);
+}
+
+/// Bodies over the recording limit go through in full; the start is kept,
+/// decoded and searchable, and the full size is noted.
+#[tokio::test]
+async fn long_bodies_pass_through_and_are_kept_in_part() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let up = serve_http().await;
+    let big = serve_streams(Arc::new(tokio::sync::Notify::new())).await;
+    let r = start(&home, None).await;
+    r.engine.set_body_limit(1000);
+
+    // A compressed response, cut at 1000 bytes on the wire.
+    let (status, text) = via_proxy(r.proxy_addr, &format!("http://localhost:{}/big", big.port()), &[]).await;
+    assert_eq!(status, 200);
+    assert!(!text.is_empty(), "the client gets the whole compressed body");
+    wait_for_count(&r.engine, 1).await;
+    let ex = r.engine.store.get_exchange(1).unwrap().unwrap();
+    assert!(ex.resp_truncated);
+    assert_eq!(ex.resp_body.len(), 1000);
+    assert!(ex.resp_size.unwrap() > 1000);
+    let decoded = plonix_core::codec::body_text(&ex.resp_headers, &ex.resp_body).unwrap();
+    assert!(decoded.starts_with("plonix-start\nline 0\n"), "{}", &decoded[..decoded.len().min(40)]);
+    let (hits, _) = r.engine.store.search(&Query::parse("plonix-start").unwrap(), &r.engine.rules(), 10, 0).unwrap();
+    assert_eq!(hits.len(), 1, "the kept part is searchable");
+    assert_eq!(hits[0].resp_len, ex.resp_size.unwrap(), "listings show the full size");
+
+    // A request body over the limit streams to the server in full.
+    let tcp = TcpStream::connect(r.proxy_addr).await.unwrap();
+    let (mut sender, conn) = hyper::client::conn::http1::handshake::<_, Full<Bytes>>(TokioIo::new(tcp)).await.unwrap();
+    tokio::spawn(conn);
+    let payload = "x".repeat(3000);
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("http://localhost:{}/echo", up.port()))
+        .header("host", format!("localhost:{}", up.port()))
+        .body(Full::new(Bytes::from(payload.clone())))
+        .unwrap();
+    let echoed = sender.send_request(req).await.unwrap().into_body().collect().await.unwrap().to_bytes();
+    assert!(String::from_utf8_lossy(&echoed).ends_with(&payload), "the server got the whole body");
+    wait_for_count(&r.engine, 2).await;
+    let ex = r.engine.store.get_exchange(2).unwrap().unwrap();
+    assert!(ex.req_truncated && ex.resp_truncated);
+    assert_eq!((ex.req_body.len(), ex.req_size), (1000, Some(3000)));
+
+    // A cut request body is not re-sent as if it were whole.
+    r.engine.decide("localhost", Decision::Accepted, false, "").unwrap();
+    let err = r.engine.replay(ReplayRequest { id: 2, ..Default::default() }, "test").await.unwrap_err();
+    assert!(matches!(err, SendError::BadRequest(_)), "{err}");
+}
