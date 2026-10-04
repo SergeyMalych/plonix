@@ -10,7 +10,12 @@
       "author": "Plonix contributors",
       "url": "skills/triage-host.md",
       "sha256": "2c32d0caa490421b84e5e3c317d2cf13d08d0b743f9261b97e7cf6a04f6598c7",
-      "homepage": "https://github.com/SergeyMalych/plonix"
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "about": [
+        "Gives an agent a repeatable way to size up a host: what it serves, how it is built, how it signs users in, and which requests deserve a first look.",
+        "The agent reads your captured traffic, the technologies Plonix detected and the host's map. It does not send anything.",
+        "Use it when you land on a new target and want a briefing before you start digging."
+      ]
     },
     {
       "name": "explain-request",
@@ -20,7 +25,12 @@
       "author": "Plonix contributors",
       "url": "skills/explain-request.md",
       "sha256": "5528dc246ce3baeb341075e1b53d75efafbfb89e0eb7a286a098046b2d182fe1",
-      "homepage": "https://github.com/SergeyMalych/plonix"
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "about": [
+        "Walks an agent through one captured request and its response: what the call is for, what each header, cookie and parameter does, and anything that looks unusual.",
+        "Give it a request id. The agent reads that exchange and the Lens insights Plonix spotted in it, and answers in plain language.",
+        "Good for unfamiliar APIs, tokens you do not recognise and long minified responses."
+      ]
     },
     {
       "name": "review-sign-in",
@@ -30,7 +40,12 @@
       "author": "Plonix contributors",
       "url": "skills/review-sign-in.md",
       "sha256": "3cd68b270a84d1d92a43b067d09edee482c37322ba71a90980de3634a4169e98",
-      "homepage": "https://github.com/SergeyMalych/plonix"
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "about": [
+        "Has an agent follow how a site signs users in: the requests involved, where tokens and cookies are set, and what is worth testing next.",
+        "It reads captured traffic only. It does not try credentials or replay anything.",
+        "Run it after you have signed in to the target once in the browser behind Plonix."
+      ]
     },
     {
       "name": "check-scope",
@@ -40,7 +55,12 @@
       "author": "Plonix contributors",
       "url": "skills/check-scope.md",
       "sha256": "86a265073f947e6a9186abd9ba15cf78c5cf484ddbe6f8355db422963f01263f",
-      "homepage": "https://github.com/SergeyMalych/plonix"
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "about": [
+        "Goes through the domains Plonix suggests for scope and recommends which belong to the target, with a line of evidence for each.",
+        "Accept means it is the target's own (shared cookies, its certificate, calls made by its pages). Keep out means a third-party service such as analytics or a CDN. Ask the owner means the evidence is thin.",
+        "The agent only reads. You decide in the Scope screen."
+      ]
     },
     {
       "name": "draft-finding",
@@ -50,7 +70,12 @@
       "author": "Plonix contributors",
       "url": "skills/draft-finding.md",
       "sha256": "dc4ed246f96c69c244db79671ae20ed39e656d64c7ed06e26fbbc496e7781471",
-      "homepage": "https://github.com/SergeyMalych/plonix"
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "about": [
+        "Helps an agent turn something you found into a clear write-up: a title, the steps to reproduce, the evidence from your traffic, the impact and a suggested fix.",
+        "It reads the requests and findings you point it at and drafts text for you to review. Agents are read-only, so you record the finding yourself.",
+        "Use it when you want a first draft you can tidy up."
+      ]
     },
     {
       "name": "api-inventory",
@@ -60,7 +85,12 @@
       "author": "Plonix contributors",
       "url": "skills/api-inventory.md",
       "sha256": "9a332e5689f7538250a2ec41023a97df321949bf892f793173001b3e897f3d59",
-      "homepage": "https://github.com/SergeyMalych/plonix"
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "about": [
+        "Builds an inventory of a target's API from what you have captured: endpoints, methods, parameters, authentication and how responses are shaped.",
+        "The agent reads your traffic and the site map. It does not probe the API.",
+        "Handy before you test, and for handing a clear picture of an API to a teammate."
+      ]
     },
     {
       "name": "api-kit",
@@ -73,6 +103,11 @@
         "api-inventory",
         "leaks",
         "admin-panels"
+      ],
+      "about": [
+        "A starter set for working on APIs. It installs the API inventory skill, the leaks filter pack and the admin panels rule pack together.",
+        "Removing the bundle removes the parts it installed. Every part is checked before anything is added.",
+        "Choose it if API testing is most of what you do."
       ]
     },
     {
@@ -83,7 +118,12 @@
       "author": "Plonix contributors",
       "url": "extensions/graphql-explorer.json",
       "sha256": "fe718c7077583e33b631d2769e14b4ad1a27c671614e96edac8118e92f3c834c",
-      "homepage": "https://github.com/SergeyMalych/plonix"
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "about": [
+        "A planned extension that adds a GraphQL tab: browse a schema, see queries in a readable form and build requests from them.",
+        "Extensions that run code need the sandboxed extension runtime, which is not in this version of Plonix yet. It is listed so you can see what is coming and what it would be allowed to do.",
+        "It cannot be installed yet."
+      ]
     },
     {
       "name": "web-servers",
@@ -93,7 +133,12 @@
       "author": "Plonix contributors",
       "url": "packs/web-servers.json",
       "sha256": "7641f527608f9542a2812a8e6f073aa544363191474433249e3426f90253b5e9",
-      "homepage": "https://github.com/SergeyMalych/plonix"
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "about": [
+        "Recognises web servers, proxies and application servers from the headers and markers they leave: nginx, Apache, IIS, Caddy, Envoy, Traefik, HAProxy, Gunicorn, Tomcat, Kestrel and more.",
+        "Rule packs are data, not code. They only match on captured traffic and show their findings in the Map and the Lens.",
+        "Built in."
+      ]
     },
     {
       "name": "frameworks",
@@ -103,7 +148,12 @@
       "author": "Plonix contributors",
       "url": "packs/frameworks.json",
       "sha256": "ce488c7cfbe087a26522e86e7df3139c4eee2cf2e47beed3a1a15d6d4cc3cbf6",
-      "homepage": "https://github.com/SergeyMalych/plonix"
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "about": [
+        "Recognises web frameworks and libraries from cookies, headers, paths and page markers, such as Rails, Django, Laravel, Express, Next.js and Spring.",
+        "Rule packs are data, not code. They only match on captured traffic.",
+        "Built in. Knowing the framework tells you what to try and what to skip."
+      ]
     },
     {
       "name": "cms",
@@ -113,7 +163,12 @@
       "author": "Plonix contributors",
       "url": "packs/cms.json",
       "sha256": "f1c0c675357ccb06afca6a4c1d3094e3b97a11eaa924d6b2c00da7f57ef9f95f",
-      "homepage": "https://github.com/SergeyMalych/plonix"
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "about": [
+        "Recognises content management and commerce platforms: WordPress, Drupal, Joomla, Ghost, Magento, Shopify, WooCommerce, Strapi and similar.",
+        "Rule packs are data, not code. They only match on captured traffic.",
+        "Built in. Knowing the platform tells you where to look first."
+      ]
     },
     {
       "name": "edge",
@@ -123,7 +178,12 @@
       "author": "Plonix contributors",
       "url": "packs/edge.json",
       "sha256": "46183c48842b6c60681984be55be53e36024fbf4c27500067e63a801161857e1",
-      "homepage": "https://github.com/SergeyMalych/plonix"
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "about": [
+        "Recognises the CDNs, firewalls and hosting platforms in front of a site, from the headers, cookies and markers they add: Cloudflare, Fastly, Akamai, CloudFront, Vercel, Netlify and more.",
+        "Rule packs are data, not code. They only match on captured traffic.",
+        "Built in. Helps you tell what is the target and what is the layer in front of it."
+      ]
     },
     {
       "name": "api-surface",
@@ -133,7 +193,12 @@
       "author": "Plonix contributors",
       "url": "packs/api-surface.json",
       "sha256": "97131c1c04d35b36dad4c5ee0d5c19c4b65421ca4f158595bb26f207fbd36bd9",
-      "homepage": "https://github.com/SergeyMalych/plonix"
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "about": [
+        "Recognises API styles and sign-in systems from captured traffic: GraphQL, OpenAPI docs, gRPC-Web, JSON-RPC, SOAP, OAuth 2.0 and OpenID Connect, Keycloak, Auth0, Okta and JSON Web Tokens.",
+        "Rule packs are data, not code. They only match on captured traffic.",
+        "Built in. Shows where a target keeps its API and how it signs users in."
+      ]
     },
     {
       "name": "admin-panels",
@@ -143,7 +208,12 @@
       "author": "Plonix contributors",
       "url": "packs/admin-panels.json",
       "sha256": "6900932344af6e9c187928da6e38c29ddcbb6b161112f736405c5de559c51e72",
-      "homepage": "https://github.com/SergeyMalych/plonix"
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "about": [
+        "Spots admin and management consoles from what their pages say and where they live: Jenkins, GitLab, Grafana, Kibana, Prometheus, phpMyAdmin, Kubernetes Dashboard and more.",
+        "Rule packs are data, not code. They only match on captured traffic and never request anything.",
+        "Not built in. Add it when you want admin interfaces called out."
+      ]
     },
     {
       "name": "common",
@@ -153,7 +223,12 @@
       "author": "Plonix contributors",
       "url": "filterpacks/common.json",
       "sha256": "a4f4f392a0db973ab9d40273cede5598a20a7372856c9f98107eebcce27f9a59",
-      "homepage": "https://github.com/SergeyMalych/plonix"
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "about": [
+        "Named filters for the questions you ask most: API calls, GraphQL, sign-in traffic, admin paths, writes, uploads, redirects, failures, denied requests, API docs, files, and a filter that hides trackers.",
+        "Use them in the search box as is:auth or -is:trackers, or pick them from the Filter button. They only narrow what you see.",
+        "Built in."
+      ]
     },
     {
       "name": "leaks",
@@ -163,7 +238,12 @@
       "author": "Plonix contributors",
       "url": "filterpacks/leaks.json",
       "sha256": "3e8bb6c56270ba8b6ab817d13f905fe4af97bf058ae38ca1e079443757457e3e",
-      "homepage": "https://github.com/SergeyMalych/plonix"
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "about": [
+        "Filters that find traffic likely to expose something sensitive: AWS keys, private keys, JSON Web Tokens, stack traces, SQL errors, debug pages, source maps and internal IP addresses.",
+        "Use them as is:aws-keys and similar. They only narrow what you see and change nothing.",
+        "Add it when you review a target for sensitive data exposure."
+      ]
     }
   ]
 }

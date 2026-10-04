@@ -669,3 +669,13 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .xpreview { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; max-height: 340px; overflow: auto; }
 .xpreview p { margin: 0; line-height: 1.45; }
 .xhead { font-size: 13px; }
+.mbody.paged .pane { display: none; }
+.mbody.paged #mdetail { flex: 1; justify-content: center; overflow: auto; }
+.mside.mpage { width: 100%; max-width: 760px; border-left: 0; background: transparent; height: auto; padding: 24px 16px 40px; }
+.mpage .mside-h { align-items: center; gap: 14px; }
+.mpage .mside-h h3 { font-size: 20px; }
+.mpage .mdesc { font-size: 15px; }
+.mabout { margin: 0 0 8px; line-height: 1.55; }
+.mdl { display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px; margin: 0; }
+.mdl dt { color: var(--muted); font-size: 12px; }
+.mdl dd { margin: 0; overflow-wrap: anywhere; }

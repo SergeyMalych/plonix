@@ -666,6 +666,7 @@ impl Market {
                     url: String::new(),
                     sha256: item.entry.sha256.clone(),
                     homepage: String::new(),
+                    about: vec![],
                     requires: vec![],
                 },
                 status: Status::Installed { version: item.entry.version.clone() },

@@ -128,6 +128,9 @@ pub struct Package {
     pub sha256: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub homepage: String,
+    /// The longer description shown on the item's page: a few short paragraphs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub about: Vec<String>,
     /// Packages installed along with this one, by name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub requires: Vec<String>,
@@ -161,6 +164,12 @@ pub fn parse(bytes: &[u8]) -> Result<Index, String> {
         check_text(&p.description, 300, false).map_err(|e| at(format!("description: {e}")))?;
         check_text(&p.author, 100, false).map_err(|e| at(format!("author: {e}")))?;
         check_text(&p.homepage, 200, true).map_err(|e| at(format!("homepage: {e}")))?;
+        if p.about.len() > 8 {
+            return Err(at("about: at most 8 paragraphs".into()));
+        }
+        for para in &p.about {
+            check_text(para, 700, false).map_err(|e| at(format!("about: {e}")))?;
+        }
         if p.kind == Kind::Bundle {
             if !p.url.is_empty() || !p.sha256.is_empty() {
                 return Err(at("a bundle has no file: leave out url and sha256".into()));

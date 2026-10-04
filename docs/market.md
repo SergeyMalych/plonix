@@ -112,3 +112,7 @@ In the app, use **Add from a file or link** on the Market screen. Plonix reads t
 Anything added this way is marked **Not verified**: nobody has signed or reviewed it. It is still checked and cannot run code, and agents cannot add anything themselves. A skill that is not verified carries a note saying so when an agent uses it.
 
 To use a Market list that is not signed, turn on **Allow unsigned Market lists** in Settings › Market. Everything from it is then marked Not verified.
+
+## Item pages
+
+Selecting anything in the Market opens its own page: a description written for people, what it does and what it needs, who made it, its version and checksum, the bundles it is part of, and whether it is verified. Index authors add the description with an `about` list of short paragraphs (at most 8 of 700 characters) on each package.

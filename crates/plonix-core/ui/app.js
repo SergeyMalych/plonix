@@ -2709,6 +2709,7 @@ function renderMarket(main) {
     value: MK.q,
     oninput: (e) => {
       MK.q = e.target.value;
+      closePackage();
       drawMarket();
     },
   });
@@ -2728,7 +2729,7 @@ function renderMarket(main) {
       ),
       h('div', { class: 'mtrust', id: 'mtrust' }),
       h('div', { class: 'filterchips mkinds', id: 'mkinds' }),
-      h('div', { class: 'mbody' }, h('div', { class: 'pane' }, h('div', { class: 'mgrid', id: 'mgrid' }, h('div', { class: 'muted', text: 'Loading the Market…' }))), h('div', { id: 'mdetail' })),
+      h('div', { class: 'mbody', id: 'mbody' }, h('div', { class: 'pane' }, h('div', { class: 'mgrid', id: 'mgrid' }, h('div', { class: 'muted', text: 'Loading the Market…' }))), h('div', { id: 'mdetail' })),
     ),
   );
   loadMarket(false);
@@ -2921,14 +2922,26 @@ async function updateAll() {
   loadMarket(false);
 }
 
+function closePackage() {
+  MK.sel = null;
+  const body = $('#mbody');
+  if (body) body.classList.remove('paged');
+  const slot = $('#mdetail');
+  if (slot) clear(slot);
+  for (const c of document.querySelectorAll('.mpkg')) c.classList.remove('sel');
+}
+
+/** An item's own page: what it is, what it does, what it needs, who made it and how far to trust it. */
 async function showPackage(name) {
   MK.sel = name;
+  const mbody = $('#mbody');
+  if (mbody) mbody.classList.add('paged');
   for (const c of document.querySelectorAll('.mpkg')) c.classList.toggle('sel', c.querySelector('b').textContent === name);
   const slot = $('#mdetail');
   if (!slot) return;
   const p = MK.data && MK.data.packages.find((x) => x.name === name);
   if (!p) return;
-  const panel = h('aside', { class: 'mside' }, h('div', { class: 'muted', text: 'Loading…' }));
+  const panel = h('article', { class: 'mside mpage' }, h('div', { class: 'muted', text: 'Loading…' }));
   clear(slot, panel);
   let d;
   try {
@@ -2942,6 +2955,20 @@ async function showPackage(name) {
   const det = d.detail || {};
   const sec = (title, ...kids) => h('div', { class: 'msec' }, h('h4', { text: title }), kids);
   const parts = [];
+  const about = p.about && p.about.length ? p.about : [p.description];
+  parts.push(sec('About', about.map((t) => h('p', { class: 'mabout', text: t }))));
+  const rows = [
+    ['Type', k.one],
+    ['Version', p.version + (st.action === 'update' ? ` (you have ${p.status.installed})` : '')],
+    ['Made by', p.author + (p.local ? ' · added by you' : '')],
+    ['Status', st.text],
+    p.sha256 ? ['Checksum', h('span', { class: 'mono fine', text: 'sha256 ' + p.sha256 })] : null,
+    p.url ? ['Source', h('span', { class: 'mono fine', text: p.url })] : null,
+    p.homepage ? ['Homepage', h('a', { class: 'link', href: p.homepage, target: '_blank', rel: 'noopener', text: p.homepage })] : null,
+  ].filter(Boolean);
+  parts.push(sec('Details', h('dl', { class: 'mdl' }, rows.map(([a, b]) => [h('dt', { text: a }), h('dd', null, b)]))));
+  const within = (MK.data.packages || []).filter((x) => x.kind === 'bundle' && (x.includes || []).includes(name) && x.name !== name);
+  if (within.length) parts.push(sec('Part of', h('div', { class: 'mchips' }, within.map((b) => h('button', { class: 'chip', text: b.name, onclick: () => showPackage(b.name) })))));
   if (p.includes && p.includes.length) {
     parts.push(sec(p.kind === 'bundle' ? 'Installs' : 'Also installs', h('div', { class: 'mchips' }, p.includes.map((n) => h('button', { class: 'chip', text: n, onclick: () => showPackage(n) })))));
   }
@@ -2971,12 +2998,12 @@ async function showPackage(name) {
   if (det.filters) parts.push(sec('Filters', det.filters.map((f) => h('div', { class: 'marg' }, h('code', { text: 'is:' + f.id }), h('span', { class: 'muted', text: f.label + ' · ' + f.query })))));
   clear(
     panel,
-    h('div', { class: 'mside-h' }, h('span', { class: 'mico big k-' + p.kind, text: k.ico }), h('div', null, h('h3', { text: p.name }), h('div', { class: 'muted', text: `${k.one} · ${p.version} · ${p.author}` })), h('button', { class: 'iconbtn', text: '✕', title: 'Close', onclick: () => ((MK.sel = null), clear(slot), drawMarket()) })),
+    h('div', { class: 'mback' }, h('button', { class: 'btn sm', text: '← Market', title: 'Back to the list', onclick: () => (closePackage(), drawMarket()) })),
+    h('div', { class: 'mside-h' }, h('span', { class: 'mico big k-' + p.kind, text: k.ico }), h('div', null, h('h3', { text: p.name }), h('div', { class: 'muted', text: `${k.one} · ${p.version} · ${p.author}` }))),
     h('p', { class: 'mdesc', text: p.description }),
     h('div', { class: 'mact' }, h('span', { class: st.cls, text: st.text }), st.action ? marketButton(p, st.action, false) : null, st.action === 'update' ? marketButton(p, 'remove', false) : null),
     h('div', { class: 'mtrustbox ' + ({ verified: 'ok', built_in: 'ok', unverified: 'warn', changed: 'bad' }[p.verification.level] || 'warn') }, trustBadge(p.verification, true), h('p', { text: p.verification.detail })),
     parts,
-    p.homepage ? h('a', { class: 'link fine', href: p.homepage, target: '_blank', rel: 'noopener', text: p.homepage }) : null,
   );
 }
 
