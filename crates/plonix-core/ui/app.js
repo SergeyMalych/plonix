@@ -823,7 +823,7 @@ function renderTraffic(main) {
   const input = h('input', {
     id: 'q',
     value: T.text,
-    placeholder: 'Search any text, or type a filter: host:example.com -kind:static status:4xx,5xx',
+    placeholder: 'Search any text, or type a filter such as host:example.com',
     spellcheck: 'false',
     autocomplete: 'off',
     oninput: () => {
@@ -995,6 +995,8 @@ function renderChips() {
         ]
       : null,
     sugg.length ? h('span', { class: 'fsep' }) : null,
+    // Labelled so one-click suggestions are not mistaken for active filters.
+    sugg.length ? h('span', { class: 'chipslbl', text: 'Suggested' }) : null,
     sugg.map((c) =>
       h(
         'button',
