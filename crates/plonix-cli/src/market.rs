@@ -7,7 +7,7 @@
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Subcommand};
 use plonix_core::access::{AgentSettings, Group};
-use plonix_core::market::{self, Action, Catalog, Change, Market, OpenOptions, Status, Trust};
+use plonix_core::market::{self, Action, Catalog, Change, Market, OpenOptions, Status, Trust, TrustLevel, Verification};
 use plonix_core::registry::{self, Kind};
 use plonix_core::settings;
 use plonix_core::skill::{self, SkillLibrary};
@@ -129,6 +129,16 @@ fn status_label(s: &Status) -> String {
     }
 }
 
+/// A short mark for a table: ✓ verified, ! not verified or changed.
+fn trust_mark(v: &Verification) -> &'static str {
+    match v.level {
+        TrustLevel::BuiltIn => "built-in",
+        TrustLevel::Verified => "✓ verified",
+        TrustLevel::Unverified => "! NOT VERIFIED",
+        TrustLevel::Changed => "! CHANGED",
+    }
+}
+
 fn trust_line(c: &Catalog) -> String {
     match &c.trust {
         Trust::Verified { publisher, .. } => format!("signed by {publisher}"),
@@ -180,13 +190,25 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
                 println!("Nothing matches.");
                 return Ok(());
             }
-            println!("{:<18} {:<8} {:<9} {:<15} DESCRIPTION", "NAME", "KIND", "VERSION", "STATUS");
+            println!("{:<18} {:<8} {:<9} {:<15} {:<15} DESCRIPTION", "NAME", "KIND", "VERSION", "STATUS", "TRUST");
             for l in &rows {
                 let mut status = status_label(&l.status);
                 if status.ends_with('→') {
                     status.push_str(&l.package.version);
                 }
-                println!("{:<18} {:<8} {:<9} {:<15} {}", l.package.name, kind_label(l.package.kind), l.package.version, status, clip(&l.package.description, 70));
+                println!(
+                    "{:<18} {:<8} {:<9} {:<15} {:<15} {}",
+                    l.package.name,
+                    kind_label(l.package.kind),
+                    l.package.version,
+                    status,
+                    trust_mark(&l.verification),
+                    clip(&l.package.description, 60)
+                );
+            }
+            let unverified = rows.iter().filter(|l| matches!(l.verification.level, TrustLevel::Unverified | TrustLevel::Changed)).count();
+            if unverified > 0 {
+                println!("\n{unverified} not verified: added by hand, from an unsigned Market, or changed since install. `plonix market show <name>` says why.");
             }
             println!("\nDetails with `plonix market show <name>`, install with `plonix market install <name>`.");
         }
@@ -194,7 +216,7 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
             let cat = market::open(&ctx.home, &opts)?;
             let l = m.listing(&cat).into_iter().find(|l| l.package.name == name).ok_or_else(|| anyhow!("`{name}` is not in the Market"))?;
             let p = &l.package;
-            let file = (p.kind != Kind::Bundle).then(|| cat.fetch(p)).transpose()?;
+            let file = (p.kind != Kind::Bundle && !l.local).then(|| cat.fetch(p)).transpose()?;
             let skill = match (&file, p.kind) {
                 (Some(b), Kind::Skill) => skill::parse(b).ok(),
                 _ => None,
@@ -212,7 +234,7 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
             println!("{} {} · {} by {}", p.name, p.version, p.kind.noun(), p.author);
             println!("{}", p.description);
             println!("Status: {}{}", status_label(&l.status), if matches!(l.status, Status::Update { .. }) { p.version.as_str() } else { "" });
-            println!("Verified: {}{}", trust_line(&cat), if p.kind == Kind::Bundle { "" } else { ", file pinned by sha256" });
+            println!("Trust: {} - {}", l.verification.label, l.verification.detail);
             if !l.includes.is_empty() {
                 println!("Includes: {}", l.includes.join(", "));
             }
@@ -376,7 +398,7 @@ pub fn skills_cmd(ctx: &Ctx, cmd: SkillsCmd) -> Result<()> {
             if ctx.json {
                 return ctx.print_json(&json!({ "skills": infos, "problems": loaded.problems }));
             }
-            println!("{:<18} {:<9} {:<28} {:<24} AGENTS", "SKILL", "VERSION", "TITLE", "USES");
+            println!("{:<18} {:<9} {:<28} {:<22} {:<15} AGENTS", "SKILL", "VERSION", "TITLE", "USES", "TRUST");
             for i in &infos {
                 let uses: Vec<&str> = i.skill.uses.iter().map(|g| group_label(*g)).collect();
                 let state = if i.available {
@@ -385,7 +407,8 @@ pub fn skills_cmd(ctx: &Ctx, cmd: SkillsCmd) -> Result<()> {
                     let off: Vec<&str> = i.missing.iter().map(|g| group_label(*g)).collect();
                     format!("off: needs {}", off.join(", "))
                 };
-                println!("{:<18} {:<9} {:<28} {:<24} {}", i.skill.name, i.skill.version, clip(&i.skill.title, 28), clip(&uses.join(","), 24), state);
+                let trust = trust_mark(&Market::new(&ctx.home).verification(Kind::Skill, &i.skill.name));
+                println!("{:<18} {:<9} {:<28} {:<22} {:<15} {}", i.skill.name, i.skill.version, clip(&i.skill.title, 28), clip(&uses.join(","), 22), trust, state);
             }
             println!(
                 "\nAgents connected with `plonix connect claude` see these as prompts and through the get_skill tool. \

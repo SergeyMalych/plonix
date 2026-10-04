@@ -2674,6 +2674,7 @@ async function loadAgentSkills() {
         { class: 'skillrow' + (sk.available ? '' : ' off') },
         h('div', { class: 'sk-main' }, h('b', { text: sk.title }), h('span', { class: 'muted', text: sk.description })),
         h('code', { class: 'sk-cmd', text: '/mcp__plonix__' + sk.name }),
+        trustBadge(sk.verification, false),
         sk.available
           ? h('span', { class: 'tag in', text: 'offered' })
           : h('span', { class: 'tag out', title: 'Uses ' + sk.missing.map(groupLabel).join(', ') + ', which is switched off in Settings', text: 'off' }),
@@ -2745,6 +2746,16 @@ async function loadMarket(refresh) {
   if (MK.sel) showPackage(MK.sel);
 }
 
+/** The trust mark shown next to every package: verified, built in, not verified, or changed. */
+function trustBadge(v, full) {
+  if (!v) return null;
+  const cls = { verified: 'ok', built_in: 'in', unverified: 'warn', changed: 'bad' }[v.level] || 'warn';
+  const mark = v.level === 'verified' || v.level === 'built_in' ? '✓' : '!';
+  return h('span', { class: 'trust ' + cls, title: v.detail }, h('i', { text: mark }), full ? v.label : v.level === 'verified' ? 'Verified' : v.level === 'built_in' ? 'Built in' : v.level === 'changed' ? 'Changed' : 'Not verified');
+}
+
+const isUnverified = (p) => p.verification && ['unverified', 'changed'].includes(p.verification.level);
+
 function marketStatus(p) {
   const st = p.status.state;
   if (st === 'built_in') return { text: 'Built in', cls: 'tag in', action: null };
@@ -2771,11 +2782,12 @@ function drawMarket() {
   const counts = { all: d.packages.length };
   for (const p of d.packages) counts[p.kind] = (counts[p.kind] || 0) + 1;
   counts.installed = d.packages.filter((p) => ['installed', 'update'].includes(p.status.state)).length;
+  counts.unverified = d.packages.filter(isUnverified).length;
   const kinds = $('#mkinds');
   if (kinds) {
     const chip = (key, label) =>
       h('button', { class: 'chip' + (MK.kind === key ? ' on' : ''), onclick: () => ((MK.kind = key), drawMarket()) }, h('span', { text: label }), h('span', { class: 'n', text: counts[key] || 0 }));
-    clear(kinds, chip('all', 'All'), Object.entries(KIND_INFO).map(([k, v]) => chip(k, v.label)), h('span', { class: 'fsep' }), chip('installed', 'Installed'));
+    clear(kinds, chip('all', 'All'), Object.entries(KIND_INFO).map(([k, v]) => chip(k, v.label)), h('span', { class: 'fsep' }), chip('installed', 'Installed'), counts.unverified ? chip('unverified', 'Not verified') : null);
   }
   const updates = d.packages.filter((p) => p.status.state === 'update');
   const ub = $('#mupdate');
@@ -2786,7 +2798,7 @@ function drawMarket() {
   const q = MK.q.trim().toLowerCase();
   const list = d.packages.filter(
     (p) =>
-      (MK.kind === 'all' || p.kind === MK.kind || (MK.kind === 'installed' && ['installed', 'update'].includes(p.status.state))) &&
+      (MK.kind === 'all' || p.kind === MK.kind || (MK.kind === 'installed' && ['installed', 'update'].includes(p.status.state)) || (MK.kind === 'unverified' && isUnverified(p))) &&
       (!q || p.name.includes(q) || p.description.toLowerCase().includes(q) || (KIND_INFO[p.kind] || {}).one.toLowerCase().includes(q)),
   );
   const grid = $('#mgrid');
@@ -2799,14 +2811,14 @@ function drawMarket() {
       const k = KIND_INFO[p.kind] || { one: p.kind, ico: '•' };
       return h(
         'div',
-        { class: 'mpkg' + (MK.sel === p.name ? ' sel' : ''), tabindex: 0, onclick: () => showPackage(p.name), onkeydown: (e) => e.key === 'Enter' && showPackage(p.name) },
-        h('div', { class: 'mph' }, h('span', { class: 'mico k-' + p.kind, text: k.ico }), h('div', { class: 'mpn' }, h('b', { text: p.name }), h('span', { class: 'muted', text: k.one + ' · ' + p.version })), h('span', { class: st.cls, text: st.text })),
+        { class: 'mpkg' + (MK.sel === p.name ? ' sel' : '') + (isUnverified(p) ? ' unv' : ''), tabindex: 0, onclick: () => showPackage(p.name), onkeydown: (e) => e.key === 'Enter' && showPackage(p.name) },
+        h('div', { class: 'mph' }, h('span', { class: 'mico k-' + p.kind, text: k.ico }), h('div', { class: 'mpn' }, h('b', { text: p.name }), h('span', { class: 'muted', text: k.one + ' · ' + p.version + (p.local ? ' · added by you' : '') })), h('span', { class: st.cls, text: st.text })),
         h('div', { class: 'mpd', text: p.description }),
         p.includes && p.includes.length ? h('div', { class: 'mpinc muted', text: 'Includes ' + p.includes.join(', ') }) : null,
         h(
           'div',
           { class: 'mpf' },
-          h('span', { class: 'muted', text: p.author }),
+          trustBadge(p.verification, false),
           st.action ? marketButton(p, st.action, true) : null,
         ),
       );
@@ -2908,7 +2920,7 @@ async function showPackage(name) {
     h('div', { class: 'mside-h' }, h('span', { class: 'mico big k-' + p.kind, text: k.ico }), h('div', null, h('h3', { text: p.name }), h('div', { class: 'muted', text: `${k.one} · ${p.version} · ${p.author}` })), h('button', { class: 'iconbtn', text: '✕', title: 'Close', onclick: () => ((MK.sel = null), clear(slot), drawMarket()) })),
     h('p', { class: 'mdesc', text: p.description }),
     h('div', { class: 'mact' }, h('span', { class: st.cls, text: st.text }), st.action ? marketButton(p, st.action, false) : null, st.action === 'update' ? marketButton(p, 'remove', false) : null),
-    h('div', { class: 'mverify' }, h('span', { class: 'mshield ok', text: '✓' }), p.kind === 'bundle' ? 'Listed in the signed Market index' : 'Pinned by SHA-256 in the signed Market index'),
+    h('div', { class: 'mtrustbox ' + ({ verified: 'ok', built_in: 'ok', unverified: 'warn', changed: 'bad' }[p.verification.level] || 'warn') }, trustBadge(p.verification, true), h('p', { text: p.verification.detail })),
     parts,
     p.homepage ? h('a', { class: 'link fine', href: p.homepage, target: '_blank', rel: 'noopener', text: p.homepage }) : null,
   );

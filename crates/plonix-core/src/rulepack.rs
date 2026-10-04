@@ -263,6 +263,10 @@ impl Library {
         self.shelf.installed_version(name)
     }
 
+    pub fn installed(&self) -> Vec<crate::shelf::Installed> {
+        self.shelf.installed()
+    }
+
     /// Built-in packs, then installed ones. A pack that no longer matches
     /// its pinned checksum, or no longer validates, is skipped and reported.
     pub fn load(&self) -> Loaded {

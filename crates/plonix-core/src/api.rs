@@ -502,10 +502,22 @@ fn is_agent(caller: &MaybeCaller) -> bool {
 async fn skills(State(s): State<AppState>, caller: MaybeCaller) -> Response {
     let settings = s.agent_settings.read().unwrap().clone();
     let home = s.home.clone();
+    let home2 = s.home.clone();
     let agent = is_agent(&caller);
     match tokio::task::spawn_blocking(move || skill::SkillLibrary::new(&home).load()).await {
         Ok(loaded) => {
-            let infos: Vec<_> = loaded.infos(&settings).into_iter().filter(|i| !agent || i.available).collect();
+            let m = market::Market::new(&home2);
+            let infos: Vec<Value> = loaded
+                .infos(&settings)
+                .into_iter()
+                .filter(|i| !agent || i.available)
+                .map(|i| {
+                    let v = m.verification(registry::Kind::Skill, &i.skill.name);
+                    let mut j = serde_json::to_value(&i).unwrap_or(Value::Null);
+                    j["verification"] = serde_json::to_value(v).unwrap_or(Value::Null);
+                    j
+                })
+                .collect();
             Json(json!({ "skills": infos, "problems": if agent { vec![] } else { loaded.problems } })).into_response()
         }
         Err(e) => internal(e.into()),
@@ -586,7 +598,7 @@ async fn market_detail(State(s): State<AppState>, Path(name): Path<String>) -> R
         let m = market::Market::new(&home);
         let Some(l) = m.listing(&cat).into_iter().find(|l| l.package.name == name) else { return Ok(None) };
         let mut detail = json!({});
-        if l.package.kind != registry::Kind::Bundle {
+        if l.package.kind != registry::Kind::Bundle && !l.local {
             let bytes = cat.fetch(&l.package)?;
             detail = match l.package.kind {
                 registry::Kind::Skill => {

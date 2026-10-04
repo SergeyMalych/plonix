@@ -29,7 +29,7 @@ use serde_json::Value;
 use crate::detect::clean;
 use crate::filterpack::{self, FilterLibrary};
 use crate::paths::{Home, write_private};
-use crate::registry::{self, Index, Kind, Location, Package, TrustedKey};
+use crate::registry::{self, Index, Kind, Location, OFFICIAL_PUBLISHER, Package, TrustedKey};
 use crate::rulepack::{self, Library, MAX_PACK_BYTES, newer, sha256_hex};
 use crate::settings::{self, Field, Level, Section};
 use crate::skill::{self, SkillLibrary};
@@ -291,12 +291,88 @@ pub enum Status {
     NeedsRuntime,
 }
 
+/// How far to trust a package, shown next to every package.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustLevel {
+    /// Ships inside Plonix.
+    BuiltIn,
+    /// From a signed Market, unchanged since it was checked.
+    Verified,
+    /// Nobody vouches for it: from an unsigned Market, or added by hand.
+    Unverified,
+    /// Installed from the Market, but the file on disk is no longer the one
+    /// that was checked.
+    Changed,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Verification {
+    pub level: TrustLevel,
+    /// Short, for a badge: "Verified by Plonix maintainers".
+    pub label: String,
+    /// One or two sentences for the details.
+    pub detail: String,
+}
+
+impl Verification {
+    fn built_in() -> Self {
+        Self { level: TrustLevel::BuiltIn, label: "Built in".into(), detail: "Ships inside Plonix, reviewed with the app itself.".into() }
+    }
+
+    fn signed(publisher: &str, has_file: bool) -> Self {
+        let checked = if has_file {
+            "The file is pinned by SHA-256 in the signed Market list, and was checked in full before it installed."
+        } else {
+            "Listed in the signed Market list; the packages it installs are each checked the same way."
+        };
+        let who = if publisher == OFFICIAL_PUBLISHER {
+            "Reviewed by the Plonix maintainers, who signed the Market list."
+        } else {
+            "Signed by a publisher whose key you chose to trust."
+        };
+        Self { level: TrustLevel::Verified, label: format!("Verified by {publisher}"), detail: format!("{who} {checked}") }
+    }
+
+    fn unsigned_catalog() -> Self {
+        Self {
+            level: TrustLevel::Unverified,
+            label: "Not verified".into(),
+            detail: "This Market list is not signed, so nobody vouches for it. The file still matches the list and is validated, but read what it does before you install it.".into(),
+        }
+    }
+
+    fn by_hand(source: &str) -> Self {
+        Self {
+            level: TrustLevel::Unverified,
+            label: "Not verified".into(),
+            detail: format!(
+                "You added this yourself ({}), not through a signed Market, so nobody has vouched for it. It is still validated and cannot run code.",
+                crate::detect::clean(source, 120)
+            ),
+        }
+    }
+
+    fn changed() -> Self {
+        Self {
+            level: TrustLevel::Changed,
+            label: "Changed since install".into(),
+            detail: "The file on disk is no longer the one that was checked. Plonix does not load it. Remove it and install it again.".into(),
+        }
+    }
+}
+
 /// One row of the Market.
 #[derive(Debug, Clone, Serialize)]
 pub struct Listing {
     #[serde(flatten)]
     pub package: Package,
     pub status: Status,
+    pub verification: Verification,
+    /// Installed without the Market (`plonix rules add` and the like), so it
+    /// is not in the catalog.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub local: bool,
     /// Packages this one installs (bundles and requirements), by name.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub includes: Vec<String>,
@@ -337,6 +413,21 @@ struct BundleEntry {
     added: Vec<String>,
 }
 
+/// Who vouched for an installed package, recorded when the Market installs it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Provenance {
+    /// `None` when the Market list was not signed.
+    publisher: Option<String>,
+    sha256: String,
+    catalog: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct ProvenanceLock {
+    /// `kind:name` to who vouched for it.
+    packages: BTreeMap<String, Provenance>,
+}
+
 pub struct Market {
     home: Home,
     pub rules: Library,
@@ -360,6 +451,119 @@ impl Market {
     fn write_bundles(&self, lock: &BundleLock) -> Result<()> {
         std::fs::create_dir_all(self.home.root.join("market"))?;
         write_private(&self.bundles_path(), &serde_json::to_vec_pretty(lock)?)
+    }
+
+    fn provenance_path(&self) -> std::path::PathBuf {
+        self.home.root.join("market").join("provenance.json")
+    }
+
+    fn read_provenance(&self) -> ProvenanceLock {
+        std::fs::read(self.provenance_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    }
+
+    fn write_provenance(&self, lock: &ProvenanceLock) -> Result<()> {
+        std::fs::create_dir_all(self.home.root.join("market"))?;
+        write_private(&self.provenance_path(), &serde_json::to_vec_pretty(lock)?)
+    }
+
+    fn record(&self, cat: &Catalog, changes: &[Change], packages: &[&Package]) -> Result<()> {
+        let mut lock = self.read_provenance();
+        for c in changes.iter().filter(|c| matches!(c.action, Action::Installed | Action::Updated)) {
+            let Some(p) = packages.iter().find(|p| p.name == c.name) else { continue };
+            let publisher = match &cat.trust {
+                Trust::Verified { publisher, .. } => Some(publisher.clone()),
+                Trust::Unverified => None,
+            };
+            lock.packages.insert(format!("{}:{}", c.kind.as_str(), c.name), Provenance { publisher, sha256: p.sha256.clone(), catalog: cat.location() });
+        }
+        self.write_provenance(&lock)
+    }
+
+    fn forget(&self, changes: &[Change]) -> Result<()> {
+        let mut lock = self.read_provenance();
+        for c in changes.iter().filter(|c| c.action == Action::Removed) {
+            lock.packages.remove(&format!("{}:{}", c.kind.as_str(), c.name));
+        }
+        self.write_provenance(&lock)
+    }
+
+    /// Everything installed through any route, with whether its file is intact.
+    fn installed_all(&self) -> Vec<(Kind, crate::shelf::Installed)> {
+        let mut v = vec![];
+        v.extend(self.rules.installed().into_iter().map(|i| (Kind::Rules, i)));
+        v.extend(self.filters.installed().into_iter().map(|i| (Kind::Filters, i)));
+        v.extend(self.skills.installed().into_iter().map(|i| (Kind::Skill, i)));
+        v
+    }
+
+    /// How far an installed or built-in package can be trusted.
+    pub fn verification(&self, kind: Kind, name: &str) -> Verification {
+        if Self::builtin(kind, name) {
+            return Verification::built_in();
+        }
+        if kind == Kind::Bundle {
+            return match self.read_provenance().packages.get(&format!("bundle:{name}")) {
+                Some(Provenance { publisher: Some(p), .. }) => Verification::signed(p, false),
+                _ => Verification::unsigned_catalog(),
+            };
+        }
+        let Some((_, item)) = self.installed_all().into_iter().find(|(k, i)| *k == kind && i.name == name) else {
+            return Verification::unsigned_catalog();
+        };
+        if !item.intact {
+            return Verification::changed();
+        }
+        match self.read_provenance().packages.get(&format!("{}:{name}", kind.as_str())) {
+            Some(Provenance { publisher: Some(p), sha256, .. }) if *sha256 == item.entry.sha256 => Verification::signed(p, true),
+            Some(Provenance { publisher: None, sha256, .. }) if *sha256 == item.entry.sha256 => Verification::unsigned_catalog(),
+            _ => Verification::by_hand(&item.entry.source),
+        }
+    }
+
+    /// What the Market would say about a package before it is installed.
+    fn offered(cat: &Catalog, p: &Package) -> Verification {
+        match &cat.trust {
+            Trust::Verified { publisher, .. } => Verification::signed(publisher, p.kind != Kind::Bundle),
+            Trust::Unverified => Verification::unsigned_catalog(),
+        }
+    }
+
+    /// Installed packages that are not in the catalog: added by hand.
+    fn local_listing(&self, cat: &Catalog) -> Vec<Listing> {
+        let rules = self.rules.load();
+        let filters = self.filters.load();
+        let skills = self.skills.load();
+        let mut out = vec![];
+        for (kind, item) in self.installed_all() {
+            if cat.index.get(&item.name).is_some() {
+                continue;
+            }
+            let (description, author) = match kind {
+                Kind::Rules => rules.packs.iter().find(|(_, i)| i.name == item.name).map(|(_, i)| (i.description.clone(), i.author.clone())),
+                Kind::Filters => filters.packs.iter().find(|i| i.name == item.name).map(|i| (i.description.clone(), i.author.clone())),
+                Kind::Skill => skills.get(&item.name).map(|(s, ..)| (s.description.clone(), s.author.clone())),
+                _ => None,
+            }
+            .unwrap_or_else(|| ("Not loaded: the file changed since it was installed.".into(), "unknown".into()));
+            out.push(Listing {
+                package: Package {
+                    name: item.name.clone(),
+                    kind,
+                    version: item.entry.version.clone(),
+                    description,
+                    author,
+                    url: String::new(),
+                    sha256: item.entry.sha256.clone(),
+                    homepage: String::new(),
+                    requires: vec![],
+                },
+                status: Status::Installed { version: item.entry.version.clone() },
+                verification: self.verification(kind, &item.name),
+                includes: vec![],
+                local: true,
+            });
+        }
+        out
     }
 
     fn builtin(kind: Kind, name: &str) -> bool {
@@ -397,15 +601,28 @@ impl Market {
     }
 
     pub fn listing(&self, cat: &Catalog) -> Vec<Listing> {
-        cat.index
+        let mut rows: Vec<Listing> = cat
+            .index
             .packages
             .iter()
-            .map(|p| Listing {
-                status: self.status(p),
-                includes: registry::install_order(&cat.index, &p.name).unwrap_or_default().into_iter().filter(|n| *n != p.name).collect(),
-                package: p.clone(),
+            .map(|p| {
+                let status = self.status(p);
+                let verification = match status {
+                    Status::Available | Status::NeedsRuntime => Self::offered(cat, p),
+                    // Installed from here, by hand, or changed: what is on disk decides.
+                    _ => self.verification(p.kind, &p.name),
+                };
+                Listing {
+                    status,
+                    verification,
+                    local: false,
+                    includes: registry::install_order(&cat.index, &p.name).unwrap_or_default().into_iter().filter(|n| *n != p.name).collect(),
+                    package: p.clone(),
+                }
             })
-            .collect()
+            .collect();
+        rows.extend(self.local_listing(cat));
+        rows
     }
 
     /// Installs a package and everything it requires. Every file is
@@ -472,6 +689,7 @@ impl Market {
             lock.bundles.insert(top.name.clone(), BundleEntry { version: top.version.clone(), members, added });
             self.write_bundles(&lock)?;
         }
+        self.record(cat, &changes, &packages)?;
         Ok(changes)
     }
 
@@ -500,6 +718,7 @@ impl Market {
             }
             self.write_bundles(&lock)?;
             changes.push(Change { name: name.into(), kind: Kind::Bundle, version: bundle.version, action: Action::Removed, from: None });
+            self.forget(&changes)?;
             return Ok(changes);
         }
         let changes = self.remove_one(name)?;
@@ -516,6 +735,7 @@ impl Market {
             b.added.retain(|a| a != name);
         }
         self.write_bundles(&lock)?;
+        self.forget(&changes)?;
         Ok(changes)
     }
 
@@ -639,5 +859,46 @@ mod tests {
         // Changed after signing.
         std::fs::write(&index, SNAPSHOT[0].1.replace("Plonix contributors", "Someone else")).unwrap();
         assert!(open(&home, &opts).unwrap_err().to_string().contains("changed after it was signed"));
+    }
+
+    #[test]
+    fn every_package_says_whether_it_is_verified() {
+        let (_d, home) = home();
+        let market = Market::new(&home);
+        let cat = official();
+        let level = |name: &str| market.listing(&cat).into_iter().find(|l| l.package.name == name).unwrap().verification.level;
+        assert_eq!(level("triage-host"), TrustLevel::BuiltIn);
+        assert_eq!(level("api-inventory"), TrustLevel::Verified);
+        assert_eq!(level("graphql-explorer"), TrustLevel::Verified);
+
+        // Installed through the signed Market: still verified.
+        market.install(&cat, "api-kit").unwrap();
+        assert_eq!(level("leaks"), TrustLevel::Verified);
+        assert_eq!(level("api-kit"), TrustLevel::Verified);
+
+        // Something added by hand is listed, and not verified.
+        let mine = "---\nplonix_skill: 1\nname: mine\nversion: 1.0.0\ntitle: Mine\ndescription: My skill.\nauthor: me\nuses: [traffic]\n---\nLook at traffic.\n";
+        market.skills.install(mine.as_bytes(), "/tmp/mine.md", None).unwrap();
+        let row = market.listing(&cat).into_iter().find(|l| l.package.name == "mine").expect("hand-installed skill is listed");
+        assert!(row.local && row.verification.level == TrustLevel::Unverified, "{row:?}");
+        assert!(row.verification.detail.contains("/tmp/mine.md"));
+
+        // Hand-installing a Market package's name does not inherit its trust.
+        let swapped = mine.replace("name: mine", "name: api-inventory");
+        market.skills.install(swapped.as_bytes(), "/tmp/x.md", None).unwrap();
+        assert_eq!(level("api-inventory"), TrustLevel::Unverified);
+
+        // A file edited on disk is called out.
+        std::fs::write(home.root.join("filters/packs/leaks.json"), "tampered").unwrap();
+        assert_eq!(level("leaks"), TrustLevel::Changed);
+
+        // An unsigned Market never produces a verified package.
+        let mut unsigned = cat.clone();
+        unsigned.trust = Trust::Unverified;
+        let (_d2, home2) = self::home();
+        let m2 = Market::new(&home2);
+        assert_eq!(m2.listing(&unsigned).into_iter().find(|l| l.package.name == "api-inventory").unwrap().verification.level, TrustLevel::Unverified);
+        m2.install(&unsigned, "api-inventory").unwrap();
+        assert_eq!(m2.verification(Kind::Skill, "api-inventory").level, TrustLevel::Unverified);
     }
 }

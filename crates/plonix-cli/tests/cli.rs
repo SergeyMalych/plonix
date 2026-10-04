@@ -889,6 +889,19 @@ fn market_installs_bundles_and_skills_from_a_signed_index() {
     let out = p.run(&["market", "show", "api-kit", "--index", index]).ok().stdout();
     assert!(out.contains("Includes: api-inventory, leaks, admin-panels"), "{out}");
     let out = p.run(&["market", "install", "api-kit", "--index", index]).ok().stdout();
+    // Everything from the signed Market is marked verified; a skill added by hand is not.
+    let listing = p.run(&["market", "--index", index]).ok().stdout();
+    assert!(line(&listing, "api-inventory").contains("✓ verified"), "{listing}");
+    assert!(line(&listing, "triage-host").contains("built-in"), "{listing}");
+    let mine = p.home.path().join("mine.md");
+    std::fs::write(&mine, "---\nplonix_skill: 1\nname: mine\nversion: 1.0.0\ntitle: Mine\ndescription: My skill.\nauthor: me\nuses: [traffic]\n---\nLook at traffic.\n").unwrap();
+    p.run(&["skills", "add", mine.to_str().unwrap()]).ok();
+    let listing = p.run(&["market", "--index", index]).ok().stdout();
+    assert!(line(&listing, "mine").contains("NOT VERIFIED") && line(&listing, "mine").contains("skill"), "{listing}");
+    assert!(listing.contains("1 not verified"), "{listing}");
+    assert!(p.run(&["market", "show", "mine", "--index", index]).ok().stdout().contains("You added this yourself"));
+    assert!(line(&p.run(&["skills"]).ok().stdout(), "mine").contains("NOT VERIFIED"));
+    p.run(&["skills", "remove", "mine"]).ok();
     for name in ["api-inventory", "leaks", "admin-panels", "api-kit"] {
         assert!(out.contains(&format!("Installed {name} 1.0.0")), "{out}");
     }
