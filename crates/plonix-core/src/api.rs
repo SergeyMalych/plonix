@@ -267,6 +267,7 @@ async fn status(State(s): State<AppState>) -> Response {
         "project": s.engine.project,
         "project_id": project.map(|p| p.id.clone()),
         "project_dir": project.map(|p| p.dir.clone()),
+        "demo": this_project(&s).is_some_and(|p| p.file.demo),
         "proxy": s.proxy_addr(),
         "api": s.api_addr.to_string(),
         "pid": std::process::id(),
