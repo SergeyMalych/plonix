@@ -70,7 +70,7 @@ pub enum Payloads {
     Values { values: Vec<String> },
     /// A numeric range, `from` through `to` inclusive, stepping by `step`.
     Range { from: i64, to: i64, #[serde(default = "one")] step: i64 },
-    /// A built-in list, by id (see [`builtin_lists`]).
+    /// A list by id: a built-in list or one installed from the Market.
     Builtin { id: String },
 }
 
@@ -79,8 +79,11 @@ fn one() -> i64 {
 }
 
 impl Payloads {
-    /// Resolves this list to its values, capped at [`MAX_LIST_VALUES`].
-    pub fn resolve(&self) -> Result<Vec<String>, String> {
+    /// Resolves this list to its values, capped at [`MAX_LIST_VALUES`]. A
+    /// built-in list is looked up through `named` — the engine's list library,
+    /// which holds the lists that ship with Plonix plus any installed from the
+    /// Market.
+    pub fn resolve(&self, named: &dyn Fn(&str) -> Option<Vec<String>>) -> Result<Vec<String>, String> {
         let values = match self {
             Payloads::Values { values } => values.clone(),
             Payloads::Range { from, to, step } => {
@@ -99,11 +102,7 @@ impl Payloads {
                 }
                 out
             }
-            Payloads::Builtin { id } => builtin_lists()
-                .iter()
-                .find(|l| l.id == id)
-                .map(|l| l.values.iter().map(|v| v.to_string()).collect())
-                .ok_or_else(|| format!("no built-in list named '{id}'"))?,
+            Payloads::Builtin { id } => named(id).ok_or_else(|| format!("no list named '{id}'"))?,
         };
         if values.len() > MAX_LIST_VALUES {
             return Err(format!("a list of more than {MAX_LIST_VALUES} values is too large"));
@@ -317,7 +316,7 @@ impl Plan {
 }
 
 /// Validates a request and builds its [`Plan`]. Does not send anything.
-pub fn plan(req: &RunRequest) -> Result<Plan, String> {
+pub fn plan(req: &RunRequest, named: &dyn Fn(&str) -> Option<Vec<String>>) -> Result<Plan, String> {
     if req.url.trim().is_empty() {
         return Err("a run needs a URL".into());
     }
@@ -334,7 +333,7 @@ pub fn plan(req: &RunRequest) -> Result<Plan, String> {
         return Err(format!("too many positions ({positions}); at most {MAX_POSITIONS}"));
     }
 
-    let lists: Vec<Vec<String>> = req.lists.iter().map(|l| l.resolve()).collect::<Result<_, _>>()?;
+    let lists: Vec<Vec<String>> = req.lists.iter().map(|l| l.resolve(named)).collect::<Result<_, _>>()?;
     if lists.is_empty() {
         return Err("choose at least one list of values".into());
     }
@@ -382,109 +381,6 @@ pub fn split_raw(raw: &str) -> Result<(Headers, String), String> {
     Ok((headers, body))
 }
 
-/// A built-in list of values, kept in a shape a Market package can also carry.
-pub struct BuiltinList {
-    pub id: &'static str,
-    pub title: &'static str,
-    pub description: &'static str,
-    pub values: &'static [&'static str],
-}
-
-/// The lists that ship with Plonix. Deliberately small and general: starting
-/// points for exploring your own and authorized targets. More can be added
-/// from the Market.
-pub fn builtin_lists() -> &'static [BuiltinList] {
-    BUILTIN_LISTS
-}
-
-static BUILTIN_LISTS: &[BuiltinList] = &[
-    BuiltinList {
-        id: "digits",
-        title: "Digits 0–9",
-        description: "Single digits, for one-character positions.",
-        values: &["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
-    },
-    BuiltinList {
-        id: "numbers-1-100",
-        title: "Numbers 1–100",
-        description: "The whole numbers 1 through 100, for id and page walks.",
-        values: &NUMBERS_1_100,
-    },
-    BuiltinList {
-        id: "booleans",
-        title: "Booleans and empties",
-        description: "True/false, 0/1, null and empty, for toggling flags.",
-        values: &["true", "false", "1", "0", "yes", "no", "null", ""],
-    },
-    BuiltinList {
-        id: "http-methods",
-        title: "HTTP methods",
-        description: "Common request methods, to see which an endpoint accepts.",
-        values: &["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "TRACE"],
-    },
-    BuiltinList {
-        id: "common-params",
-        title: "Common parameters",
-        description: "Query and body parameter names worth trying on an endpoint.",
-        values: &[
-            "id", "user", "user_id", "account", "page", "limit", "offset", "q", "search", "sort", "order", "filter", "fields",
-            "format", "callback", "redirect", "url", "next", "debug", "test", "admin", "role", "token", "lang", "locale",
-        ],
-    },
-    BuiltinList {
-        id: "common-paths",
-        title: "Common paths",
-        description: "Well-known files and endpoints to probe on a host.",
-        values: &[
-            "robots.txt", "sitemap.xml", "favicon.ico", ".well-known/security.txt", "humans.txt", "crossdomain.xml",
-            "admin", "login", "logout", "register", "api", "api/v1", "health", "healthz", "status", "metrics", "version",
-            "config", "config.json", ".env", "backup", "docs", "swagger.json", "openapi.json", "graphql",
-        ],
-    },
-    BuiltinList {
-        id: "common-usernames",
-        title: "Common usernames",
-        description: "Frequently used account names, for authorized login testing.",
-        values: &["admin", "administrator", "root", "user", "test", "guest", "demo", "support", "operator", "service"],
-    },
-    BuiltinList {
-        id: "user-agents",
-        title: "User agents",
-        description: "A handful of User-Agent strings, to vary the client.",
-        values: &[
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
-            "Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0",
-            "curl/8.4.0",
-            "Plonix",
-        ],
-    },
-    BuiltinList {
-        id: "content-types",
-        title: "Content types",
-        description: "Request body content types, to see how an endpoint parses input.",
-        values: &[
-            "application/json",
-            "application/x-www-form-urlencoded",
-            "multipart/form-data",
-            "text/xml",
-            "application/xml",
-            "text/plain",
-        ],
-    },
-    BuiltinList {
-        id: "input-probes",
-        title: "Input probes",
-        description: "Small, benign strings for checking how input is validated and reflected.",
-        values: &["", " ", "'", "\"", "<x>", "0", "-1", "null", "true", "{}", "[]", LONG_INPUT],
-    },
-];
-
-/// A long run of characters, to see how an endpoint handles oversized input.
-const LONG_INPUT: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-
-static NUMBERS_1_100: [&str; 100] = numbers_1_100();
 
 #[cfg(test)]
 mod tests {
@@ -492,6 +388,11 @@ mod tests {
 
     fn vals(v: &[&str]) -> Payloads {
         Payloads::Values { values: v.iter().map(|s| s.to_string()).collect() }
+    }
+
+    /// A resolver with no named lists, for tests that use only Values/Range.
+    fn none(_: &str) -> Option<Vec<String>> {
+        None
     }
 
     #[test]
@@ -517,7 +418,7 @@ mod tests {
             mode: RunMode::Sweep,
             ..Default::default()
         };
-        let p = plan(&req).unwrap();
+        let p = plan(&req, &none).unwrap();
         let a = p.assignments();
         // 2 positions * 2 values = 4, each with exactly one position off base.
         assert_eq!(a, vec![
@@ -536,7 +437,7 @@ mod tests {
             mode: RunMode::Parallel,
             ..Default::default()
         };
-        let a = plan(&req).unwrap().assignments();
+        let a = plan(&req, &none).unwrap().assignments();
         assert_eq!(a, vec![vec!["1".to_string(), "x".to_string()], vec!["2".to_string(), "y".to_string()]]);
     }
 
@@ -548,7 +449,7 @@ mod tests {
             mode: RunMode::Matrix,
             ..Default::default()
         };
-        let a = plan(&req).unwrap().assignments();
+        let a = plan(&req, &none).unwrap().assignments();
         assert_eq!(a.len(), 4);
         assert!(a.contains(&vec!["1".to_string(), "x".to_string()]));
         assert!(a.contains(&vec!["2".to_string(), "y".to_string()]));
@@ -562,30 +463,30 @@ mod tests {
             mode: RunMode::Parallel,
             ..Default::default()
         };
-        assert!(plan(&req).is_err());
+        assert!(plan(&req, &none).is_err());
     }
 
     #[test]
     fn a_run_with_no_positions_is_rejected() {
         let req = RunRequest { url: "https://h/".into(), lists: vec![vals(&["1"])], ..Default::default() };
-        assert!(plan(&req).is_err());
+        assert!(plan(&req, &none).is_err());
     }
 
     #[test]
     fn range_resolves_in_both_directions() {
-        assert_eq!(Payloads::Range { from: 1, to: 3, step: 1 }.resolve().unwrap(), vec!["1", "2", "3"]);
-        assert_eq!(Payloads::Range { from: 5, to: 1, step: -2 }.resolve().unwrap(), vec!["5", "3", "1"]);
-        assert!(Payloads::Range { from: 1, to: 3, step: 0 }.resolve().is_err());
+        assert_eq!(Payloads::Range { from: 1, to: 3, step: 1 }.resolve(&none).unwrap(), vec!["1", "2", "3"]);
+        assert_eq!(Payloads::Range { from: 5, to: 1, step: -2 }.resolve(&none).unwrap(), vec!["5", "3", "1"]);
+        assert!(Payloads::Range { from: 1, to: 3, step: 0 }.resolve(&none).is_err());
     }
 
     #[test]
-    fn builtin_lists_resolve_and_are_sane() {
-        for l in builtin_lists() {
-            assert!(!l.values.is_empty(), "{} is empty", l.id);
-            let got = Payloads::Builtin { id: l.id.to_string() }.resolve().unwrap();
-            assert_eq!(got.len(), l.values.len());
-        }
-        assert!(Payloads::Builtin { id: "nope".into() }.resolve().is_err());
+    fn named_lists_resolve_through_the_library() {
+        let lib = |id: &str| (id == "ids").then(|| vec!["1".to_string(), "2".to_string()]);
+        assert_eq!(Payloads::Builtin { id: "ids".into() }.resolve(&lib).unwrap(), vec!["1", "2"]);
+        assert!(Payloads::Builtin { id: "nope".into() }.resolve(&lib).is_err());
+        // A run can be planned from a named list resolved through the library.
+        let req = RunRequest { url: "https://h/?x=§§".into(), lists: vec![Payloads::Builtin { id: "ids".into() }], mode: RunMode::Sweep, ..Default::default() };
+        assert_eq!(plan(&req, &lib).unwrap().assignments().len(), 2);
     }
 
     #[test]
@@ -597,7 +498,7 @@ mod tests {
             mode: RunMode::Parallel,
             ..Default::default()
         };
-        let p = plan(&req).unwrap();
+        let p = plan(&req, &none).unwrap();
         assert_eq!(p.positions(), 2);
         let (url, raw) = p.render(&["1".into(), "2".into()]);
         assert_eq!(url, "https://h/?u=1");
@@ -613,14 +514,3 @@ mod tests {
     }
 }
 
-const fn numbers_1_100() -> [&'static str; 100] {
-    // A const table of the strings "1".."100".
-    [
-        "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20",
-        "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
-        "40", "41", "42", "43", "44", "45", "46", "47", "48", "49", "50", "51", "52", "53", "54", "55", "56", "57", "58",
-        "59", "60", "61", "62", "63", "64", "65", "66", "67", "68", "69", "70", "71", "72", "73", "74", "75", "76", "77",
-        "78", "79", "80", "81", "82", "83", "84", "85", "86", "87", "88", "89", "90", "91", "92", "93", "94", "95", "96",
-        "97", "98", "99", "100",
-    ]
-}

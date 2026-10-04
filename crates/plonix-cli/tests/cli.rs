@@ -387,6 +387,40 @@ fn bench_runs_payloads_through_marked_positions_and_stays_in_scope() {
 }
 
 #[test]
+fn market_installs_a_list_pack_and_the_bench_can_use_it() {
+    let p = Plonix::new();
+    let proxy = p.start();
+    let _ = proxy;
+
+    // The built-in starter lists are there from the start.
+    let out = p.run(&["bench", "lists"]).ok().stdout();
+    assert!(out.contains("numbers-1-100"), "{out}");
+    assert!(!out.contains("id-formats"), "extra lists are not present until installed:\n{out}");
+
+    // Install the extra list pack from the repository's signed Market index.
+    let index = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../store/index.json");
+    let index = index.to_str().unwrap();
+    let r = p.run(&["market", "--index", index, "install", "extra-wordlists"]);
+    let out = r.ok().stdout();
+    assert!(out.to_lowercase().contains("extra-wordlists"), "{out}");
+
+    // Its lists now show up in the Bench and resolve in a run.
+    let out = p.run(&["bench", "lists"]).ok().stdout();
+    assert!(out.contains("id-formats"), "installed list should be offered:\n{out}");
+
+    p.run(&["scope", "accept", "localhost"]).ok();
+    let v = p.run(&["bench", "run", "http://localhost:1/x?id=\u{a7}1\u{a7}", "--list", "builtin:id-formats", "--max-requests", "3", "--delay-ms", "0", "--json"]);
+    // The host does not answer, but the run still plans from the installed list
+    // and reports requests attempted against the accepted host.
+    let out = v.ok().stdout();
+    assert!(out.contains("\"positions\": 1") || out.contains("\"positions\":1"), "{out}");
+
+    // Removing it takes its lists away again.
+    p.run(&["market", "remove", "extra-wordlists"]).ok();
+    assert!(!p.run(&["bench", "lists"]).ok().stdout().contains("id-formats"));
+}
+
+#[test]
 fn open_starts_everything_and_launches_the_browser_through_the_proxy() {
     let mut p = Plonix::new();
     let bin = tempfile::tempdir().unwrap();

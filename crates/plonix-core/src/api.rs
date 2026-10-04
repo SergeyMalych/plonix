@@ -682,6 +682,11 @@ async fn market_detail(State(s): State<AppState>, Path(name): Path<String>) -> R
                     let filters: Vec<_> = pack.doc.filters.iter().map(|f| json!({ "id": f.id, "label": f.label, "query": f.query })).collect();
                     json!({ "filters": filters })
                 }
+                registry::Kind::List => {
+                    let pack = crate::listpack::parse(&bytes).map_err(|e| anyhow::anyhow!(e))?;
+                    let lists: Vec<_> = pack.doc.lists.iter().map(|l| json!({ "id": l.id, "title": l.title, "count": l.values.len() })).collect();
+                    json!({ "lists": lists })
+                }
                 registry::Kind::Bundle => unreachable!(),
             };
         }
@@ -974,13 +979,17 @@ async fn run(State(s): State<AppState>, headers: HeaderMap, Json(req): Json<crat
     }
 }
 
-/// The built-in payload lists that ship with Plonix.
-async fn run_lists(State(_s): State<AppState>) -> Response {
-    let lists: Vec<Value> = crate::runs::builtin_lists()
-        .iter()
-        .map(|l| json!({ "id": l.id, "title": l.title, "description": l.description, "count": l.values.len() }))
-        .collect();
-    Json(json!({ "lists": lists })).into_response()
+/// The payload lists available for a run: the built-in ones plus any installed
+/// from the Market.
+async fn run_lists(State(s): State<AppState>) -> Response {
+    let engine = s.engine.clone();
+    match tokio::task::spawn_blocking(move || engine.lists()).await {
+        Ok(set) => {
+            let lists: Vec<_> = set.catalog();
+            Json(json!({ "lists": lists, "packs": set.packs, "problems": set.problems })).into_response()
+        }
+        Err(e) => internal(e.into()),
+    }
 }
 
 async fn findings(State(s): State<AppState>) -> Response {

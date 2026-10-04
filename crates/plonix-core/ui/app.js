@@ -2003,17 +2003,17 @@ function renderBench(main) {
 /* ----- Bench payload runs ----- */
 
 const MARK = '§'; // §, the position marker, matched to the engine.
-let BUILTIN_LISTS = null;
+let LIST_CATALOG = null;
 
-async function loadBuiltinLists() {
-  if (BUILTIN_LISTS) return BUILTIN_LISTS;
+async function loadLists() {
+  if (LIST_CATALOG) return LIST_CATALOG;
   try {
     const v = await api('/api/run/lists');
-    BUILTIN_LISTS = v.lists || [];
+    LIST_CATALOG = v.lists || [];
   } catch (_) {
-    BUILTIN_LISTS = [];
+    LIST_CATALOG = [];
   }
-  return BUILTIN_LISTS;
+  return LIST_CATALOG;
 }
 
 function countPositions(tab) {
@@ -2032,14 +2032,14 @@ function listPicker(cfg, onchange) {
   const sel = h(
     'select',
     { class: 'listkind', onchange: () => pick(sel.value) },
-    h('option', { value: 'builtin', text: 'Built-in list', selected: kinds === 'builtin' }),
+    h('option', { value: 'builtin', text: 'Saved list', selected: kinds === 'builtin' }),
     h('option', { value: 'range', text: 'Number range', selected: kinds === 'range' }),
     h('option', { value: 'values', text: 'Custom list', selected: kinds === 'values' }),
   );
   const slot = h('span', { class: 'listdetail' });
   const pick = (kind) => {
     cfg.kind = kind;
-    if (kind === 'builtin' && !cfg.id) cfg.id = (BUILTIN_LISTS[0] || {}).id;
+    if (kind === 'builtin' && !cfg.id) cfg.id = (LIST_CATALOG[0] || {}).id;
     onchange();
     drawDetail();
   };
@@ -2048,7 +2048,7 @@ function listPicker(cfg, onchange) {
       const d = h(
         'select',
         { onchange: () => ((cfg.id = d.value), onchange()) },
-        (BUILTIN_LISTS || []).map((l) => h('option', { value: l.id, text: `${l.title} (${l.count})`, selected: l.id === cfg.id })),
+        (LIST_CATALOG || []).map((l) => h('option', { value: l.id, text: `${l.title} (${l.count})${l.builtin ? '' : ' · ' + l.pack}`, selected: l.id === cfg.id })),
       );
       clear(slot, d);
     } else if (cfg.kind === 'range') {
@@ -2066,7 +2066,7 @@ function listPicker(cfg, onchange) {
 }
 
 async function renderRunPanel(tab, main, col) {
-  await loadBuiltinLists();
+  await loadLists();
   if (!col.isConnected) return;
   const cfg = runCfg(tab);
   const positions = countPositions(tab);
@@ -2076,7 +2076,7 @@ async function renderRunPanel(tab, main, col) {
   // multi-position mode; sweep uses a single list for all of them.
   const lists = cfg.lists;
   const need = multi ? positions : 1;
-  while (lists.length < need) lists.push({ kind: 'builtin', id: (BUILTIN_LISTS[0] || {}).id });
+  while (lists.length < need) lists.push({ kind: 'builtin', id: (LIST_CATALOG[0] || {}).id });
   if (lists.length > need) lists.length = need;
 
   const persist = () => saveBench();
@@ -3724,6 +3724,7 @@ const KIND_INFO = {
   skill: { label: 'Skills', one: 'Skill', ico: '✦' },
   rules: { label: 'Rules', one: 'Rule pack', ico: '◎' },
   filters: { label: 'Filters', one: 'Filter pack', ico: '⧩' },
+  list: { label: 'Lists', one: 'List pack', ico: '≣' },
   bundle: { label: 'Bundles', one: 'Bundle', ico: '❖' },
   extension: { label: 'Extensions', one: 'Extension', ico: '⬡' },
 };
@@ -4029,6 +4030,7 @@ async function showPackage(name) {
   }
   if (det.rules) parts.push(sec(`Detects ${det.rules.count} technologies`, h('div', { class: 'mchips' }, det.rules.detects.map((n) => h('span', { class: 'chip', text: n })))));
   if (det.filters) parts.push(sec('Filters', det.filters.map((f) => h('div', { class: 'marg' }, h('code', { text: 'is:' + f.id }), h('span', { class: 'muted', text: f.label + ' · ' + f.query })))));
+  if (det.lists) parts.push(sec('Lists', det.lists.map((l) => h('div', { class: 'marg' }, h('code', { text: l.id }), h('span', { class: 'muted', text: `${l.title} · ${l.count} value${l.count === 1 ? '' : 's'}` })))));
   clear(
     panel,
     h('div', { class: 'mback' }, h('button', { class: 'btn sm', text: '← Market', title: 'Back to the list', onclick: () => (closePackage(), drawMarket()) })),

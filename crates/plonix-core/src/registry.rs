@@ -82,6 +82,8 @@ pub enum Kind {
     Rules,
     /// A filter pack: named Traffic filters (declarative).
     Filters,
+    /// A list pack: named payload lists for the Bench (declarative).
+    List,
     /// A set of other packages, installed together.
     Bundle,
     /// A sandboxed extension (see docs/extensions.md; not installable yet).
@@ -89,13 +91,14 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub const ALL: &[Kind] = &[Kind::Skill, Kind::Rules, Kind::Filters, Kind::Bundle, Kind::Extension];
+    pub const ALL: &[Kind] = &[Kind::Skill, Kind::Rules, Kind::Filters, Kind::List, Kind::Bundle, Kind::Extension];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Kind::Skill => "skill",
             Kind::Rules => "rules",
             Kind::Filters => "filters",
+            Kind::List => "list",
             Kind::Bundle => "bundle",
             Kind::Extension => "extension",
         }
@@ -107,6 +110,7 @@ impl Kind {
             Kind::Skill => "skill",
             Kind::Rules => "rule pack",
             Kind::Filters => "filter pack",
+            Kind::List => "list pack",
             Kind::Bundle => "bundle",
             Kind::Extension => "extension",
         }
@@ -157,8 +161,8 @@ pub fn parse(bytes: &[u8]) -> Result<Index, String> {
         if !seen.insert(p.name.clone()) {
             return Err(at("listed twice".into()));
         }
-        if index.plonix_index < 2 && (matches!(p.kind, Kind::Skill | Kind::Bundle) || !p.requires.is_empty()) {
-            return Err(at("skills, bundles and requirements need index format 2".into()));
+        if index.plonix_index < 2 && (matches!(p.kind, Kind::Skill | Kind::List | Kind::Bundle) || !p.requires.is_empty()) {
+            return Err(at("skills, list packs, bundles and requirements need index format 2".into()));
         }
         check_version(&p.version).map_err(|e| at(format!("version: {e}")))?;
         check_text(&p.description, 300, false).map_err(|e| at(format!("description: {e}")))?;
@@ -545,6 +549,7 @@ mod tests {
             let (name, version) = match p.kind {
                 Kind::Rules => crate::rulepack::parse(&data).map(|x| (x.doc.name, x.doc.version)).map_err(|e| e.to_string()),
                 Kind::Filters => crate::filterpack::parse(&data).map(|x| (x.doc.name, x.doc.version)),
+                Kind::List => crate::listpack::parse(&data).map(|x| (x.doc.name, x.doc.version)),
                 Kind::Skill => crate::skill::parse(&data).map(|x| (x.name, x.version)),
                 Kind::Extension => crate::extension::parse_manifest(&data).map(|m| (m.name, m.version)),
                 Kind::Bundle => unreachable!(),
