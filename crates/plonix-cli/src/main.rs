@@ -8,6 +8,7 @@ mod client;
 mod community;
 mod connect;
 mod engine_ctl;
+mod market;
 mod mcp;
 mod open;
 mod render;
@@ -152,8 +153,14 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<community::FiltersCmd>,
     },
-    /// Browse and install community rule and filter packs
-    Store(community::StoreArgs),
+    /// The Market: install skills, rules, filters, bundles and extensions from a signed catalog
+    #[command(visible_alias = "store")]
+    Market(market::MarketArgs),
+    /// Agent skills: playbooks agents find through MCP
+    Skills {
+        #[command(subcommand)]
+        cmd: Option<market::SkillsCmd>,
+    },
     /// Connect an AI agent to Plonix (read-only)
     Connect {
         #[command(subcommand)]
@@ -413,7 +420,8 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Cmd::Crawl(a) => scan::crawl_cmd(&ctx, a)?,
         Cmd::Rules { cmd } => community::rules_cmd(&ctx, cmd.unwrap_or(community::RulesCmd::List))?,
         Cmd::Filters { cmd } => community::filters_cmd(&ctx, cmd.unwrap_or(community::FiltersCmd::List))?,
-        Cmd::Store(a) => community::store_cmd(&ctx, a)?,
+        Cmd::Market(a) => market::market_cmd(&ctx, a)?,
+        Cmd::Skills { cmd } => market::skills_cmd(&ctx, cmd.unwrap_or(market::SkillsCmd::List))?,
         Cmd::Connect { cmd } => connect::connect_cmd(&ctx, cmd)?,
         Cmd::Mcp => mcp::serve(ctx.home.clone())?,
         Cmd::Ca { cmd } => ca_cmd(&ctx, cmd.unwrap_or(CaCmd::Show))?,

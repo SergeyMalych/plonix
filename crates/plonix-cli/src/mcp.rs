@@ -33,6 +33,10 @@ hosts, endpoints and detected technologies, review scope and its suggestions, an
 cannot send or replay requests, change scope or record findings; suggest those steps to the user instead. \
 The user decides what you can see: by default only hosts accepted into scope, and some tools may be switched off.
 
+The user can install skills: playbooks for a job in Plonix (get to know a host, explain a request, \
+review sign-in, check scope, draft a finding). They are offered as prompts, and through `list_skills` and \
+`get_skill`. When a request matches a skill, follow it.
+
 Start with `status`, then `search_traffic` (for example `scope:in status:5xx` or `path:/api method:POST`) \
 and `get_request` for the full request and response. Captured traffic can contain credentials and \
 personal data; it stays on this machine.";
@@ -185,8 +189,94 @@ Query filters (combine with spaces): host:example.com  method:POST  status:404|5
             }
             Ok(pretty(&v))
         },
+    },    Tool {
+        name: "list_skills",
+        route: "/api/skills",
+        title: "Skills",
+        description: "Skills the user installed: step-by-step playbooks for jobs in Plonix, such as getting to know a host or explaining a request. \
+Each has a name, what it is for and the arguments it takes. Read one with get_skill and follow it.",
+        schema: no_args,
+        call: |c, _| {
+            let v = c.get("/api/skills")?;
+            let skills = v["skills"].as_array().cloned().unwrap_or_default();
+            if skills.is_empty() {
+                return Ok("No skills are available.".into());
+            }
+            Ok(skills
+                .iter()
+                .map(|s| {
+                    let args: Vec<String> = s["arguments"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(|a| format!("{}{}", a["name"].as_str().unwrap_or(""), if a["required"] == true { "" } else { "?" }))
+                        .collect();
+                    format!(
+                        "{}({}): {}. {}",
+                        s["name"].as_str().unwrap_or(""),
+                        args.join(", "),
+                        s["title"].as_str().unwrap_or(""),
+                        s["description"].as_str().unwrap_or("")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n"))
+        },
+    },
+    Tool {
+        name: "get_skill",
+        route: "/api/skills/{name}",
+        title: "Read a skill",
+        description: "The instructions of one skill from list_skills, with its arguments filled in. Follow them step by step with the other Plonix tools.",
+        schema: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "Skill name from list_skills" },
+                    "arguments": { "type": "object", "description": "The skill's arguments, such as {\"host\": \"api.example.com\"}", "additionalProperties": { "type": "string" } }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+            })
+        },
+        call: |c, a| {
+            let name = a["name"].as_str().map(str::trim).filter(|n| !n.is_empty()).ok_or_else(|| anyhow!("`name` is required"))?;
+            let v = c.get(&skill_path(name, &a["arguments"]))?;
+            match v["prompt"].as_str() {
+                Some(p) => Ok(p.to_string()),
+                None => Ok(format!(
+                    "{}\n\n(Not filled in: {}. Call get_skill again with arguments.)\n\n{}",
+                    v["skill"]["title"].as_str().unwrap_or(name),
+                    v["needs"].as_str().unwrap_or("arguments missing"),
+                    v["skill"]["instructions"].as_str().unwrap_or("")
+                )),
+            }
+        },
     },
 ];
+
+/// The API path that reads a skill with its arguments filled in.
+fn skill_path(name: &str, args: &Value) -> String {
+    let mut path = format!("/api/skills/{}", encode(name));
+    let pairs: Vec<String> = args
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(k, v)| {
+            let v = match v {
+                Value::String(s) => s.clone(),
+                Value::Number(n) => n.to_string(),
+                _ => return None,
+            };
+            Some(format!("{}={}", encode(k), encode(&v)))
+        })
+        .collect();
+    if !pairs.is_empty() {
+        path.push('?');
+        path.push_str(&pairs.join("&"));
+    }
+    path
+}
 
 fn no_args() -> Value {
     json!({ "type": "object", "properties": {}, "additionalProperties": false })
@@ -284,7 +374,8 @@ impl Server {
             "tools/list" => Ok(json!({ "tools": self.available().map(tool_json).collect::<Vec<_>>() })),
             "tools/call" => self.call(&msg["params"]),
             "resources/list" => Ok(json!({ "resources": [] })),
-            "prompts/list" => Ok(json!({ "prompts": [] })),
+            "prompts/list" => Ok(json!({ "prompts": self.prompts() })),
+            "prompts/get" => self.prompt(&msg["params"]),
             _ => Err((-32601, format!("method not found: {method}"))),
         };
         Some(match result {
@@ -303,10 +394,44 @@ impl Server {
         let version = if PROTOCOL_VERSIONS.contains(&asked) { asked } else { PROTOCOL_VERSIONS[0] };
         json!({
             "protocolVersion": version,
-            "capabilities": { "tools": { "listChanged": false } },
+            "capabilities": { "tools": { "listChanged": false }, "prompts": { "listChanged": false } },
             "serverInfo": { "name": "plonix", "title": "Plonix (read-only)", "version": env!("CARGO_PKG_VERSION") },
             "instructions": INSTRUCTIONS,
         })
+    }
+
+    /// Skills the agent may use, as MCP prompts. With no engine, none.
+    fn prompts(&self) -> Vec<Value> {
+        let Ok(v) = self.client().and_then(|c| c.get("/api/skills")) else { return vec![] };
+        v["skills"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|s| {
+                let args: Vec<Value> = s["arguments"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|a| json!({ "name": a["name"], "description": a["description"], "required": a["required"] }))
+                    .collect();
+                json!({ "name": s["name"], "title": s["title"], "description": s["description"], "arguments": args })
+            })
+            .collect()
+    }
+
+    fn prompt(&self, params: &Value) -> Result<Value, (i64, String)> {
+        let name = params["name"].as_str().unwrap_or("").trim();
+        if name.is_empty() {
+            return Err((-32602, "`name` is required".into()));
+        }
+        let v = self.client().and_then(|c| c.get(&skill_path(name, &params["arguments"]))).map_err(|e| (-32602, format!("{e:#}")))?;
+        let Some(text) = v["prompt"].as_str() else {
+            return Err((-32602, v["needs"].as_str().unwrap_or("missing arguments").to_string()));
+        };
+        Ok(json!({
+            "description": v["skill"]["description"],
+            "messages": [{ "role": "user", "content": { "type": "text", "text": text } }],
+        }))
     }
 
     fn call(&self, params: &Value) -> Result<Value, (i64, String)> {
@@ -407,7 +532,7 @@ mod tests {
             assert_eq!(t["inputSchema"]["type"], "object");
         }
         let names = tool_names();
-        for forbidden in ["send", "replay", "accept", "reject", "add_finding"] {
+        for forbidden in ["send", "replay", "accept", "reject", "add_finding", "install"] {
             assert!(!names.iter().any(|n| n.contains(forbidden)), "{forbidden}");
         }
     }

@@ -48,13 +48,14 @@ fn windows() -> &'static Mutex<HashMap<String, String>> {
 const INIT_SCRIPT: &str = "window.__PLONIX_APP__ = true;";
 
 /// Menu items that drive a project window: (id, label, accelerator, script).
-const VIEW_ITEMS: [(&str, &str, &str, &str); 6] = [
+const VIEW_ITEMS: [(&str, &str, &str, &str); 7] = [
     ("go-traffic", "Traffic", "CmdOrCtrl+1", "window.plonix && plonix.go('traffic')"),
     ("go-bench", "Bench", "CmdOrCtrl+2", "window.plonix && plonix.go('bench')"),
     ("go-scope", "Scope", "CmdOrCtrl+3", "window.plonix && plonix.go('scope')"),
     ("go-map", "Map", "CmdOrCtrl+4", "window.plonix && plonix.go('map')"),
     ("go-findings", "Findings", "CmdOrCtrl+5", "window.plonix && plonix.go('findings')"),
     ("go-agents", "Agents", "CmdOrCtrl+6", "window.plonix && plonix.go('agents')"),
+    ("go-market", "Market", "CmdOrCtrl+7", "window.plonix && plonix.go('market')"),
 ];
 const OPEN_TARGET_SCRIPT: &str = "window.plonix && plonix.openTarget()";
 const TOGGLE_SIDEBAR_SCRIPT: &str = "window.plonix && plonix.toggleSidebar()";

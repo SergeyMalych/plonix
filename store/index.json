@@ -1,7 +1,90 @@
 {
-  "plonix_index": 1,
-  "name": "Plonix community store",
+  "plonix_index": 2,
+  "name": "Plonix Market",
   "packages": [
+    {
+      "name": "triage-host",
+      "kind": "skill",
+      "version": "1.0.0",
+      "description": "Summarize what a host does, how it is built, how it signs users in, and where to look first.",
+      "author": "Plonix contributors",
+      "url": "skills/triage-host.md",
+      "sha256": "2c32d0caa490421b84e5e3c317d2cf13d08d0b743f9261b97e7cf6a04f6598c7",
+      "homepage": "https://github.com/SergeyMalych/plonix"
+    },
+    {
+      "name": "explain-request",
+      "kind": "skill",
+      "version": "1.0.0",
+      "description": "Walk through one captured request and its response in plain language, including tokens and encoded values.",
+      "author": "Plonix contributors",
+      "url": "skills/explain-request.md",
+      "sha256": "5528dc246ce3baeb341075e1b53d75efafbfb89e0eb7a286a098046b2d182fe1",
+      "homepage": "https://github.com/SergeyMalych/plonix"
+    },
+    {
+      "name": "review-sign-in",
+      "kind": "skill",
+      "version": "1.0.0",
+      "description": "Find the sign-in, sign-out and session requests and describe how the application keeps users signed in.",
+      "author": "Plonix contributors",
+      "url": "skills/review-sign-in.md",
+      "sha256": "3cd68b270a84d1d92a43b067d09edee482c37322ba71a90980de3634a4169e98",
+      "homepage": "https://github.com/SergeyMalych/plonix"
+    },
+    {
+      "name": "check-scope",
+      "kind": "skill",
+      "version": "1.0.0",
+      "description": "Go through scope suggestions and recommend which domains belong to the target, with the evidence for each.",
+      "author": "Plonix contributors",
+      "url": "skills/check-scope.md",
+      "sha256": "86a265073f947e6a9186abd9ba15cf78c5cf484ddbe6f8355db422963f01263f",
+      "homepage": "https://github.com/SergeyMalych/plonix"
+    },
+    {
+      "name": "draft-finding",
+      "kind": "skill",
+      "version": "1.0.0",
+      "description": "Turn an observed issue into a clear, reproducible finding write-up to review and record in Plonix.",
+      "author": "Plonix contributors",
+      "url": "skills/draft-finding.md",
+      "sha256": "dc4ed246f96c69c244db79671ae20ed39e656d64c7ed06e26fbbc496e7781471",
+      "homepage": "https://github.com/SergeyMalych/plonix"
+    },
+    {
+      "name": "api-inventory",
+      "kind": "skill",
+      "version": "1.0.0",
+      "description": "List every API operation seen on a host with its parameters, authentication and data returned.",
+      "author": "Plonix contributors",
+      "url": "skills/api-inventory.md",
+      "sha256": "9a332e5689f7538250a2ec41023a97df321949bf892f793173001b3e897f3d59",
+      "homepage": "https://github.com/SergeyMalych/plonix"
+    },
+    {
+      "name": "api-kit",
+      "kind": "bundle",
+      "version": "1.0.0",
+      "description": "Everything for testing an API: the API inventory skill, filters for leaked secrets and debug output, and admin console detection.",
+      "author": "Plonix contributors",
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "requires": [
+        "api-inventory",
+        "leaks",
+        "admin-panels"
+      ]
+    },
+    {
+      "name": "graphql-explorer",
+      "kind": "extension",
+      "version": "0.1.0",
+      "description": "A GraphQL tab: every operation seen in traffic, grouped by type, with its variables and the requests that used it.",
+      "author": "Plonix contributors",
+      "url": "extensions/graphql-explorer.json",
+      "sha256": "fe718c7077583e33b631d2769e14b4ad1a27c671614e96edac8118e92f3c834c",
+      "homepage": "https://github.com/SergeyMalych/plonix"
+    },
     {
       "name": "web-servers",
       "kind": "rules",

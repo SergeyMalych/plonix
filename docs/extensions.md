@@ -6,7 +6,7 @@ Plonix is meant to be maintained by its community. Extensions are how people add
 
 - **Rule packs** are installable from files, URLs and the store, with schema validation and SHA-256 pinning. See [detection-rules.md](detection-rules.md).
 - **Filter packs** add named Traffic filters (`is:graphql`, `-is:trackers`) to search and to the window's **+ Filter** builder. See [filters.md](filters.md).
-- The **store** client (`plonix store`) lists packages from any JSON index and installs rule and filter packs, verifying checksums.
+- The **Market** (`plonix market`, and the Market screen) lists skills, rule packs, filter packs, bundles and extensions from a signed index and installs everything but code extensions, verifying the signature and every checksum. See [market.md](market.md).
 
 Tabs, panels and tweaks are designed below ([UI contributions](#ui-contributions-tabs-panels-tweaks-and-filters)) and not built yet.
 
@@ -70,7 +70,7 @@ These hold for every extension, whatever capabilities it has. They're enforced b
 4. **Read-only decisions.** Scope rules, project settings and the user's findings can't be changed. Extensions can *propose* findings, which are stored as created by the extension and marked unconfirmed until a person confirms them.
 5. **Bounded resources.** Each call has a fuel (instruction) budget, a memory cap and a wall-clock timeout. An extension that exceeds them is stopped, and one that keeps doing it is disabled.
 6. **Data, not markup.** Everything an extension returns is plain structured data that the engine validates (lengths, character sets, no control characters) before showing it anywhere.
-7. **Pinned bytes.** What runs is exactly what was verified at install time (SHA-256 against the store index), and it's re-verified on load.
+7. **Pinned bytes.** What runs is exactly what was verified at install time (SHA-256 against the signed Market index), and it's re-verified on load.
 
 ## Extension kinds
 

@@ -1,18 +1,15 @@
-//! Community content: detection rule packs and the store.
+//! Community content: detection rule packs and filter packs.
 //!
 //! Everything fetched here is untrusted. Downloads are size-capped, must be
 //! https (or a local file), and rule packs are validated and pinned by
 //! SHA-256 by `plonix_core::rulepack` before anything is installed. Nothing
 //! fetched here is ever executed.
 
-use std::io::Read;
-use std::time::Duration;
-
-use anyhow::{Context, Result, anyhow, bail};
-use clap::{Args, Subcommand};
+use anyhow::{Result, anyhow, bail};
+use clap::Subcommand;
 use plonix_core::filterpack::{self, FilterLibrary};
-use plonix_core::registry::{self, Index, Kind, Location};
-use plonix_core::rulepack::{self, BUILTIN, Library, MAX_PACK_BYTES};
+use plonix_core::registry::{self, Location};
+use plonix_core::rulepack::{self, Library, MAX_PACK_BYTES};
 use serde_json::{Value, json};
 
 use crate::Ctx;
@@ -69,61 +66,10 @@ pub enum FiltersCmd {
     },
 }
 
-#[derive(Args)]
-pub struct StoreArgs {
-    /// Store index to use [default: $PLONIX_STORE_INDEX or the Plonix community index]
-    #[arg(long, global = true, value_name = "PATH|URL")]
-    index: Option<String>,
-    #[command(subcommand)]
-    cmd: Option<StoreCmd>,
-}
-
-#[derive(Subcommand)]
-enum StoreCmd {
-    /// Packages in the store, optionally filtered (the default)
-    List {
-        /// Only show packages whose name or description contains this
-        filter: Option<String>,
-    },
-    /// Install packages from the store (verified by SHA-256)
-    Install {
-        #[arg(required = true)]
-        names: Vec<String>,
-    },
-    /// Upgrade installed packs that have a newer version in the store
-    Update,
-}
-
 // ---- fetching ---------------------------------------------------------------
 
-/// Reads a local file or downloads a URL, refusing anything over `max` bytes.
 fn fetch(loc: &Location, max: usize) -> Result<Vec<u8>> {
-    let mut buf = Vec::new();
-    match loc {
-        Location::File(p) => {
-            let f = std::fs::File::open(p).with_context(|| format!("reading {}", p.display()))?;
-            f.take(max as u64 + 1).read_to_end(&mut buf).with_context(|| format!("reading {}", p.display()))?;
-        }
-        Location::Url(u) => {
-            let mut b = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(10)).timeout(Duration::from_secs(60)).redirects(3);
-            // Downloads honour the usual proxy variables; the local API client does not.
-            let local = u.starts_with("http://");
-            if let Some(p) = std::env::var("HTTPS_PROXY").ok().or_else(|| std::env::var("https_proxy").ok()).filter(|_| !local) {
-                b = b.proxy(ureq::Proxy::new(p).context("invalid HTTPS_PROXY")?);
-            }
-            let resp = b.build().get(u).call().map_err(|e| match e {
-                ureq::Error::Status(code, _) => anyhow!("{u}: HTTP {code}"),
-                ureq::Error::Transport(t) => anyhow!("{u}: {t}"),
-            })?;
-            // A redirect must not downgrade to plain http or leave https.
-            registry::location(resp.get_url()).map_err(|e| anyhow!("{u} redirected to an unsafe location: {e}"))?;
-            resp.into_reader().take(max as u64 + 1).read_to_end(&mut buf).with_context(|| format!("downloading {u}"))?;
-        }
-    }
-    if buf.len() > max {
-        bail!("{loc} is larger than {max} bytes; refusing it");
-    }
-    Ok(buf)
+    registry::fetch(loc, max)
 }
 
 fn location(s: &str) -> Result<Location> {
@@ -155,7 +101,7 @@ pub fn rules_cmd(ctx: &Ctx, cmd: RulesCmd) -> Result<()> {
                 total += i.rules;
                 println!("{:<18} {:<9} {:>5}  {}", i.name, i.version, i.rules, clip(&i.source, 80));
             }
-            println!("\n{} rules from {} packs · `plonix tech` shows what they detect · `plonix store` for more", total, loaded.packs.len());
+            println!("\n{} rules from {} packs · `plonix tech` shows what they detect · `plonix market` for more", total, loaded.packs.len());
             for p in &loaded.problems {
                 eprintln!("warning: {p}");
             }
@@ -312,178 +258,10 @@ pub fn tech_cmd(ctx: &Ctx, host: Option<String>) -> Result<()> {
     if shown == 0 {
         match host {
             Some(h) => println!("Nothing detected on {h} yet."),
-            None => println!("No technologies detected yet. Browse the target, or add rules with `plonix store`."),
+            None => println!("No technologies detected yet. Browse the target, or add rules with `plonix market`."),
         }
     } else {
         println!("Evidence ids are exchanges: `plonix show <id>`.");
     }
     Ok(())
-}
-
-// ---- plonix store -----------------------------------------------------------------
-
-fn index_location(a: &StoreArgs) -> Result<Location> {
-    let s = a.index.clone().or_else(|| std::env::var("PLONIX_STORE_INDEX").ok()).unwrap_or_else(|| registry::DEFAULT_INDEX.to_string());
-    location(&s)
-}
-
-fn load_index(loc: &Location) -> Result<Index> {
-    let bytes = fetch(loc, registry::MAX_INDEX_BYTES).with_context(|| format!("fetching store index {loc}"))?;
-    registry::parse(&bytes).map_err(|e| anyhow!("store index {loc}: {e}"))
-}
-
-pub fn store_cmd(ctx: &Ctx, a: StoreArgs) -> Result<()> {
-    let loc = index_location(&a)?;
-    let index = load_index(&loc)?;
-    let shelves = Shelves::new(&ctx.home);
-    let status = |p: &registry::Package| -> String {
-        if shelves.builtin(p) {
-            return "built-in".into();
-        }
-        if p.kind == Kind::Extension {
-            return "needs runtime".into();
-        }
-        match shelves.installed_version(p) {
-            Some(v) if rulepack::newer(&p.version, &v) => format!("update {v}→{}", p.version),
-            Some(_) => "installed".into(),
-            None => "available".into(),
-        }
-    };
-    match a.cmd.unwrap_or(StoreCmd::List { filter: None }) {
-        StoreCmd::List { filter } => {
-            let f = filter.unwrap_or_default().to_lowercase();
-            let items: Vec<_> = index
-                .packages
-                .iter()
-                .filter(|p| f.is_empty() || p.name.contains(&f) || p.description.to_lowercase().contains(&f))
-                .collect();
-            if ctx.json {
-                let rows: Vec<_> = items.iter().map(|p| json!({ "package": p, "status": status(p) })).collect();
-                return ctx.print_json(&json!({ "index": loc.to_string(), "name": index.name, "packages": rows }));
-            }
-            let title = if index.name.is_empty() { "Store".to_string() } else { index.name.clone() };
-            println!("{title} · {loc}\n");
-            if items.is_empty() {
-                println!("No packages match.");
-                return Ok(());
-            }
-            println!("{:<18} {:<9} {:<6} {:<16} DESCRIPTION", "NAME", "VERSION", "KIND", "STATUS");
-            for p in &items {
-                let kind = match p.kind {
-                    Kind::Rules => "rules",
-                    Kind::Filters => "filter",
-                    Kind::Extension => "ext",
-                };
-                println!("{:<18} {:<9} {:<6} {:<16} {}", p.name, p.version, kind, status(p), clip(&p.description, 70));
-            }
-            println!("\nInstall with `plonix store install <name>`.");
-        }
-        StoreCmd::Install { names } => {
-            let mut results = vec![];
-            for name in names {
-                let Some(p) = index.packages.iter().find(|p| p.name == name) else {
-                    bail!("`{}` is not in the store (see `plonix store list`)", plonix_core::detect::clean(&name, 64));
-                };
-                if shelves.builtin(p) {
-                    println!("{} is built in; nothing to install.", p.name);
-                    continue;
-                }
-                results.push(install(&shelves, &loc, p, ctx.json)?);
-            }
-            if ctx.json {
-                return ctx.print_json(&Value::Array(results));
-            }
-        }
-        StoreCmd::Update => {
-            let mut results = vec![];
-            for p in &index.packages {
-                if p.kind != Kind::Extension
-                    && let Some(v) = shelves.installed_version(p)
-                    && rulepack::newer(&p.version, &v)
-                {
-                    results.push(install(&shelves, &loc, p, ctx.json)?);
-                }
-            }
-            if ctx.json {
-                return ctx.print_json(&Value::Array(results));
-            }
-            if results.is_empty() {
-                println!("All installed packs are up to date.");
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Where each kind of store package is installed.
-struct Shelves {
-    rules: Library,
-    filters: FilterLibrary,
-}
-
-impl Shelves {
-    fn new(home: &plonix_core::paths::Home) -> Self {
-        Self { rules: Library::new(home), filters: FilterLibrary::new(home) }
-    }
-
-    fn builtin(&self, p: &registry::Package) -> bool {
-        let list = match p.kind {
-            Kind::Rules => BUILTIN,
-            Kind::Filters => filterpack::BUILTIN,
-            Kind::Extension => return false,
-        };
-        list.iter().any(|(n, _)| *n == p.name)
-    }
-
-    fn installed_version(&self, p: &registry::Package) -> Option<String> {
-        match p.kind {
-            Kind::Rules => self.rules.installed_version(&p.name),
-            Kind::Filters => self.filters.installed_version(&p.name),
-            Kind::Extension => None,
-        }
-    }
-}
-
-fn install(shelves: &Shelves, index: &Location, p: &registry::Package, quiet: bool) -> Result<Value> {
-    if p.kind == Kind::Extension {
-        bail!(
-            "{} is an extension. Extensions need the sandboxed extension runtime, which this version of Plonix does not have yet (see docs/extensions.md).",
-            p.name
-        );
-    }
-    let src = registry::resolve(index, &p.url).map_err(|e| anyhow!("{}: {e}", p.name))?;
-    let bytes = fetch(&src, MAX_PACK_BYTES).with_context(|| format!("downloading {}", p.name))?;
-    // Check that the file is what the store says before touching what is installed.
-    let actual = rulepack::sha256_hex(&bytes);
-    if actual != p.sha256 {
-        bail!("{}: checksum mismatch: the store lists sha256 {}, the download is {actual}. Nothing was installed.", p.name, p.sha256);
-    }
-    let (name, version) = match p.kind {
-        Kind::Rules => rulepack::parse(&bytes).map(|x| (x.doc.name, x.doc.version)).map_err(|e| anyhow!("{}: {e}", p.name))?,
-        Kind::Filters => filterpack::parse(&bytes).map(|x| (x.doc.name, x.doc.version)).map_err(|e| anyhow!("{}: {e}", p.name))?,
-        Kind::Extension => unreachable!(),
-    };
-    if name != p.name || version != p.version {
-        bail!("{}: the store lists {} {} but the file is {name} {version}", p.name, p.name, p.version);
-    }
-    let source = src.to_string();
-    let installing = || format!("installing {}", p.name);
-    let (count, what, sha, previous) = match p.kind {
-        Kind::Rules => {
-            let (pack, prev) = shelves.rules.install(&bytes, &source, Some(&p.sha256)).with_context(installing)?;
-            (pack.rules.len(), "rules", pack.sha256, prev)
-        }
-        Kind::Filters => {
-            let (pack, prev) = shelves.filters.install(&bytes, &source, Some(&p.sha256)).with_context(installing)?;
-            (pack.doc.filters.len(), "filters", pack.sha256, prev)
-        }
-        Kind::Extension => unreachable!(),
-    };
-    if !quiet {
-        match &previous {
-            Some(v) => println!("Updated {} {v} → {} ({count} {what}, sha256 verified).", p.name, p.version),
-            None => println!("Installed {} {} ({count} {what}, sha256 verified).", p.name, p.version),
-        }
-    }
-    Ok(json!({ "name": p.name, "kind": p.kind, "version": p.version, what: count, "sha256": sha, "replaced": previous }))
 }
