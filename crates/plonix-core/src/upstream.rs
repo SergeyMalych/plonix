@@ -330,7 +330,7 @@ impl Upstream {
             let tcp = self.connect(&req.host, req.port).await?;
             let (resp, tls_sans) = if req.scheme == "https" {
                 let name = ServerName::try_from(req.host.clone()).map_err(|_| anyhow!("invalid server name {}", req.host))?;
-                let tls = self.tls_http1.connect(name, tcp).await.with_context(|| format!("TLS handshake with {}", req.host))?;
+                let tls = self.tls_http1.connect(name, tcp).await.map_err(|e| tls_error(&req.host, req.port, e))?;
                 let sans = tls.get_ref().1.peer_certificates().and_then(|c| c.first()).map(cert_dns_names).unwrap_or_default();
                 (send_http1(TokioIo::new(tls), req, None).await?, sans)
             } else {
@@ -372,7 +372,7 @@ impl Upstream {
 
         if req.scheme == "https" {
             let name = ServerName::try_from(req.host.clone()).map_err(|_| anyhow!("invalid server name {}", req.host))?;
-            let tls = self.tls.connect(name, tcp).await.with_context(|| format!("TLS handshake with {}", req.host))?;
+            let tls = self.tls.connect(name, tcp).await.map_err(|e| tls_error(&req.host, req.port, e))?;
             let sans = tls.get_ref().1.peer_certificates().and_then(|c| c.first()).map(cert_dns_names).unwrap_or_default();
             let mut resp = if tls.get_ref().1.alpn_protocol() == Some(b"h2") {
                 let resp = send_http2(TokioIo::new(tls), req, body).await?;
@@ -387,6 +387,20 @@ impl Upstream {
             exchange(TokioIo::new(tcp), req, body).await
         }
     }
+}
+
+/// Describes a failed TLS handshake. A server that drops the connection as
+/// soon as the handshake starts usually serves no HTTPS on that port, so the
+/// message says so instead of only naming the socket error.
+fn tls_error(host: &str, port: u16, e: std::io::Error) -> anyhow::Error {
+    use std::io::ErrorKind as K;
+    let hint = if matches!(e.kind(), K::ConnectionReset | K::ConnectionAborted | K::UnexpectedEof) {
+        let plain = if port == 443 { format!("http://{host}") } else { format!("http://{host}:{port}") };
+        format!(" (the server closed the connection before any TLS reply, so it may not serve HTTPS on port {port}; try {plain})")
+    } else {
+        String::new()
+    };
+    anyhow!("TLS handshake with {host}: {e}{hint}")
 }
 
 async fn exchange<T>(io: TokioIo<T>, req: OutboundRequest, body: Option<StreamBody>) -> Result<StreamingResponse>
@@ -598,6 +612,34 @@ mod tests {
         assert!(ProxyServer::parse("proxy:3128").is_err());
         assert!(ProxyServer::parse("https://proxy:3128").is_err());
         assert!(ProxyServer::parse("http://proxy").is_err());
+    }
+
+    #[tokio::test]
+    async fn closed_handshake_suggests_plain_http() {
+        // A port that accepts TCP but drops every TLS handshake, like a host
+        // that serves only plain HTTP.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = sock.read(&mut buf).await;
+            }
+        });
+        let up = Upstream::new(false, vec![]).unwrap();
+        let req = OutboundRequest {
+            scheme: "https".into(),
+            host: "127.0.0.1".into(),
+            port,
+            method: "GET".into(),
+            target: "/".into(),
+            headers: vec![],
+            body: Bytes::new(),
+            extra_headers: vec![],
+        };
+        let err = up.send(req).await.unwrap_err().to_string();
+        assert!(err.starts_with("TLS handshake with 127.0.0.1: "), "{err}");
+        assert!(err.contains(&format!("may not serve HTTPS on port {port}; try http://127.0.0.1:{port}")), "{err}");
     }
 
     #[test]
