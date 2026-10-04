@@ -58,6 +58,13 @@ const header = (headers, name) => {
   return hit ? hit[1] : null;
 };
 
+/* State kept in the browser for one project (search, Bench tabs, last
+ * target) is keyed by the project's id, so it stays with the project even
+ * when another project later opens at the same address. */
+const PROJECT_ID = (document.querySelector('meta[name="plonix-project"]') || {}).content || '';
+const pkey = (key) => (PROJECT_ID && !PROJECT_ID.includes('{') ? `${key}@${PROJECT_ID}` : key);
+const pstore = (key, value) => store(pkey(key), value);
+
 function store(key, value) {
   try {
     if (value === undefined) return JSON.parse(localStorage.getItem(key));
@@ -71,10 +78,11 @@ function store(key, value) {
 /* ---------- API ---------- */
 
 class ApiError extends Error {
-  constructor(status, code, message) {
+  constructor(status, code, message, data) {
     super(message);
     this.status = status;
     this.code = code;
+    this.problems = data && data.problems;
   }
 }
 
@@ -87,6 +95,7 @@ const S = {
   scope: { rules: [], suggestions: [] },
   /** Named filters (is:id) from filter packs, for the filter builder and chips. */
   named: [],
+  exclusions: { groups: [], asked: true },
 };
 
 async function api(path, { method = 'GET', body } = {}) {
@@ -113,7 +122,7 @@ async function api(path, { method = 'GET', body } = {}) {
     signOut();
     throw new ApiError(401, 'unauthorized', 'Signed out');
   }
-  if (!resp.ok) throw new ApiError(resp.status, (data && data.code) || 'error', (data && data.error) || resp.statusText);
+  if (!resp.ok) throw new ApiError(resp.status, (data && data.code) || 'error', (data && data.error) || resp.statusText, data);
   return data;
 }
 
@@ -240,6 +249,7 @@ const VIEWS = {
   map: { label: 'Map', ico: '⊞', render: renderMap },
   findings: { label: 'Findings', ico: '⚑', render: renderFindings },
   agents: { label: 'Agents', ico: '✦', render: renderAgents },
+  settings: { label: 'Settings', ico: '⚙', render: renderSettings, footer: true },
 };
 
 const IN_APP = !!window.__PLONIX_APP__;
@@ -247,6 +257,7 @@ const IN_APP = !!window.__PLONIX_APP__;
 function renderShell() {
   const nav = h('div', { class: 'nav' });
   Object.entries(VIEWS).forEach(([key, v], i) => {
+    if (v.footer) return;
     nav.append(
       h(
         'button',
@@ -285,6 +296,16 @@ function renderShell() {
         nav,
         h('div', { class: 'railsecs', id: 'railsecs' }),
         h('div', { class: 'spacer' }),
+        h(
+          'div',
+          { class: 'nav navfoot' },
+          h(
+            'button',
+            { 'data-v': 'settings', title: `Settings: proxy, storage and more${IN_APP ? '  (⌘,)' : ''}`, onclick: () => go('settings') },
+            h('span', { class: 'ico', text: '⚙' }),
+            h('span', { class: 'nl', text: 'Settings' }),
+          ),
+        ),
         h(
           'button',
           { class: 'railtoggle', id: 'railtoggle', onclick: toggleSidebar },
@@ -331,10 +352,11 @@ function renderRail() {
   const box = $('#railsecs');
   if (!box) return;
   const secs = [];
-  const pending = (S.scope.suggestions || []).slice(0, 4);
+  const waiting = stillPending(S.scope.suggestions);
+  const pending = waiting.slice(0, 4);
   if (pending.length) {
     secs.push(
-      h('button', { class: 'navsec navlink', title: 'Review them on the Scope screen', onclick: () => go('scope') }, 'Scope suggestions', h('span', { class: 'qn', text: (S.scope.suggestions || []).length })),
+      h('button', { class: 'navsec navlink', title: 'Review them on the Scope screen', onclick: () => go('scope') }, 'Scope suggestions', h('span', { class: 'qn', text: waiting.length })),
       pending.map((sg) =>
         h(
           'div',
@@ -372,7 +394,7 @@ function renderRail() {
 
 /** Opens a target in the capture browser: an isolated browser that routes through Plonix. */
 function openTarget() {
-  const input = h('input', { placeholder: 'example.com', spellcheck: 'false', autocomplete: 'off', value: store('plonix.lastTarget') || '' });
+  const input = h('input', { placeholder: 'example.com', spellcheck: 'false', autocomplete: 'off', value: pstore('plonix.lastTarget') || '' });
   const go = async () => {
     const target = input.value.trim();
     if (!target) return input.focus();
@@ -399,7 +421,7 @@ function openTarget() {
 async function launchTarget(target) {
   try {
     const r = await api('/api/browser/open', { method: 'POST', body: { target } });
-    store('plonix.lastTarget', target);
+    pstore('plonix.lastTarget', target);
     toast(`Opened ${r.url} in ${r.browser}. Browse the site; requests appear in Traffic.`, 'ok');
     await loadScope();
     if (S.view !== 'traffic') go('traffic');
@@ -412,6 +434,10 @@ async function launchTarget(target) {
 function go(view, force) {
   if (!VIEWS[view]) return;
   if (S.view === view && !force) return;
+  // Going somewhere from the sidebar forgets the way back; leaveTo keeps it.
+  if (!S.keepBack) S.back = null;
+  S.keepBack = false;
+  if (S.view === 'map') saveMapScroll();
   S.view = view;
   if (location.hash !== '#/' + view) history.replaceState(null, '', '#/' + view);
   for (const b of document.querySelectorAll('.nav button')) b.classList.toggle('on', b.dataset.v === view);
@@ -420,10 +446,30 @@ function go(view, force) {
   VIEWS[view].render(main);
 }
 
+/** Moves to another screen from inside one, remembering where to go back to. */
+function leaveTo(view) {
+  if (S.view !== view && VIEWS[S.view]) S.back = S.view;
+  S.keepBack = true;
+  go(view, true);
+}
+
+function goBack() {
+  const back = S.back;
+  S.back = null;
+  if (back) go(back, true);
+}
+
+/** "← Map": returns to the screen the user came from, exactly as they left it. */
+function backButton() {
+  if (!S.back || !VIEWS[S.back]) return null;
+  return h('button', { class: 'btn sm backbtn', text: '← ' + VIEWS[S.back].label, title: 'Back to ' + VIEWS[S.back].label, onclick: goBack });
+}
+
 function updateChrome() {
   const st = S.status;
   if (!st || !$('#engine')) return;
   $('#proj').textContent = '· ' + st.project;
+  $('#proj').title = st.project_dir ? 'Project folder: ' + st.project_dir : '';
   document.title = 'Plonix · ' + st.project;
   const eng = $('#engine');
   eng.classList.toggle('down', !S.engineUp);
@@ -437,7 +483,7 @@ function updateChrome() {
   $('#f-cap').textContent = st.exchanges;
   $('#f-ver').textContent = st.version;
   $('#ct-traffic').textContent = st.exchanges || '';
-  const pending = (S.scope.suggestions || []).length;
+  const pending = stillPending(S.scope.suggestions).length;
   const pend = $('#ct-scope');
   pend.textContent = pending || '';
   pend.classList.toggle('hot', pending > 0);
@@ -495,10 +541,14 @@ async function loadScope() {
   try {
     S.scope = await api('/api/scope');
   } catch (_) {}
+  try {
+    S.exclusions = await api('/api/scope/exclusions');
+  } catch (_) {}
   updateChrome();
   renderRail();
   if (S.view === 'traffic') renderBanner();
   if (S.view === 'bench') renderScopeHint();
+  maybeAskExclusions();
 }
 
 /** Same rule as the engine: the most specific matching rule decides. */
@@ -838,6 +888,7 @@ function renderTraffic(main) {
       h(
         'div',
         { class: 'toolbar' },
+        backButton(),
         h('div', { class: 'search', id: 'searchbox' }, h('span', { class: 'mg', text: '⌕' }), input, h('kbd', { text: '/' })),
         h('span', { class: 'count', id: 'tcount' }),
         liveBtn,
@@ -1124,7 +1175,7 @@ async function setQuery(q) {
   T.text = text;
   T.sel = null;
   saveTrafficView();
-  go('traffic', true);
+  leaveTo('traffic');
 }
 
 async function refreshTraffic(userAction) {
@@ -1156,7 +1207,7 @@ async function refreshTraffic(userAction) {
 }
 
 function emptyTraffic(st) {
-  const input = h('input', { placeholder: 'example.com', spellcheck: 'false', autocomplete: 'off', value: store('plonix.lastTarget') || '' });
+  const input = h('input', { placeholder: 'example.com', spellcheck: 'false', autocomplete: 'off', value: pstore('plonix.lastTarget') || '' });
   const err = h('div', { class: 'qerr' });
   const open = async () => {
     if (!input.value.trim()) return input.focus();
@@ -1233,6 +1284,7 @@ function selectRow(delta) {
 async function openInspector(id) {
   T.sel = id;
   for (const tr of document.querySelectorAll('#rows tr')) tr.classList.toggle('sel', Number(tr.dataset.id) === id);
+  for (const tr of document.querySelectorAll('tr[data-ex]')) tr.classList.toggle('sel', Number(tr.dataset.ex) === id);
   const slot = $('#inspslot');
   if (!slot) return;
   let ex;
@@ -1486,7 +1538,7 @@ function closeInspector() {
   T.sel = null;
   const slot = $('#inspslot');
   if (slot) clear(slot);
-  for (const tr of document.querySelectorAll('#rows tr.sel')) tr.classList.remove('sel');
+  for (const tr of document.querySelectorAll('#rows tr.sel, tr[data-ex].sel')) tr.classList.remove('sel');
 }
 
 const scopeTag = (d) => ({ accepted: 'in', rejected: 'rej', unknown: 'out' })[d];
@@ -1511,7 +1563,7 @@ const EV = {
 function renderBanner() {
   const slot = $('#bannerslot');
   if (!slot) return;
-  const all = S.scope.suggestions || [];
+  const all = stillPending(S.scope.suggestions);
   const fresh = all.filter((s) => !(T.hidden || []).includes(s.domain));
   if (!all.length || !fresh.length) return clear(slot);
   const queue = all.filter((s) => !(T.skipped || []).includes(s.domain));
@@ -1540,6 +1592,15 @@ function renderBanner() {
 /** The host a suggestion is about: `*.example.com` is about example.com. */
 const suggestionBase = (domain) => domain.replace(/^\*\./, '');
 
+/**
+ * Suggestions still waiting on a decision. The engine already drops a
+ * suggestion once a rule covers it, but a rule added elsewhere can land a
+ * moment before the next scope refresh, so we also hide anything the current
+ * rules already decide. A domain that is part of an existing rule never
+ * prompts again.
+ */
+const stillPending = (sugg) => (sugg || []).filter((s) => decide(suggestionBase(s.domain)) === 'unknown');
+
 /** The three choices for one suggestion: this host only, with subdomains, or reject. */
 function scopeButtons(s, size, after) {
   const base = suggestionBase(s.domain);
@@ -1554,7 +1615,7 @@ function scopeButtons(s, size, after) {
 
 /** Accepts (each host only) or rejects every pending suggestion, after asking. */
 function decideAll(action) {
-  const list = (S.scope.suggestions || []).slice();
+  const list = stillPending(S.scope.suggestions);
   if (!list.length) return;
   const accept = action === 'accept';
   const run = async () => {
@@ -1600,9 +1661,12 @@ function evidenceList(evidence) {
   );
 }
 
+/** Opens a request in the Lens. Screens with a Lens of their own (Traffic,
+ * Map, Findings) show it in place, so the user never loses their spot. */
 function showExchange(id) {
+  if ($('#inspslot')) return openInspector(id);
   T.sel = id;
-  go('traffic', true);
+  leaveTo('traffic');
 }
 
 /* ======================================================================
@@ -1611,7 +1675,7 @@ function showExchange(id) {
 
 const R = { tabs: [], active: 0, mode: 'response' };
 (function loadBench() {
-  const saved = store('plonix.bench');
+  const saved = pstore('plonix.bench');
   if (saved && Array.isArray(saved.tabs)) {
     R.tabs = saved.tabs;
     R.active = Math.min(saved.active || 0, Math.max(0, R.tabs.length - 1));
@@ -1619,7 +1683,7 @@ const R = { tabs: [], active: 0, mode: 'response' };
 })();
 function saveBench() {
   const tabs = R.tabs.map((t) => ({ ...t, error: undefined, picks: [] }));
-  store('plonix.bench', { tabs: tabs.slice(-30), active: R.active });
+  pstore('plonix.bench', { tabs: tabs.slice(-30), active: R.active });
 }
 const tabNo = () => (R.counter = (R.counter || R.tabs.length) + 1);
 
@@ -1649,7 +1713,7 @@ async function sendToBench(id) {
   });
   R.active = R.tabs.length - 1;
   saveBench();
-  go('bench', true);
+  leaveTo('bench');
 }
 
 function newBlankTab() {
@@ -1715,7 +1779,7 @@ function renderBench(main) {
   const view = h(
     'div',
     { class: 'view' },
-    h('div', { class: 'toolbar' }, h('h2', { text: 'Bench' }), h('span', { class: 'hint', text: 'Each tab is an experiment: edit a request, send it, branch it, compare responses. Sends only reach in-scope hosts.' })),
+    h('div', { class: 'toolbar' }, backButton(), h('h2', { text: 'Bench' }), h('span', { class: 'hint', text: 'Each tab is an experiment: edit a request, send it, branch it, compare responses. Sends only reach in-scope hosts.' })),
     tabs,
   );
   clear(main, view);
@@ -2129,8 +2193,11 @@ function renderScopeBody() {
     }
   };
   domain.addEventListener('keydown', (e) => e.key === 'Enter' && add('accept'));
-  const sugg = S.scope.suggestions || [];
-  const rules = (S.scope.rules || []).slice().sort((x, y) => x.decision.localeCompare(y.decision) || x.pattern.localeCompare(y.pattern));
+  const sugg = stillPending(S.scope.suggestions);
+  const rules = (S.scope.rules || [])
+    .filter((r) => !(r.note || '').startsWith('group:'))
+    .slice()
+    .sort((x, y) => x.decision.localeCompare(y.decision) || x.pattern.localeCompare(y.pattern));
   clear(
     box,
     h(
@@ -2215,6 +2282,195 @@ function renderScopeBody() {
           )
         : null,
     ),
+    excludedSection(),
+  );
+}
+
+/* ---- exclusions: grouped out-of-scope domains ---- */
+
+/** Which exclusion groups are expanded on the Scope screen. */
+const X = { open: {} };
+
+const groupStateLabel = { on: 'On', partial: 'Some', off: 'Off' };
+
+async function reloadExclusions(ex) {
+  if (ex) S.exclusions = ex;
+  // Group changes add or drop reject rules, so refresh the rest of the screen too.
+  await loadScope();
+  renderScopeBody();
+}
+
+async function toggleGroup(id, on) {
+  try {
+    const ex = await api('/api/scope/exclusions/group', { method: 'POST', body: { id, on } });
+    toast(on ? 'Excluded the group' : 'Removed the group from exclusions', on ? 'ok' : '');
+    await reloadExclusions(ex);
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+async function toggleExcludedDomain(id, host, on) {
+  try {
+    const ex = await api('/api/scope/exclusions/domain', { method: 'POST', body: { id, host, on } });
+    await reloadExclusions(ex);
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+function groupCard(g) {
+  const open = !!X.open[g.id];
+  const count = g.domains.filter((d) => d.excluded).length;
+  const header = h(
+    'div',
+    { class: 'top' },
+    h(
+      'button',
+      { class: 'disclose', title: open ? 'Hide domains' : 'Show domains', onclick: () => ((X.open[g.id] = !open), renderScopeBody()) },
+      h('span', { class: 'caret', text: open ? '▾' : '▸' }),
+      h('span', { class: 'dom', text: g.name }),
+    ),
+    h('span', { class: 'meta', text: `${count}/${g.domains.length} excluded${g.builtin ? '' : ' · custom'}` }),
+    h(
+      'span',
+      { class: 'acts' },
+      h('span', { class: 'tag ' + (g.state === 'off' ? 'out' : g.state === 'on' ? 'rej' : ''), text: groupStateLabel[g.state] }),
+      h('button', { class: 'btn sm', text: g.state === 'on' ? 'Turn off' : 'Exclude all', onclick: () => toggleGroup(g.id, g.state !== 'on') }),
+      g.builtin ? null : h('button', { class: 'btn sm danger', text: 'Delete', title: 'Delete this custom group', onclick: () => removeCustomGroup(g) }),
+    ),
+  );
+  const desc = g.description ? h('div', { class: 'gdesc muted', text: g.description }) : null;
+  const list = open
+    ? h(
+        'div',
+        { class: 'domlist' },
+        g.domains.map((d) =>
+          h(
+            'label',
+            { class: 'domrow' },
+            h('input', { type: 'checkbox', checked: d.excluded, onchange: (e) => toggleExcludedDomain(g.id, d.host, e.target.checked) }),
+            h('span', { class: 'mono', text: d.host }),
+          ),
+        ),
+      )
+    : null;
+  return h('div', { class: 'card group' }, header, desc, list);
+}
+
+function newGroupForm() {
+  const name = h('input', { type: 'text', placeholder: 'Group name, e.g. Vendor widgets', spellcheck: 'false' });
+  const domains = h('textarea', { placeholder: 'One domain per line, or comma-separated', rows: '3', spellcheck: 'false' });
+  const create = async () => {
+    const list = domains.value
+      .split(/[\s,]+/)
+      .map((d) => d.trim())
+      .filter(Boolean);
+    if (!name.value.trim()) return name.focus();
+    if (!list.length) return domains.focus();
+    try {
+      const res = await api('/api/scope/exclusions/custom', { method: 'POST', body: { id: '', name: name.value.trim(), domains: list } });
+      name.value = '';
+      domains.value = '';
+      toast('Created the group. Turn it on to exclude its domains.', 'ok');
+      await reloadExclusions(res.exclusions);
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  };
+  return h(
+    'div',
+    { class: 'card newgroup' },
+    h('div', { class: 'caph', text: 'New group' }),
+    name,
+    domains,
+    h('div', { class: 'row end' }, h('button', { class: 'btn primary', text: 'Create group', onclick: create })),
+  );
+}
+
+function removeCustomGroup(g) {
+  modal(
+    'Delete group',
+    h('p', null, 'Delete the custom group ', h('b', { text: g.name }), ' and remove any exclusions it added? This cannot be undone.'),
+    [
+      h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }),
+      h('button', {
+        class: 'btn danger',
+        text: 'Delete group',
+        onclick: async () => {
+          closeModal();
+          try {
+            const ex = await api('/api/scope/exclusions/custom', { method: 'DELETE', body: { id: g.id } });
+            toast('Deleted the group');
+            await reloadExclusions(ex);
+          } catch (e) {
+            toast(e.message, 'err');
+          }
+        },
+      }),
+    ],
+  );
+}
+
+function excludedSection() {
+  const groups = (S.exclusions && S.exclusions.groups) || [];
+  const total = groups.reduce((n, g) => n + g.domains.filter((d) => d.excluded).length, 0);
+  return h(
+    'div',
+    { class: 'excluded' },
+    h(
+      'div',
+      { class: 'sechead' },
+      h('h3', { text: `Excluded domains (${total})` }),
+      h('span', { class: 'hint', text: 'Hosts you never want captured as targets. They are never suggested and never sent to.' }),
+    ),
+    groups.length ? groups.map(groupCard) : h('div', { class: 'card' }, h('div', { class: 'empty', text: 'No exclusion groups.' })),
+    newGroupForm(),
+  );
+}
+
+/** First run: offer to exclude common third-party domains, once per project. */
+function maybeAskExclusions() {
+  if (!S.exclusions || S.exclusions.asked || S.askedExclusionsThisSession) return;
+  const groups = S.exclusions.groups || [];
+  if (!groups.length) return;
+  S.askedExclusionsThisSession = true;
+  const picks = {};
+  groups.forEach((g) => (picks[g.id] = true));
+  const rows = groups.map((g) =>
+    h(
+      'label',
+      { class: 'domrow' },
+      h('input', { type: 'checkbox', checked: true, onchange: (e) => (picks[g.id] = e.target.checked) }),
+      h('span', null, h('b', { text: g.name }), ' ', h('span', { class: 'muted', text: `(${g.domains.length} domains)` })),
+    ),
+  );
+  const finish = async (enable) => {
+    closeModal();
+    try {
+      if (enable) {
+        for (const g of groups) if (picks[g.id]) await api('/api/scope/exclusions/group', { method: 'POST', body: { id: g.id, on: true } });
+      }
+      await api('/api/scope/exclusions/asked', { method: 'POST' });
+      await loadScope();
+      if (S.view === 'scope') renderScopeBody();
+      if (enable) toast('Common domains excluded. Edit them anytime on the Scope screen.', 'ok');
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  };
+  modal(
+    'Exclude common domains?',
+    h(
+      'div',
+      null,
+      h('p', { class: 'muted', text: 'Plonix can keep common third parties — analytics, ads, payments, CDNs and the like — out of your target scope, so they are never suggested or sent to. Pick the groups to exclude; you can change these anytime on the Scope screen.' }),
+      h('div', { class: 'domlist' }, rows),
+    ),
+    [
+      h('button', { class: 'btn', text: 'Not now', onclick: () => finish(false) }),
+      h('button', { class: 'btn primary', text: 'Exclude selected', onclick: () => finish(true) }),
+    ],
   );
 }
 
@@ -2222,7 +2478,21 @@ function renderScopeBody() {
    Map: hosts, endpoints, technologies
    ====================================================================== */
 
-const M = { hosts: [], tech: {}, sel: null, dirty: true };
+const M = { hosts: [], tech: {}, sel: null, dirty: true, scroll: null };
+
+function saveMapScroll() {
+  const list = $('#hostlist');
+  const detail = $('#hostdetail');
+  if (list && detail) M.scroll = [list.scrollTop, detail.scrollTop];
+}
+
+function restoreMapScroll() {
+  const list = $('#hostlist');
+  const detail = $('#hostdetail');
+  if (!M.scroll || !list || !detail) return;
+  [list.scrollTop, detail.scrollTop] = M.scroll;
+  M.scroll = null;
+}
 
 function renderMap(main) {
   clear(
@@ -2237,7 +2507,7 @@ function renderMap(main) {
         h('span', { class: 'hint', id: 'rulesinfo', text: 'Hosts, endpoints and parameters learned from traffic, with detected technologies.' }),
         h('button', { class: 'btn sm', text: 'Refresh', onclick: () => loadMap(true) }),
       ),
-      h('div', { class: 'mapwrap' }, h('div', { class: 'hostlist', id: 'hostlist' }), h('div', { class: 'hostdetail', id: 'hostdetail' })),
+      h('div', { class: 'traffic' }, h('div', { class: 'mapwrap' }, h('div', { class: 'hostlist', id: 'hostlist' }), h('div', { class: 'hostdetail', id: 'hostdetail' })), h('div', { id: 'inspslot' })),
     ),
   );
   loadMap(true);
@@ -2252,7 +2522,8 @@ async function loadMap(withTech) {
   M.dirty = false;
   if (!M.sel && M.hosts.length) M.sel = (M.hosts.find((x) => x.scope === 'accepted') || M.hosts[0]).host;
   drawHostList();
-  drawHostDetail();
+  await drawHostDetail();
+  restoreMapScroll();
   if (withTech) {
     api('/api/rules')
       .then((r) => {
@@ -2348,7 +2619,7 @@ async function drawHostDetail() {
         eps.map((e) =>
           h(
             'tr',
-            { class: 'click', title: 'Open a sample request', onclick: () => showExchange(e.sample_id) },
+            { class: 'click' + (T.sel === e.sample_id ? ' sel' : ''), 'data-ex': e.sample_id, title: 'Open a sample request', onclick: () => showExchange(e.sample_id) },
             h('td', null, h('span', { class: 'meth m-' + e.method, text: e.method })),
             h('td', { class: 'mono', text: e.path }),
             h('td', null, e.statuses.map((s) => [h('span', { class: statusClass(s), text: s }), ' '])),
@@ -2372,7 +2643,7 @@ function renderFindings(main) {
       'div',
       { class: 'view' },
       h('div', { class: 'toolbar' }, h('h2', { text: 'Findings' }), h('span', { class: 'hint', text: 'Reproducible issues, each tied to the requests that prove it.' }), h('button', { class: 'btn primary sm', text: 'New finding', onclick: () => newFinding([], '') })),
-      h('div', { class: 'pane' }, h('div', { class: 'stack', id: 'findbody' })),
+      h('div', { class: 'traffic' }, h('div', { class: 'pane' }, h('div', { class: 'stack', id: 'findbody' })), h('div', { id: 'inspslot' })),
     ),
   );
   loadFindings();
@@ -2410,7 +2681,7 @@ async function loadFindings() {
               'div',
               { class: 'fb' },
               f.description || null,
-              f.exchange_ids.length ? h('div', { class: 'evid' }, f.exchange_ids.map((id) => h('button', { text: 'request #' + id, title: 'Open in Traffic', onclick: () => showExchange(id) }))) : null,
+              f.exchange_ids.length ? h('div', { class: 'evid' }, f.exchange_ids.map((id) => h('button', { text: 'request #' + id, title: 'Open in the Lens', onclick: () => showExchange(id) }))) : null,
             )
           : null,
       ),
@@ -2783,7 +3054,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if ($('.popover, .ctxmenu')) return closePopover();
     if ($('.modal')) return closeModal();
-    if (S.view === 'traffic' && !typing) return closeInspector();
+    if ($('#inspector') && !typing) return closeInspector();
   }
   if (S.view === 'bench' && e.key === 'Enter' && (e.metaKey || e.ctrlKey) && R.send) {
     e.preventDefault();
@@ -2796,7 +3067,7 @@ document.addEventListener('keydown', (e) => {
     }
     return;
   }
-  const keys = Object.keys(VIEWS);
+  const keys = Object.keys(VIEWS).filter((k) => !VIEWS[k].footer);
   if (/^[1-6]$/.test(e.key)) return go(keys[Number(e.key) - 1]);
   if (e.key === '\\') return toggleSidebar();
   if (S.view !== 'traffic') return;
@@ -2811,6 +3082,99 @@ document.addEventListener('keydown', (e) => {
     selectRow(-1);
   } else if (e.key === 'b' && T.sel) sendToBench(T.sel);
 });
+
+/* ---------- settings ---------- */
+
+async function renderSettings(main) {
+  const box = h('div', { class: 'view settingsview' }, h('div', { class: 'empty', text: 'Loading settings…' }));
+  main.append(box);
+  let data;
+  try {
+    data = await api('/api/settings');
+  } catch (e) {
+    clear(box, h('div', { class: 'empty', text: e.message }));
+    return;
+  }
+  if (S.view !== 'settings') return;
+  PlonixSettings.render(box, data, {
+    select: S.settingsSection || 'proxy',
+    onSelect: (id) => (S.settingsSection = id),
+    save: async (section, values) => {
+      const r = await api('/api/settings/' + section, { method: 'PUT', body: { values } });
+      if (section === 'proxy') {
+        S.status = await api('/api/status');
+        updateChrome();
+        r.message = 'Saved and applied. The proxy listens on ' + r.proxy + '.';
+      }
+      return r;
+    },
+    extra: (section, el) => {
+      if (section.id === 'proxy') el.append(proxyPanel());
+      if (section.id === 'storage') el.append(storagePanel());
+    },
+  });
+}
+
+function proxyPanel() {
+  const st = S.status || {};
+  return h(
+    'div',
+    { class: 'spanel' },
+    h('h4', { text: 'Listening now' }),
+    h('p', null, 'This project\'s proxy is at ', h('b', { class: 'mono', text: st.proxy || '…' }), '. Other open projects have proxies of their own.'),
+    h('p', null, 'Devices that should capture through it need the Plonix certificate, from ', h('span', { class: 'mono', text: 'http://' + (st.proxy || '') + '/ca.pem' }), ' through the proxy.'),
+  );
+}
+
+function storagePanel() {
+  const panel = h('div', { class: 'spanel' }, h('h4', { text: 'Out-of-scope traffic' }), h('p', { text: 'Counting…' }));
+  api('/api/storage')
+    .then((s) => {
+      const st = s.stats;
+      const rows = [
+        h('h4', { text: 'Out-of-scope traffic' }),
+        h('p', { text: `${st.out_of_scope} of ${st.total} captured request(s) are to hosts that are not in scope.` }),
+      ];
+      if (s.last_prune) {
+        const r = s.last_prune;
+        rows.push(h('p', { class: 'muted', text: r.skipped ? `Last time: ${r.skipped}.` : `Last time (${fmtDate(r.at)}): deleted ${r.removed}, kept ${r.kept}.` }));
+      }
+      if (!st.in_scope_rules) rows.push(h('p', { class: 'muted', text: 'Nothing is in scope yet, so nothing would be deleted.' }));
+      const btn = h('button', { class: 'btn danger', text: 'Delete Out-of-Scope Traffic Now…', disabled: !st.in_scope_rules || !st.out_of_scope, onclick: () => confirmPrune(st) });
+      rows.push(h('div', { class: 'row' }, btn));
+      clear(panel, rows);
+    })
+    .catch((e) => clear(panel, h('p', { text: e.message })));
+  return panel;
+}
+
+function confirmPrune(st) {
+  const m = modal(
+    'Delete out-of-scope traffic?',
+    [
+      h('p', { text: `This permanently deletes ${st.out_of_scope} request(s) to hosts that are not in scope, then compacts the project file. Requests that findings point to are kept.` }),
+      h('p', { class: 'muted', text: 'Scope suggestions that relied on that traffic go away too.' }),
+    ],
+    [
+      h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }),
+      h('button', {
+        class: 'btn primary',
+        text: 'Delete',
+        onclick: async () => {
+          try {
+            const r = await api('/api/storage/prune', { method: 'POST', body: { confirm: true } });
+            closeModal();
+            toast(r.skipped ? r.skipped : `Deleted ${r.removed} request(s). ${r.kept} kept.`, 'ok');
+            exCache.clear();
+            go('settings', true);
+          } catch (e) {
+            m.err.textContent = e.message;
+          }
+        },
+      }),
+    ],
+  );
+}
 
 // Entry points for the Plonix app's menu bar.
 window.plonix = {

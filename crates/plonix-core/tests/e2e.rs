@@ -44,6 +44,12 @@ async fn upstream_handler(req: Request<Incoming>) -> Result<Response<Full<Bytes>
             text.push_str(&String::from_utf8_lossy(&body));
             Response::builder().header("content-type", "text/plain").body(Full::new(Bytes::from(text)))
         }
+        "/site" => Response::builder().header("content-type", "text/html").body(Full::new(Bytes::from(
+            "<a href=\"/site/a\">a</a> <a href='/site/b?id=1'>b</a> <a href=\"https://evil.test/x\">off</a><form method=\"post\" action=\"/login\"><input name=\"user\"></form>",
+        ))),
+        "/site/a" => Response::builder().header("content-type", "text/html").body(Full::new(Bytes::from("<a href=\"/site/c\">c</a>"))),
+        "/site/b" => Response::builder().header("content-type", "text/html").body(Full::new(Bytes::from("<p>b</p>"))),
+        "/site/c" => Response::builder().header("content-type", "text/html").body(Full::new(Bytes::from("<p>c</p>"))),
         "/.git/config" => Response::builder()
             .header("content-type", "text/plain")
             .body(Full::new(Bytes::from_static(b"[core]\n\trepositoryformatversion = 0\n"))),
@@ -105,6 +111,7 @@ impl rustls::server::ResolvesServerCert for Fixed {
 async fn start(home: &Home, extra_root: Option<CertificateDer<'static>>) -> Running {
     home.ensure().unwrap();
     let ca = Arc::new(CertAuthority::load_or_create(home).unwrap());
+    std::fs::create_dir_all(home.root.join("projects")).unwrap();
     let store = Store::open(&home.project_db("test")).unwrap();
     let upstream = Upstream::new(false, extra_root.into_iter().collect()).unwrap();
     let engine = Engine::new("test", store, ca, upstream).unwrap();
@@ -253,6 +260,41 @@ async fn adaptive_scope_suggests_with_evidence() {
     assert!(!r.engine.store.suggestions(&r.engine.rules()).unwrap().iter().any(|s| s.domain == "127.0.0.1"));
     r.engine.remove_rule("127.0.0.1").unwrap();
     assert!(r.engine.store.suggestions(&r.engine.rules()).unwrap().iter().any(|s| s.domain == "127.0.0.1"));
+}
+
+#[tokio::test]
+async fn crawl_discovers_linked_pages_and_stays_in_scope() {
+    use plonix_core::crawl::CrawlRequest;
+
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let up = serve_http().await;
+    let r = start(&home, None).await;
+
+    // One captured request so the engine knows the host's scheme and port.
+    via_proxy(r.proxy_addr, &format!("http://localhost:{}/site", up.port()), &[]).await;
+    wait_for_count(&r.engine, 1).await;
+
+    // Refused until the host is accepted.
+    let refused = r.engine.crawl(CrawlRequest { host: "localhost".into(), ..Default::default() }, "crawl").await;
+    assert!(matches!(refused, Err(SendError::OutOfScope { .. })));
+
+    r.engine.decide("localhost", Decision::Accepted, false, "").unwrap();
+    let report = r
+        .engine
+        .crawl(CrawlRequest { host: "localhost".into(), start: Some("/site".into()), ..Default::default() }, "crawl")
+        .await
+        .unwrap();
+
+    assert!(report.pages_fetched >= 4, "should have followed links to /site/a,b,c: {report:?}");
+    // The off-host link was not followed.
+    let endpoints = r.engine.store.endpoints("localhost").unwrap();
+    let paths: Vec<&str> = endpoints.iter().map(|e| e.path.as_str()).collect();
+    assert!(paths.contains(&"/site/a") && paths.contains(&"/site/c"), "crawl should reach linked pages: {paths:?}");
+    assert!(report.forms.iter().any(|f| f.action.ends_with("/login") && f.fields.contains(&"user".to_string())));
+    assert!(!r.engine.store.count().is_err());
+    // evil.test was never requested.
+    assert!(r.engine.rules().decide("evil.test") != Decision::Accepted);
 }
 
 #[tokio::test]
@@ -623,4 +665,80 @@ async fn api_opens_the_capture_browser() {
     assert!(args.contains(&format!("--proxy-server=http://{}", r.proxy_addr)), "{args}");
     assert!(args.contains(&format!("--ignore-certificate-errors-spki-list={}", r.engine.ca.spki_sha256())), "{args}");
     assert!(args.ends_with("https://shop.test/login\n"), "{args}");
+}
+
+#[tokio::test]
+async fn exclusions_groups_domains_and_custom() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let r = start(&home, None).await;
+    let base = format!("http://{}", r.api_addr);
+    let token = r.token.clone();
+
+    tokio::task::spawn_blocking(move || {
+        let auth = format!("Bearer {token}");
+        let get = |path: &str| match ureq::get(&format!("{base}{path}")).set("Authorization", &auth).call() {
+            Ok(r) => (r.status(), r.into_json::<serde_json::Value>().unwrap()),
+            Err(ureq::Error::Status(c, r)) => (c, r.into_json::<serde_json::Value>().unwrap()),
+            Err(e) => panic!("{e}"),
+        };
+        let post = |path: &str, body: serde_json::Value| match ureq::post(&format!("{base}{path}")).set("Authorization", &auth).send_json(body) {
+            Ok(r) => (r.status(), r.into_json::<serde_json::Value>().unwrap()),
+            Err(ureq::Error::Status(c, r)) => (c, r.into_json::<serde_json::Value>().unwrap()),
+            Err(e) => panic!("{e}"),
+        };
+
+        // The one-time prompt starts unanswered, and the built-in groups are offered.
+        let (code, ex) = get("/api/scope/exclusions");
+        assert_eq!(code, 200);
+        assert_eq!(ex["asked"], false);
+        let groups = ex["groups"].as_array().unwrap();
+        let analytics = groups.iter().find(|g| g["id"] == "analytics").unwrap();
+        assert_eq!(analytics["state"], "off");
+
+        // Turning a group on excludes every member.
+        let (code, ex) = post("/api/scope/exclusions/group", serde_json::json!({ "id": "analytics", "on": true }));
+        assert_eq!(code, 200);
+        let analytics = ex["groups"].as_array().unwrap().iter().find(|g| g["id"] == "analytics").unwrap().clone();
+        assert_eq!(analytics["state"], "on");
+        assert!(analytics["domains"].as_array().unwrap().iter().all(|d| d["excluded"] == true));
+
+        // An excluded host is out of scope: the engine refuses to send to it.
+        let send = serde_json::json!({ "method": "GET", "url": "https://google-analytics.com/collect" });
+        let (code, body) = match ureq::post(&format!("{base}/api/send")).set("Authorization", &auth).send_json(send) {
+            Ok(r) => (r.status(), r.into_json::<serde_json::Value>().unwrap()),
+            Err(ureq::Error::Status(c, r)) => (c, r.into_json().unwrap()),
+            Err(e) => panic!("{e}"),
+        };
+        assert_eq!((code, body["code"].as_str()), (403, Some("out_of_scope")));
+
+        // Turning one member off makes the group partial.
+        let (_, ex) = post("/api/scope/exclusions/domain", serde_json::json!({ "id": "analytics", "host": "google-analytics.com", "on": false }));
+        let analytics = ex["groups"].as_array().unwrap().iter().find(|g| g["id"] == "analytics").unwrap().clone();
+        assert_eq!(analytics["state"], "partial");
+
+        // A custom group can be created, enabled and deleted.
+        let (code, res) = post("/api/scope/exclusions/custom", serde_json::json!({ "id": "", "name": "Vendor widgets", "domains": ["widget.vendor.test", "cdn.vendor.test"] }));
+        assert_eq!(code, 200);
+        let gid = res["group"]["id"].as_str().unwrap().to_string();
+        assert_eq!(gid, "vendor-widgets");
+        assert!(res["exclusions"]["groups"].as_array().unwrap().iter().any(|g| g["id"] == "vendor-widgets" && g["builtin"] == false));
+
+        let (_, ex) = post("/api/scope/exclusions/group", serde_json::json!({ "id": gid, "on": true }));
+        let custom = ex["groups"].as_array().unwrap().iter().find(|g| g["id"] == "vendor-widgets").unwrap().clone();
+        assert_eq!(custom["state"], "on");
+
+        let del = match ureq::delete(&format!("{base}/api/scope/exclusions/custom")).set("Authorization", &auth).send_json(serde_json::json!({ "id": gid })) {
+            Ok(r) => r.into_json::<serde_json::Value>().unwrap(),
+            Err(ureq::Error::Status(_, r)) => r.into_json().unwrap(),
+            Err(e) => panic!("{e}"),
+        };
+        assert!(!del["groups"].as_array().unwrap().iter().any(|g| g["id"] == "vendor-widgets"));
+
+        // Marking the prompt answered sticks.
+        assert_eq!(post("/api/scope/exclusions/asked", serde_json::json!({})).0, 200);
+        assert_eq!(get("/api/scope/exclusions").1["asked"], true);
+    })
+    .await
+    .unwrap();
 }

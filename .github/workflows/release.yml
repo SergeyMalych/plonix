@@ -1,0 +1,67 @@
+name: Release
+
+# Pushing a tag like v0.2.0 builds Plonix.app, signs the update package and
+# publishes a GitHub release with it. Installed copies of Plonix find the
+# release through latest.json, and only install it when their user says so.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check the version and the update key
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          conf=crates/plonix-app/tauri.conf.json
+          version=$(jq -r .version "$conf")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version $version in $conf"; exit 1
+          fi
+          if [ -z "$(jq -r '.plugins.updater.pubkey // ""' "$conf")" ]; then
+            echo "::error::plugins.updater.pubkey is empty in $conf. See docs/updates.md"; exit 1
+          fi
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret is not set. See docs/updates.md"; exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Build Plonix.app
+        working-directory: crates/plonix-app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: >
+          npx --yes @tauri-apps/cli@2 build --bundles app --target universal-apple-darwin
+          --config '{"bundle":{"createUpdaterArtifacts":true}}' -- --locked
+      - name: Write latest.json
+        run: |
+          dir=target/universal-apple-darwin/release/bundle/macos
+          ditto -c -k --keepParent "$dir/Plonix.app" Plonix-macOS.zip
+          cp "$dir/Plonix.app.tar.gz" Plonix-macOS.app.tar.gz
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/Plonix-macOS.app.tar.gz"
+          jq -n --arg v "$VERSION" --arg url "$url" --rawfile sig "$dir/Plonix.app.tar.gz.sig" \
+            --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg notes "See https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME" \
+            '{version: $v, notes: $notes, pub_date: $date, platforms: {
+               "darwin-aarch64": {url: $url, signature: $sig},
+               "darwin-x86_64": {url: $url, signature: $sig}}}' > latest.json
+          cat latest.json
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" --title "Plonix $VERSION" --generate-notes
+          Plonix-macOS.zip Plonix-macOS.app.tar.gz latest.json
