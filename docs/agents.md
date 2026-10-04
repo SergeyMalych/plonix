@@ -18,7 +18,7 @@ Plonix · connect Claude Code
   ✓ Claude Code  added MCP server "plonix" for all your projects: /Users/you/.cargo/bin/plonix mcp
 
 What the agent can do (read-only):
-  status · search_traffic · get_request · get_insights · list_hosts · list_endpoints · detected_tech · get_scope · list_findings · findings_report
+  status · search_traffic · get_request · get_insights · get_messages · list_hosts · list_endpoints · detected_tech · get_scope · list_findings · findings_report
 Not allowed:
   ✗ Send or replay requests
   ✗ Accept, reject or remove scope rules
@@ -65,6 +65,7 @@ Set `PLONIX_HOME` in the server's environment if your data is not in `~/.plonix`
 | `search_traffic` | Captured requests matching a query (the same search language as the window and `plonix search`), newest first, with paging |
 | `get_request` | One request and its response in full, with decoded bodies (clipped to `max_body_chars`) |
 | `get_insights` | What stands out in a request: decodable tokens such as JWTs, personal data, secrets |
+| `get_messages` | The WebSocket messages sent over the connection a handshake opened, oldest first |
 | `list_hosts` | Every host seen, with request counts and scope decision |
 | `list_endpoints` | Methods, paths, statuses and parameter names seen on a host |
 | `detected_tech` | Technologies detected per host, with confidence and evidence |

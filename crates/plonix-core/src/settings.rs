@@ -438,7 +438,18 @@ fn proxy_section() -> Section {
                 .help("Hosts that skip the upstream proxy, one per line."),
         )
         .field(Field::number("connect_timeout_s", "Connect timeout", 10, 1, 300).unit("seconds").group("Timeouts"))
-        .field(Field::number("request_timeout_s", "Request timeout", 120, 1, 3600).unit("seconds").group("Timeouts"))
+        .field(
+            Field::number("request_timeout_s", "Request timeout", 120, 1, 3600)
+                .unit("seconds")
+                .group("Timeouts")
+                .help("How long a server may take to answer. Through the proxy, event streams and downloads keep going once the answer has started."),
+        )
+        .field(
+            Field::number("max_body_mb", "Keep bodies up to", 10, 1, 1024)
+                .unit("MB")
+                .group("Recording")
+                .help("Each request and response body passes through in full; Plonix keeps the start of a longer one and notes its full size."),
+        )
         .validator(|v| {
             let mut p = vec![];
             let host = v.get("listen_host").and_then(Value::as_str).unwrap_or("");
@@ -505,6 +516,8 @@ pub struct ProxySettings {
     pub upstream_bypass: Vec<String>,
     pub connect_timeout_s: u64,
     pub request_timeout_s: u64,
+    /// Bodies are recorded up to this many megabytes each.
+    pub max_body_mb: u64,
 }
 
 impl ProxySettings {
@@ -522,6 +535,7 @@ impl ProxySettings {
             upstream_bypass: l(v, "upstream_bypass"),
             connect_timeout_s: n(v, "connect_timeout_s").max(1) as u64,
             request_timeout_s: n(v, "request_timeout_s").max(1) as u64,
+            max_body_mb: n(v, "max_body_mb").max(1) as u64,
         }
     }
 }
@@ -603,6 +617,7 @@ mod tests {
         assert_eq!(p.listen_host.to_string(), "127.0.0.1");
         assert!(!p.intercept_tls);
         assert_eq!(p.upstream_bypass, vec!["localhost", "127.0.0.1", "::1"]);
+        assert_eq!(p.max_body_mb, 10);
     }
 
     #[test]

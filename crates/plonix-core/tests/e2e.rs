@@ -222,6 +222,7 @@ async fn intercepts_https_with_minted_certificate() {
     assert_eq!((ex.scheme.as_str(), ex.method.as_str(), ex.path.as_str(), ex.query.as_str()), ("https", "POST", "/echo", "debug=1"));
     assert_eq!(ex.req_body, b"user=alice&pass=s3cret");
     assert_eq!(ex.tls_sans, vec!["localhost".to_string()]);
+    assert_eq!(ex.http_version, "HTTP/1.1", "the server only speaks HTTP/1.1");
     let (hits, _) = r.engine.store.search(&Query::parse("s3cret").unwrap(), &r.engine.rules(), 10, 0).unwrap();
     assert_eq!(hits.len(), 1);
 }
@@ -883,4 +884,512 @@ async fn exclusions_groups_domains_and_custom() {
     })
     .await
     .unwrap();
+}
+
+/// A response body fed by the test, one chunk at a time.
+struct ChunkBody(tokio::sync::mpsc::Receiver<Bytes>);
+
+impl hyper::body::Body for ChunkBody {
+    type Data = Bytes;
+    type Error = Infallible;
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<hyper::body::Frame<Bytes>, Infallible>>> {
+        self.0.poll_recv(cx).map(|c| c.map(|b| Ok(hyper::body::Frame::data(b))))
+    }
+}
+
+/// Serves `/events`, an event stream that sends its first event, waits for
+/// `go`, then sends the last one; and `/big`, a gzip-compressed page.
+async fn serve_streams(go: Arc<tokio::sync::Notify>) -> SocketAddr {
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let (s, _) = l.accept().await.unwrap();
+            let go = go.clone();
+            let svc = service_fn(move |req: Request<Incoming>| {
+                let go = go.clone();
+                async move {
+                    let resp = match req.uri().path() {
+                        "/events" => {
+                            let (tx, rx) = tokio::sync::mpsc::channel(4);
+                            tokio::spawn(async move {
+                                tx.send(Bytes::from_static(b"data: first\n\n")).await.unwrap();
+                                go.notified().await;
+                                tx.send(Bytes::from_static(b"data: last\n\n")).await.unwrap();
+                            });
+                            Response::builder().header("content-type", "text/event-stream").body(ChunkBody(rx).boxed())
+                        }
+                        _ => {
+                            use std::io::Write;
+                            let text: String = std::iter::once("plonix-start\n".to_string()).chain((0..5000).map(|i| format!("line {i}\n"))).collect();
+                            let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+                            enc.write_all(text.as_bytes()).unwrap();
+                            Response::builder()
+                                .header("content-type", "text/plain")
+                                .header("content-encoding", "gzip")
+                                .body(Full::new(Bytes::from(enc.finish().unwrap())).boxed())
+                        }
+                    };
+                    Ok::<_, Infallible>(resp.unwrap())
+                }
+            });
+            tokio::spawn(hyper::server::conn::http1::Builder::new().serve_connection(TokioIo::new(s), svc));
+        }
+    });
+    addr
+}
+
+/// Event streams reach the client as they are sent, and the exchange is
+/// recorded once the stream ends.
+#[tokio::test]
+async fn event_streams_pass_through_as_they_arrive() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let go = Arc::new(tokio::sync::Notify::new());
+    let up = serve_streams(go.clone()).await;
+    let r = start(&home, None).await;
+
+    let tcp = TcpStream::connect(r.proxy_addr).await.unwrap();
+    let (mut sender, conn) = hyper::client::conn::http1::handshake::<_, Full<Bytes>>(TokioIo::new(tcp)).await.unwrap();
+    tokio::spawn(conn);
+    let url = format!("http://localhost:{}/events", up.port());
+    let req = Request::builder().uri(&url).header("host", format!("localhost:{}", up.port())).body(Full::new(Bytes::new())).unwrap();
+    let resp = sender.send_request(req).await.unwrap();
+    assert_eq!(resp.headers()["content-type"], "text/event-stream");
+    let mut body = resp.into_body();
+    // The server holds the last event back until the client has the first,
+    // so a proxy that waits for the whole body never gets here.
+    let first = tokio::time::timeout(Duration::from_secs(5), body.frame()).await.expect("first event arrives before the stream ends");
+    let first = first.unwrap().unwrap().into_data().unwrap();
+    assert_eq!(&first[..], b"data: first\n\n");
+    assert_eq!(r.engine.store.count().unwrap(), 0, "recorded when the stream ends");
+    go.notify_one();
+    let rest = tokio::time::timeout(Duration::from_secs(5), body.collect()).await.unwrap().unwrap().to_bytes();
+    assert_eq!(&rest[..], b"data: last\n\n");
+
+    wait_for_count(&r.engine, 1).await;
+    let ex = r.engine.store.get_exchange(1).unwrap().unwrap();
+    assert_eq!(ex.resp_body, b"data: first\n\ndata: last\n\n");
+    assert!(!ex.resp_truncated);
+}
+
+/// Bodies over the recording limit go through in full; the start is kept,
+/// decoded and searchable, and the full size is noted.
+#[tokio::test]
+async fn long_bodies_pass_through_and_are_kept_in_part() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let up = serve_http().await;
+    let big = serve_streams(Arc::new(tokio::sync::Notify::new())).await;
+    let r = start(&home, None).await;
+    r.engine.set_body_limit(1000);
+
+    // A compressed response, cut at 1000 bytes on the wire.
+    let (status, text) = via_proxy(r.proxy_addr, &format!("http://localhost:{}/big", big.port()), &[]).await;
+    assert_eq!(status, 200);
+    assert!(!text.is_empty(), "the client gets the whole compressed body");
+    wait_for_count(&r.engine, 1).await;
+    let ex = r.engine.store.get_exchange(1).unwrap().unwrap();
+    assert!(ex.resp_truncated);
+    assert_eq!(ex.resp_body.len(), 1000);
+    assert!(ex.resp_size.unwrap() > 1000);
+    let decoded = plonix_core::codec::body_text(&ex.resp_headers, &ex.resp_body).unwrap();
+    assert!(decoded.starts_with("plonix-start\nline 0\n"), "{}", &decoded[..decoded.len().min(40)]);
+    let (hits, _) = r.engine.store.search(&Query::parse("plonix-start").unwrap(), &r.engine.rules(), 10, 0).unwrap();
+    assert_eq!(hits.len(), 1, "the kept part is searchable");
+    assert_eq!(hits[0].resp_len, ex.resp_size.unwrap(), "listings show the full size");
+
+    // A request body over the limit streams to the server in full.
+    let tcp = TcpStream::connect(r.proxy_addr).await.unwrap();
+    let (mut sender, conn) = hyper::client::conn::http1::handshake::<_, Full<Bytes>>(TokioIo::new(tcp)).await.unwrap();
+    tokio::spawn(conn);
+    let payload = "x".repeat(3000);
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("http://localhost:{}/echo", up.port()))
+        .header("host", format!("localhost:{}", up.port()))
+        .body(Full::new(Bytes::from(payload.clone())))
+        .unwrap();
+    let echoed = sender.send_request(req).await.unwrap().into_body().collect().await.unwrap().to_bytes();
+    assert!(String::from_utf8_lossy(&echoed).ends_with(&payload), "the server got the whole body");
+    wait_for_count(&r.engine, 2).await;
+    let ex = r.engine.store.get_exchange(2).unwrap().unwrap();
+    assert!(ex.req_truncated && ex.resp_truncated);
+    assert_eq!((ex.req_body.len(), ex.req_size), (1000, Some(3000)));
+
+    // A cut request body is not re-sent as if it were whole.
+    r.engine.decide("localhost", Decision::Accepted, false, "").unwrap();
+    let err = r.engine.replay(ReplayRequest { id: 2, ..Default::default() }, "test").await.unwrap_err();
+    assert!(matches!(err, SendError::BadRequest(_)), "{err}");
+}
+
+/// Writes one WebSocket frame; clients mask theirs.
+async fn ws_write<S: tokio::io::AsyncWrite + Unpin>(s: &mut S, fin: bool, opcode: u8, payload: &[u8], masked: bool) {
+    let mut f = vec![(fin as u8) << 7 | opcode];
+    let m = if masked { 0x80 } else { 0 };
+    if payload.len() < 126 {
+        f.push(m | payload.len() as u8);
+    } else {
+        f.push(m | 126);
+        f.extend_from_slice(&(payload.len() as u16).to_be_bytes());
+    }
+    if masked {
+        let key = [9u8, 8, 7, 6];
+        f.extend_from_slice(&key);
+        f.extend(payload.iter().enumerate().map(|(i, b)| b ^ key[i % 4]));
+    } else {
+        f.extend_from_slice(payload);
+    }
+    s.write_all(&f).await.unwrap();
+    s.flush().await.unwrap();
+}
+
+/// Reads one WebSocket frame: (fin, opcode, unmasked payload).
+async fn ws_read<S: tokio::io::AsyncRead + Unpin>(s: &mut S) -> (bool, u8, Vec<u8>) {
+    let mut h = [0u8; 2];
+    s.read_exact(&mut h).await.unwrap();
+    let len = match h[1] & 0x7f {
+        126 => {
+            let mut b = [0u8; 2];
+            s.read_exact(&mut b).await.unwrap();
+            u16::from_be_bytes(b) as usize
+        }
+        127 => {
+            let mut b = [0u8; 8];
+            s.read_exact(&mut b).await.unwrap();
+            u64::from_be_bytes(b) as usize
+        }
+        n => n as usize,
+    };
+    let mut key = [0u8; 4];
+    if h[1] & 0x80 != 0 {
+        s.read_exact(&mut key).await.unwrap();
+    }
+    let mut payload = vec![0u8; len];
+    s.read_exact(&mut payload).await.unwrap();
+    for (i, b) in payload.iter_mut().enumerate() {
+        *b ^= key[i % 4];
+    }
+    (h[0] & 0x80 != 0, h[0] & 0x0f, payload)
+}
+
+/// Echoes every frame back as it came (fragments too); answers pings and closes.
+async fn ws_echo<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(mut s: S) {
+    loop {
+        let (fin, op, payload) = ws_read(&mut s).await;
+        match op {
+            8 => {
+                ws_write(&mut s, true, 8, &payload, false).await;
+                return;
+            }
+            9 => ws_write(&mut s, true, 10, &payload, false).await,
+            _ => ws_write(&mut s, fin, op, &payload, false).await,
+        }
+    }
+}
+
+/// A WebSocket echo server at `/ws`, over TLS for `localhost` when `tls` is set.
+async fn serve_ws(tls: bool) -> (SocketAddr, CertificateDer<'static>) {
+    let (ca_pem, ca_key) = CertAuthority::generate_pem().unwrap();
+    let test_ca = CertAuthority::from_pem(&ca_pem, &ca_key).unwrap();
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let config = rustls::ServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_cert_resolver(Arc::new(Fixed(test_ca.leaf_for("localhost").unwrap())));
+    let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    let handler = |req: Request<Incoming>| async move {
+        use base64::Engine as _;
+        let key = req.headers()["sec-websocket-key"].to_str().unwrap().to_string();
+        let digest = ring::digest::digest(&ring::digest::SHA1_FOR_LEGACY_USE_ONLY, format!("{key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11").as_bytes());
+        let accept = base64::engine::general_purpose::STANDARD.encode(digest.as_ref());
+        tokio::spawn(async move {
+            let io = hyper::upgrade::on(req).await.unwrap();
+            ws_echo(TokioIo::new(io)).await;
+        });
+        Ok::<_, Infallible>(
+            Response::builder()
+                .status(101)
+                .header("connection", "Upgrade")
+                .header("upgrade", "websocket")
+                .header("sec-websocket-accept", accept)
+                .body(Full::new(Bytes::new()))
+                .unwrap(),
+        )
+    };
+    tokio::spawn(async move {
+        loop {
+            let (s, _) = l.accept().await.unwrap();
+            let acceptor = acceptor.clone();
+            tokio::spawn(async move {
+                let conn = hyper::server::conn::http1::Builder::new();
+                if tls {
+                    let Ok(t) = acceptor.accept(s).await else { return };
+                    let _ = conn.serve_connection(TokioIo::new(t), service_fn(handler)).with_upgrades().await;
+                } else {
+                    let _ = conn.serve_connection(TokioIo::new(s), service_fn(handler)).with_upgrades().await;
+                }
+            });
+        }
+    });
+    (addr, CertificateDer::from_pem_slice(ca_pem.as_bytes()).unwrap())
+}
+
+/// Opens a CONNECT tunnel through the proxy and starts TLS that trusts the Plonix CA.
+async fn tunnel(r: &Running, target: &str, alpn: &[&[u8]]) -> tokio_rustls::client::TlsStream<TcpStream> {
+    let mut tcp = TcpStream::connect(r.proxy_addr).await.unwrap();
+    tcp.write_all(format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n\r\n").as_bytes()).await.unwrap();
+    let mut buf = [0u8; 1024];
+    let n = tcp.read(&mut buf).await.unwrap();
+    assert!(String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/1.1 200"));
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add(r.engine.ca.ca_der().clone()).unwrap();
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    config.alpn_protocols = alpn.iter().map(|p| p.to_vec()).collect();
+    tokio_rustls::TlsConnector::from(Arc::new(config)).connect(ServerName::try_from("localhost").unwrap(), tcp).await.unwrap()
+}
+
+/// Sends a handshake, then text in two fragments, a ping, binary and a close,
+/// checking each echo.
+async fn ws_session<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(s: &mut S, target: &str, host: &str) {
+    let handshake = format!(
+        "GET {target} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+    );
+    s.write_all(handshake.as_bytes()).await.unwrap();
+    let mut head = Vec::new();
+    let mut byte = [0u8; 1];
+    while !head.ends_with(b"\r\n\r\n") {
+        s.read_exact(&mut byte).await.unwrap();
+        head.push(byte[0]);
+    }
+    let head = String::from_utf8_lossy(&head).to_ascii_lowercase();
+    assert!(head.starts_with("http/1.1 101"), "{head}");
+    assert!(head.contains("sec-websocket-accept: s3pplmbitxaq9kygzzhzrbk+xoo="), "{head}");
+
+    ws_write(s, false, 1, b"hello ", true).await;
+    ws_write(s, true, 0, b"world", true).await;
+    assert_eq!(ws_read(s).await, (false, 1, b"hello ".to_vec()));
+    assert_eq!(ws_read(s).await, (true, 0, b"world".to_vec()));
+    ws_write(s, true, 9, b"p", true).await;
+    assert_eq!(ws_read(s).await, (true, 10, b"p".to_vec()));
+    let big = vec![7u8; 3000];
+    ws_write(s, true, 2, &big, true).await;
+    assert_eq!(ws_read(s).await, (true, 2, big));
+    ws_write(s, true, 8, &[0x03, 0xe8], true).await;
+    assert_eq!(ws_read(s).await.1, 8);
+}
+
+/// Waits until a handshake has this many messages recorded, and returns them.
+async fn wait_for_messages(engine: &Engine, id: i64, n: i64) -> Vec<plonix_core::model::WsMessage> {
+    for _ in 0..300 {
+        let (list, total) = engine.store.ws_messages(id, 100, 0).unwrap();
+        if total >= n {
+            return list;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("expected {n} messages, have {:?}", engine.store.ws_messages(id, 100, 0).unwrap().0);
+}
+
+fn assert_captured(msgs: &[plonix_core::model::WsMessage]) {
+    let side = |d: &str| msgs.iter().filter(|m| m.direction == d).map(|m| (m.opcode.as_str(), m.payload.len(), m.truncated)).collect::<Vec<_>>();
+    assert_eq!(side("to_server"), vec![("text", 11, false), ("ping", 1, false), ("binary", 1000, true), ("close", 2, false)]);
+    assert_eq!(side("to_client"), vec![("text", 11, false), ("pong", 1, false), ("binary", 1000, true), ("close", 2, false)]);
+    let text = msgs.iter().find(|m| m.opcode == "text").unwrap();
+    assert_eq!(text.text().as_deref(), Some("hello world"));
+    assert!(msgs.iter().filter(|m| m.opcode == "binary").all(|m| m.size == 3000));
+    assert_eq!(msgs.iter().find(|m| m.opcode == "close").unwrap().text().as_deref(), Some("1000"));
+}
+
+/// WebSockets work through the proxy, in plain HTTP and inside decrypted
+/// HTTPS, and every message is recorded against its handshake.
+#[tokio::test]
+async fn websockets_are_relayed_and_their_messages_recorded() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let (plain, _) = serve_ws(false).await;
+    let (secure, secure_root) = serve_ws(true).await;
+    let r = start(&home, Some(secure_root)).await;
+    r.engine.set_body_limit(1000);
+
+    // ws:// through the proxy, in absolute form.
+    let host = format!("localhost:{}", plain.port());
+    let mut tcp = TcpStream::connect(r.proxy_addr).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(10), ws_session(&mut tcp, &format!("http://{host}/ws?room=1"), &host)).await.expect("plain session");
+    wait_for_count(&r.engine, 1).await;
+    let ex = r.engine.store.get_exchange(1).unwrap().unwrap();
+    assert_eq!((ex.status, ex.method.as_str(), ex.path.as_str(), ex.query.as_str()), (Some(101), "GET", "/ws", "room=1"));
+    assert_captured(&wait_for_messages(&r.engine, 1, 8).await);
+
+    // wss:// inside a decrypted CONNECT tunnel.
+    let host = format!("localhost:{}", secure.port());
+    let mut tls = tunnel(&r, &host, &[b"http/1.1"]).await;
+    tokio::time::timeout(Duration::from_secs(10), ws_session(&mut tls, "/ws", &host)).await.expect("TLS session");
+    wait_for_count(&r.engine, 2).await;
+    let ex = r.engine.store.get_exchange(2).unwrap().unwrap();
+    assert_eq!((ex.scheme.as_str(), ex.status), ("https", Some(101)));
+    assert_captured(&wait_for_messages(&r.engine, 2, 8).await);
+
+    // The API lists them, for the user and (in scope) for agents.
+    r.engine.decide("localhost", Decision::Accepted, false, "").unwrap();
+    let base = format!("http://{}", r.api_addr);
+    let (user, agent) = (format!("Bearer {}", r.token), format!("Bearer {}", r.agent_token));
+    tokio::task::spawn_blocking(move || {
+        for auth in [&user, &agent] {
+            let v: serde_json::Value = ureq::get(&format!("{base}/api/traffic/2/messages?limit=3")).set("Authorization", auth).call().unwrap().into_json().unwrap();
+            assert_eq!(v["total"], 8);
+            assert_eq!(v["items"].as_array().unwrap().len(), 3);
+            assert_eq!((v["items"][0]["direction"].as_str(), v["items"][0]["text"].as_str()), (Some("to_server"), Some("hello world")));
+        }
+        let missing = ureq::get(&format!("{base}/api/traffic/99/messages")).set("Authorization", &user).call();
+        assert!(matches!(missing, Err(ureq::Error::Status(404, _))));
+    })
+    .await
+    .unwrap();
+}
+
+/// Hosts that are never decrypted pass through untouched, WebSockets included.
+#[tokio::test]
+async fn websockets_in_hosts_never_decrypted_are_not_recorded() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let (secure, secure_root) = serve_ws(true).await;
+    let r = start(&home, None).await;
+    let settings = plonix_core::settings::ProxySettings { passthrough_hosts: vec!["localhost".into()], listen_port: 0, ..Default::default() };
+    r.engine.apply_proxy_settings(&settings).await.unwrap();
+    let proxy = r.engine.proxy_addr().unwrap();
+
+    let host = format!("localhost:{}", secure.port());
+    let mut tcp = TcpStream::connect(proxy).await.unwrap();
+    tcp.write_all(format!("CONNECT {host} HTTP/1.1\r\nHost: {host}\r\n\r\n").as_bytes()).await.unwrap();
+    let mut buf = [0u8; 1024];
+    let n = tcp.read(&mut buf).await.unwrap();
+    assert!(String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/1.1 200"));
+    // The server's own certificate comes through, not one minted by Plonix.
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add(secure_root).unwrap();
+    let config = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    let mut tls = tokio_rustls::TlsConnector::from(Arc::new(config)).connect(ServerName::try_from("localhost").unwrap(), tcp).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(10), ws_session(&mut tls, "/ws", &host)).await.expect("session");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(r.engine.store.count().unwrap(), 0);
+}
+
+/// An HTTPS server for `localhost` that speaks HTTP/2 only. `/echo` answers
+/// with the protocol, request line, headers and body it received.
+async fn serve_h2() -> (SocketAddr, CertificateDer<'static>) {
+    let (ca_pem, ca_key) = CertAuthority::generate_pem().unwrap();
+    let test_ca = CertAuthority::from_pem(&ca_pem, &ca_key).unwrap();
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut config = rustls::ServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_cert_resolver(Arc::new(Fixed(test_ca.leaf_for("localhost").unwrap())));
+    config.alpn_protocols = vec![b"h2".to_vec()];
+    let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    let handler = |req: Request<Incoming>| async move {
+        let (parts, body) = req.into_parts();
+        let body = body.collect().await.unwrap().to_bytes();
+        let mut text = format!("{:?} {} {}\n", parts.version, parts.method, parts.uri);
+        for (k, v) in &parts.headers {
+            text.push_str(&format!("{}: {}\n", k, v.to_str().unwrap_or("")));
+        }
+        text.push('\n');
+        text.push_str(&String::from_utf8_lossy(&body));
+        Ok::<_, Infallible>(Response::builder().header("content-type", "text/plain").body(Full::new(Bytes::from(text))).unwrap())
+    };
+    tokio::spawn(async move {
+        loop {
+            let (s, _) = l.accept().await.unwrap();
+            let acceptor = acceptor.clone();
+            tokio::spawn(async move {
+                if let Ok(tls) = acceptor.accept(s).await {
+                    let _ = hyper::server::conn::http2::Builder::new(hyper_util::rt::TokioExecutor::new())
+                        .serve_connection(TokioIo::new(tls), service_fn(handler))
+                        .await;
+                }
+            });
+        }
+    });
+    (addr, CertificateDer::from_pem_slice(ca_pem.as_bytes()).unwrap())
+}
+
+/// HTTP/2 on both sides: the browser can speak it to the proxy, the proxy
+/// speaks it to servers that offer it, and each exchange records which.
+#[tokio::test]
+async fn http2_is_spoken_on_both_sides_and_recorded() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let (up, root) = serve_h2().await;
+    let r = start(&home, Some(root)).await;
+    let host = format!("localhost:{}", up.port());
+
+    // An HTTP/2 client: the proxy agrees to HTTP/2 inside the tunnel.
+    let tls = tunnel(&r, &host, &[b"h2", b"http/1.1"]).await;
+    assert_eq!(tls.get_ref().1.alpn_protocol(), Some(&b"h2"[..]));
+    let (mut sender, conn) = hyper::client::conn::http2::handshake::<_, _, Full<Bytes>>(hyper_util::rt::TokioExecutor::new(), TokioIo::new(tls)).await.unwrap();
+    tokio::spawn(conn);
+    let req = Request::builder()
+        .uri(format!("https://{host}/echo?x=1"))
+        .header("cookie", "a=1")
+        .header("cookie", "b=2")
+        .body(Full::new(Bytes::new()))
+        .unwrap();
+    let resp = sender.send_request(req).await.unwrap();
+    assert_eq!((resp.status().as_u16(), resp.version()), (200, hyper::Version::HTTP_2));
+    let text = String::from_utf8_lossy(&resp.into_body().collect().await.unwrap().to_bytes()).into_owned();
+    assert!(text.starts_with(&format!("HTTP/2.0 GET https://{host}/echo?x=1")), "{text}");
+    assert!(text.contains("cookie: a=1; b=2"), "{text}");
+    wait_for_count(&r.engine, 1).await;
+    let ex = r.engine.store.get_exchange(1).unwrap().unwrap();
+    assert_eq!((ex.http_version.as_str(), ex.status, ex.query.as_str()), ("HTTP/2", Some(200), "x=1"));
+    assert_eq!(plonix_core::model::header(&ex.req_headers, "host"), Some(host.as_str()), "recorded like HTTP/1.1");
+
+    // An HTTP/1.1 client: the server is still reached over HTTP/2.
+    let tls = tunnel(&r, &host, &[b"http/1.1"]).await;
+    let (mut sender, conn) = hyper::client::conn::http1::handshake::<_, Full<Bytes>>(TokioIo::new(tls)).await.unwrap();
+    tokio::spawn(conn);
+    let req = Request::builder()
+        .method("POST")
+        .uri("/echo")
+        .header("host", &host)
+        .header("connection", "keep-alive")
+        .body(Full::new(Bytes::from_static(b"over h2")))
+        .unwrap();
+    let text = String::from_utf8_lossy(&sender.send_request(req).await.unwrap().into_body().collect().await.unwrap().to_bytes()).into_owned();
+    assert!(text.starts_with(&format!("HTTP/2.0 POST https://{host}/echo")) && text.ends_with("over h2"), "{text}");
+    assert!(!text.contains("connection:") && !text.contains("\nhost:"), "no connection headers in HTTP/2: {text}");
+    wait_for_count(&r.engine, 2).await;
+    assert_eq!(r.engine.store.get_exchange(2).unwrap().unwrap().http_version, "HTTP/2");
+
+    // Replays use HTTP/2 too.
+    r.engine.decide("localhost", Decision::Accepted, false, "").unwrap();
+    let ex = r.engine.replay(ReplayRequest { id: 2, body: Some("again".into()), ..Default::default() }, "test").await.unwrap();
+    assert_eq!(ex.http_version, "HTTP/2");
+    assert!(String::from_utf8_lossy(&ex.resp_body).ends_with("again"));
+    let ex = r
+        .engine
+        .send(SendRequest { method: "GET".into(), url: format!("https://{host}/echo"), headers: vec![("Host".into(), host.clone())], ..Default::default() }, "test")
+        .await
+        .unwrap();
+    assert_eq!((ex.status, ex.http_version.as_str()), (Some(200), "HTTP/2"));
 }

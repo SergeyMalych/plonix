@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Instant;
 
@@ -11,7 +11,7 @@ use base64::Engine as _;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
-use tokio::sync::{Notify, mpsc};
+use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::ca::CertAuthority;
@@ -47,14 +47,19 @@ pub struct Engine {
     pub project_ref: OnceLock<ProjectRef>,
     /// Captured exchanges are recorded in arrival order by one worker, so a
     /// response is always analyzed before requests that follow it.
-    recorder: mpsc::UnboundedSender<Exchange>,
-    recorder_rx: Mutex<Option<mpsc::UnboundedReceiver<Exchange>>>,
+    recorder: mpsc::UnboundedSender<Queued>,
+    recorder_rx: Mutex<Option<mpsc::UnboundedReceiver<Queued>>>,
     detection: Mutex<DetectionState>,
     filters: Mutex<FilterState>,
     /// The listen address last asked for in the settings.
     applied_listen: Mutex<Option<SocketAddr>>,
     overrides: Mutex<UpstreamOptions>,
+    /// Bodies passing through the proxy are recorded up to this many bytes.
+    body_limit: AtomicUsize,
 }
+
+/// How much of each body is recorded until the settings say otherwise.
+pub const DEFAULT_BODY_LIMIT: usize = 10 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct StorageStats {
@@ -62,6 +67,9 @@ pub struct StorageStats {
     pub out_of_scope: i64,
     pub in_scope_rules: usize,
 }
+
+/// An exchange waiting to be recorded, and who wants to know its id.
+type Queued = (Exchange, Option<oneshot::Sender<i64>>);
 
 #[derive(Default)]
 struct ProxyListener {
@@ -179,7 +187,17 @@ impl Engine {
             filters: Mutex::new(FilterState::default()),
             applied_listen: Mutex::new(None),
             overrides: Mutex::default(),
+            body_limit: AtomicUsize::new(DEFAULT_BODY_LIMIT),
         }))
+    }
+
+    /// How many bytes of each body the proxy records.
+    pub fn body_limit(&self) -> usize {
+        self.body_limit.load(Ordering::Relaxed)
+    }
+
+    pub fn set_body_limit(&self, bytes: usize) {
+        self.body_limit.store(bytes.max(1), Ordering::Relaxed);
     }
 
     /// The client used for outbound requests.
@@ -244,6 +262,7 @@ impl Engine {
         let bound = if keep { current.unwrap() } else { self.bind_proxy(addr, p.port_fallback).await? };
         *self.applied_listen.lock().unwrap() = Some(addr);
         self.set_upstream(upstream);
+        self.set_body_limit((p.max_body_mb as usize).saturating_mul(1024 * 1024));
         *self.interception.write().unwrap() = Interception { decrypt: p.intercept_tls, passthrough: p.passthrough_hosts.clone() };
         Ok(bound)
     }
@@ -396,9 +415,25 @@ impl Engine {
 
     /// Queues a captured exchange for recording (see [`Engine::start_recorder`]).
     pub fn enqueue(self: &Arc<Self>, ex: Exchange) {
-        if let Err(mpsc::error::SendError(ex)) = self.recorder.send(ex) {
+        self.queue(ex, None);
+    }
+
+    /// Like [`Engine::enqueue`], and tells the exchange's id once it is
+    /// recorded (WebSocket messages are stored against their handshake).
+    pub fn enqueue_for_id(self: &Arc<Self>, ex: Exchange) -> oneshot::Receiver<i64> {
+        let (tx, rx) = oneshot::channel();
+        self.queue(ex, Some(tx));
+        rx
+    }
+
+    fn queue(self: &Arc<Self>, ex: Exchange, reply: Option<oneshot::Sender<i64>>) {
+        if let Err(mpsc::error::SendError((ex, reply))) = self.recorder.send((ex, reply)) {
             let engine = self.clone();
-            tokio::task::spawn_blocking(move || engine.record(ex));
+            tokio::task::spawn_blocking(move || {
+                if let (Ok(id), Some(reply)) = (engine.record(ex), reply) {
+                    let _ = reply.send(id);
+                }
+            });
         }
     }
 
@@ -409,9 +444,14 @@ impl Engine {
         std::thread::Builder::new()
             .name("plonix-recorder".into())
             .spawn(move || {
-                while let Some(ex) = rx.blocking_recv() {
-                    if let Err(e) = engine.record(ex) {
-                        tracing::error!("failed to record exchange: {e:#}");
+                while let Some((ex, reply)) = rx.blocking_recv() {
+                    match engine.record(ex) {
+                        Ok(id) => {
+                            if let Some(reply) = reply {
+                                let _ = reply.send(id);
+                            }
+                        }
+                        Err(e) => tracing::error!("failed to record exchange: {e:#}"),
                     }
                 }
             })
@@ -646,6 +686,7 @@ impl Engine {
                 ex.resp_headers = up.headers;
                 ex.resp_body = up.body.to_vec();
                 ex.tls_sans = up.tls_sans;
+                ex.http_version = up.version;
             }
             Err(e) => ex.error = Some(format!("{e:#}")),
         }
@@ -668,6 +709,13 @@ impl Engine {
         let target = req.target.clone().unwrap_or_else(|| {
             if orig.query.is_empty() { orig.path.clone() } else { format!("{}?{}", orig.path, orig.query) }
         });
+        if orig.req_truncated && req.body.is_none() {
+            return Err(SendError::BadRequest(format!(
+                "only the first {} bytes of request {}'s body were recorded, so it cannot be sent again as it was; give the body to send",
+                orig.req_body.len(),
+                orig.id
+            )));
+        }
         let url = Exchange { path: target, query: String::new(), ..orig.clone() }.url();
         let (body, body_base64) = match req.body {
             Some(b) => (Some(b), None),

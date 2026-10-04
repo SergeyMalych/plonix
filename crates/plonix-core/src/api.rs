@@ -87,6 +87,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/traffic/facets", get(facets))
         .route("/api/traffic/{id}", get(exchange))
         .route("/api/traffic/{id}/insights", get(insights))
+        .route("/api/traffic/{id}/messages", get(messages))
         .route("/api/views/{view}", get(view_state).put(set_view_state))
         .route("/api/hosts", get(hosts))
         .route("/api/hosts/{host}/endpoints", get(endpoints))
@@ -335,6 +336,46 @@ async fn exchange(State(s): State<AppState>, caller: MaybeCaller, Path(id): Path
             Json(view(ex, in_scope)).into_response()
         }
         Ok(None) => err(StatusCode::NOT_FOUND, "not_found", &format!("exchange {id} not found")),
+        Err(e) => internal(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct PageParams {
+    #[serde(default = "default_messages")]
+    limit: usize,
+    #[serde(default)]
+    offset: usize,
+}
+
+fn default_messages() -> usize {
+    500
+}
+
+/// A message as the API shows it: the stored message plus its text.
+#[derive(Serialize)]
+pub struct MessageView {
+    #[serde(flatten)]
+    pub message: crate::model::WsMessage,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+/// WebSocket messages sent over the connection one handshake opened, oldest first.
+async fn messages(State(s): State<AppState>, caller: MaybeCaller, Path(id): Path<i64>, Query(p): Query<PageParams>) -> Response {
+    let ex = match s.engine.store.get_exchange(id) {
+        Ok(Some(ex)) => ex,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "not_found", &format!("exchange {id} not found")),
+        Err(e) => return internal(e),
+    };
+    if agent_in_scope_only(&s, &caller) && !s.engine.rules().in_scope(&ex.host) {
+        return outside_agent_data();
+    }
+    match s.engine.store.ws_messages(id, p.limit.min(5000), p.offset) {
+        Ok((items, total)) => {
+            let items: Vec<MessageView> = items.into_iter().map(|m| MessageView { text: m.text(), message: m }).collect();
+            Json(json!({ "total": total, "items": items })).into_response()
+        }
         Err(e) => internal(e),
     }
 }

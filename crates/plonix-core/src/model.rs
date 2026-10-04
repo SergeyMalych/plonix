@@ -70,6 +70,22 @@ pub struct Exchange {
     pub source: Option<Source>,
     /// Who initiated an active request (`cli`, `mcp`, `gui`...).
     pub initiator: Option<String>,
+    /// The request body was longer than the recording limit: it went through
+    /// in full, and `req_body` holds its start.
+    #[serde(default)]
+    pub req_truncated: bool,
+    /// Full size of a truncated request body, when all of it went through.
+    #[serde(default)]
+    pub req_size: Option<i64>,
+    /// Like `req_truncated`, for the response body.
+    #[serde(default)]
+    pub resp_truncated: bool,
+    #[serde(default)]
+    pub resp_size: Option<i64>,
+    /// The protocol spoken with the server (`HTTP/1.1`, `HTTP/2`), or with
+    /// the client when the server was not reached. Empty in older captures.
+    #[serde(default)]
+    pub http_version: String,
 }
 
 impl Exchange {
@@ -87,10 +103,52 @@ impl Exchange {
         url
     }
 
+    /// Size of the response body as sent, which is more than was kept when
+    /// the body was cut at the recording limit.
+    pub fn resp_len(&self) -> i64 {
+        self.resp_size.unwrap_or(self.resp_body.len() as i64)
+    }
+
     pub fn mime(&self) -> String {
         header(&self.resp_headers, "content-type")
             .map(|v| v.split(';').next().unwrap_or("").trim().to_ascii_lowercase())
             .unwrap_or_default()
+    }
+}
+
+/// One WebSocket message, captured on the connection a handshake exchange opened.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WsMessage {
+    pub id: i64,
+    /// The handshake exchange (status 101) this message belongs to.
+    pub exchange_id: i64,
+    /// Unix time in milliseconds when the message started.
+    pub ts: i64,
+    /// `to_server` (sent by the client) or `to_client`.
+    pub direction: String,
+    /// `text`, `binary`, `close`, `ping` or `pong`.
+    pub opcode: String,
+    /// The message as the application sees it: reassembled from its
+    /// fragments, unmasked and decompressed. Cut at the recording limit.
+    #[serde(with = "body_b64")]
+    pub payload: Vec<u8>,
+    /// Full payload size in bytes.
+    pub size: i64,
+    pub truncated: bool,
+}
+
+impl WsMessage {
+    /// Readable text of a text or close message.
+    pub fn text(&self) -> Option<String> {
+        match self.opcode.as_str() {
+            "text" => Some(String::from_utf8_lossy(&self.payload).into_owned()),
+            "close" if self.payload.len() >= 2 => {
+                let code = u16::from_be_bytes([self.payload[0], self.payload[1]]);
+                let reason = String::from_utf8_lossy(&self.payload[2..]);
+                Some(if reason.is_empty() { code.to_string() } else { format!("{code} {reason}") })
+            }
+            _ => None,
+        }
     }
 }
 

@@ -238,6 +238,15 @@ code, .mono { font-family: var(--mono); }
 .lbl .seg button.on { background: var(--accent-soft); color: var(--accent); }
 pre.raw { position: relative; margin: 0; flex: 1; min-height: 0; overflow: auto; padding: 4px 12px 12px; font-family: var(--mono); font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-all; }
 .hl-h { color: var(--accent); font-weight: 650; } .hl-k { color: var(--violet); } .hl-note { color: var(--fg-3); font-style: italic; }
+/* WebSocket messages under a handshake in the lens */
+.col:has(.wsbox) > pre.raw { flex: none; max-height: 40%; }
+.wsbox { display: flex; flex-direction: column; flex: 1; min-height: 0; border-top: 1px solid var(--line-2); }
+.wslist { flex: 1; min-height: 0; overflow: auto; padding: 0 12px 12px; }
+.wsempty { padding: 4px 12px; font-size: 11.5px; }
+.wsmsg { display: grid; grid-template-columns: 14px auto 1fr; gap: 2px 8px; align-items: baseline; padding: 5px 0; border-bottom: 1px solid var(--line-2); font-size: 11px; }
+.wsdir { font-weight: 700; } .wsdir.out { color: var(--accent); } .wsdir.in { color: var(--ok); }
+.wsop { font-weight: 650; color: var(--fg-2); } .wsmeta { color: var(--fg-3); }
+.wsbody { grid-column: 2 / -1; margin: 0; font-family: var(--mono); font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
 /* spotted in the lens: tokens to decode, personal data, secrets */
 .spots { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; padding: 2px 12px 6px; }
 .spotlbl { font-size: 10px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3); margin-right: 2px; }

@@ -405,11 +405,21 @@ fn run(cli: Cli) -> Result<ExitCode> {
             watch(&c, &query.join(" "), ctx.json)?;
         }
         Cmd::Show { id, full } => {
-            let v = ctx.client()?.get(&format!("/api/traffic/{id}"))?;
+            let c = ctx.client()?;
+            let mut v = c.get(&format!("/api/traffic/{id}"))?;
+            // A WebSocket handshake: its messages follow the response.
+            let messages = if v["status"] == 101 { Some(c.get(&format!("/api/traffic/{id}/messages?limit=5000"))?) } else { None };
             if ctx.json {
+                if let Some(m) = messages {
+                    v["messages"] = m["items"].clone();
+                }
                 ctx.print_json(&v)?;
             } else {
-                print!("{}", render::exchange(&v, if full { usize::MAX } else { 4000 }));
+                let max = if full { usize::MAX } else { 4000 };
+                print!("{}", render::exchange(&v, max));
+                if let Some(m) = messages {
+                    print!("{}", render::messages(&m, if full { usize::MAX } else { 400 }));
+                }
             }
         }
         Cmd::Replay(a) => replay_cmd(&ctx, a)?,

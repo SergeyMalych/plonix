@@ -471,3 +471,79 @@ async fn the_start_screen_creates_opens_and_closes_projects() {
     .await;
     h.shutdown().await;
 }
+
+#[derive(Debug)]
+struct OneCert(Arc<rustls::sign::CertifiedKey>);
+impl rustls::server::ResolvesServerCert for OneCert {
+    fn resolve(&self, _: rustls::server::ClientHello<'_>) -> Option<Arc<rustls::sign::CertifiedKey>> {
+        Some(self.0.clone())
+    }
+}
+
+/// HTTPS on `localhost` that speaks HTTP/2 only and answers with the
+/// protocol it got. Returns its address and the root its certificate chains to.
+async fn h2_server() -> (SocketAddr, rustls_pki_types::CertificateDer<'static>) {
+    use rustls_pki_types::pem::PemObject;
+    let (ca_pem, ca_key) = plonix_core::ca::CertAuthority::generate_pem().unwrap();
+    let ca = plonix_core::ca::CertAuthority::from_pem(&ca_pem, &ca_key).unwrap();
+    let mut config = rustls::ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_cert_resolver(Arc::new(OneCert(ca.leaf_for("localhost").unwrap())));
+    config.alpn_protocols = vec![b"h2".to_vec()];
+    let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let (s, _) = l.accept().await.unwrap();
+            let acceptor = acceptor.clone();
+            tokio::spawn(async move {
+                let Ok(tls) = acceptor.accept(s).await else { return };
+                let svc = service_fn(|req: Request<Incoming>| async move {
+                    Ok::<_, Infallible>(Response::new(Full::new(Bytes::from(format!("{:?}", req.version())))))
+                });
+                let _ = hyper::server::conn::http2::Builder::new(hyper_util::rt::TokioExecutor::new()).serve_connection(TokioIo::new(tls), svc).await;
+            });
+        }
+    });
+    (addr, rustls_pki_types::CertificateDer::from_pem_slice(ca_pem.as_bytes()).unwrap())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn http2_servers_are_reached_through_upstream_proxies() {
+    use plonix_core::upstream::{OutboundRequest, ProxyServer, Upstream, UpstreamOptions};
+    let (up, root) = h2_server().await;
+    let get = |port| OutboundRequest {
+        scheme: "https".into(),
+        host: "localhost".into(),
+        port,
+        method: "GET".into(),
+        target: "/".into(),
+        headers: vec![],
+        body: Bytes::new(),
+        extra_headers: vec![],
+    };
+    for kind in ["http", "socks5"] {
+        let seen = Arc::new(Mutex::new(vec![]));
+        let proxy = if kind == "http" { http_proxy(seen.clone()).await } else { socks5_proxy(seen.clone()).await };
+        let options = UpstreamOptions { extra_roots: vec![root.clone()], proxy: Some(ProxyServer::parse(&format!("{kind}://{proxy}")).unwrap()), ..Default::default() };
+        let resp = Upstream::with_options(options).unwrap().send(get(up.port())).await.unwrap();
+        assert_eq!((resp.status, resp.version.as_str(), &resp.body[..]), (200, "HTTP/2", &b"HTTP/2.0"[..]), "through {kind}");
+        assert_eq!(seen.lock().unwrap().len(), 1, "went through the {kind} proxy");
+    }
+
+    // The request timeout still holds for a server that never answers.
+    let silent = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = silent.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let mut held = vec![];
+        loop {
+            held.push(silent.accept().await.unwrap());
+        }
+    });
+    let options = UpstreamOptions { extra_roots: vec![root], total_timeout: Duration::from_millis(300), ..Default::default() };
+    let err = Upstream::with_options(options).unwrap().send(get(port)).await.unwrap_err();
+    assert!(format!("{err:#}").contains("timed out"), "{err:#}");
+}

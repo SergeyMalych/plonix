@@ -58,6 +58,9 @@ Plonix has a handful of tools, each with its own name. They are the same in the 
 - HTTP and HTTPS interception. Plonix creates its own certificate authority on first run and mints per-host certificates on the fly.
 - Trust the CA once (`~/.plonix/ca.pem`) and every HTTPS site you visit through the proxy is captured.
 - Compressed bodies (gzip, deflate, brotli) are decoded for display and search.
+- Bodies stream through: event streams, long polls and large downloads reach the browser as the server sends them. Plonix keeps the first 10 MB of each body (Settings › Proxy › Keep bodies up to), and the Lens and `plonix show` say when a body was cut and how big it was.
+- HTTP/2 on both sides: browsers can speak HTTP/2 to the proxy inside decrypted HTTPS, and servers that offer HTTP/2 are reached over it (others over HTTP/1.1), through an upstream proxy too. Each request records the protocol it used, shown in the Lens and `plonix show`; replays from the Bench use it as well.
+- WebSockets work through the proxy, over plain HTTP and inside decrypted HTTPS. Every message (text, binary, ping, pong, close, in both directions) is recorded against its handshake: reassembled from fragments, unmasked and decompressed. The Lens lists them under the handshake, `plonix show` prints them, and `GET /api/traffic/{id}/messages` returns them.
 
 ### Full traffic capture
 - Every request and response is recorded into a per-project SQLite database, in scope or not, so nothing you browsed is lost.
@@ -112,7 +115,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - **Keep only in-scope traffic** (Settings › Storage, per project): when the project closes, Plonix deletes traffic to every host that is not in scope and compacts the file, so it is gone from disk. Requests your findings point to are kept, and if nothing is in scope yet, nothing is deleted. If Plonix quits unexpectedly, the clean-up runs the next time the project opens. See [docs/projects.md](docs/projects.md).
 
 ### Settings
-- **Proxy** (per project, applies right away): listen address and port (use 0.0.0.0 to capture from phones and other devices), next-free-port fallback, HTTPS decryption on or off, hosts that are never decrypted (for apps that pin certificates), server certificate checks, an upstream HTTP or SOCKS5 proxy with login and a list of hosts to reach directly, and timeouts.
+- **Proxy** (per project, applies right away): listen address and port (use 0.0.0.0 to capture from phones and other devices), next-free-port fallback, HTTPS decryption on or off, hosts that are never decrypted (for apps that pin certificates), server certificate checks, an upstream HTTP or SOCKS5 proxy with login and a list of hosts to reach directly, timeouts, and how much of each body to keep.
 - **Storage** (per project): keep only in-scope traffic, with a count of what it would delete and a button to delete it now.
 - **Interface** (all projects): open projects in a Plonix window or in your web browser.
 - Settings are a registry: a feature adds a section by describing its fields, and the Settings screens draw it with validation and storage included (see [docs/projects.md](docs/projects.md#adding-a-settings-section)).
@@ -283,6 +286,7 @@ The API listens on port 8090 when it is free; `plonix status` shows the actual a
 | GET | `/api/traffic/facets` | What recent traffic contains (methods, status classes, content kinds, in-scope hosts and paths), for suggested filters |
 | GET | `/api/traffic/{id}` | One exchange, with decoded bodies |
 | GET | `/api/traffic/{id}/insights` | What stands out in one exchange: tokens to decode, personal data, secrets |
+| GET | `/api/traffic/{id}/messages?limit=&offset=` | WebSocket messages sent over the connection a handshake opened, oldest first (direction, kind, payload, size) |
 | GET | `/api/hosts` | Hosts seen |
 | GET | `/api/hosts/{host}/endpoints` | Endpoints seen on a host |
 | GET | `/api/tech` · `/api/tech/{host}` | Detected technologies per host, with evidence |

@@ -111,6 +111,14 @@ Query filters (combine with spaces): host:example.com  method:POST  status:404|5
         call: |c, a| Ok(pretty(&c.get(&format!("/api/traffic/{}/insights", id_arg(a)?))?)),
     },
     Tool {
+        name: "get_messages",
+        route: "/api/traffic/{id}/messages",
+        title: "WebSocket messages",
+        description: "The WebSocket messages sent over the connection a handshake request (status 101) opened, oldest first: direction (↑ client, ↓ server), kind, size and text.",
+        schema: id_only,
+        call: |c, a| Ok(render::messages(&c.get(&format!("/api/traffic/{}/messages?limit=1000", id_arg(a)?))?, 4000)),
+    },
+    Tool {
         name: "list_hosts",
         route: "/api/hosts",
         title: "Hosts",

@@ -59,19 +59,62 @@ pub fn exchange(v: &Value, max_body: usize) -> String {
         Some(q) => format!("{}?{}", v["path"].as_str().unwrap_or(""), q),
         None => v["path"].as_str().unwrap_or("").to_string(),
     };
-    out.push_str(&format!("{} {} HTTP/1.1\n", v["method"].as_str().unwrap_or(""), target));
+    let version = v["http_version"].as_str().filter(|s| !s.is_empty()).unwrap_or("HTTP/1.1");
+    out.push_str(&format!("{} {} {version}\n", v["method"].as_str().unwrap_or(""), target));
     out.push_str(&headers(&v["req_headers"]));
     out.push_str(&body(&v["req_text"], &v["req_body"], max_body));
+    out.push_str(&cut_note(v, "req"));
     out.push_str("\n――――――――――――――――――――――――――――――――――――――――\n");
     match v["status"].as_u64() {
         Some(s) => {
-            out.push_str(&format!("HTTP/1.1 {s}\n"));
+            out.push_str(&format!("{version} {s}\n"));
             out.push_str(&headers(&v["resp_headers"]));
             out.push_str(&body(&v["resp_text"], &v["resp_body"], max_body));
+            out.push_str(&cut_note(v, "resp"));
         }
         None => out.push_str(&format!("error: {}\n", v["error"].as_str().unwrap_or("unknown"))),
     }
     out
+}
+
+/// WebSocket messages (as returned by `/api/traffic/{id}/messages`), one per
+/// line: ↑ sent by the client, ↓ by the server.
+pub fn messages(v: &Value, max: usize) -> String {
+    let items = v["items"].as_array().cloned().unwrap_or_default();
+    let total = v["total"].as_i64().unwrap_or(items.len() as i64);
+    let mut out = format!("\n――――――――――――――――――――――――――――――――――――――――\n{total} WebSocket message(s)\n");
+    for m in &items {
+        let arrow = if m["direction"] == "to_server" { "↑" } else { "↓" };
+        let size = m["size"].as_i64().unwrap_or(0);
+        let cut = if m["truncated"].as_bool() == Some(true) { format!(", first {} kept", human_size(b64_len(&m["payload"]) as i64)) } else { String::new() };
+        let shown = match m["text"].as_str() {
+            Some(t) if t.len() > max => format!("{}… [{} more bytes]", clip_bytes(t, max), t.len() - max),
+            Some(t) => t.to_string(),
+            None if size > 0 => format!("<{} of binary data>", human_size(size)),
+            None => String::new(),
+        };
+        out.push_str(&format!("{arrow} {:<6} {:>8}{cut}  {shown}\n", m["opcode"].as_str().unwrap_or(""), human_size(size)));
+    }
+    if (items.len() as i64) < total {
+        out.push_str(&format!("… and {} more\n", total - items.len() as i64));
+    }
+    out
+}
+
+/// A note for a body that was longer than the recording limit (`side` is `req` or `resp`).
+fn cut_note(v: &Value, side: &str) -> String {
+    if v[format!("{side}_truncated")].as_bool() != Some(true) {
+        return String::new();
+    }
+    let kept = b64_len(&v[format!("{side}_body")]);
+    match v[format!("{side}_size")].as_i64() {
+        Some(size) => format!("[body cut: the first {} of {} were kept]\n", human_size(kept as i64), human_size(size)),
+        None => format!("[body cut: the first {} were kept]\n", human_size(kept as i64)),
+    }
+}
+
+fn b64_len(raw_b64: &Value) -> usize {
+    raw_b64.as_str().and_then(|b| base64::engine::general_purpose::STANDARD.decode(b).ok()).map(|b| b.len()).unwrap_or(0)
 }
 
 fn headers(h: &Value) -> String {
@@ -201,4 +244,38 @@ pub fn hosts(items: &[Value]) -> String {
         out.push_str(&format!("{:>7}  {:<5}  {}\n", h["requests"].as_i64().unwrap_or(0), scope, h["host"].as_str().unwrap_or("")));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn cut_bodies_say_how_much_was_kept() {
+        let v = json!({
+            "id": 3, "method": "GET", "url": "https://a.test/big", "path": "/big", "status": 200,
+            "req_headers": [], "req_body": "", "resp_headers": [], "resp_text": "start",
+            "resp_body": "c3RhcnQ=", "resp_truncated": true, "resp_size": 3145728,
+        });
+        let out = exchange(&v, 4000);
+        assert!(out.contains("[body cut: the first 5 B of 3.0 MB were kept]"), "{out}");
+        assert_eq!(out.matches("body cut").count(), 1, "the request was not cut");
+        assert!(out.contains("GET /big HTTP/1.1\n") && out.contains("HTTP/1.1 200\n"), "older captures read as HTTP/1.1: {out}");
+        let out = exchange(&json!({ "method": "GET", "path": "/", "status": 204, "http_version": "HTTP/2" }), 4000);
+        assert!(out.contains("GET / HTTP/2\n") && out.contains("HTTP/2 204\n"), "{out}");
+    }
+
+    #[test]
+    fn websocket_messages_one_per_line() {
+        let v = json!({ "total": 3, "items": [
+            { "direction": "to_server", "opcode": "text", "size": 5, "payload": "aGVsbG8=", "text": "hello", "truncated": false },
+            { "direction": "to_client", "opcode": "binary", "size": 2048, "payload": "AAE=", "truncated": true },
+        ]});
+        let out = messages(&v, 400);
+        assert!(out.contains("3 WebSocket message(s)"), "{out}");
+        assert!(out.contains("↑ text        5 B  hello"), "{out}");
+        assert!(out.contains("↓ binary   2.0 KB, first 2 B kept  <2.0 KB of binary data>"), "{out}");
+        assert!(out.ends_with("… and 1 more\n"), "{out}");
+    }
 }

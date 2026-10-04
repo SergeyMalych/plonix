@@ -34,6 +34,7 @@ pub struct Migration {
 pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 1, what: "traffic, scope, evidence, findings and view state", run: v1_initial },
     Migration { version: 2, what: "when findings were last edited", run: v2_finding_updated_at },
+    Migration { version: 3, what: "how much of long bodies was kept, WebSocket messages and the HTTP version", run: v3_proxy_transport },
 ];
 
 /// The schema version this build reads and writes.
@@ -53,6 +54,40 @@ fn v2_finding_updated_at(tx: &rusqlite::Transaction) -> Result<()> {
         tx.execute_batch("ALTER TABLE findings ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0")?;
     }
     tx.execute_batch("UPDATE findings SET updated_at = created_at WHERE updated_at = 0")?;
+    Ok(())
+}
+
+/// Bodies longer than the recording limit are kept in part (see proxy.rs):
+/// whether each body was cut, and its full size. WebSocket messages are
+/// stored against the handshake exchange that opened their connection. Each
+/// exchange notes the HTTP version spoken with the server.
+fn v3_proxy_transport(tx: &rusqlite::Transaction) -> Result<()> {
+    let columns = [
+        ("exchanges", "req_truncated", "INTEGER NOT NULL DEFAULT 0"),
+        ("exchanges", "req_size", "INTEGER"),
+        ("exchanges", "resp_truncated", "INTEGER NOT NULL DEFAULT 0"),
+        ("exchanges", "resp_size", "INTEGER"),
+        // HTTP/1.1 or HTTP/2.
+        ("exchanges", "http_version", "TEXT NOT NULL DEFAULT ''"),
+    ];
+    for (table, column, decl) in columns {
+        if !has_column(tx, table, column)? {
+            tx.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))?;
+        }
+    }
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS ws_messages (
+            id INTEGER PRIMARY KEY,
+            exchange_id INTEGER NOT NULL,
+            ts INTEGER NOT NULL,
+            direction TEXT NOT NULL,
+            opcode TEXT NOT NULL,
+            payload BLOB NOT NULL,
+            size INTEGER NOT NULL,
+            truncated INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ws_messages_exchange ON ws_messages(exchange_id, id);",
+    )?;
     Ok(())
 }
 
@@ -133,12 +168,15 @@ CREATE TABLE IF NOT EXISTS exclude_groups (
 );
 "#;
 
-
 pub struct Store {
     conn: Mutex<Connection>,
 }
 
 const SUMMARY_COLS: &str = "e.id, e.ts, e.method, e.scheme, e.host, e.port, e.path, e.query, e.status, e.mime, e.resp_len, e.duration_ms, e.source";
+
+/// The columns [`row_to_exchange`] reads, in order.
+const EXCHANGE_COLS: &str = "id, ts, scheme, host, port, method, path, query, req_headers, req_body, status, resp_headers,
+    resp_body, duration_ms, error, tls_sans, source, initiator, req_truncated, req_size, resp_truncated, resp_size, http_version";
 
 impl Store {
     pub fn open(path: &Path) -> Result<Self> {
@@ -183,8 +221,9 @@ impl Store {
         let tx = conn.transaction()?;
         tx.execute(
             "INSERT INTO exchanges (ts, scheme, host, port, method, path, query, req_headers, req_body, status,
-                resp_headers, resp_body, resp_len, mime, duration_ms, error, tls_sans, source, initiator)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+                resp_headers, resp_body, resp_len, mime, duration_ms, error, tls_sans, source, initiator,
+                req_truncated, req_size, resp_truncated, resp_size, http_version)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
             params![
                 ex.ts,
                 ex.scheme,
@@ -198,13 +237,18 @@ impl Store {
                 ex.status,
                 serde_json::to_string(&ex.resp_headers)?,
                 ex.resp_body,
-                ex.resp_body.len() as i64,
+                ex.resp_len(),
                 ex.mime(),
                 ex.duration_ms,
                 ex.error,
                 serde_json::to_string(&ex.tls_sans)?,
                 ex.source.unwrap_or(Source::Proxy).as_str(),
                 ex.initiator,
+                ex.req_truncated,
+                ex.req_size,
+                ex.resp_truncated,
+                ex.resp_size,
+                ex.http_version,
             ],
         )?;
         let id = tx.last_insert_rowid();
@@ -219,8 +263,7 @@ impl Store {
     pub fn get_exchange(&self, id: i64) -> Result<Option<Exchange>> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT id, ts, scheme, host, port, method, path, query, req_headers, req_body, status, resp_headers,
-                    resp_body, duration_ms, error, tls_sans, source, initiator FROM exchanges WHERE id = ?1",
+            &format!("SELECT {EXCHANGE_COLS} FROM exchanges WHERE id = ?1"),
             [id],
             row_to_exchange,
         )
@@ -231,10 +274,7 @@ impl Store {
     /// Exchanges with id greater than `after`, in id order, for rescans.
     pub fn exchanges_after(&self, after: i64, limit: usize) -> Result<Vec<Exchange>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, ts, scheme, host, port, method, path, query, req_headers, req_body, status, resp_headers,
-                    resp_body, duration_ms, error, tls_sans, source, initiator FROM exchanges WHERE id > ?1 ORDER BY id LIMIT ?2",
-        )?;
+        let mut stmt = conn.prepare(&format!("SELECT {EXCHANGE_COLS} FROM exchanges WHERE id > ?1 ORDER BY id LIMIT ?2"))?;
         let rows = stmt.query_map(params![after, limit as i64], row_to_exchange)?;
         rows.collect::<Result<_, _>>().map_err(Into::into)
     }
@@ -242,12 +282,46 @@ impl Store {
     /// A host's most recent exchanges, newest first.
     pub fn exchanges_for_host(&self, host: &str, limit: usize) -> Result<Vec<Exchange>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, ts, scheme, host, port, method, path, query, req_headers, req_body, status, resp_headers,
-                    resp_body, duration_ms, error, tls_sans, source, initiator FROM exchanges WHERE host = ?1 ORDER BY id DESC LIMIT ?2",
-        )?;
+        let mut stmt = conn.prepare(&format!("SELECT {EXCHANGE_COLS} FROM exchanges WHERE host = ?1 ORDER BY id DESC LIMIT ?2"))?;
         let rows = stmt.query_map(params![host.to_ascii_lowercase(), limit as i64], row_to_exchange)?;
         rows.collect::<Result<_, _>>().map_err(Into::into)
+    }
+
+    /// Stores WebSocket messages, in the order given.
+    pub fn insert_ws_messages(&self, messages: &[WsMessage]) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        for m in messages {
+            tx.execute(
+                "INSERT INTO ws_messages (exchange_id, ts, direction, opcode, payload, size, truncated) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![m.exchange_id, m.ts, m.direction, m.opcode, m.payload, m.size, m.truncated],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// One connection's WebSocket messages in the order they were sent, and how many there are in all.
+    pub fn ws_messages(&self, exchange_id: i64, limit: usize, offset: usize) -> Result<(Vec<WsMessage>, i64)> {
+        let conn = self.conn.lock().unwrap();
+        let total = conn.query_row("SELECT count(*) FROM ws_messages WHERE exchange_id = ?1", [exchange_id], |r| r.get(0))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, exchange_id, ts, direction, opcode, payload, size, truncated FROM ws_messages
+             WHERE exchange_id = ?1 ORDER BY id LIMIT ?2 OFFSET ?3",
+        )?;
+        let rows = stmt.query_map(params![exchange_id, limit as i64, offset as i64], |r| {
+            Ok(WsMessage {
+                id: r.get(0)?,
+                exchange_id: r.get(1)?,
+                ts: r.get(2)?,
+                direction: r.get(3)?,
+                opcode: r.get(4)?,
+                payload: r.get(5)?,
+                size: r.get(6)?,
+                truncated: r.get(7)?,
+            })
+        })?;
+        Ok((rows.collect::<Result<_, _>>()?, total))
     }
 
     pub fn count(&self) -> Result<i64> {
@@ -577,6 +651,7 @@ impl Store {
         let n = tx.execute("DELETE FROM exchanges WHERE id IN (SELECT id FROM doomed)", [])?;
         tx.execute("DELETE FROM exchanges_fts WHERE rowid IN (SELECT id FROM doomed)", [])?;
         tx.execute("DELETE FROM evidence WHERE exchange_id IN (SELECT id FROM doomed)", [])?;
+        tx.execute("DELETE FROM ws_messages WHERE exchange_id IN (SELECT id FROM doomed)", [])?;
         tx.execute("DELETE FROM doomed", [])?;
         tx.commit()?;
         Ok(n as i64)
@@ -761,6 +836,11 @@ fn row_to_exchange(r: &Row) -> rusqlite::Result<Exchange> {
         tls_sans: serde_json::from_str(&json(15)?).unwrap_or_default(),
         source: Some(Source::parse(&r.get::<_, String>(16)?)),
         initiator: r.get(17)?,
+        req_truncated: r.get(18)?,
+        req_size: r.get(19)?,
+        resp_truncated: r.get(20)?,
+        resp_size: r.get(21)?,
+        http_version: r.get(22)?,
     })
 }
 
@@ -886,6 +966,74 @@ mod tests {
         assert_eq!(got.tls_sans, ex.tls_sans);
         assert_eq!(got.url(), "https://www.example.com/login?q=1&page=2");
         assert!(s.get_exchange(id + 1).unwrap().is_none());
+    }
+
+    #[test]
+    fn truncated_bodies_keep_their_full_size() {
+        let s = Store::open_in_memory().unwrap();
+        let mut ex = sample("www.example.com", "GET", "/big", 200, "<b>start of a long page");
+        ex.resp_truncated = true;
+        ex.resp_size = Some(50_000_000);
+        ex.http_version = "HTTP/2".into();
+        let id = s.insert_exchange(&ex).unwrap();
+        let got = s.get_exchange(id).unwrap().unwrap();
+        assert_eq!(got.http_version, "HTTP/2");
+        assert!(got.resp_truncated && !got.req_truncated);
+        assert_eq!((got.resp_size, got.req_size), (Some(50_000_000), None));
+        let (hits, _) = s.search(&Query::parse("start of a long").unwrap(), &ScopeRules::default(), 10, 0).unwrap();
+        assert_eq!(hits[0].resp_len, 50_000_000, "listings show the size as sent");
+    }
+
+    #[test]
+    fn websocket_messages_follow_their_exchange() {
+        let s = Store::open_in_memory().unwrap();
+        let keep = s.insert_exchange(&sample("www.example.com", "GET", "/socket", 101, "")).unwrap();
+        let gone = s.insert_exchange(&sample("cdn.other.test", "GET", "/socket", 101, "")).unwrap();
+        let msg = |exchange_id, direction: &str, payload: &[u8]| WsMessage {
+            exchange_id,
+            ts: now_ms(),
+            direction: direction.into(),
+            opcode: "text".into(),
+            payload: payload.to_vec(),
+            size: payload.len() as i64,
+            ..Default::default()
+        };
+        s.insert_ws_messages(&[msg(keep, "to_server", b"hello"), msg(keep, "to_client", b"hi"), msg(gone, "to_server", b"x")]).unwrap();
+        let (list, total) = s.ws_messages(keep, 10, 0).unwrap();
+        assert_eq!(total, 2);
+        assert_eq!((list[0].direction.as_str(), list[0].payload.as_slice()), ("to_server", &b"hello"[..]));
+        assert_eq!(list[1].text().as_deref(), Some("hi"));
+        assert_eq!(s.ws_messages(keep, 10, 1).unwrap().0.len(), 1);
+        s.delete_for_hosts(&["cdn.other.test".into()], &BTreeSet::new()).unwrap();
+        assert_eq!(s.ws_messages(gone, 10, 0).unwrap().1, 0, "deleting traffic deletes its messages");
+        assert_eq!(s.ws_messages(keep, 10, 0).unwrap().1, 2);
+    }
+
+    #[test]
+    fn older_databases_gain_the_new_columns() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        {
+            // A database from before these columns, with traffic in it.
+            let mut conn = Connection::open(&path).unwrap();
+            migrate(&mut conn, &MIGRATIONS[..2]).unwrap();
+            let s = Store { conn: Mutex::new(conn) };
+            assert!(s.insert_exchange(&sample("a.test", "GET", "/", 200, "x")).is_err(), "the old table lacks the columns");
+            s.conn.lock().unwrap().execute_batch(
+                "INSERT INTO exchanges (ts, scheme, host, port, method, path, query, req_headers, req_body, status, resp_headers, resp_body,
+                    resp_len, mime, duration_ms, tls_sans, source) VALUES (1, 'https', 'old.test', 443, 'GET', '/', '', '[]', x'', 200, '[]', x'', 0, '', 0, '[]', 'proxy')",
+            )
+            .unwrap();
+        }
+        let s = Store::open(&path).unwrap();
+        assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
+        let old = s.get_exchange(1).unwrap().unwrap();
+        assert!(!old.resp_truncated && old.resp_size.is_none() && old.http_version.is_empty(), "older captures read as whole");
+        assert_eq!(s.ws_messages(1, 10, 0).unwrap().1, 0, "the messages table is there");
+        s.insert_exchange(&sample("a.test", "GET", "/", 200, "x")).unwrap();
+        drop(s);
+        let s = Store::open(&path).unwrap();
+        assert_eq!(s.count().unwrap(), 2, "opening again changes nothing");
     }
 
     #[test]

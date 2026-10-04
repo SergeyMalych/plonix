@@ -8,23 +8,35 @@ use crate::model::{Headers, header};
 pub const MAX_TEXT: usize = 2 * 1024 * 1024;
 
 /// Undoes `Content-Encoding` (gzip, deflate, br). Returns the input when the
-/// encoding is unknown or the body is corrupt.
+/// encoding is unknown or the body is corrupt. A body that was cut at the
+/// recording limit decodes as far as it goes.
 pub fn decode_body(headers: &Headers, body: &[u8]) -> Vec<u8> {
     let enc = header(headers, "content-encoding").unwrap_or("").trim().to_ascii_lowercase();
-    let mut out = Vec::new();
-    let ok = match enc.as_str() {
-        "gzip" | "x-gzip" => flate2::read::MultiGzDecoder::new(body).take(MAX_TEXT as u64 * 4).read_to_end(&mut out).is_ok(),
+    let limit = MAX_TEXT as u64 * 4;
+    let out = match enc.as_str() {
+        "gzip" | "x-gzip" => read_partial(flate2::read::MultiGzDecoder::new(body).take(limit)),
         "deflate" => {
-            flate2::read::ZlibDecoder::new(body).take(MAX_TEXT as u64 * 4).read_to_end(&mut out).is_ok()
-                || {
-                    out.clear();
-                    flate2::read::DeflateDecoder::new(body).take(MAX_TEXT as u64 * 4).read_to_end(&mut out).is_ok()
-                }
+            read_partial(flate2::read::ZlibDecoder::new(body).take(limit)).or_else(|| read_partial(flate2::read::DeflateDecoder::new(body).take(limit)))
         }
-        "br" => brotli::Decompressor::new(body, 4096).take(MAX_TEXT as u64 * 4).read_to_end(&mut out).is_ok(),
+        "br" => read_partial(brotli::Decompressor::new(body, 4096).take(limit)),
         _ => return body.to_vec(),
     };
-    if ok { out } else { body.to_vec() }
+    out.unwrap_or_else(|| body.to_vec())
+}
+
+/// Everything a decoder produces before it ends or fails, or `None` when it
+/// produces nothing usable.
+fn read_partial(mut r: impl Read) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        match r.read(&mut buf) {
+            Ok(0) => return Some(out),
+            Ok(n) => out.extend_from_slice(&buf[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return if out.is_empty() { None } else { Some(out) },
+        }
+    }
 }
 
 /// Whether a body is worth treating as text (for search, link extraction and display).
@@ -87,6 +99,22 @@ mod tests {
             ("Content-Encoding".into(), "gzip".into()),
         ];
         assert_eq!(body_text(&h, &gz).unwrap(), "{\"token\":\"abc\"}");
+    }
+
+    #[test]
+    fn cut_compressed_bodies_decode_as_far_as_they_go() {
+        let text: String = (0..20_000).map(|i| format!("line {i}\n")).collect();
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        enc.write_all(text.as_bytes()).unwrap();
+        let gz = enc.finish().unwrap();
+        let h: Headers = vec![("Content-Type".into(), "text/plain".into()), ("Content-Encoding".into(), "gzip".into())];
+        let part = body_text(&h, &gz[..gz.len() / 2]).unwrap();
+        assert!(part.starts_with("line 0\nline 1\n") && part.len() < text.len(), "{}", part.len());
+        let mut enc = brotli::CompressorWriter::new(Vec::new(), 4096, 5, 22);
+        enc.write_all(text.as_bytes()).unwrap();
+        let br = enc.into_inner();
+        let h: Headers = vec![("Content-Type".into(), "text/plain".into()), ("Content-Encoding".into(), "br".into())];
+        assert!(body_text(&h, &br[..br.len() / 2]).unwrap().starts_with("line 0\n"));
     }
 
     #[test]

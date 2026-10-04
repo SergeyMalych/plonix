@@ -1,7 +1,13 @@
-//! Outbound HTTP/1.1 client used by the proxy and for active requests.
+//! Outbound HTTP client used by the proxy and for active requests.
 //!
 //! Connects directly, or through an upstream proxy (HTTP `CONNECT` or
-//! SOCKS5) when the project's proxy settings name one.
+//! SOCKS5) when the project's proxy settings name one. HTTPS servers that
+//! offer HTTP/2 are spoken to in HTTP/2, others in HTTP/1.1; plain HTTP is
+//! always HTTP/1.1.
+//!
+//! [`Upstream::send`] reads the whole response; [`Upstream::open`] returns
+//! as soon as the response head arrives and leaves the body streaming, which
+//! the proxy uses so event streams and downloads reach the client as they come.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,8 +15,10 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use base64::Engine as _;
 use bytes::Bytes;
+use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
-use hyper_util::rt::TokioIo;
+use hyper::body::Incoming;
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use rustls::ClientConfig;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
@@ -54,6 +62,54 @@ pub struct InboundResponse {
     pub headers: Headers,
     pub body: Bytes,
     pub tls_sans: Vec<String>,
+    /// The protocol spoken with the server, such as `HTTP/2`.
+    pub version: String,
+}
+
+pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+/// A request or response body that may still be arriving.
+pub type StreamBody = BoxBody<Bytes, BoxError>;
+
+/// A whole body, as a [`StreamBody`].
+pub fn full_body(b: impl Into<Bytes>) -> StreamBody {
+    Full::new(b.into()).map_err(|never| match never {}).boxed()
+}
+
+/// The answer to a request to switch protocols (a WebSocket handshake).
+pub struct UpgradeResponse {
+    pub status: u16,
+    pub headers: Headers,
+    pub tls_sans: Vec<String>,
+    pub outcome: Upgrade,
+}
+
+pub enum Upgrade {
+    /// The server switched: the connection now carries the new protocol.
+    Switched(hyper::upgrade::Upgraded),
+    /// The server answered with an ordinary response instead.
+    Refused(Incoming),
+}
+
+/// A response whose head has arrived; the body is read as it comes.
+#[derive(Debug)]
+pub struct StreamingResponse {
+    pub status: u16,
+    pub headers: Headers,
+    pub body: Incoming,
+    pub tls_sans: Vec<String>,
+    pub version: String,
+}
+
+/// How a protocol version is shown and recorded.
+pub fn version_name(v: http::Version) -> &'static str {
+    match v {
+        http::Version::HTTP_09 => "HTTP/0.9",
+        http::Version::HTTP_10 => "HTTP/1.0",
+        http::Version::HTTP_2 => "HTTP/2",
+        http::Version::HTTP_3 => "HTTP/3",
+        _ => "HTTP/1.1",
+    }
 }
 
 /// Another proxy that outbound connections go through.
@@ -166,7 +222,10 @@ pub fn host_matches(host: &str, patterns: &[String]) -> bool {
 }
 
 pub struct Upstream {
+    /// Offers HTTP/2 and HTTP/1.1.
     tls: TlsConnector,
+    /// Offers HTTP/1.1 only, for connections that switch protocols.
+    tls_http1: TlsConnector,
     pub connect_timeout: Duration,
     pub total_timeout: Duration,
     proxy: Option<ProxyServer>,
@@ -203,7 +262,9 @@ impl Upstream {
             builder.with_root_certificates(roots).with_no_client_auth()
         };
         config.alpn_protocols = vec![b"http/1.1".to_vec()];
-        Ok(Self { tls: TlsConnector::from(Arc::new(config)), connect_timeout, total_timeout, proxy, bypass, insecure })
+        let tls_http1 = TlsConnector::from(Arc::new(config.clone()));
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+        Ok(Self { tls: TlsConnector::from(Arc::new(config)), tls_http1, connect_timeout, total_timeout, proxy, bypass, insecure })
     }
 
     /// The upstream proxy used for `host`, if any.
@@ -236,13 +297,59 @@ impl Upstream {
         Ok(tcp)
     }
 
+    /// Sends a request and reads the whole response, all within the request timeout.
     pub async fn send(&self, req: OutboundRequest) -> Result<InboundResponse> {
-        tokio::time::timeout(self.total_timeout, self.send_inner(req))
+        let fut = async {
+            let r = self.open_inner(req, None).await?;
+            let body = r.body.collect().await.context("reading response body")?.to_bytes();
+            Ok(InboundResponse { status: r.status, headers: r.headers, body, tls_sans: r.tls_sans, version: r.version })
+        };
+        tokio::time::timeout(self.total_timeout, fut)
             .await
             .map_err(|_| anyhow!("upstream timed out after {:?}", self.total_timeout))?
     }
 
-    async fn send_inner(&self, mut req: OutboundRequest) -> Result<InboundResponse> {
+    /// Sends a request and returns once the response head arrives; the
+    /// request timeout covers only that part, so long streams are not cut.
+    /// With `body`, the request body streams from it instead of `req.body`,
+    /// and the request's own `Content-Length` (if any) is kept.
+    pub async fn open(&self, req: OutboundRequest, body: Option<StreamBody>) -> Result<StreamingResponse> {
+        tokio::time::timeout(self.total_timeout, self.open_inner(req, body))
+            .await
+            .map_err(|_| anyhow!("upstream timed out after {:?}", self.total_timeout))?
+    }
+
+    /// Sends a request that asks to switch protocols (`Connection: Upgrade`
+    /// and `Upgrade: <protocol>` are added to `req`). The connection always
+    /// speaks HTTP/1.1 and, behind an HTTP upstream proxy, is tunneled with
+    /// `CONNECT` so the switch reaches the server.
+    pub async fn upgrade(&self, mut req: OutboundRequest, protocol: &str) -> Result<UpgradeResponse> {
+        req.extra_headers.push(("Connection".into(), "Upgrade".into()));
+        req.extra_headers.push(("Upgrade".into(), protocol.into()));
+        let fut = async {
+            let tcp = self.connect(&req.host, req.port).await?;
+            let (resp, tls_sans) = if req.scheme == "https" {
+                let name = ServerName::try_from(req.host.clone()).map_err(|_| anyhow!("invalid server name {}", req.host))?;
+                let tls = self.tls_http1.connect(name, tcp).await.with_context(|| format!("TLS handshake with {}", req.host))?;
+                let sans = tls.get_ref().1.peer_certificates().and_then(|c| c.first()).map(cert_dns_names).unwrap_or_default();
+                (send_http1(TokioIo::new(tls), req, None).await?, sans)
+            } else {
+                (send_http1(TokioIo::new(tcp), req, None).await?, vec![])
+            };
+            let (status, headers) = head_of(&resp);
+            let outcome = if status == 101 {
+                Upgrade::Switched(hyper::upgrade::on(resp).await.context("switching protocols")?)
+            } else {
+                Upgrade::Refused(resp.into_body())
+            };
+            Ok(UpgradeResponse { status, headers, tls_sans, outcome })
+        };
+        tokio::time::timeout(self.total_timeout, fut)
+            .await
+            .map_err(|_| anyhow!("upstream timed out after {:?}", self.total_timeout))?
+    }
+
+    async fn open_inner(&self, mut req: OutboundRequest, body: Option<StreamBody>) -> Result<StreamingResponse> {
         // Plain HTTP through an HTTP proxy uses absolute-form requests, which
         // every HTTP proxy accepts (not all allow CONNECT to port 80).
         if req.scheme == "http"
@@ -259,7 +366,7 @@ impl Upstream {
                 req.headers.retain(|(k, _)| !k.eq_ignore_ascii_case("proxy-authorization"));
                 req.extra_headers.push(("Proxy-Authorization".into(), format!("Basic {creds}")));
             }
-            return exchange(TokioIo::new(tcp), req).await;
+            return exchange(TokioIo::new(tcp), req, body).await;
         }
         let tcp = self.connect(&req.host, req.port).await?;
 
@@ -267,33 +374,93 @@ impl Upstream {
             let name = ServerName::try_from(req.host.clone()).map_err(|_| anyhow!("invalid server name {}", req.host))?;
             let tls = self.tls.connect(name, tcp).await.with_context(|| format!("TLS handshake with {}", req.host))?;
             let sans = tls.get_ref().1.peer_certificates().and_then(|c| c.first()).map(cert_dns_names).unwrap_or_default();
-            let mut resp = exchange(TokioIo::new(tls), req).await?;
+            let mut resp = if tls.get_ref().1.alpn_protocol() == Some(b"h2") {
+                let resp = send_http2(TokioIo::new(tls), req, body).await?;
+                let (status, headers) = head_of(&resp);
+                StreamingResponse { status, headers, body: resp.into_body(), tls_sans: vec![], version: "HTTP/2".into() }
+            } else {
+                exchange(TokioIo::new(tls), req, body).await?
+            };
             resp.tls_sans = sans;
             Ok(resp)
         } else {
-            exchange(TokioIo::new(tcp), req).await
+            exchange(TokioIo::new(tcp), req, body).await
         }
     }
 }
 
-async fn exchange<T>(io: TokioIo<T>, req: OutboundRequest) -> Result<InboundResponse>
+async fn exchange<T>(io: TokioIo<T>, req: OutboundRequest, body: Option<StreamBody>) -> Result<StreamingResponse>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let resp = send_http1(io, req, body).await?;
+    let (status, headers) = head_of(&resp);
+    let version = version_name(resp.version()).to_string();
+    Ok(StreamingResponse { status, headers, body: resp.into_body(), tls_sans: vec![], version })
+}
+
+fn head_of<B>(resp: &http::Response<B>) -> (u16, Headers) {
+    let headers = resp
+        .headers()
+        .iter()
+        .map(|(k, v)| (k.as_str().to_string(), String::from_utf8_lossy(v.as_bytes()).into_owned()))
+        .collect();
+    (resp.status().as_u16(), headers)
+}
+
+async fn send_http1<T>(io: TokioIo<T>, req: OutboundRequest, body: Option<StreamBody>) -> Result<http::Response<Incoming>>
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
     let (mut sender, conn) = hyper::client::conn::http1::Builder::new()
-        .handshake::<_, Full<Bytes>>(io)
+        .handshake::<_, StreamBody>(io)
         .await
         .context("HTTP handshake")?;
     tokio::spawn(async move {
+        let _ = conn.with_upgrades().await;
+    });
+    sender.send_request(build_request(req, body, false)?).await.context("sending request")
+}
+
+async fn send_http2<T>(io: TokioIo<T>, req: OutboundRequest, body: Option<StreamBody>) -> Result<http::Response<Incoming>>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let (mut sender, conn) = hyper::client::conn::http2::Builder::new(TokioExecutor::new())
+        .handshake::<_, StreamBody>(io)
+        .await
+        .context("HTTP/2 handshake")?;
+    tokio::spawn(async move {
         let _ = conn.await;
     });
+    sender.send_request(build_request(req, body, true)?).await.context("sending request")
+}
 
-    let mut builder = http::Request::builder().method(req.method.as_str()).uri(&req.target);
+/// `host`, or `host:port` when the port is not the scheme's default.
+fn authority(scheme: &str, host: &str, port: u16) -> String {
+    let host = if host.contains(':') { format!("[{host}]") } else { host.to_string() };
+    let default = (scheme == "https" && port == 443) || (scheme == "http" && port == 80);
+    if default { host } else { format!("{host}:{port}") }
+}
+
+/// The request as sent. Headers that only describe one connection are left
+/// out. In HTTP/2 the `Host` header (as captured or edited) becomes the
+/// `:authority`, and is not sent as a header.
+fn build_request(req: OutboundRequest, body: Option<StreamBody>, http2: bool) -> Result<http::Request<StreamBody>> {
+    let streaming = body.is_some();
+    let host = crate::model::header(&req.headers, "host").map(str::to_string).unwrap_or_else(|| authority(&req.scheme, &req.host, req.port));
+    let mut builder = if http2 {
+        http::Request::builder().version(http::Version::HTTP_2).uri(format!("{}://{host}{}", req.scheme, req.target))
+    } else {
+        http::Request::builder().uri(&req.target)
+    }
+    .method(req.method.as_str());
     let mut has_host = false;
     for (k, v) in &req.headers {
         let lk = k.to_ascii_lowercase();
-        // Length is recomputed from the (possibly edited) body.
-        if HOP_BY_HOP.contains(&lk.as_str()) || lk == "content-length" {
+        // Length is recomputed from the (possibly edited) body; a streamed
+        // body is passed on unchanged, so its length still holds.
+        if HOP_BY_HOP.contains(&lk.as_str()) || (lk == "content-length" && !streaming) || (lk == "host" && http2) || lk.starts_with(':') {
             continue;
         }
         has_host |= lk == "host";
@@ -302,25 +469,15 @@ where
     for (k, v) in &req.extra_headers {
         builder = builder.header(k.as_str(), v.as_str());
     }
-    if !has_host {
-        let default = (req.scheme == "https" && req.port == 443) || (req.scheme == "http" && req.port == 80);
-        let host = if default { req.host.clone() } else { format!("{}:{}", req.host, req.port) };
+    if !http2 && !has_host {
         builder = builder.header("host", host);
     }
     let send_len = !req.body.is_empty() || matches!(req.method.as_str(), "POST" | "PUT" | "PATCH");
-    if send_len {
+    if send_len && !streaming {
         builder = builder.header("content-length", req.body.len());
     }
-    let request = builder.body(Full::new(req.body)).context("building request")?;
-    let resp = sender.send_request(request).await.context("sending request")?;
-    let status = resp.status().as_u16();
-    let headers = resp
-        .headers()
-        .iter()
-        .map(|(k, v)| (k.as_str().to_string(), String::from_utf8_lossy(v.as_bytes()).into_owned()))
-        .collect();
-    let body = resp.into_body().collect().await.context("reading response body")?.to_bytes();
-    Ok(InboundResponse { status, headers, body, tls_sans: vec![] })
+    let body = body.unwrap_or_else(|| full_body(req.body));
+    builder.body(body).context("building request")
 }
 
 /// Opens a tunnel through an HTTP proxy with `CONNECT`.

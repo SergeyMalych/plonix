@@ -2,18 +2,26 @@
 //!
 //! Plain HTTP requests arrive in absolute form and are forwarded. `CONNECT`
 //! tunnels are terminated with a leaf certificate minted by the local CA, and
-//! the HTTP/1.1 requests inside are forwarded over a fresh TLS connection.
+//! the requests inside (HTTP/2 or HTTP/1.1, as the client chooses) are
+//! forwarded over a fresh TLS connection, in HTTP/2 when the server offers it.
 //! Every request/response pair is recorded, regardless of scope.
+//!
+//! Bodies stream through: the client gets each part of a response as the
+//! server sends it (event streams, long polls, large downloads), while the
+//! first [`Engine::body_limit`] bytes of each body are kept for the record.
+//! An exchange is recorded once its response has ended.
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll, ready};
 use std::time::Instant;
 
 use bytes::Bytes;
 use http::{Method, Request, Response, StatusCode};
-use http_body_util::{BodyExt, Full};
-use hyper::body::Incoming;
+use http_body_util::BodyExt;
+use hyper::body::{Body, Frame, Incoming, SizeHint};
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
@@ -22,7 +30,9 @@ use tokio_rustls::TlsAcceptor;
 use crate::ca::LeafResolver;
 use crate::engine::Engine;
 use crate::model::{Exchange, Headers, Source, now_ms};
-use crate::upstream::{HOP_BY_HOP, OutboundRequest};
+use crate::upstream::{BoxError, HOP_BY_HOP, OutboundRequest, StreamBody, Upgrade, full_body};
+
+type ProxyResponse = Response<StreamBody>;
 
 /// Requests to this host through the proxy are answered by Plonix itself.
 pub const MAGIC_HOST: &str = "plonix";
@@ -56,17 +66,14 @@ where
     I: hyper::rt::Read + hyper::rt::Write + Unpin + Send + 'static,
 {
     let svc = service_fn(move |req| handle(req, ctx.clone()));
-    if let Err(e) = hyper::server::conn::http1::Builder::new()
-        .preserve_header_case(true)
-        .serve_connection(io, svc)
-        .with_upgrades()
-        .await
-    {
+    let mut builder = hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new());
+    builder.http1().preserve_header_case(true);
+    if let Err(e) = builder.serve_connection_with_upgrades(io, svc).await {
         tracing::debug!("proxy connection ended: {e}");
     }
 }
 
-async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<Response<Full<Bytes>>, Infallible> {
+async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<ProxyResponse, Infallible> {
     if req.method() == Method::CONNECT && ctx.tunnel.is_none() {
         return Ok(connect(req, ctx));
     }
@@ -96,76 +103,298 @@ async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<Response<Full<Bytes>
         Some(pq) => pq.as_str().to_string(),
         None => "/".to_string(),
     };
-    let req_headers: Headers = req
+    let mut req_headers: Headers = req
         .headers()
         .iter()
         .map(|(k, v)| (k.as_str().to_string(), String::from_utf8_lossy(v.as_bytes()).into_owned()))
         .collect();
-    let req_body = match req.into_body().collect().await {
-        Ok(b) => b.to_bytes(),
-        Err(e) => return Ok(error_page(StatusCode::BAD_REQUEST, &format!("could not read request body: {e}"))),
-    };
-
-    let outbound = OutboundRequest {
+    if req.version() == http::Version::HTTP_2 {
+        from_http2(&mut req_headers, req.uri().authority().map(|a| a.as_str()));
+    }
+    let client_version = crate::upstream::version_name(req.version()).to_string();
+    let limit = ctx.engine.body_limit();
+    let req_cap = Arc::new(Mutex::new(Captured::new(limit)));
+    let mut outbound = OutboundRequest {
         scheme: scheme.clone(),
         host: host.clone(),
         port,
         method: method.clone(),
         target,
         headers: req_headers.clone(),
-        body: req_body.clone(),
+        body: Bytes::new(),
         extra_headers: vec![],
     };
-    let result = ctx.engine.upstream().send(outbound).await;
-    let mut ex = Exchange {
-        ts,
-        scheme,
-        host,
-        port,
-        method,
-        path,
-        query,
-        req_headers,
-        req_body: req_body.to_vec(),
-        source: Some(Source::Proxy),
-        ..Default::default()
+    let mut pending = Pending {
+        engine: ctx.engine.clone(),
+        started,
+        req: req_cap.clone(),
+        resp: Arc::new(Mutex::new(Captured::new(limit))),
+        ex: Exchange {
+            ts,
+            scheme,
+            host,
+            port,
+            method,
+            path,
+            query,
+            req_headers,
+            source: Some(Source::Proxy),
+            http_version: client_version,
+            ..Default::default()
+        },
+        taken: false,
     };
-    ex.duration_ms = started.elapsed().as_millis() as i64;
 
-    let response = match result {
-        Ok(up) => {
-            ex.status = Some(up.status);
-            ex.resp_headers = up.headers.clone();
-            ex.resp_body = up.body.to_vec();
-            ex.tls_sans = up.tls_sans;
-            let mut builder = Response::builder().status(up.status);
-            for (k, v) in &up.headers {
-                if !HOP_BY_HOP.contains(&k.to_ascii_lowercase().as_str()) {
-                    builder = builder.header(k.as_str(), v.as_str());
-                }
+    if req.version() <= http::Version::HTTP_11 && crate::websocket::is_handshake(req.headers()) {
+        return Ok(websocket(req, ctx, outbound, pending).await);
+    }
+
+    // A body of known length within the limit is read first, as before, so a
+    // request that fails still shows what it carried. Longer and open-ended
+    // bodies (uploads, streams) go through as they arrive.
+    let stream = match req.body().size_hint().exact() {
+        Some(n) if n <= limit as u64 => match req.into_body().collect().await {
+            Ok(b) => {
+                outbound.body = b.to_bytes();
+                let mut cap = req_cap.lock().unwrap();
+                cap.add(&outbound.body);
+                cap.done = true;
+                None
             }
-            builder
-                .body(Full::new(up.body))
-                .unwrap_or_else(|e| error_page(StatusCode::BAD_GATEWAY, &format!("invalid upstream response: {e}")))
-        }
-        Err(e) => {
-            let msg = format!("{e:#}");
-            ex.error = Some(msg.clone());
-            let hint = if msg.contains("certificate") || msg.contains("UnknownIssuer") {
-                "\n\nThe upstream certificate is not trusted. For staging hosts with self-signed certificates, \
-                 turn off Settings > Proxy > Check server certificates."
-            } else {
-                ""
-            };
-            error_page(StatusCode::BAD_GATEWAY, &format!("Plonix could not reach {}: {msg}{hint}", ex.host))
-        }
+            Err(e) => {
+                pending.ex.error = Some(format!("could not read the request body: {e}"));
+                return Ok(error_page(StatusCode::BAD_REQUEST, &format!("could not read request body: {e}")));
+            }
+        },
+        _ => Some(Tee::new(req.into_body(), req_cap, None).boxed()),
     };
 
-    ctx.engine.enqueue(ex);
-    Ok(response)
+    Ok(match ctx.engine.upstream().open(outbound, stream).await {
+        Ok(up) => {
+            pending.ex.tls_sans = up.tls_sans;
+            pending.ex.http_version = up.version;
+            forward(up.status, up.headers, up.body, pending)
+        }
+        Err(e) => unreachable(e, pending),
+    })
 }
 
-fn connect(req: Request<Incoming>, ctx: Ctx) -> Response<Full<Bytes>> {
+/// Records an HTTP/2 request's headers the way HTTP/1.1 writes them, which is
+/// also how they are forwarded to an HTTP/1.1 server and replayed: the
+/// `:authority` becomes `Host`, and cookies split over several fields are
+/// joined into one `Cookie` header.
+fn from_http2(headers: &mut Headers, authority: Option<&str>) {
+    let cookies: Vec<String> = headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("cookie")).map(|(_, v)| v.clone()).collect();
+    if cookies.len() > 1 {
+        let at = headers.iter().position(|(k, _)| k.eq_ignore_ascii_case("cookie")).unwrap_or(0);
+        headers.retain(|(k, _)| !k.eq_ignore_ascii_case("cookie"));
+        headers.insert(at.min(headers.len()), ("cookie".into(), cookies.join("; ")));
+    }
+    if let Some(a) = authority
+        && !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("host"))
+    {
+        headers.insert(0, ("host".into(), a.to_string()));
+    }
+}
+
+/// Answers the client with the server's response, streaming its body.
+fn forward(status: u16, headers: Headers, body: Incoming, mut pending: Pending) -> ProxyResponse {
+    pending.ex.status = Some(status);
+    let mut builder = Response::builder().status(status);
+    for (k, v) in &headers {
+        if !HOP_BY_HOP.contains(&k.to_ascii_lowercase().as_str()) {
+            builder = builder.header(k.as_str(), v.as_str());
+        }
+    }
+    pending.ex.resp_headers = headers;
+    let resp_cap = pending.resp.clone();
+    builder
+        .body(Tee::new(body, resp_cap, Some(pending)).boxed())
+        .unwrap_or_else(|e| error_page(StatusCode::BAD_GATEWAY, &format!("invalid upstream response: {e}")))
+}
+
+/// Answers the client when the server could not be reached.
+fn unreachable(e: anyhow::Error, mut pending: Pending) -> ProxyResponse {
+    let msg = format!("{e:#}");
+    pending.ex.error = Some(msg.clone());
+    let hint = if msg.contains("certificate") || msg.contains("UnknownIssuer") {
+        "\n\nThe upstream certificate is not trusted. For staging hosts with self-signed certificates, \
+         turn off Settings > Proxy > Check server certificates."
+    } else {
+        ""
+    };
+    error_page(StatusCode::BAD_GATEWAY, &format!("Plonix could not reach {}: {msg}{hint}", pending.ex.host))
+}
+
+/// Forwards a WebSocket handshake. When the server switches protocols, the
+/// handshake is recorded right away and the connection is relayed, with its
+/// messages recorded against it (see [`crate::websocket`]).
+async fn websocket(mut req: Request<Incoming>, ctx: Ctx, outbound: OutboundRequest, mut pending: Pending) -> ProxyResponse {
+    let client_upgrade = hyper::upgrade::on(&mut req);
+    let protocol = crate::websocket::requested_protocol(&pending.ex.req_headers);
+    let up = match ctx.engine.upstream().upgrade(outbound, &protocol).await {
+        Ok(up) => up,
+        Err(e) => return unreachable(e, pending),
+    };
+    pending.ex.tls_sans = up.tls_sans;
+    pending.ex.http_version = "HTTP/1.1".into();
+    let server = match up.outcome {
+        Upgrade::Refused(body) => return forward(up.status, up.headers, body, pending),
+        Upgrade::Switched(server) => server,
+    };
+    let mut builder = Response::builder().status(StatusCode::SWITCHING_PROTOCOLS);
+    for (k, v) in &up.headers {
+        if !HOP_BY_HOP.contains(&k.to_ascii_lowercase().as_str()) {
+            builder = builder.header(k.as_str(), v.as_str());
+        }
+    }
+    let switched_to = crate::model::header(&up.headers, "upgrade").unwrap_or(&protocol).to_string();
+    let response = builder.header("connection", "upgrade").header("upgrade", switched_to).body(full_body(Bytes::new()));
+    let response = match response {
+        Ok(r) => r,
+        Err(e) => return error_page(StatusCode::BAD_GATEWAY, &format!("invalid upstream response: {e}")),
+    };
+    pending.ex.status = Some(up.status);
+    pending.ex.resp_headers = up.headers.clone();
+    // Record the handshake now: the connection can stay open for hours.
+    let engine = ctx.engine.clone();
+    let Some(ex) = pending.take() else { return response };
+    let exchange_id = engine.enqueue_for_id(ex);
+    tokio::spawn(async move {
+        match client_upgrade.await {
+            Ok(client) => crate::websocket::relay(client, server, engine, exchange_id, &up.headers).await,
+            Err(e) => tracing::debug!("WebSocket upgrade with the client failed: {e}"),
+        }
+    });
+    response
+}
+
+/// The part of a body kept for the record, and how much went through.
+#[derive(Debug, Default)]
+struct Captured {
+    data: Vec<u8>,
+    limit: usize,
+    seen: u64,
+    truncated: bool,
+    /// The body ended normally, so `seen` is its full size.
+    done: bool,
+}
+
+impl Captured {
+    fn new(limit: usize) -> Self {
+        Self { limit, ..Default::default() }
+    }
+
+    fn add(&mut self, chunk: &[u8]) {
+        self.seen += chunk.len() as u64;
+        let room = self.limit.saturating_sub(self.data.len());
+        if chunk.len() > room {
+            self.truncated = true;
+        }
+        self.data.extend_from_slice(&chunk[..chunk.len().min(room)]);
+    }
+
+    /// Moves the kept part into an exchange: (body, truncated, full size).
+    fn take(&mut self) -> (Vec<u8>, bool, Option<i64>) {
+        let size = (self.truncated && self.done).then_some(self.seen as i64);
+        (std::mem::take(&mut self.data), self.truncated, size)
+    }
+}
+
+/// An exchange waiting for its response to end. Dropping it records the
+/// exchange, so it is recorded however the stream ends: normally, with an
+/// error, or because the client went away.
+struct Pending {
+    engine: Arc<Engine>,
+    started: Instant,
+    req: Arc<Mutex<Captured>>,
+    resp: Arc<Mutex<Captured>>,
+    ex: Exchange,
+    taken: bool,
+}
+
+impl Pending {
+    /// The exchange as it stands. Once taken, dropping records nothing.
+    fn take(&mut self) -> Option<Exchange> {
+        if std::mem::replace(&mut self.taken, true) {
+            return None;
+        }
+        let mut ex = std::mem::take(&mut self.ex);
+        ex.duration_ms = self.started.elapsed().as_millis() as i64;
+        (ex.req_body, ex.req_truncated, ex.req_size) = self.req.lock().unwrap().take();
+        (ex.resp_body, ex.resp_truncated, ex.resp_size) = self.resp.lock().unwrap().take();
+        Some(ex)
+    }
+}
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        if let Some(ex) = self.take() {
+            self.engine.enqueue(ex);
+        }
+    }
+}
+
+/// Passes a body through unchanged while keeping its start in a [`Captured`].
+struct Tee<B> {
+    inner: B,
+    cap: Arc<Mutex<Captured>>,
+    /// Recorded when the body ends (response bodies only).
+    pending: Option<Pending>,
+}
+
+impl<B> Tee<B> {
+    fn new(inner: B, cap: Arc<Mutex<Captured>>, pending: Option<Pending>) -> Self {
+        Self { inner, cap, pending }
+    }
+}
+
+impl<B> Body for Tee<B>
+where
+    B: Body<Data = Bytes> + Unpin,
+    B::Error: Into<BoxError>,
+{
+    type Data = Bytes;
+    type Error = BoxError;
+
+    fn poll_frame(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Bytes>, BoxError>>> {
+        let this = &mut *self;
+        match ready!(Pin::new(&mut this.inner).poll_frame(cx)) {
+            Some(Ok(frame)) => {
+                if let Some(data) = frame.data_ref() {
+                    this.cap.lock().unwrap().add(data);
+                }
+                Poll::Ready(Some(Ok(frame)))
+            }
+            Some(Err(e)) => {
+                let e = e.into();
+                if let Some(mut p) = this.pending.take() {
+                    p.ex.error = Some(format!("the response stopped early: {e}"));
+                }
+                Poll::Ready(Some(Err(e)))
+            }
+            None => {
+                this.cap.lock().unwrap().done = true;
+                this.pending.take();
+                Poll::Ready(None)
+            }
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        let end = self.inner.is_end_stream();
+        if end {
+            self.cap.lock().unwrap().done = true;
+        }
+        end
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
+    }
+}
+
+fn connect(req: Request<Incoming>, ctx: Ctx) -> ProxyResponse {
     let Some(authority) = req.uri().authority().cloned() else {
         return error_page(StatusCode::BAD_REQUEST, "CONNECT needs host:port");
     };
@@ -192,7 +421,7 @@ fn connect(req: Request<Incoming>, ctx: Ctx) -> Response<Full<Bytes>> {
                 return;
             }
         };
-        config.alpn_protocols = vec![b"http/1.1".to_vec()];
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
         let tls = match TlsAcceptor::from(Arc::new(config)).accept(TokioIo::new(upgraded)).await {
             Ok(t) => t,
             Err(e) => {
@@ -204,11 +433,11 @@ fn connect(req: Request<Incoming>, ctx: Ctx) -> Response<Full<Bytes>> {
         let inner = Ctx { tunnel: Some((host, port)), ..ctx };
         serve_conn(TokioIo::new(tls), inner).await;
     });
-    Response::new(Full::new(Bytes::new()))
+    Response::new(full_body(Bytes::new()))
 }
 
 /// Tunnels a CONNECT without decrypting it. Nothing inside is recorded.
-fn passthrough(req: Request<Incoming>, ctx: Ctx, host: String, port: u16) -> Response<Full<Bytes>> {
+fn passthrough(req: Request<Incoming>, ctx: Ctx, host: String, port: u16) -> ProxyResponse {
     tokio::spawn(async move {
         let mut server = match ctx.engine.upstream().connect(&host, port).await {
             Ok(s) => s,
@@ -221,19 +450,19 @@ fn passthrough(req: Request<Incoming>, ctx: Ctx, host: String, port: u16) -> Res
         let mut client = TokioIo::new(upgraded);
         let _ = tokio::io::copy_bidirectional(&mut client, &mut server).await;
     });
-    Response::new(Full::new(Bytes::new()))
+    Response::new(full_body(Bytes::new()))
 }
 
 fn is_self(host: &str, port: u16, local: SocketAddr) -> bool {
     port == local.port() && matches!(host, "127.0.0.1" | "localhost" | "::1" | "0.0.0.0")
 }
 
-fn local_page(path: &str, ctx: &Ctx) -> Response<Full<Bytes>> {
+fn local_page(path: &str, ctx: &Ctx) -> ProxyResponse {
     match path {
         "/ca.pem" | "/ca.crt" | "/cert" => Response::builder()
             .header("content-type", "application/x-x509-ca-cert")
             .header("content-disposition", "attachment; filename=\"plonix-ca.pem\"")
-            .body(Full::new(Bytes::from(ctx.engine.ca.ca_pem().to_string())))
+            .body(full_body(ctx.engine.ca.ca_pem().to_string()))
             .unwrap(),
         _ => {
             let html = format!(
@@ -246,16 +475,48 @@ fn local_page(path: &str, ctx: &Ctx) -> Response<Full<Bytes>> {
                 ctx.engine.store.count().unwrap_or(0),
                 ctx.engine.ca.fingerprint()
             );
-            Response::builder().header("content-type", "text/html; charset=utf-8").body(Full::new(Bytes::from(html))).unwrap()
+            Response::builder().header("content-type", "text/html; charset=utf-8").body(full_body(html)).unwrap()
         }
     }
 }
 
-fn error_page(status: StatusCode, msg: &str) -> Response<Full<Bytes>> {
+fn error_page(status: StatusCode, msg: &str) -> ProxyResponse {
     Response::builder()
         .status(status)
         .header("content-type", "text/plain; charset=utf-8")
         .header("x-plonix-error", "1")
-        .body(Full::new(Bytes::from(msg.to_string())))
+        .body(full_body(msg.to_string()))
         .unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn captured_keeps_the_start_and_counts_the_rest() {
+        let mut c = Captured::new(5);
+        c.add(b"abc");
+        c.add(b"defg");
+        c.add(b"hi");
+        assert_eq!(c.take(), (b"abcde".to_vec(), true, None), "size unknown until the body ends");
+        let mut c = Captured::new(5);
+        c.add(b"abcdefgh");
+        c.done = true;
+        assert_eq!(c.take(), (b"abcde".to_vec(), true, Some(8)));
+        let mut c = Captured::new(5);
+        c.add(b"abcde");
+        c.done = true;
+        assert_eq!(c.take(), (b"abcde".to_vec(), false, None), "a body that fits is not cut");
+    }
+
+    #[test]
+    fn http2_headers_are_recorded_like_http1() {
+        let mut h: Headers = vec![("cookie".into(), "a=1".into()), ("accept".into(), "*/*".into()), ("cookie".into(), "b=2".into())];
+        from_http2(&mut h, Some("app.test:8443"));
+        assert_eq!(
+            h,
+            vec![("host".into(), "app.test:8443".into()), ("cookie".into(), "a=1; b=2".into()), ("accept".into(), "*/*".into())]
+        );
+    }
 }
