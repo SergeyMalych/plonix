@@ -24,6 +24,17 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
+  # The 100,000-exchange scale tests (crates/plonix-core/tests/scale.rs), in
+  # release mode. A 10,000-exchange version runs with the tests above.
+  scale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Scale tests
+        run: cargo test --release --locked -p plonix-core --test scale -- --ignored --nocapture
+
   lint:
     runs-on: ubuntu-latest
     steps:

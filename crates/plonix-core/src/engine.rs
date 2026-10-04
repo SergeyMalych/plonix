@@ -1,6 +1,6 @@
 //! The engine ties the proxy, store, scope and upstream client together.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
@@ -30,7 +30,7 @@ use crate::runs;
 use crate::scan;
 use crate::scope::{self, Decision, Rule, ScopeRules};
 use crate::settings::ProxySettings;
-use crate::store::Store;
+use crate::store::{Learned, Store};
 use crate::upstream::{InboundResponse, OutboundRequest, Upstream, UpstreamOptions, host_matches};
 
 pub struct Engine {
@@ -77,6 +77,10 @@ pub type Responder = Arc<dyn Fn(&OutboundRequest) -> Option<InboundResponse> + S
 
 /// How much of each body is recorded until the settings say otherwise.
 pub const DEFAULT_BODY_LIMIT: usize = 10 * 1024 * 1024;
+
+/// Most exchanges the recorder writes in one transaction. Filling the search
+/// index one exchange per transaction costs several times more per exchange.
+const RECORD_BATCH: usize = 128;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct StorageStats {
@@ -534,14 +538,26 @@ impl Engine {
         std::thread::Builder::new()
             .name("plonix-recorder".into())
             .spawn(move || {
-                while let Some((ex, reply)) = rx.blocking_recv() {
-                    match engine.record(ex) {
-                        Ok(id) => {
-                            if let Some(reply) = reply {
-                                let _ = reply.send(id);
+                // Whatever queued up while the last batch was written goes
+                // in the next one: a busy proxy is recorded in batches.
+                while let Some(first) = rx.blocking_recv() {
+                    let mut batch = vec![first];
+                    while batch.len() < RECORD_BATCH {
+                        match rx.try_recv() {
+                            Ok(item) => batch.push(item),
+                            Err(_) => break,
+                        }
+                    }
+                    let (exchanges, replies): (Vec<Exchange>, Vec<_>) = batch.into_iter().unzip();
+                    match engine.record_all(exchanges) {
+                        Ok(ids) => {
+                            for (id, reply) in ids.into_iter().zip(replies) {
+                                if let Some(reply) = reply {
+                                    let _ = reply.send(id);
+                                }
                             }
                         }
-                        Err(e) => tracing::error!("failed to record exchange: {e:#}"),
+                        Err(e) => tracing::error!("failed to record exchanges: {e:#}"),
                     }
                 }
             })
@@ -550,13 +566,15 @@ impl Engine {
 
     /// Stores an exchange and feeds it to the scope analyzer.
     pub fn record(&self, ex: Exchange) -> Result<i64> {
-        let id = self.store.insert_exchange(&ex)?;
-        self.analyze(&ex, id, &self.rules())?;
-        Ok(id)
+        Ok(self.record_all(vec![ex])?[0])
     }
 
-    fn analyze(&self, ex: &Exchange, id: i64, rules: &ScopeRules) -> Result<()> {
-        analyze_into(&self.store, ex, id, rules)
+    /// Stores exchanges in one transaction, then feeds them to the scope
+    /// analyzer in order. Returns their ids.
+    pub fn record_all(&self, exchanges: Vec<Exchange>) -> Result<Vec<i64>> {
+        let ids = self.store.insert_exchanges(&exchanges)?;
+        analyze_into(&self.store, exchanges.iter().zip(ids.iter().copied()), &self.rules())?;
+        Ok(ids)
     }
 
     /// Re-runs the analyzer over all stored traffic. Called when scope
@@ -1120,15 +1138,24 @@ pub struct Running {
     pub agent_token: String,
 }
 
-fn analyze_into(store: &Store, ex: &Exchange, id: i64, rules: &ScopeRules) -> Result<()> {
-    let analysis = scope::analyze(ex, rules, &|h| store.token_owner(h));
-    if !analysis.tokens.is_empty() {
-        store.add_tokens(&analysis.tokens, &scope::normalize_host(&ex.host))?;
+/// Runs scope analysis over exchanges in order and stores what it learned
+/// in one go. A token the batch itself teaches counts for the exchanges after
+/// it, as if each had been written right away.
+fn analyze_into<'a>(store: &Store, exchanges: impl Iterator<Item = (&'a Exchange, i64)>, rules: &ScopeRules) -> Result<()> {
+    let mut owners: HashMap<String, String> = HashMap::new();
+    let mut learned = Vec::new();
+    for (ex, id) in exchanges {
+        let analysis = scope::analyze(ex, rules, &|h| store.token_owner(h).or_else(|| owners.get(h).cloned()));
+        if analysis.tokens.is_empty() && analysis.evidence.is_empty() {
+            continue;
+        }
+        let host = scope::normalize_host(&ex.host);
+        for t in &analysis.tokens {
+            owners.entry(t.clone()).or_insert_with(|| host.clone());
+        }
+        learned.push(Learned { exchange_id: id, ts: ex.ts, host, tokens: analysis.tokens, evidence: analysis.evidence });
     }
-    for ev in &analysis.evidence {
-        store.add_evidence(ev, id, ex.ts)?;
-    }
-    Ok(())
+    store.add_analysis(&learned)
 }
 
 /// Rebuilds scope evidence for everything in `store` against `rules`.
@@ -1141,19 +1168,19 @@ pub fn reanalyze(store: &Store, rules: &ScopeRules) -> Result<()> {
         let batch = store.exchanges_after(last, 500)?;
         let Some(tail) = batch.last() else { break };
         last = tail.id;
-        for ex in batch.iter().filter(|e| rules.in_scope(&e.host)) {
-            let tokens = scope::session_tokens(ex, true);
-            store.add_tokens(&tokens, &scope::normalize_host(&ex.host))?;
-        }
+        let tokens: Vec<Learned> = batch
+            .iter()
+            .filter(|e| rules.in_scope(&e.host))
+            .map(|ex| Learned { host: scope::normalize_host(&ex.host), tokens: scope::session_tokens(ex, true), ..Default::default() })
+            .collect();
+        store.add_analysis(&tokens)?;
     }
     let mut last = 0;
     loop {
         let batch = store.exchanges_after(last, 500)?;
         let Some(tail) = batch.last() else { break };
         last = tail.id;
-        for ex in &batch {
-            analyze_into(store, ex, ex.id, rules)?;
-        }
+        analyze_into(store, batch.iter().map(|ex| (ex, ex.id)), rules)?;
     }
     Ok(())
 }
