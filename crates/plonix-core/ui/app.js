@@ -785,7 +785,7 @@ const TCOLS = [
   { key: 'method', label: 'Method', w: 66 },
   { key: 'host', label: 'Host', w: 220, col: 'c-host', th: 'c-host' },
   { key: 'path', label: 'Path' },
-  { key: 'status', label: 'Status', w: 64 },
+  { key: 'status', label: 'Status', w: 74 },
   { key: 'type', label: 'Type', w: 92 },
   { key: 'size', label: 'Size', w: 72, col: 'c-size', th: 'num c-size' },
   { key: 'ms', label: 'ms', w: 60, col: 'c-ms', th: 'num c-ms' },
@@ -798,15 +798,38 @@ function trafficColumns() {
   const cols = TCOLS.map((c) => h('col', { class: c.col, style: c.w ? { width: (widths[c.key] || c.w) + 'px' } : null }));
   const flex = TCOLS.findIndex((c) => !c.w);
   const ths = TCOLS.map((c, i) => {
-    const th = h('th', { class: c.th, text: c.label });
-    if (c.w) th.append(h('span', { class: 'colgrip ' + (i < flex ? 'r' : 'l'), title: 'Drag to resize · double-click to reset', onmousedown: (e) => startColResize(e, c, cols[i], i < flex ? 1 : -1), ondblclick: () => setColWidth(c, cols[i], null) }));
+    const th = h('th', { class: (c.th ? c.th + ' ' : '') + 'sortable', 'data-col': c.key, title: 'Sort by ' + c.label, onclick: () => cycleSort(c.key) }, h('span', { class: 'sortarrow' }), h('span', { class: 'collabel', text: c.label }));
+    if (c.w) th.append(h('span', { class: 'colgrip ' + (i < flex ? 'r' : 'l'), title: 'Drag to resize · double-click to reset', onclick: (e) => e.stopPropagation(), onmousedown: (e) => startColResize(e, c, cols[i], i < flex ? 1 : -1), ondblclick: (e) => (e.stopPropagation(), setColWidth(c, cols[i], null)) }));
     return th;
   });
-  if (!T.colsLoaded) loadTrafficColumns(cols);
-  return [h('colgroup', null, cols), h('thead', null, h('tr', null, ths))];
+  const head = h('thead', null, h('tr', null, ths));
+  markSort(head);
+  if (!T.colsLoaded) loadTrafficColumns(cols, head);
+  return [h('colgroup', null, cols), head];
 }
 
-async function loadTrafficColumns(cols) {
+/** Ascending, then descending, then back to newest first. */
+function cycleSort(key) {
+  const cur = T.sort || '';
+  T.sort = cur === key ? '-' + key : cur === '-' + key ? '' : key;
+  markSort();
+  saveTrafficColumns();
+  T.refresh(true);
+}
+
+function markSort(head = $('.ttable thead')) {
+  if (!head) return;
+  const key = (T.sort || '').replace(/^-/, '');
+  const desc = (T.sort || '').startsWith('-');
+  for (const th of head.querySelectorAll('th[data-col]')) {
+    const on = th.dataset.col === key;
+    th.classList.toggle('sorted', on);
+    th.querySelector('.sortarrow').textContent = on ? (desc ? '↓' : '↑') : '';
+    th.setAttribute('aria-sort', on ? (desc ? 'descending' : 'ascending') : 'none');
+  }
+}
+
+async function loadTrafficColumns(cols, head) {
   try {
     const v = await api('/api/views/traffic-columns');
     T.colsLoaded = true;
@@ -816,8 +839,14 @@ async function loadTrafficColumns(cols) {
       if (c.w && Number.isFinite(w) && w >= TCOL_MIN) T.colW[c.key] = Math.round(w);
     }
     TCOLS.forEach((c, i) => c.w && (cols[i].style.width = (T.colW[c.key] || c.w) + 'px'));
+    const sort = typeof v.sort === 'string' && TCOLS.some((c) => c.key === v.sort.replace(/^-/, '')) ? v.sort : '';
+    if (sort !== (T.sort || '')) {
+      T.sort = sort;
+      markSort(head);
+      if (S.view === 'traffic' && T.refresh) T.refresh(true);
+    }
   } catch (_) {
-    /* engine unreachable: default widths */
+    /* engine unreachable: default widths and order */
   }
 }
 
@@ -826,8 +855,12 @@ function setColWidth(c, col, w) {
   if (w == null) delete T.colW[c.key];
   else T.colW[c.key] = w;
   col.style.width = (w || c.w) + 'px';
+  saveTrafficColumns();
+}
+
+function saveTrafficColumns() {
   clearTimeout(T.colSaveT);
-  T.colSaveT = setTimeout(() => api('/api/views/traffic-columns', { method: 'PUT', body: { widths: T.colW } }).catch(() => {}), 300);
+  T.colSaveT = setTimeout(() => api('/api/views/traffic-columns', { method: 'PUT', body: { widths: T.colW || {}, sort: T.sort || '' } }).catch(() => {}), 300);
 }
 
 function startColResize(e, c, col, dir) {
@@ -1237,7 +1270,7 @@ async function refreshTraffic(userAction) {
   const seq = (T.seq = (T.seq || 0) + 1);
   let data;
   try {
-    data = await api('/api/traffic?limit=500&q=' + encodeURIComponent(fullQuery()));
+    data = await api('/api/traffic?limit=500&q=' + encodeURIComponent(fullQuery()) + (T.sort ? '&sort=' + encodeURIComponent(T.sort) : ''));
   } catch (e) {
     if (seq !== T.seq) return;
     if (e.code === 'bad_query') {

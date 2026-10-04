@@ -183,6 +183,11 @@ code, .mono { font-family: var(--mono); }
 .tablewrap { flex: 1; min-height: 80px; overflow: auto; }
 .ttable { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
 .ttable thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; text-align: left; font-weight: 600; color: var(--fg-3); font-size: 11px; padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ttable thead th.sortable { cursor: pointer; user-select: none; }
+.ttable thead th.sortable:hover { color: var(--fg); }
+.ttable thead th.sorted { color: var(--accent); }
+.ttable .sortarrow:empty { display: none; }
+.ttable .sortarrow { margin-right: 3px; }
 .ttable .colgrip { position: absolute; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 2; }
 .ttable .colgrip.r { right: 0; }
 .ttable .colgrip.l { left: 0; }
