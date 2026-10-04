@@ -186,7 +186,7 @@ open ../../target/release/bundle/macos/Plonix.app
 
 Drag `Plonix.app` to Applications to keep it. While developing, `cargo run -p plonix-app` opens the same window without bundling.
 
-Each CI run on `main` and on pull requests also builds `Plonix.app` and attaches it as a download (`Plonix-macOS`). These builds are not signed yet: the first time, right-click the app and choose **Open**, or run `xattr -dr com.apple.quarantine Plonix.app`.
+Each CI run on `main` and on pull requests also builds `Plonix.app` and attaches it as a download (`Plonix-macOS`). Builds from `main` are signed and notarized once the project's signing is set up ([docs/releasing.md](docs/releasing.md)); until then, and for pull requests, they are unsigned: the first time, right-click the app and choose **Open**, or run `xattr -dr com.apple.quarantine Plonix.app`.
 
 ### The first 60 seconds from a terminal
 
@@ -375,7 +375,7 @@ docs/             detection rules, agents and MCP, extension design
 
 **Coming**
 - [ ] Opt-in active mode for agents: replay and send within accepted scope, switched on by you ([design](docs/agents.md#later-an-opt-in-active-mode))
-- [ ] Signed and notarized app downloads
+- [ ] Signed and notarized app downloads (the pipeline is ready; see [docs/releasing.md](docs/releasing.md))
 - [ ] Crawl with a browser for JavaScript-heavy apps, and a Scans screen in the window
 - [ ] Sandboxed WebAssembly extensions with a closed capability list that can never bypass scope ([design](docs/extensions.md))
 

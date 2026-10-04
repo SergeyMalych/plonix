@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Merged by Tauri into Plonix.app's Info.plist. Shown when macOS asks whether Plonix may control Terminal. -->
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Plonix opens Terminal to start Claude Code with the context you chose to share.</string>
+</dict>
+</plist>

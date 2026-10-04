@@ -52,6 +52,11 @@ jobs:
 
   macos-app:
     runs-on: macos-latest
+    env:
+      # Pushes to main produce a signed and notarized app when the signing
+      # secrets are set (see docs/releasing.md). Pull requests, forks and
+      # repositories without the secrets get the unsigned build.
+      CAN_SIGN: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.APPLE_CERTIFICATE != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -59,17 +64,71 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Build Plonix.app
+
+      - name: Build Plonix.app (unsigned)
+        if: env.CAN_SIGN != 'true'
         working-directory: crates/plonix-app
         run: npx --yes @tauri-apps/cli@2 build --bundles app -- --locked
-      - name: Check the bundle
+      - name: Check the bundle (unsigned)
+        if: env.CAN_SIGN != 'true'
         run: |
           app=target/release/bundle/macos/Plonix.app
           test -x "$app/Contents/MacOS/Plonix"
           plutil -p "$app/Contents/Info.plist" | grep -E 'CFBundleName|CFBundleIdentifier|CFBundleShortVersionString'
           codesign --verify --verbose "$app" || true
-      - name: Zip Plonix.app
-        run: ditto -c -k --keepParent target/release/bundle/macos/Plonix.app Plonix-macOS.zip
+          ditto -c -k --keepParent "$app" Plonix-macOS.zip
+
+      # Tauri signs with the hardened runtime and entitlements.plist, then
+      # notarizes and staples, during the build when these variables are set.
+      # Only the ones that have a value are exported, so Tauri uses whichever
+      # notarization method (Apple ID or API key) the secrets describe.
+      - name: Prepare signing
+        if: env.CAN_SIGN == 'true'
+        env:
+          S_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          S_APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          S_APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          S_APPLE_ID: ${{ secrets.APPLE_ID }}
+          S_APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          S_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          S_APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          S_APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          S_APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          if [ -z "$S_APPLE_SIGNING_IDENTITY" ]; then
+            echo "::error::Set the APPLE_SIGNING_IDENTITY secret too. See docs/releasing.md"; exit 1
+          fi
+          if [ -z "$S_APPLE_ID$S_APPLE_API_KEY" ]; then
+            echo "::error::Set the notarization secrets (Apple ID or API key). See docs/releasing.md"; exit 1
+          fi
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+                      APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID APPLE_API_KEY APPLE_API_ISSUER; do
+            source_var="S_$name"
+            value="${!source_var}"
+            [ -n "$value" ] || continue
+            { echo "$name<<PLONIX_EOF"; printf '%s\n' "$value"; echo "PLONIX_EOF"; } >> "$GITHUB_ENV"
+          done
+          if [ -n "$S_APPLE_API_PRIVATE_KEY" ]; then
+            key="$RUNNER_TEMP/AuthKey_$S_APPLE_API_KEY.p8"
+            printf '%s\n' "$S_APPLE_API_PRIVATE_KEY" > "$key"
+            chmod 600 "$key"
+            echo "APPLE_API_KEY_PATH=$key" >> "$GITHUB_ENV"
+          fi
+      - name: Build, sign and notarize Plonix.app
+        if: env.CAN_SIGN == 'true'
+        working-directory: crates/plonix-app
+        run: npx --yes @tauri-apps/cli@2 build --bundles app -- --locked
+      - name: Verify the signature and notarization
+        if: env.CAN_SIGN == 'true'
+        run: |
+          app=target/release/bundle/macos/Plonix.app
+          test -x "$app/Contents/MacOS/Plonix"
+          plutil -p "$app/Contents/Info.plist" | grep -E 'CFBundleName|CFBundleIdentifier|CFBundleShortVersionString'
+          scripts/macos/sign-and-notarize.sh --verify --zip Plonix-macOS.zip "$app"
+      - name: Remove the API key
+        if: always() && env.APPLE_API_KEY_PATH != ''
+        run: rm -f "$APPLE_API_KEY_PATH"
+
       - uses: actions/upload-artifact@v4
         with:
           name: Plonix-macOS
