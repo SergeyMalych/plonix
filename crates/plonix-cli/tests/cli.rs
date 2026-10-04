@@ -528,36 +528,36 @@ fn store_installs_only_verified_packs() {
     }));
     let url = format!("http://127.0.0.1:{port}/store/index.json");
 
-    let out = p.run(&["store", "--index", &url]).ok().stdout();
+    let out = p.run(&["store", "--index", &url, "--allow-unsigned"]).ok().stdout();
     assert!(out.contains("Test store"), "{out}");
     for (name, status) in [("acme-internal", "available"), ("web-servers", "built-in"), ("jwt-workbench", "needs runtime")] {
         let line = out.lines().find(|l| l.starts_with(name)).unwrap_or_else(|| panic!("{name} missing:\n{out}"));
         assert!(line.contains(status), "{line}");
     }
 
-    let r = p.run(&["store", "install", "jwt-workbench", "--index", &url]);
+    let r = p.run(&["store", "install", "jwt-workbench", "--index", &url, "--allow-unsigned"]);
     assert_eq!(r.code(), 1);
     assert!(r.stderr().contains("sandboxed extension runtime"), "{}", r.stderr());
 
     // A tampered download is refused and nothing is installed.
     *pack_bytes.lock().unwrap() = ACME_PACK.replace("Acme Gateway", "Evil Gateway").into_bytes();
-    let r = p.run(&["store", "install", "acme-internal", "--index", &url]);
+    let r = p.run(&["store", "install", "acme-internal", "--index", &url, "--allow-unsigned"]);
     assert_eq!(r.code(), 1);
     assert!(r.stderr().contains("checksum mismatch"), "{}", r.stderr());
     assert!(!p.run(&["rules"]).ok().stdout().contains("acme-internal"));
 
     *pack_bytes.lock().unwrap() = ACME_PACK.as_bytes().to_vec();
-    let out = p.run(&["store", "install", "acme-internal", "--index", &url]).ok().stdout();
-    assert!(out.contains("Installed acme-internal 1.0.0 (1 rules, sha256 verified)."), "{out}");
-    assert!(p.run(&["store", "update", "--index", &url]).ok().stdout().contains("up to date"));
+    let out = p.run(&["store", "install", "acme-internal", "--index", &url, "--allow-unsigned"]).ok().stdout();
+    assert!(out.contains("Installed acme-internal 1.0.0 (rule pack, sha256 verified)."), "{out}");
+    assert!(p.run(&["store", "update", "--index", &url, "--allow-unsigned"]).ok().stdout().contains("up to date"));
 
     // A new version in the store shows up as an update.
     let v2 = ACME_PACK.replace("1.0.0", "1.1.0");
     *pack_bytes.lock().unwrap() = v2.clone().into_bytes();
     *index.lock().unwrap() = make_index("1.1.0", &sha256(v2.as_bytes()));
-    let out = p.run(&["store", "list", "acme", "--index", &url]).ok().stdout();
+    let out = p.run(&["store", "list", "acme", "--index", &url, "--allow-unsigned"]).ok().stdout();
     assert!(out.contains("update 1.0.0→1.1.0"), "{out}");
-    let out = p.run(&["store", "update", "--index", &url]).ok().stdout();
+    let out = p.run(&["store", "update", "--index", &url, "--allow-unsigned"]).ok().stdout();
     assert!(out.contains("Updated acme-internal 1.0.0 → 1.1.0"), "{out}");
 }
 
@@ -779,4 +779,282 @@ fn connect_claude_adds_the_mcp_server() {
     let out = p.run(&["connect", "claude", "--print"]).ok().stdout();
     assert!(out.contains("claude mcp add --scope user plonix --") && out.contains("\"mcpServers\""), "{out}");
     assert!(!dir.path().join("claude-args.txt").exists());
+}
+
+const ACME_FILTERS: &str = r#"{
+  "plonix_filters": 1, "name": "acme-filters", "version": "1.0.0",
+  "description": "Acme console traffic", "author": "acme red team",
+  "filters": [{"id": "acme-console", "label": "Acme console", "query": "path:/console method:GET"}]
+}"#;
+
+#[test]
+fn filter_packs_add_named_filters_to_search() {
+    let p = Plonix::new();
+    let dir = tempfile::tempdir().unwrap();
+    let pack = dir.path().join("acme-filters.json");
+    std::fs::write(&pack, ACME_FILTERS).unwrap();
+    let pack = pack.to_str().unwrap();
+
+    let out = p.run(&["filters"]).ok().stdout();
+    assert!(out.contains("is:graphql") && out.contains("is:trackers"), "{out}");
+    assert!(p.run(&["filters", "check", pack]).ok().stdout().contains("acme-filters 1.0.0 is valid: 1 filters."));
+    let bad = dir.path().join("bad.json");
+    std::fs::write(&bad, ACME_FILTERS.replace("path:/console method:GET", "is:graphql")).unwrap();
+    let r = p.run(&["filters", "check", bad.to_str().unwrap()]);
+    assert_eq!(r.code(), 1);
+    assert!(r.stderr().contains("unknown filter is:graphql"), "{}", r.stderr());
+
+    let target = serve(std::sync::Arc::new(|path: &str| {
+        let ctype = if path.starts_with("/graphql") { "application/json" } else { "text/html" };
+        (200, vec![("Content-Type".to_string(), ctype.to_string())], b"{}".to_vec())
+    }));
+    p.start();
+    let proxy = p.proxy();
+    for path in ["/graphql", "/console", "/home"] {
+        via_proxy(&proxy, &format!("http://localhost:{target}{path}"), &[]);
+    }
+    p.search_until("host:localhost", 3);
+
+    let paths = |q: &str| -> Vec<String> {
+        let v: serde_json::Value = serde_json::from_str(&p.run(&["search", "--json", q]).ok().stdout()).unwrap();
+        v["items"].as_array().unwrap().iter().map(|i| i["path"].as_str().unwrap().to_string()).collect()
+    };
+    assert_eq!(paths("is:graphql"), ["/graphql"]);
+    assert_eq!(paths("is:api"), ["/graphql"]);
+    let mut hidden = paths("-is:graphql host:localhost");
+    hidden.sort();
+    assert_eq!(hidden, ["/console", "/home"]);
+    let r = p.run(&["search", "is:acme-console"]);
+    assert_eq!(r.code(), 2);
+    assert!(r.stderr().contains("unknown filter is:acme-console"), "{}", r.stderr());
+
+    // Installed while the engine runs: picked up without a restart.
+    assert!(p.run(&["filters", "add", pack]).ok().stdout().contains("Installed acme-filters 1.0.0: 1 filters"));
+    assert_eq!(paths("is:acme-console"), ["/console"]);
+    assert_eq!(paths("is:acme-console,graphql").len(), 2);
+
+    assert_eq!(p.run(&["filters", "remove", "common"]).code(), 1);
+    p.run(&["filters", "remove", "acme-filters"]).ok();
+    assert_eq!(p.run(&["search", "is:acme-console"]).code(), 2);
+}
+
+#[test]
+fn store_installs_filter_packs() {
+    let p = Plonix::new();
+    let index = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../store/index.json");
+    let index = index.to_str().unwrap();
+    let out = p.run(&["store", "--index", index]).ok().stdout();
+    let line = |name: &str| out.lines().find(|l| l.starts_with(name)).unwrap_or_else(|| panic!("{name} missing:\n{out}")).to_string();
+    assert!(line("common").contains("filter") && line("common").contains("built-in"));
+    assert!(line("leaks").contains("available"));
+    let out = p.run(&["store", "install", "leaks", "--index", index]).ok().stdout();
+    assert!(out.contains("Installed leaks 1.0.0 (filter pack, sha256 verified)."), "{out}");
+    assert!(p.run(&["filters"]).ok().stdout().contains("is:aws-keys"));
+}
+
+// ---- the Market and skills ----------------------------------------------------
+
+/// Copies the repository's Market folder so a test can change it.
+fn copy_market(dir: &Path) -> PathBuf {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../store");
+    fn copy(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for e in std::fs::read_dir(from).unwrap() {
+            let e = e.unwrap();
+            if e.file_type().unwrap().is_dir() {
+                copy(&e.path(), &to.join(e.file_name()));
+            } else {
+                std::fs::copy(e.path(), to.join(e.file_name())).unwrap();
+            }
+        }
+    }
+    copy(&src, &dir.join("store"));
+    dir.join("store/index.json")
+}
+
+#[test]
+fn market_installs_bundles_and_skills_from_a_signed_index() {
+    let p = Plonix::new();
+    let index = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../store/index.json");
+    let index = index.to_str().unwrap();
+    let out = p.run(&["market", "--index", index]).ok().stdout();
+    assert!(out.contains("signed by Plonix maintainers"), "{out}");
+    let line = |out: &str, name: &str| out.lines().find(|l| l.starts_with(name)).unwrap_or_else(|| panic!("{name} missing:\n{out}")).to_string();
+    assert!(line(&out, "triage-host").contains("built-in"));
+    assert!(line(&out, "api-kit").contains("bundle") && line(&out, "api-kit").contains("available"));
+    assert!(line(&out, "graphql-explorer").contains("needs runtime"));
+    let skills_only = p.run(&["market", "--index", index, "--kind", "skill"]).ok().stdout();
+    assert!(!skills_only.contains("web-servers") && skills_only.contains("api-inventory"), "{skills_only}");
+
+    let out = p.run(&["market", "show", "api-kit", "--index", index]).ok().stdout();
+    assert!(out.contains("Includes: api-inventory, leaks, admin-panels"), "{out}");
+    let out = p.run(&["market", "install", "api-kit", "--index", index]).ok().stdout();
+    // Everything from the signed Market is marked verified; a skill added by hand is not.
+    let listing = p.run(&["market", "--index", index]).ok().stdout();
+    assert!(line(&listing, "api-inventory").contains("✓ verified"), "{listing}");
+    assert!(line(&listing, "triage-host").contains("built-in"), "{listing}");
+    let mine = p.home.path().join("mine.md");
+    std::fs::write(&mine, "---\nplonix_skill: 1\nname: mine\nversion: 1.0.0\ntitle: Mine\ndescription: My skill.\nauthor: me\nuses: [traffic]\n---\nLook at traffic.\n").unwrap();
+    p.run(&["skills", "add", mine.to_str().unwrap()]).ok();
+    let listing = p.run(&["market", "--index", index]).ok().stdout();
+    assert!(line(&listing, "mine").contains("NOT VERIFIED") && line(&listing, "mine").contains("skill"), "{listing}");
+    assert!(listing.contains("1 not verified"), "{listing}");
+    assert!(p.run(&["market", "show", "mine", "--index", index]).ok().stdout().contains("You added this yourself"));
+    assert!(line(&p.run(&["skills"]).ok().stdout(), "mine").contains("NOT VERIFIED"));
+    p.run(&["skills", "remove", "mine"]).ok();
+    for name in ["api-inventory", "leaks", "admin-panels", "api-kit"] {
+        assert!(out.contains(&format!("Installed {name} 1.0.0")), "{out}");
+    }
+    assert!(p.run(&["skills"]).ok().stdout().contains("api-inventory"));
+    assert!(p.run(&["filters"]).ok().stdout().contains("is:aws-keys"));
+    let out = p.run(&["skills", "show", "api-inventory", "--arg", "host=api.example.test"]).ok().stdout();
+    assert!(out.contains("Build an inventory of the API on api.example.test") && out.contains("read-only"), "{out}");
+
+    let out = p.run(&["market", "remove", "api-kit"]).ok().stdout();
+    assert!(out.contains("Removed api-inventory (skill).") && out.contains("Removed api-kit (bundle)."), "{out}");
+    assert!(!p.run(&["skills"]).ok().stdout().contains("api-inventory"));
+    let r = p.run(&["market", "remove", "triage-host"]);
+    assert_eq!(r.code(), 1);
+    assert!(r.stderr().contains("built-in skill"), "{}", r.stderr());
+}
+
+#[test]
+fn market_refuses_unsigned_and_tampered_indexes() {
+    let p = Plonix::new();
+    let dir = tempfile::tempdir().unwrap();
+    let index_path = copy_market(dir.path());
+    let index = index_path.to_str().unwrap();
+    assert!(p.run(&["market", "--index", index]).ok().stdout().contains("signed by Plonix maintainers"));
+
+    // Changing a single character after signing is caught.
+    let text = std::fs::read_to_string(&index_path).unwrap();
+    std::fs::write(&index_path, text.replace("Plonix contributors", "Plonix contributers")).unwrap();
+    let r = p.run(&["market", "install", "api-inventory", "--index", index]);
+    assert_eq!(r.code(), 1);
+    assert!(r.stderr().contains("changed after it was signed"), "{}", r.stderr());
+
+    // Without a signature it is refused unless the author asks.
+    std::fs::remove_file(dir.path().join("store/index.json.sig")).unwrap();
+    let r = p.run(&["market", "--index", index]);
+    assert_eq!(r.code(), 1);
+    assert!(r.stderr().contains("not signed"), "{}", r.stderr());
+
+    // A Market author signs with their own key; users who trust it can install.
+    let key = dir.path().join("author.key");
+    let out = p.run(&["market", "keygen", key.to_str().unwrap()]).ok().stdout();
+    let public = out.lines().find_map(|l| l.strip_prefix("Public key: ")).unwrap().to_string();
+    p.run(&["market", "sign", index, "--key", key.to_str().unwrap()]).ok();
+    let r = p.run(&["market", "--index", index]);
+    assert_eq!(r.code(), 1);
+    assert!(r.stderr().contains("not a key you trust"), "{}", r.stderr());
+    p.run(&["market", "trust", &public]).ok();
+    let out = p.run(&["market", "install", "api-inventory", "--index", index]).ok().stdout();
+    assert!(out.contains("Installed api-inventory 1.0.0 (skill, sha256 verified)."), "{out}");
+
+    // A swapped package file is refused even from a trusted index.
+    std::fs::write(dir.path().join("store/skills/check-scope.md"), "tampered").unwrap();
+    p.run(&["market", "remove", "api-inventory"]).ok();
+    let skill = std::fs::read_to_string(dir.path().join("store/skills/api-inventory.md")).unwrap();
+    std::fs::write(dir.path().join("store/skills/api-inventory.md"), skill.replace("Inventory an API", "Something else")).unwrap();
+    let r = p.run(&["market", "install", "api-inventory", "--index", index]);
+    assert_eq!(r.code(), 1);
+    assert!(r.stderr().contains("checksum mismatch"), "{}", r.stderr());
+    assert!(!p.run(&["skills"]).ok().stdout().contains("api-inventory"));
+}
+
+#[test]
+fn agents_get_skills_as_mcp_prompts_within_their_settings() {
+    let p = Plonix::new();
+    p.start();
+    let mut m = Mcp::start(&p);
+    m.request("initialize", serde_json::json!({ "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": { "name": "skill-agent" } }));
+    let prompts = m.request("prompts/list", serde_json::json!({}));
+    let names: Vec<&str> = prompts["result"]["prompts"].as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"triage-host") && names.contains(&"check-scope"), "{names:?}");
+
+    let got = m.request("prompts/get", serde_json::json!({ "name": "triage-host", "arguments": { "host": "shop.example.test" } }));
+    let text = got["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+    assert!(text.contains("Build a short briefing on shop.example.test"), "{text}");
+    let missing = m.request("prompts/get", serde_json::json!({ "name": "triage-host", "arguments": {} }));
+    assert!(missing["error"]["message"].as_str().unwrap().contains("host"), "{missing}");
+
+    let (err, text) = m.tool("list_skills", serde_json::json!({}));
+    assert!(!err && text.contains("explain-request(id)"), "{text}");
+    let (err, text) = m.tool("get_skill", serde_json::json!({ "name": "explain-request", "arguments": { "id": "7" } }));
+    assert!(!err && text.contains("Explain request #7"), "{text}");
+
+    // Switching off a capability a skill uses takes the skill away from agents.
+    let user_token = std::fs::read_to_string(p.home.path().join("api-token")).unwrap();
+    let mut settings: serde_json::Value = ureq::get(&format!("{}/api/agents/settings", api_base(&p)))
+        .set("Authorization", &format!("Bearer {}", user_token.trim()))
+        .call()
+        .unwrap()
+        .into_json()
+        .unwrap();
+    settings["off"] = serde_json::json!(["scope"]);
+    ureq::put(&format!("{}/api/agents/settings", api_base(&p)))
+        .set("Authorization", &format!("Bearer {}", user_token.trim()))
+        .send_json(settings)
+        .unwrap();
+    let prompts = m.request("prompts/list", serde_json::json!({}));
+    let names: Vec<&str> = prompts["result"]["prompts"].as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap()).collect();
+    assert!(!names.contains(&"triage-host") && !names.contains(&"check-scope") && names.contains(&"explain-request"), "{names:?}");
+    let (err, text) = m.tool("get_skill", serde_json::json!({ "name": "check-scope" }));
+    assert!(err && text.contains("switched off"), "{text}");
+
+    // Agents cannot install anything from the Market.
+    let token = std::fs::read_to_string(p.home.path().join("agent-token")).unwrap();
+    let err = ureq::post(&format!("{}/api/market/install", api_base(&p)))
+        .set("Authorization", &format!("Bearer {}", token.trim()))
+        .send_json(serde_json::json!({ "name": "api-kit" }))
+        .unwrap_err();
+    assert!(matches!(err, ureq::Error::Status(403, _)), "{err}");
+}
+
+#[test]
+fn external_files_can_be_added_but_stay_unverified() {
+    let p = Plonix::new();
+    let dir = tempfile::tempdir().unwrap();
+    let skill = dir.path().join("notes.md");
+    std::fs::write(&skill, "---\nplonix_skill: 1\nname: acme-notes\nversion: 1.0.0\ntitle: Notes\ndescription: My notes.\nauthor: me\nuses: [traffic]\n---\nLook at traffic.\n").unwrap();
+    let path = skill.to_str().unwrap();
+
+    // Without --yes it only shows what it would do.
+    let r = p.run(&["market", "add", path]);
+    assert_eq!(r.code(), 1);
+    assert!(r.stdout().contains("NOT VERIFIED") && r.stdout().contains("agents stay read-only") || r.stdout().contains("Agents stay read-only"), "{}", r.stdout());
+    assert!(!p.run(&["skills"]).ok().stdout().contains("acme-notes"));
+
+    let out = p.run(&["market", "add", path, "--yes"]).ok().stdout();
+    assert!(out.contains("Installed acme-notes"), "{out}");
+    assert!(p.run(&["skills"]).ok().stdout().lines().find(|l| l.starts_with("acme-notes")).unwrap().contains("NOT VERIFIED"));
+
+    // Packs are detected by their contents; anything else is refused with a reason.
+    let pack = dir.path().join("pack.json");
+    std::fs::write(&pack, ACME_PACK).unwrap();
+    assert!(p.run(&["market", "add", pack.to_str().unwrap(), "--yes"]).ok().stdout().contains("rule pack"));
+    let junk = dir.path().join("junk.json");
+    std::fs::write(&junk, "{\"hello\": 1}").unwrap();
+    assert!(p.run(&["market", "add", junk.to_str().unwrap(), "--yes"]).stderr().contains("not a Plonix skill or pack"));
+    let index = dir.path().join("index.json");
+    std::fs::write(&index, "{\"plonix_index\": 2, \"packages\": []}").unwrap();
+    assert!(p.run(&["market", "add", index.to_str().unwrap(), "--yes"]).stderr().contains("Market list"));
+    assert_eq!(p.run(&["market", "add", "http://example.com/x.md", "--yes"]).code(), 1);
+
+    // The agent prompt for an unverified skill says so.
+    p.start();
+    let mut m = Mcp::start(&p);
+    m.request("initialize", serde_json::json!({ "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": { "name": "a" } }));
+    let (err, text) = m.tool("get_skill", serde_json::json!({ "name": "acme-notes" }));
+    assert!(!err && text.contains("this skill is not verified"), "{text}");
+    let (_, text) = m.tool("get_skill", serde_json::json!({ "name": "explain-request", "arguments": { "id": "1" } }));
+    assert!(!text.contains("not verified"), "{text}");
+
+    // Agents cannot add anything.
+    let token = std::fs::read_to_string(p.home.path().join("agent-token")).unwrap();
+    let err = ureq::post(&format!("{}/api/market/add", api_base(&p)))
+        .set("Authorization", &format!("Bearer {}", token.trim()))
+        .send_json(serde_json::json!({ "source": path, "confirm": true }))
+        .unwrap_err();
+    assert!(matches!(err, ureq::Error::Status(403, _)), "{err}");
 }

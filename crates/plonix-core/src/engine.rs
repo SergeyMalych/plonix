@@ -18,8 +18,11 @@ use crate::ca::CertAuthority;
 use crate::detect::{self, Detection, Detector, HostTech};
 use crate::model::{Exchange, Headers, Source, now_ms};
 use crate::paths::{EngineInfo, Home};
+use crate::filterpack::{FilterLibrary, FilterSet};
 use crate::project::PruneReport;
 use crate::rulepack::{Library, PackInfo};
+use crate::crawl;
+use crate::exclude::{self, ExcludedDomain, Exclusions, Group, GroupStatus};
 use crate::scan;
 use crate::scope::{self, Decision, Rule, ScopeRules};
 use crate::settings::ProxySettings;
@@ -46,6 +49,7 @@ pub struct Engine {
     recorder: mpsc::UnboundedSender<Exchange>,
     recorder_rx: Mutex<Option<mpsc::UnboundedReceiver<Exchange>>>,
     detection: Mutex<DetectionState>,
+    filters: Mutex<FilterState>,
     /// The listen address last asked for in the settings.
     applied_listen: Mutex<Option<SocketAddr>>,
     overrides: Mutex<UpstreamOptions>,
@@ -76,6 +80,14 @@ struct Interception {
 pub struct ProjectRef {
     pub id: String,
     pub dir: std::path::PathBuf,
+}
+
+/// Named Traffic filters in effect, reloaded when filter packs change.
+#[derive(Default)]
+struct FilterState {
+    library: Option<FilterLibrary>,
+    loaded_stamp: Option<Option<std::time::SystemTime>>,
+    set: Arc<FilterSet>,
 }
 
 /// Detection rules currently in effect. Reloaded when installed packs change
@@ -163,6 +175,7 @@ impl Engine {
             interception: RwLock::new(Interception { decrypt: true, passthrough: vec![] }),
             project_ref: OnceLock::new(),
             detection: Mutex::new(DetectionState::default()),
+            filters: Mutex::new(FilterState::default()),
             applied_listen: Mutex::new(None),
             overrides: Mutex::default(),
         }))
@@ -312,6 +325,32 @@ impl Engine {
 
     /// Loads installed rule packs from this library (built-in packs are
     /// always loaded).
+    /// Loads installed filter packs from this library (built-in packs are
+    /// always loaded).
+    pub fn set_filter_library(&self, library: FilterLibrary) {
+        let mut f = self.filters.lock().unwrap();
+        f.library = Some(library);
+        f.loaded_stamp = None;
+    }
+
+    /// Named filters in effect (`is:name`), reloading them if packs changed.
+    pub fn filters(&self) -> Arc<FilterSet> {
+        let mut f = self.filters.lock().unwrap();
+        let stamp = f.library.as_ref().and_then(FilterLibrary::stamp);
+        if f.loaded_stamp != Some(stamp) {
+            let set = match &f.library {
+                Some(lib) => lib.load(),
+                None => FilterLibrary::at(std::path::Path::new("/nonexistent")).load(),
+            };
+            for p in &set.problems {
+                tracing::warn!("filters: {p}");
+            }
+            f.set = Arc::new(set);
+            f.loaded_stamp = Some(stamp);
+        }
+        f.set.clone()
+    }
+
     pub fn set_rule_library(&self, library: Library) {
         let mut d = self.detection.lock().unwrap();
         d.library = Some(library);
@@ -445,6 +484,91 @@ impl Engine {
             self.store.prune_decided(&self.rules())?;
         }
         Ok(rule)
+    }
+
+    // ---- exclusions ------------------------------------------------------
+
+    /// The built-in groups followed by the user's custom groups.
+    pub fn exclusion_groups(&self) -> Result<Vec<Group>> {
+        let mut groups = exclude::builtin_groups();
+        groups.extend(self.store.custom_groups()?);
+        Ok(groups)
+    }
+
+    /// A snapshot of every group with each domain's current on/off state.
+    pub fn exclusions(&self) -> Result<Exclusions> {
+        let rules = self.rules();
+        let groups = self
+            .exclusion_groups()?
+            .into_iter()
+            .map(|g| {
+                let state = exclude::group_state(&rules, &g);
+                let domains = g.domains.iter().map(|d| ExcludedDomain { host: d.clone(), excluded: exclude::is_excluded(&rules, d) }).collect();
+                GroupStatus { state, domains, id: g.id, name: g.name, description: g.description, builtin: g.builtin }
+            })
+            .collect();
+        Ok(Exclusions { groups, asked: self.exclusions_asked()? })
+    }
+
+    /// Switches a whole group on (exclude every member) or off.
+    pub fn set_group_excluded(&self, group_id: &str, on: bool) -> Result<()> {
+        let group = self.exclusion_groups()?.into_iter().find(|g| g.id == group_id).context("unknown exclusion group")?;
+        if on {
+            let now = now_ms();
+            let rules: Vec<Rule> = group.domains.iter().map(|d| exclude::exclusion_rule(d, group_id, now)).collect();
+            self.store.put_rules(&rules)?;
+        } else {
+            self.store.delete_group_rules(group_id)?;
+        }
+        *self.rules.write().unwrap() = self.store.rules()?;
+        self.store.prune_decided(&self.rules())?;
+        Ok(())
+    }
+
+    /// Switches one member of a group on or off.
+    pub fn set_domain_excluded(&self, group_id: &str, host: &str, on: bool) -> Result<()> {
+        if on {
+            self.store.put_rules(&[exclude::exclusion_rule(host, group_id, now_ms())])?;
+        } else {
+            self.store.delete_group_rule(&scope::normalize_host(host))?;
+        }
+        *self.rules.write().unwrap() = self.store.rules()?;
+        self.store.prune_decided(&self.rules())?;
+        Ok(())
+    }
+
+    /// Creates or replaces a custom group. Enabling it is a separate step.
+    pub fn save_custom_group(&self, mut group: Group) -> Result<Group> {
+        group.id = exclude::normalize_group_id(&group.id, &group.name);
+        anyhow::ensure!(!group.id.is_empty(), "a group needs a name");
+        anyhow::ensure!(!exclude::builtin_groups().iter().any(|g| g.id == group.id), "that name clashes with a built-in group");
+        group.builtin = false;
+        group.domains = group.domains.iter().map(|d| scope::normalize_host(d)).filter(|d| !d.is_empty()).collect();
+        self.store.put_custom_group(&group, now_ms())?;
+        Ok(group)
+    }
+
+    /// Deletes a custom group and any exclusions it owns.
+    pub fn remove_custom_group(&self, id: &str) -> Result<()> {
+        self.store.delete_group_rules(id)?;
+        self.store.delete_custom_group(id)?;
+        *self.rules.write().unwrap() = self.store.rules()?;
+        Ok(())
+    }
+
+    /// Whether the one-time "exclude common domains?" prompt has been answered.
+    pub fn exclusions_asked(&self) -> Result<bool> {
+        Ok(self
+            .store
+            .view_state("exclusions")?
+            .and_then(|v| v.get("asked").and_then(|a| a.as_bool()))
+            .unwrap_or(false))
+    }
+
+    /// Records that the one-time prompt has been answered, so it is not shown again.
+    pub fn mark_exclusions_asked(&self) -> Result<()> {
+        self.store.set_view_state("exclusions", &serde_json::json!({ "asked": true }))?;
+        Ok(())
     }
 
     pub fn remove_rule(&self, domain: &str) -> Result<bool> {
@@ -680,6 +804,91 @@ impl Engine {
         }
         Ok(report)
     }
+
+    /// Crawls an accepted host: fetches in-scope pages through `send`, follows
+    /// the same-host links it finds, and records what it sees. GET only; it
+    /// never submits a form and never leaves accepted scope.
+    pub async fn crawl(&self, req: crawl::CrawlRequest, initiator: &str) -> Result<crawl::CrawlReport, SendError> {
+        let host = scope::normalize_host(&req.host);
+        let decision = self.rules().decide(&host);
+        if decision != Decision::Accepted {
+            return Err(SendError::OutOfScope { host, decision: decision.as_str() });
+        }
+
+        let exchanges = self.store.exchanges_for_host(&host, 50).map_err(SendError::Other)?;
+        let (scheme, port) = exchanges.first().map(|e| (e.scheme.clone(), e.port)).unwrap_or_else(|| ("https".into(), 443));
+        let default_port = (scheme == "https" && port == 443) || (scheme == "http" && port == 80);
+        let authority = if default_port { host.clone() } else { format!("{host}:{port}") };
+
+        let max_pages = req.max_pages.unwrap_or(crawl::DEFAULT_MAX_PAGES).min(crawl::MAX_PAGES_CEIL);
+        let max_depth = req.max_depth.unwrap_or(crawl::DEFAULT_MAX_DEPTH);
+
+        let mut report = crawl::CrawlReport { host: host.clone(), pages_fetched: 0, urls_found: 0, forms: vec![], notes: vec![] };
+        if req.browser {
+            report.notes.push("the browser crawl mode is not available yet; ran a plain crawl".into());
+        }
+
+        // Seed with the start path and any already-discovered endpoints.
+        let start = req.start.as_deref().unwrap_or("/");
+        let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut queue: std::collections::VecDeque<(String, usize)> = std::collections::VecDeque::new();
+        let enqueue = |url: String, depth: usize, seen: &mut std::collections::BTreeSet<String>, queue: &mut std::collections::VecDeque<(String, usize)>| {
+            let key = crawl::dedup_key(&url);
+            if seen.insert(key) {
+                queue.push_back((url, depth));
+            }
+        };
+        enqueue(format!("{scheme}://{authority}{}", if start.starts_with('/') { start.to_string() } else { format!("/{start}") }), 0, &mut seen, &mut queue);
+        for e in self.store.endpoints(&host).map_err(SendError::Other)?.into_iter().filter(|e| e.method.eq_ignore_ascii_case("GET")) {
+            enqueue(format!("{scheme}://{authority}{}", e.path), 0, &mut seen, &mut queue);
+        }
+        report.urls_found = seen.len();
+
+        let mut budget_hit = false;
+        while let Some((url, depth)) = queue.pop_front() {
+            if report.pages_fetched >= max_pages {
+                budget_hit = true;
+                break;
+            }
+            report.pages_fetched += 1;
+            let ex = match self.send(SendRequest { method: "GET".into(), url: url.clone(), ..Default::default() }, initiator).await {
+                Ok(ex) => ex,
+                Err(SendError::OutOfScope { .. }) => continue,
+                Err(e) => {
+                    report.notes.push(format!("fetch failed: {e}"));
+                    continue;
+                }
+            };
+            let is_html = crate::model::header(&ex.resp_headers, "content-type").is_some_and(|c| c.to_ascii_lowercase().contains("html"));
+            if !is_html {
+                continue;
+            }
+            let Some(body) = crate::codec::body_text(&ex.resp_headers, &ex.resp_body) else { continue };
+            for form in crawl::extract_forms(&body) {
+                let action = if form.action.is_empty() {
+                    url.clone()
+                } else {
+                    crawl::resolve_same_host(&scheme, &authority, &ex.path, &form.action).unwrap_or(form.action.clone())
+                };
+                let resolved = crawl::Form { action, ..form };
+                if !report.forms.contains(&resolved) {
+                    report.forms.push(resolved);
+                }
+            }
+            if depth < max_depth {
+                for raw in crawl::extract_links(&body) {
+                    if let Some(next) = crawl::resolve_same_host(&scheme, &authority, &ex.path, &raw) {
+                        enqueue(next, depth + 1, &mut seen, &mut queue);
+                    }
+                }
+            }
+            report.urls_found = seen.len();
+        }
+        if budget_hit {
+            report.notes.push(format!("page budget of {max_pages} reached; more pages remain uncrawled"));
+        }
+        Ok(report)
+    }
 }
 
 fn severity_str(s: scan::Severity) -> &'static str {
@@ -724,6 +933,7 @@ pub async fn start(config: &EngineConfig) -> Result<Running> {
     let upstream = Upstream::new(config.insecure_upstream, vec![])?;
     let engine = Engine::new(project.name(), store, ca, upstream)?;
     engine.set_rule_library(Library::new(&config.home));
+    engine.set_filter_library(FilterLibrary::new(&config.home));
     start_with(engine, config).await
 }
 

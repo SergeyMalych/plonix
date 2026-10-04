@@ -76,7 +76,7 @@ pub struct Capability {
 }
 
 /// Capabilities the user can switch off together.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Group {
     /// Engine status and this policy; always on.
@@ -119,6 +119,8 @@ const READ_ONLY: &[Capability] = &[
     cap("/api/scan/catalog", "Available scan detectors and tactics", Group::Scan),
     cap("/api/scan/suggest/{host}", "Suggested scan profile for a host (read-only advice)", Group::Scan),
     cap("/api/agents", "This access policy", Group::Basics),
+    cap("/api/skills", "Skills: playbooks for jobs in Plonix", Group::Basics),
+    cap("/api/skills/{name}", "Skills: playbooks for jobs in Plonix", Group::Basics),
 ];
 
 /// Which captured traffic agents may see.
@@ -356,6 +358,7 @@ pub fn not_allowed(mode: AgentMode) -> &'static [&'static str] {
             "Accept, reject or remove scope rules",
             "Record or change findings",
             "Open browsers, sign in to the window or stop the engine",
+            "Install, update or remove anything from the Market",
         ],
     }
 }

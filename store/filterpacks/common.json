@@ -1,0 +1,26 @@
+{
+  "plonix_filters": 1,
+  "name": "common",
+  "version": "1.0.0",
+  "description": "Everyday Traffic filters: API calls, auth flows, admin areas, writes, and tracker noise to hide.",
+  "author": "Plonix contributors",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/SergeyMalych/plonix",
+  "filters": [
+    {"id": "api", "label": "API calls", "description": "JSON, XML and gRPC responses.", "query": "mime:json,xml,grpc,protobuf"},
+    {"id": "graphql", "label": "GraphQL", "query": "path:*graphql*"},
+    {"id": "auth", "label": "Auth flows", "description": "Login, logout, OAuth, SSO, tokens and sessions.",
+     "query": "path:*login*,*logout*,*signin*,*signup*,*oauth*,*token*,*auth*,*session*,*sso*,*saml*,*password*"},
+    {"id": "admin", "label": "Admin areas", "query": "path:*admin*,*manage*,*dashboard*,*internal*,*debug*,*actuator*,*console*"},
+    {"id": "writes", "label": "State changes", "description": "Requests that change something on the server.", "query": "method:POST,PUT,PATCH,DELETE"},
+    {"id": "uploads", "label": "File uploads", "query": "method:POST,PUT \"multipart/form-data\""},
+    {"id": "redirects", "label": "Redirects", "query": "status:3xx"},
+    {"id": "failures", "label": "Server failures", "description": "5xx responses and requests that got no response.", "query": "status:5xx,none"},
+    {"id": "denied", "label": "Access denied", "query": "status:401,403"},
+    {"id": "api-docs", "label": "API docs", "query": "path:*swagger*,*openapi*,*api-docs*,*.wsdl,*graphiql*"},
+    {"id": "files", "label": "Interesting files", "description": "Archives, backups, dumps and config files.",
+     "query": "ext:zip,tar,gz,tgz,7z,bak,old,orig,backup,sql,db,sqlite,env,log,cfg,conf,ini,yml,yaml,pem,key"},
+    {"id": "trackers", "label": "Analytics & trackers", "description": "Usually hidden: third-party analytics, ads and telemetry.",
+     "query": "host:*google-analytics.com,*googletagmanager.com,*doubleclick.net,*facebook.net,*hotjar.com,*segment.io,*segment.com,*mixpanel.com,*amplitude.com,*fullstory.com,*sentry.io,*newrelic.com,*nr-data.net,*datadoghq.com,*clarity.ms,*bing.com,*intercom.io"}
+  ]
+}

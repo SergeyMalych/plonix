@@ -1,11 +1,14 @@
 # Extensions
 
-Plonix is meant to be maintained by its community. Extensions are how people add what the core deliberately leaves out: new detections, passive analyzers for a specific framework, helpers for a token format, finding templates. This document is the design for the extension system: what an extension is, how it's found, installed and loaded, and above all **what it is never allowed to do**.
+Plonix is meant to be maintained by its community. Extensions are how people add what the core deliberately leaves out: new detections, filters, tabs and panels, tweaks to how Plonix behaves, passive analyzers for a specific framework, helpers for a token format, finding templates. This document is the design for the extension system: what an extension is, how it's found, installed and loaded, and above all **what it is never allowed to do**.
 
-**Status.** Two pieces are live today:
+**Status.** Three pieces are live today:
 
 - **Rule packs** are installable from files, URLs and the store, with schema validation and SHA-256 pinning. See [detection-rules.md](detection-rules.md).
-- The **store** client (`plonix store`) lists packages from any JSON index and installs rule packs, verifying checksums.
+- **Filter packs** add named Traffic filters (`is:graphql`, `-is:trackers`) to search and to the window's **+ Filter** builder. See [filters.md](filters.md).
+- The **Market** (`plonix market`, and the Market screen) lists skills, rule packs, filter packs, bundles and extensions from a signed index and installs everything but code extensions, verifying the signature and every checksum. See [market.md](market.md).
+
+Tabs, panels and tweaks are designed below ([UI contributions](#ui-contributions-tabs-panels-tweaks-and-filters)) and not built yet.
 
 The **extension manifest and capability model** are implemented and tested (`crates/plonix-core/src/extension.rs`), so the contract is fixed before any code runs. The **code runtime is not built**. Store entries of kind `extension` are listed but refused at install time. That is deliberate: an unsandboxed plugin loader in a security tool would be a backdoor with a nice API, and we won't ship one.
 
@@ -17,6 +20,7 @@ The **extension manifest and capability model** are implemented and tested (`cra
 - [Extension kinds](#extension-kinds)
 - [Manifest](#manifest)
 - [Capabilities](#capabilities)
+- [UI contributions: tabs, panels, tweaks and filters](#ui-contributions-tabs-panels-tweaks-and-filters)
 - [Sandbox: WebAssembly](#sandbox-webassembly)
 - [Lifecycle](#lifecycle)
 - [Store and distribution](#store-and-distribution)
@@ -66,16 +70,18 @@ These hold for every extension, whatever capabilities it has. They're enforced b
 4. **Read-only decisions.** Scope rules, project settings and the user's findings can't be changed. Extensions can *propose* findings, which are stored as created by the extension and marked unconfirmed until a person confirms them.
 5. **Bounded resources.** Each call has a fuel (instruction) budget, a memory cap and a wall-clock timeout. An extension that exceeds them is stopped, and one that keeps doing it is disabled.
 6. **Data, not markup.** Everything an extension returns is plain structured data that the engine validates (lengths, character sets, no control characters) before showing it anywhere.
-7. **Pinned bytes.** What runs is exactly what was verified at install time (SHA-256 against the store index), and it's re-verified on load.
+7. **Pinned bytes.** What runs is exactly what was verified at install time (SHA-256 against the signed Market index), and it's re-verified on load.
 
 ## Extension kinds
 
 | Kind | Runtime | Can do | Status |
 | --- | --- | --- | --- |
 | Rule pack | none (data) | Detect technologies | **Shipped** |
+| Filter pack | none (data) | Add named Traffic filters, used as `is:<id>` | **Shipped** |
+| Tweak pack | none (data) | Change defaults from an allowlist: default filters, columns, shortcuts, accent colour | **Designed** |
 | Declarative extension | none (data) | Bundle one or more rule packs under one name and version | Manifest implemented; install planned |
 | Lens detector | none (data) | Flag a value in requests and responses: a regex, a label and a category (personal data, secret, decodable, info) | Built-in set shipped; packs planned |
-| WASM extension | WebAssembly sandbox | Passive analysis, finding proposals, scoped requests, per its capabilities | **Designed** (this document) |
+| WASM extension | WebAssembly sandbox | Passive analysis, finding proposals, scoped requests, panels and tabs, per its capabilities | **Designed** (this document) |
 
 The guiding rule: **anything that can be data is data.** Most community contributions (detecting a framework, flagging a header, recognising a token format) should be declarative, because data can be fully validated and can't misbehave. Code is for what data can't express.
 
@@ -117,11 +123,49 @@ The capability list is **closed**: the manifest parser rejects anything not on i
 | `read-out-of-scope` | Also receive exchanges for hosts outside scope (needs `read-traffic`) | explicit yes |
 | `read-scope` | Read scope rules and suggestions (never change them) | at install |
 | `detection-rules` | Contribute detection rules, validated like any rule pack | at install |
+| `named-filters` | Contribute named Traffic filters, validated like any filter pack | at install |
+| `ui-panels` | Show panels in existing screens (Traffic inspector, a Map host), drawn by Plonix from a view tree | at install |
+| `ui-tab` | Add one sidebar tab of its own, drawn the same way | at install |
 | `passive-analysis` | Return tags and notes for exchanges it was given | at install |
 | `propose-findings` | Propose findings, stored as unconfirmed and attributed to the extension | at install |
 | `scoped-requests` | Ask the engine to send requests. **Scope-enforced, rate-limited and recorded**, exactly like agent requests | explicit yes |
 
 At install time the user sees the capabilities in plain words (`Capability::describe`). The two **sensitive** ones (`read-out-of-scope`, `scoped-requests`) each need a separate, explicit yes. An update that asks for **new** capabilities isn't applied silently: it waits for the user to approve the difference.
+
+## UI contributions: tabs, panels, tweaks and filters
+
+People want to change the window as well as the engine: a tab for a workflow they repeat, a panel that explains a token, a filter for their target's noise, a different default layout. Each of these is a different kind of risk, so each gets the least powerful mechanism that can do the job.
+
+| Want | Mechanism | Code? | Status |
+| --- | --- | --- | --- |
+| New filters | Filter pack | No | **Shipped** |
+| Tweaks to defaults | Tweak pack | No | Designed |
+| A panel in an existing screen | WASM extension with `ui-panels` | Yes, sandboxed | Designed |
+| A new tab | WASM extension with `ui-tab` | Yes, sandboxed | Designed |
+
+### Filters (shipped)
+
+A filter pack is a list of named queries in the normal search language. Each shows up as `is:<id>` in search and the CLI, and as a one-click chip under **+ Filter** in Traffic, in either *Show only* or *Hide* mode. A filter can only narrow what you already see: its query is parsed by the same search engine as anything you type, it can't refer to another named filter, and it has no way to touch scope, send requests or run code. Packs install from a file, a URL or the store and are pinned by SHA-256, like rule packs. See [filters.md](filters.md).
+
+### Tweaks (designed)
+
+A tweak pack is data: a list of `setting = value` pairs from an **allowlist** of cosmetic and workflow settings (default Traffic filters, visible columns, row density, keyboard shortcuts, accent colour, the order of sidebar tabs). Each setting has a type and range, and Plonix shows the diff before applying it. Security settings are never on the allowlist and can't be tweaked by a pack: scope, the CA, upstream certificate checks, agent access, the API token, where data is stored. A tweak pack can be removed in one step and Plonix returns to the values it replaced.
+
+### Panels and tabs (designed)
+
+Panels and tabs need logic, so they come from WASM extensions, with two extra capabilities: `ui-panels` and `ui-tab`.
+
+- **Plonix draws everything.** The extension never ships HTML, CSS or JavaScript and never gets a web view. It returns a **view tree** made of Plonix's own components (heading, text, key/value list, table, code block, request link, badge, button, form fields) as plain data. The window renders it with the same code as built-in screens. That rules out the web's usual attacks: no scripts, no remote images or fonts that could leak data, no fake login prompts styled like Plonix, no clickjacking.
+- **Contribution points.** `ui-panels` can add a panel to the Traffic inspector (for the selected exchange) and to a host in the Map. `ui-tab` adds one tab to the sidebar. Each panel and tab is labelled with the extension's name, so it can't pass itself off as part of Plonix.
+- **Data comes through capabilities.** A panel for an exchange receives that exchange only if the extension also holds `read-traffic`, and only if it's in scope (unless `read-out-of-scope` was granted). A tab sees what its capabilities allow, through the same host API as everything else.
+- **Buttons call the host API, not the network.** A button in a panel can only trigger an action the extension's capabilities allow: propose a finding, filter Traffic, open an exchange, or, with `scoped-requests`, send a request that is scope-enforced and recorded like any agent request.
+- **Bounded.** Rendering runs under the same fuel, memory and time limits as any extension call, and view trees are capped in size and depth. A slow or broken panel shows an error in its own box and never freezes the window.
+
+```text
+ extension (WASM) ──view tree (data)──▶ Plonix validates ──▶ Plonix components render it
+        ▲                                     │
+        └──── host API calls (capability-checked, scope-enforced) ◀── button clicks
+```
 
 ## Sandbox: WebAssembly
 
@@ -223,9 +267,12 @@ The store is a static JSON index, already implemented for rule packs (`plonix_co
 1. ✅ Rule packs: format, validation, install from file or URL, SHA-256 pinning, built-in starter packs.
 2. ✅ Store index and client for rule packs (`plonix store list|install|update`).
 3. ✅ Extension manifest and closed capability list, validated and tested.
+3a. ✅ Filter packs: named Traffic filters in search, the CLI and the window's filter builder, installable from the store.
 4. Declarative extensions: install bundles of rule packs through the same flow.
    Lens detectors come next in the same format: today's built-in pattern detectors (`crates/plonix-core/src/insight.rs`) are already plain data, so a pack only needs a schema for them. Decoders that need code (JWT, Base64, hex) stay built in.
 5. WASM runtime: Wasmtime with fuel, epoch and memory limits; `analyzer` world with `read-traffic` and `passive-analysis`.
 6. `propose-findings`, then `scoped-requests`, reusing the engine's scope enforcement and recording.
 7. Signed store indexes.
 8. GUI: an Extensions pane in the Mac app with the same consent flow.
+9. Tweak packs: allowlisted settings, with a diff before applying and one-step undo.
+10. `ui-panels`, then `ui-tab`: view trees rendered with Plonix components.
