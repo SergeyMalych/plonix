@@ -7,6 +7,7 @@ The Market is where Plonix gets everything modular, in one catalog:
 | **Skill** | A playbook an AI agent follows for one job in Plonix | `$PLONIX_HOME/skills` |
 | **Rule pack** | Technology detection rules ([format](detection-rules.md)) | `$PLONIX_HOME/rules` |
 | **Filter pack** | Named Traffic filters such as `is:auth` ([format](filters.md)) | `$PLONIX_HOME/filters` |
+| **List pack** | Named payload lists for the Bench ([format](bench.md)) | `$PLONIX_HOME/lists` |
 | **Bundle** | A set of other packages, installed and removed together | `$PLONIX_HOME/market/bundles.json` |
 | **Extension** | A sandboxed extension ([design](extensions.md)) | listed only, until the runtime exists |
 

@@ -244,6 +244,36 @@
         "Use them as is:aws-keys and similar. They only narrow what you see and change nothing.",
         "Add it when you review a target for sensitive data exposure."
       ]
+    },
+    {
+      "name": "starter-lists",
+      "kind": "list",
+      "version": "1.0.0",
+      "description": "The payload lists that ship with Plonix, for the Bench.",
+      "author": "Plonix contributors",
+      "url": "lists/starter-lists.json",
+      "sha256": "ca54532606dd3dba334504c512bc0921ca0ff6974622bb0b58deeaca0bdec45b",
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "about": [
+        "The lists Plonix starts with for Bench payload runs: digits and number ranges, common parameter and path names, usernames, HTTP methods, content types, user agents and a small set of benign input probes.",
+        "Choose one in the Bench Run panel as a built-in list, or feed it a position from the command line with `--list builtin:<id>`.",
+        "Built in, so it is always available even offline."
+      ]
+    },
+    {
+      "name": "extra-wordlists",
+      "kind": "list",
+      "version": "1.0.0",
+      "description": "More starting-point lists for the Bench: id formats, ports, and common API paths.",
+      "author": "Plonix contributors",
+      "url": "lists/extra-wordlists.json",
+      "sha256": "fd7f52fad9fca2333b9d98057ac2c6e2d7ee6062c6e10b03e0b992e3b2272ea6",
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "about": [
+        "Extra payload lists for the Bench beyond the built-in starters: identifier shapes to try where a number is expected, common ports, and API endpoints worth probing.",
+        "Install it from the Market, then pick its lists in the Bench Run panel like any other.",
+        "Data only: a list supplies values you choose to send, through the usual scope-gated send path."
+      ]
     }
   ]
 }

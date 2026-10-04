@@ -61,6 +61,7 @@ pub async fn open(home: &Home, mut project: Project, options: OpenOptions) -> Re
     let _ = engine.project_ref.set(ProjectRef { id: project.id().to_string(), dir: project.dir.clone() });
     engine.set_rule_library(Library::new(home));
     engine.set_filter_library(crate::filterpack::FilterLibrary::new(home));
+    engine.set_list_library(crate::listpack::ListLibrary::new(home));
 
     // The last session did not close cleanly: finish its clean-up now.
     if storage.keep_only_in_scope && project.open_marker().exists() {

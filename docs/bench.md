@@ -74,4 +74,32 @@ plonix bench run 'https://host/q?a=§x§' -X POST \
 ```
 
 Lists are given as `builtin:<id>`, `range:A-B[:step]`, `values:a,b,c`, `@file`
-(one value per line) or `-` for stdin.
+(one value per line) or `-` for stdin. `builtin:<id>` names any list in the
+library — built-in or installed from the Market.
+
+## List packs
+
+Payload lists are shared through the [Market](market.md) as *list packs*, the
+same signed-and-checked path as rule packs and filter packs. A list pack is a
+JSON file:
+
+```json
+{
+  "plonix_lists": 1,
+  "name": "extra-wordlists",
+  "version": "1.0.0",
+  "description": "More starting-point lists for the Bench.",
+  "author": "you",
+  "lists": [
+    { "id": "id-formats", "title": "Identifier formats", "values": ["0", "-1", "00000000-0000-0000-0000-000000000000"] }
+  ]
+}
+```
+
+Each list has a lowercase `id` (how the Bench and `--list builtin:<id>` name it),
+a `title`, an optional `description`, and its `values`. A pack is data only — it
+supplies values you then choose to send through the scope-gated send path; it
+cannot run code, send anything, or change scope. Install one with
+`plonix market install <name>`, or in the Market screen, and its lists appear in
+the Bench list picker alongside the built-in ones. The lists that ship with
+Plonix are the built-in `starter-lists` pack.

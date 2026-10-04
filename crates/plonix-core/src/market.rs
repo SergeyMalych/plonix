@@ -28,6 +28,7 @@ use serde_json::Value;
 
 use crate::detect::clean;
 use crate::filterpack::{self, FilterLibrary};
+use crate::listpack::{self, ListLibrary};
 use crate::paths::{Home, write_private};
 use crate::registry::{self, Index, Kind, Location, OFFICIAL_PUBLISHER, Package, TrustedKey};
 use crate::rulepack::{self, Library, MAX_PACK_BYTES, newer, sha256_hex};
@@ -47,6 +48,8 @@ pub const SNAPSHOT: &[(&str, &str)] = &[
     ("packs/admin-panels.json", include_str!("../../../store/packs/admin-panels.json")),
     ("filterpacks/common.json", include_str!("../../../store/filterpacks/common.json")),
     ("filterpacks/leaks.json", include_str!("../../../store/filterpacks/leaks.json")),
+    ("lists/starter-lists.json", include_str!("../../../store/lists/starter-lists.json")),
+    ("lists/extra-wordlists.json", include_str!("../../../store/lists/extra-wordlists.json")),
     ("skills/triage-host.md", include_str!("../../../store/skills/triage-host.md")),
     ("skills/explain-request.md", include_str!("../../../store/skills/explain-request.md")),
     ("skills/review-sign-in.md", include_str!("../../../store/skills/review-sign-in.md")),
@@ -190,6 +193,7 @@ pub fn describe(kind: Kind, bytes: &[u8]) -> Result<(String, String), String> {
     match kind {
         Kind::Rules => rulepack::parse(bytes).map(|x| (x.doc.name, x.doc.version)).map_err(|e| e.to_string()),
         Kind::Filters => filterpack::parse(bytes).map(|x| (x.doc.name, x.doc.version)),
+        Kind::List => listpack::parse(bytes).map(|x| (x.doc.name, x.doc.version)),
         Kind::Skill => skill::parse(bytes).map(|x| (x.name, x.version)),
         Kind::Extension => crate::extension::parse_manifest(bytes).map(|m| (m.name, m.version)),
         Kind::Bundle => Err("a bundle has no file".into()),
@@ -438,12 +442,13 @@ pub struct Market {
     home: Home,
     pub rules: Library,
     pub filters: FilterLibrary,
+    pub lists: ListLibrary,
     pub skills: SkillLibrary,
 }
 
 impl Market {
     pub fn new(home: &Home) -> Self {
-        Self { home: home.clone(), rules: Library::new(home), filters: FilterLibrary::new(home), skills: SkillLibrary::new(home) }
+        Self { home: home.clone(), rules: Library::new(home), filters: FilterLibrary::new(home), lists: ListLibrary::new(home), skills: SkillLibrary::new(home) }
     }
 
     fn bundles_path(&self) -> std::path::PathBuf {
@@ -498,6 +503,7 @@ impl Market {
         let mut v = vec![];
         v.extend(self.rules.installed().into_iter().map(|i| (Kind::Rules, i)));
         v.extend(self.filters.installed().into_iter().map(|i| (Kind::Filters, i)));
+        v.extend(self.lists.installed().into_iter().map(|i| (Kind::List, i)));
         v.extend(self.skills.installed().into_iter().map(|i| (Kind::Skill, i)));
         v
     }
@@ -566,6 +572,8 @@ pub fn detect_kind(bytes: &[u8]) -> Result<Kind, String> {
         Ok(Kind::Rules)
     } else if v.get("plonix_filters").is_some() {
         Ok(Kind::Filters)
+    } else if v.get("plonix_lists").is_some() {
+        Ok(Kind::List)
     } else if v.get("plonix_extension").is_some() {
         Err("that is an extension. Extensions that run code cannot be installed until the sandboxed runtime exists".into())
     } else if v.get("plonix_index").is_some() {
@@ -608,6 +616,14 @@ impl Market {
                     vec![format!("Adds {} named Traffic filters. They can only narrow what you see.", p.doc.filters.len())],
                 )
             }
+            Kind::List => {
+                let p = listpack::parse(&bytes)?;
+                (
+                    p.doc.description.clone(),
+                    p.doc.author.clone(),
+                    vec![format!("Adds {} payload lists for the Bench. Data only; you choose when to send them.", p.doc.lists.len())],
+                )
+            }
             _ => unreachable!(),
         };
         if Self::builtin(kind, &name) {
@@ -623,8 +639,9 @@ impl Market {
         let previous = match ext.kind {
             Kind::Rules => self.rules.install(&ext.bytes, src, Some(&ext.sha256))?.1,
             Kind::Filters => self.filters.install(&ext.bytes, src, Some(&ext.sha256))?.1,
+            Kind::List => self.lists.install(&ext.bytes, src, Some(&ext.sha256))?.1,
             Kind::Skill => self.skills.install(&ext.bytes, src, Some(&ext.sha256))?.1,
-            _ => bail!("only skills, rule packs and filter packs can be added"),
+            _ => bail!("only skills, rule packs, filter packs and list packs can be added"),
         };
         // Whatever the Market vouched for under this name no longer applies.
         let mut lock = self.read_provenance();
@@ -643,6 +660,7 @@ impl Market {
     fn local_listing(&self, cat: &Catalog) -> Vec<Listing> {
         let rules = self.rules.load();
         let filters = self.filters.load();
+        let lists = self.lists.load();
         let skills = self.skills.load();
         let mut out = vec![];
         for (kind, item) in self.installed_all() {
@@ -652,6 +670,7 @@ impl Market {
             let (description, author) = match kind {
                 Kind::Rules => rules.packs.iter().find(|(_, i)| i.name == item.name).map(|(_, i)| (i.description.clone(), i.author.clone())),
                 Kind::Filters => filters.packs.iter().find(|i| i.name == item.name).map(|i| (i.description.clone(), i.author.clone())),
+                Kind::List => lists.packs.iter().find(|i| i.name == item.name).map(|i| (i.description.clone(), i.author.clone())),
                 Kind::Skill => skills.get(&item.name).map(|(s, ..)| (s.description.clone(), s.author.clone())),
                 _ => None,
             }
@@ -682,6 +701,7 @@ impl Market {
         let list = match kind {
             Kind::Rules => rulepack::BUILTIN,
             Kind::Filters => filterpack::BUILTIN,
+            Kind::List => listpack::BUILTIN,
             Kind::Skill => skill::BUILTIN,
             Kind::Bundle | Kind::Extension => return false,
         };
@@ -692,6 +712,7 @@ impl Market {
         match kind {
             Kind::Rules => self.rules.installed_version(name),
             Kind::Filters => self.filters.installed_version(name),
+            Kind::List => self.lists.installed_version(name),
             Kind::Skill => self.skills.installed_version(name),
             Kind::Bundle => self.read_bundles().bundles.get(name).map(|b| b.version.clone()),
             Kind::Extension => None,
@@ -779,6 +800,7 @@ impl Market {
             match (p.kind, bytes) {
                 (Kind::Rules, Some(b)) => drop(self.rules.install(&b, &source(p), Some(&p.sha256))?),
                 (Kind::Filters, Some(b)) => drop(self.filters.install(&b, &source(p), Some(&p.sha256))?),
+                (Kind::List, Some(b)) => drop(self.lists.install(&b, &source(p), Some(&p.sha256))?),
                 (Kind::Skill, Some(b)) => drop(self.skills.install(&b, &source(p), Some(&p.sha256))?),
                 (Kind::Bundle, _) => {}
                 _ => unreachable!("extensions are refused above and files are fetched for every other kind"),
@@ -835,7 +857,7 @@ impl Market {
         }
         let changes = self.remove_one(name)?;
         if changes.is_empty() {
-            for kind in [Kind::Rules, Kind::Filters, Kind::Skill] {
+            for kind in [Kind::Rules, Kind::Filters, Kind::List, Kind::Skill] {
                 if Self::builtin(kind, name) {
                     bail!("`{name}` is a built-in {} and cannot be removed", kind.noun());
                 }
@@ -853,11 +875,12 @@ impl Market {
 
     fn remove_one(&self, name: &str) -> Result<Vec<Change>> {
         let mut changes = vec![];
-        for kind in [Kind::Rules, Kind::Filters, Kind::Skill] {
+        for kind in [Kind::Rules, Kind::Filters, Kind::List, Kind::Skill] {
             let Some(version) = self.installed_version(kind, name) else { continue };
             match kind {
                 Kind::Rules => self.rules.remove(name)?,
                 Kind::Filters => self.filters.remove(name)?,
+                Kind::List => self.lists.remove(name)?,
                 _ => self.skills.remove(name)?,
             };
             changes.push(Change { name: name.into(), kind, version, action: Action::Removed, from: None });

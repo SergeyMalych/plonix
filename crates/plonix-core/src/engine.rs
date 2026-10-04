@@ -19,6 +19,7 @@ use crate::detect::{self, Detection, Detector, HostTech};
 use crate::model::{Exchange, Headers, Source, now_ms};
 use crate::paths::{EngineInfo, Home};
 use crate::filterpack::{FilterLibrary, FilterSet};
+use crate::listpack::{ListLibrary, ListSet};
 use crate::project::PruneReport;
 use crate::rulepack::{Library, PackInfo};
 use crate::crawl;
@@ -51,6 +52,7 @@ pub struct Engine {
     recorder_rx: Mutex<Option<mpsc::UnboundedReceiver<Exchange>>>,
     detection: Mutex<DetectionState>,
     filters: Mutex<FilterState>,
+    lists: Mutex<ListState>,
     /// The listen address last asked for in the settings.
     applied_listen: Mutex<Option<SocketAddr>>,
     overrides: Mutex<UpstreamOptions>,
@@ -89,6 +91,14 @@ struct FilterState {
     library: Option<FilterLibrary>,
     loaded_stamp: Option<Option<std::time::SystemTime>>,
     set: Arc<FilterSet>,
+}
+
+/// Payload lists in effect for the Bench, reloaded when list packs change.
+#[derive(Default)]
+struct ListState {
+    library: Option<ListLibrary>,
+    loaded_stamp: Option<Option<std::time::SystemTime>>,
+    set: Arc<ListSet>,
 }
 
 /// Detection rules currently in effect. Reloaded when installed packs change
@@ -177,6 +187,7 @@ impl Engine {
             project_ref: OnceLock::new(),
             detection: Mutex::new(DetectionState::default()),
             filters: Mutex::new(FilterState::default()),
+            lists: Mutex::new(ListState::default()),
             applied_listen: Mutex::new(None),
             overrides: Mutex::default(),
         }))
@@ -350,6 +361,30 @@ impl Engine {
             f.loaded_stamp = Some(stamp);
         }
         f.set.clone()
+    }
+
+    pub fn set_list_library(&self, library: ListLibrary) {
+        let mut l = self.lists.lock().unwrap();
+        l.library = Some(library);
+        l.loaded_stamp = None;
+    }
+
+    /// The payload lists in effect, reloading them if installed packs changed.
+    pub fn lists(&self) -> Arc<ListSet> {
+        let mut l = self.lists.lock().unwrap();
+        let stamp = l.library.as_ref().and_then(ListLibrary::stamp);
+        if l.loaded_stamp != Some(stamp) {
+            let set = match &l.library {
+                Some(lib) => lib.load(),
+                None => ListLibrary::at(std::path::Path::new("/nonexistent")).load(),
+            };
+            for p in &set.problems {
+                tracing::warn!("lists: {p}");
+            }
+            l.set = Arc::new(set);
+            l.loaded_stamp = Some(stamp);
+        }
+        l.set.clone()
     }
 
     pub fn set_rule_library(&self, library: Library) {
@@ -897,7 +932,8 @@ impl Engine {
     /// it is capped by a request budget, and every send is recorded. A person
     /// starts it; it never fires on its own.
     pub async fn run(&self, req: runs::RunRequest, initiator: &str) -> Result<runs::RunReport, SendError> {
-        let plan = runs::plan(&req).map_err(SendError::BadRequest)?;
+        let lists = self.lists();
+        let plan = runs::plan(&req, &|id| lists.values_of(id)).map_err(SendError::BadRequest)?;
         let budget = req.max_requests.unwrap_or(runs::DEFAULT_REQUEST_BUDGET).min(runs::MAX_REQUEST_BUDGET);
         let delay = std::time::Duration::from_millis(req.delay_ms.unwrap_or(runs::DEFAULT_DELAY_MS).min(runs::MAX_DELAY_MS));
         let method = if req.method.trim().is_empty() { "GET".into() } else { req.method.to_ascii_uppercase() };
@@ -1022,6 +1058,7 @@ pub async fn start(config: &EngineConfig) -> Result<Running> {
     let engine = Engine::new(project.name(), store, ca, upstream)?;
     engine.set_rule_library(Library::new(&config.home));
     engine.set_filter_library(FilterLibrary::new(&config.home));
+    engine.set_list_library(ListLibrary::new(&config.home));
     start_with(engine, config).await
 }
 
