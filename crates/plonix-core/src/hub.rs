@@ -288,6 +288,13 @@ fn loopback(hostport: &str, port: u16) -> bool {
 }
 
 async fn guard(State(hub): State<Arc<Hub>>, req: Request, next: Next) -> Response {
+    // Read the body first, so refusals never close a connection with unread
+    // bytes (which resets it and can lose the response).
+    let (parts, body) = req.into_parts();
+    let Ok(body) = axum::body::to_bytes(body, 1024 * 1024).await else {
+        return err(StatusCode::PAYLOAD_TOO_LARGE, "too_large", "the request body is too large or was cut off");
+    };
+    let req = Request::from_parts(parts, axum::body::Body::from(body));
     let host = req.headers().get("host").and_then(|h| h.to_str().ok()).unwrap_or("");
     if !loopback(host, hub.addr.port()) {
         return err(StatusCode::FORBIDDEN, "bad_host", "requests must target the loopback Start screen address");

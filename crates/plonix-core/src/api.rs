@@ -117,7 +117,19 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .with_state(state)
 }
 
+/// Largest request body the API accepts.
+const MAX_BODY: usize = 64 * 1024 * 1024;
+
 async fn guard(State(s): State<AppState>, req: Request, next: Next) -> Response {
+    // Read the whole body before answering, even for refusals and handlers
+    // that ignore it: closing a connection with unread bytes resets it, and
+    // the client can lose the response it was reading.
+    let (parts, body) = req.into_parts();
+    let body = match axum::body::to_bytes(body, MAX_BODY).await {
+        Ok(b) => b,
+        Err(_) => return err(StatusCode::PAYLOAD_TOO_LARGE, "too_large", "the request body is too large or was cut off"),
+    };
+    let req = Request::from_parts(parts, axum::body::Body::from(body));
     let host = req.headers().get("host").and_then(|h| h.to_str().ok()).unwrap_or("");
     let host_ok = host.rsplit_once(':').is_some_and(|(h, p)| {
         p.parse::<u16>().ok() == Some(s.api_addr.port()) && matches!(h, "127.0.0.1" | "localhost" | "[::1]")
