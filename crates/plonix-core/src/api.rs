@@ -27,7 +27,8 @@ use crate::ask::{self, AskError, AskRequest};
 use crate::browser;
 use crate::codec;
 use crate::engine::{Engine, ReplayRequest, SendError, SendRequest};
-use crate::model::{Exchange, NewFinding, SEVERITIES};
+use crate::model::{Exchange, FindingEdit, NewFinding, check_severity};
+use crate::report;
 use crate::paths::Home;
 use crate::project::Project;
 use crate::query;
@@ -100,6 +101,8 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/send", post(send))
         .route("/api/replay", post(replay))
         .route("/api/findings", get(findings).post(add_finding))
+        .route("/api/findings/export", get(export_findings))
+        .route("/api/findings/{id}", get(finding).patch(edit_finding).delete(delete_finding))
         .route("/api/settings", get(get_settings))
         .route("/api/settings/{section}", put(put_settings))
         .route("/api/storage", get(storage))
@@ -599,17 +602,105 @@ async fn findings(State(s): State<AppState>) -> Response {
     }
 }
 
-async fn add_finding(State(s): State<AppState>, headers: HeaderMap, Json(f): Json<NewFinding>) -> Response {
+async fn add_finding(State(s): State<AppState>, headers: HeaderMap, Json(mut f): Json<NewFinding>) -> Response {
     if f.title.trim().is_empty() {
         return err(StatusCode::BAD_REQUEST, "bad_request", "title is required");
     }
-    if !SEVERITIES.contains(&f.severity.as_str()) {
-        return err(StatusCode::BAD_REQUEST, "bad_request", &format!("severity must be one of {}", SEVERITIES.join(", ")));
-    }
+    f.severity = match check_severity(&f.severity) {
+        Ok(sev) => sev,
+        Err(e) => return err(StatusCode::BAD_REQUEST, "bad_request", &e),
+    };
     match s.engine.store.add_finding(&f, &initiator(&headers)) {
         Ok(f) => (StatusCode::CREATED, Json(f)).into_response(),
         Err(e) => internal(e),
     }
+}
+
+fn finding_not_found(id: i64) -> Response {
+    err(StatusCode::NOT_FOUND, "not_found", &format!("finding {id} not found"))
+}
+
+async fn finding(State(s): State<AppState>, Path(id): Path<i64>) -> Response {
+    match s.engine.store.finding(id) {
+        Ok(Some(f)) => Json(f).into_response(),
+        Ok(None) => finding_not_found(id),
+        Err(e) => internal(e),
+    }
+}
+
+/// Changes a finding's title, severity, status or description. User only:
+/// agents never reach it (it is in no mode's capabilities).
+async fn edit_finding(State(s): State<AppState>, Path(id): Path<i64>, Json(edit): Json<FindingEdit>) -> Response {
+    let edit = match edit.checked() {
+        Ok(e) => e,
+        Err(e) => return err(StatusCode::BAD_REQUEST, "bad_request", &e),
+    };
+    match s.engine.store.update_finding(id, &edit) {
+        Ok(Some(f)) => Json(f).into_response(),
+        Ok(None) => finding_not_found(id),
+        Err(e) => internal(e),
+    }
+}
+
+/// Deletes a finding; the requests it pointed to stay. User only.
+async fn delete_finding(State(s): State<AppState>, Path(id): Path<i64>) -> Response {
+    match s.engine.store.delete_finding(id) {
+        Ok(true) => Json(json!({ "deleted": id })).into_response(),
+        Ok(false) => finding_not_found(id),
+        Err(e) => internal(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct ExportParams {
+    #[serde(default = "default_format")]
+    format: String,
+    /// Comma-separated finding ids; none means every finding.
+    #[serde(default)]
+    ids: String,
+    /// Comma-separated statuses; by default everything but false positives.
+    #[serde(default)]
+    status: String,
+}
+
+fn default_format() -> String {
+    "md".into()
+}
+
+/// The findings as a report (Markdown, HTML or JSON) with their evidence
+/// requests. Agents limited to in-scope traffic get out-of-scope evidence
+/// as a note instead of the request.
+async fn export_findings(State(s): State<AppState>, caller: MaybeCaller, Query(p): Query<ExportParams>) -> Response {
+    let Some(format) = report::Format::parse(&p.format) else {
+        return err(StatusCode::BAD_REQUEST, "bad_request", "format must be md, html or json");
+    };
+    let sel = match report::Selection::parse(&p.ids, &p.status) {
+        Ok(sel) => sel,
+        Err(e) => return err(StatusCode::BAD_REQUEST, "bad_request", &e),
+    };
+    let in_scope_only = agent_in_scope_only(&s, &caller);
+    let engine = s.engine.clone();
+    let built = tokio::task::spawn_blocking(move || {
+        let rules = engine.rules();
+        let visible = |ex: &Exchange| !in_scope_only || rules.in_scope(&ex.host);
+        report::build(&engine.store, &engine.project, &sel, &visible)
+    })
+    .await;
+    let r = match built {
+        Ok(Ok(r)) => r,
+        Ok(Err(e)) => return internal(e),
+        Err(e) => return internal(e.into()),
+    };
+    (
+        [
+            ("content-type", format.content_type().to_string()),
+            ("content-disposition", format!("attachment; filename=\"{}\"", report::file_name(&r.project, format))),
+            ("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'".to_string()),
+            ("x-content-type-options", "nosniff".to_string()),
+        ],
+        report::render(&r, format),
+    )
+        .into_response()
 }
 
 /// The agent access policy and which agents have connected.

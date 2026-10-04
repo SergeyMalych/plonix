@@ -106,6 +106,26 @@ impl Client {
         )
     }
 
+    pub fn patch(&self, path: &str, body: Value) -> Result<Value> {
+        self.handle(self.request("PATCH", path).send_json(body))
+    }
+
+    pub fn delete(&self, path: &str) -> Result<Value> {
+        self.handle(self.request("DELETE", path).call())
+    }
+
+    /// A route that answers with a document rather than JSON (a report).
+    pub fn get_text(&self, path: &str) -> Result<String> {
+        match self.request("GET", path).call() {
+            Ok(resp) => Ok(resp.into_string()?),
+            Err(e) => self.handle(Err(e)).map(|_| String::new()),
+        }
+    }
+
+    fn request(&self, method: &str, path: &str) -> ureq::Request {
+        self.agent.request(method, &format!("{}{path}", self.base)).set("Authorization", &self.auth()).set("X-Plonix-Client", &self.initiator)
+    }
+
     fn auth(&self) -> String {
         format!("Bearer {}", self.token)
     }

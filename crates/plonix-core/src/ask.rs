@@ -155,13 +155,13 @@ fn body(headers: &Headers, raw: &[u8], max: usize) -> (String, bool) {
     }
 }
 
-fn request_text(ex: &Exchange, max: usize) -> (String, bool) {
+pub(crate) fn request_text(ex: &Exchange, max: usize) -> (String, bool) {
     let target = if ex.query.is_empty() { ex.path.clone() } else { format!("{}?{}", ex.path, ex.query) };
     let (b, clipped) = body(&ex.req_headers, &ex.req_body, max);
     (format!("{} {} HTTP/1.1\n{}{}", ex.method, target, headers(&ex.req_headers), b), clipped)
 }
 
-fn response_text(ex: &Exchange, max: usize) -> (String, bool) {
+pub(crate) fn response_text(ex: &Exchange, max: usize) -> (String, bool) {
     match ex.status {
         Some(s) => {
             let (b, clipped) = body(&ex.resp_headers, &ex.resp_body, max);

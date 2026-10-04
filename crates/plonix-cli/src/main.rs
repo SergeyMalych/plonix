@@ -8,6 +8,7 @@ mod client;
 mod community;
 mod connect;
 mod engine_ctl;
+mod findings;
 mod mcp;
 mod open;
 mod render;
@@ -40,6 +41,7 @@ Get started:
   plonix scope                     review domains Plonix thinks belong in scope
   plonix replay 42 -H 'X-Debug: 1'
   plonix tech                      technologies detected on each host
+  plonix findings                  what you found; `plonix findings export -o report.html` for a report
   plonix store                     community detection rule packs
   plonix connect claude            let Claude Code read this project (read-only MCP)
 
@@ -142,6 +144,11 @@ enum Cmd {
     },
     /// Crawl a host to discover endpoints, parameters and forms
     Crawl(scan::CrawlArgs),
+    /// Findings: list, show, add, edit, set status, delete, export a report
+    Findings {
+        #[command(subcommand)]
+        cmd: Option<findings::FindingsCmd>,
+    },
     /// Detection rule packs: list, add from a file or URL, remove, check
     Rules {
         #[command(subcommand)]
@@ -406,6 +413,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Cmd::Tech { host } => community::tech_cmd(&ctx, host)?,
         Cmd::Scan { cmd } => scan::scan_cmd(&ctx, cmd)?,
         Cmd::Crawl(a) => scan::crawl_cmd(&ctx, a)?,
+        Cmd::Findings { cmd } => findings::findings_cmd(&ctx, cmd.unwrap_or(findings::FindingsCmd::List { status: None }))?,
         Cmd::Rules { cmd } => community::rules_cmd(&ctx, cmd.unwrap_or(community::RulesCmd::List))?,
         Cmd::Store(a) => community::store_cmd(&ctx, a)?,
         Cmd::Connect { cmd } => connect::connect_cmd(&ctx, cmd)?,

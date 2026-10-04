@@ -24,6 +24,7 @@ pub mod paths;
 pub mod project;
 pub mod proxy;
 pub mod query;
+pub mod report;
 pub mod registry;
 pub mod rulepack;
 pub mod scan;

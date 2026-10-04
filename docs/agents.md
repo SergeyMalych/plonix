@@ -2,7 +2,7 @@
 
 Plonix lets an AI agent work with your live project: the traffic you captured, the map of the target, detected technologies, scope and findings. It does this through MCP, the protocol coding agents such as Claude Code use for tools.
 
-Agents get **read-only** access. They can look at everything the project holds and cannot send requests, change scope or record findings. The engine enforces this, not the agent.
+Agents get **read-only** access. They can look at everything the project holds and cannot send requests, change scope or record, edit or delete findings. The engine enforces this, not the agent.
 
 ## Connect Claude Code
 
@@ -18,11 +18,11 @@ Plonix · connect Claude Code
   ✓ Claude Code  added MCP server "plonix" for all your projects: /Users/you/.cargo/bin/plonix mcp
 
 What the agent can do (read-only):
-  status · search_traffic · get_request · get_insights · list_hosts · list_endpoints · detected_tech · get_scope · list_findings
+  status · search_traffic · get_request · get_insights · list_hosts · list_endpoints · detected_tech · get_scope · list_findings · findings_report
 Not allowed:
   ✗ Send or replay requests
   ✗ Accept, reject or remove scope rules
-  ✗ Record or change findings
+  ✗ Record, edit or delete findings
   ✗ Open browsers, sign in to the window or stop the engine
 ```
 
@@ -69,7 +69,8 @@ Set `PLONIX_HOME` in the server's environment if your data is not in `~/.plonix`
 | `list_endpoints` | Methods, paths, statuses and parameter names seen on a host |
 | `detected_tech` | Technologies detected per host, with confidence and evidence |
 | `get_scope` | Scope rules and suggested domains with their evidence |
-| `list_findings` | Findings with severity, description and evidence request ids |
+| `list_findings` | Findings with severity, status, description and evidence request ids |
+| `findings_report` | The findings as a Markdown report with their evidence requests and responses (bodies clipped); false positives left out unless asked for. Evidence on hosts outside scope is left out when agents see in-scope traffic only |
 
 Every tool is marked read-only in its MCP annotations.
 
