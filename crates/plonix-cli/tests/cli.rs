@@ -780,3 +780,74 @@ fn connect_claude_adds_the_mcp_server() {
     assert!(out.contains("claude mcp add --scope user plonix --") && out.contains("\"mcpServers\""), "{out}");
     assert!(!dir.path().join("claude-args.txt").exists());
 }
+
+const ACME_FILTERS: &str = r#"{
+  "plonix_filters": 1, "name": "acme-filters", "version": "1.0.0",
+  "description": "Acme console traffic", "author": "acme red team",
+  "filters": [{"id": "acme-console", "label": "Acme console", "query": "path:/console method:GET"}]
+}"#;
+
+#[test]
+fn filter_packs_add_named_filters_to_search() {
+    let p = Plonix::new();
+    let dir = tempfile::tempdir().unwrap();
+    let pack = dir.path().join("acme-filters.json");
+    std::fs::write(&pack, ACME_FILTERS).unwrap();
+    let pack = pack.to_str().unwrap();
+
+    let out = p.run(&["filters"]).ok().stdout();
+    assert!(out.contains("is:graphql") && out.contains("is:trackers"), "{out}");
+    assert!(p.run(&["filters", "check", pack]).ok().stdout().contains("acme-filters 1.0.0 is valid: 1 filters."));
+    let bad = dir.path().join("bad.json");
+    std::fs::write(&bad, ACME_FILTERS.replace("path:/console method:GET", "is:graphql")).unwrap();
+    let r = p.run(&["filters", "check", bad.to_str().unwrap()]);
+    assert_eq!(r.code(), 1);
+    assert!(r.stderr().contains("unknown filter is:graphql"), "{}", r.stderr());
+
+    let target = serve(std::sync::Arc::new(|path: &str| {
+        let ctype = if path.starts_with("/graphql") { "application/json" } else { "text/html" };
+        (200, vec![("Content-Type".to_string(), ctype.to_string())], b"{}".to_vec())
+    }));
+    p.start();
+    let proxy = p.proxy();
+    for path in ["/graphql", "/console", "/home"] {
+        via_proxy(&proxy, &format!("http://localhost:{target}{path}"), &[]);
+    }
+    p.search_until("host:localhost", 3);
+
+    let paths = |q: &str| -> Vec<String> {
+        let v: serde_json::Value = serde_json::from_str(&p.run(&["search", "--json", q]).ok().stdout()).unwrap();
+        v["items"].as_array().unwrap().iter().map(|i| i["path"].as_str().unwrap().to_string()).collect()
+    };
+    assert_eq!(paths("is:graphql"), ["/graphql"]);
+    assert_eq!(paths("is:api"), ["/graphql"]);
+    let mut hidden = paths("-is:graphql host:localhost");
+    hidden.sort();
+    assert_eq!(hidden, ["/console", "/home"]);
+    let r = p.run(&["search", "is:acme-console"]);
+    assert_eq!(r.code(), 2);
+    assert!(r.stderr().contains("unknown filter is:acme-console"), "{}", r.stderr());
+
+    // Installed while the engine runs: picked up without a restart.
+    assert!(p.run(&["filters", "add", pack]).ok().stdout().contains("Installed acme-filters 1.0.0: 1 filters"));
+    assert_eq!(paths("is:acme-console"), ["/console"]);
+    assert_eq!(paths("is:acme-console,graphql").len(), 2);
+
+    assert_eq!(p.run(&["filters", "remove", "common"]).code(), 1);
+    p.run(&["filters", "remove", "acme-filters"]).ok();
+    assert_eq!(p.run(&["search", "is:acme-console"]).code(), 2);
+}
+
+#[test]
+fn store_installs_filter_packs() {
+    let p = Plonix::new();
+    let index = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../store/index.json");
+    let index = index.to_str().unwrap();
+    let out = p.run(&["store", "--index", index]).ok().stdout();
+    let line = |name: &str| out.lines().find(|l| l.starts_with(name)).unwrap_or_else(|| panic!("{name} missing:\n{out}")).to_string();
+    assert!(line("common").contains("filter") && line("common").contains("built-in"));
+    assert!(line("leaks").contains("available"));
+    let out = p.run(&["store", "install", "leaks", "--index", index]).ok().stdout();
+    assert!(out.contains("Installed leaks 1.0.0 (9 filters, sha256 verified)."), "{out}");
+    assert!(p.run(&["filters"]).ok().stdout().contains("is:aws-keys"));
+}

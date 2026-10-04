@@ -34,6 +34,14 @@ pub enum Capability {
     ReadScope,
     /// Contribute detection rules (same validation as rule packs).
     DetectionRules,
+    /// Contribute named Traffic filters (same validation as filter packs).
+    NamedFilters,
+    /// Contribute panels to existing screens (the Traffic inspector, a
+    /// host in the Map), drawn with Plonix's own components from a view
+    /// tree the extension returns. No HTML, scripts or styles.
+    UiPanels,
+    /// Contribute one tab of its own to the sidebar, drawn the same way.
+    UiTab,
     /// Return passive observations (tags, notes) for exchanges it was given.
     PassiveAnalysis,
     /// Propose findings. They are recorded as created by the extension and
@@ -52,6 +60,9 @@ impl Capability {
             Capability::ReadOutOfScope => "read captured traffic for hosts outside scope",
             Capability::ReadScope => "read scope rules and suggestions",
             Capability::DetectionRules => "add technology detection rules",
+            Capability::NamedFilters => "add named Traffic filters",
+            Capability::UiPanels => "show panels inside Plonix screens, with Plonix's own components",
+            Capability::UiTab => "add a sidebar tab, with Plonix's own components",
             Capability::PassiveAnalysis => "annotate traffic it was given",
             Capability::ProposeFindings => "propose findings (unconfirmed until you confirm)",
             Capability::ScopedRequests => "send requests to accepted hosts only (scope-enforced, recorded)",
@@ -92,6 +103,9 @@ pub struct Manifest {
     /// Rule pack files inside the package.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rule_packs: Vec<String>,
+    /// Filter pack files inside the package.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filter_packs: Vec<String>,
     pub capabilities: Vec<Capability>,
 }
 
@@ -108,7 +122,7 @@ pub fn parse_manifest(bytes: &[u8]) -> Result<Manifest, String> {
     check_text(&m.description, 300, false).map_err(|e| format!("description: {e}"))?;
     check_text(&m.author, 100, false).map_err(|e| format!("author: {e}"))?;
     check_text(&m.homepage, 200, true).map_err(|e| format!("homepage: {e}"))?;
-    for f in m.entry.iter().chain(&m.rule_packs) {
+    for f in m.entry.iter().chain(&m.rule_packs).chain(&m.filter_packs) {
         check_package_path(f)?;
     }
     match m.runtime {
@@ -116,8 +130,8 @@ pub fn parse_manifest(bytes: &[u8]) -> Result<Manifest, String> {
             if m.entry.is_some() {
                 return Err("entry: a declarative extension has no code entry point".into());
             }
-            if m.capabilities.iter().any(|c| *c != Capability::DetectionRules) {
-                return Err("capabilities: a declarative extension can only ask for detection-rules".into());
+            if m.capabilities.iter().any(|c| !matches!(c, Capability::DetectionRules | Capability::NamedFilters)) {
+                return Err("capabilities: a declarative extension can only ask for detection-rules and named-filters".into());
             }
         }
         Runtime::Wasm => {
@@ -186,7 +200,9 @@ mod tests {
     fn declarative_extensions_cannot_ask_for_more() {
         let m = manifest("declarative", r#""read-traffic""#, "");
         assert!(parse_manifest(m.as_bytes()).is_err());
-        let m = manifest("declarative", r#""detection-rules""#, r#","rule_packs":["rules/a.json"]"#);
+        let m = manifest("declarative", r#""ui-tab""#, "");
+        assert!(parse_manifest(m.as_bytes()).is_err(), "UI needs code, so the sandbox");
+        let m = manifest("declarative", r#""detection-rules","named-filters""#, r#","rule_packs":["rules/a.json"],"filter_packs":["filters/a.json"]"#);
         assert!(installable(&parse_manifest(m.as_bytes()).unwrap()).is_ok());
     }
 

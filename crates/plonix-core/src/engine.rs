@@ -18,6 +18,7 @@ use crate::ca::CertAuthority;
 use crate::detect::{self, Detection, Detector, HostTech};
 use crate::model::{Exchange, Headers, Source, now_ms};
 use crate::paths::{EngineInfo, Home};
+use crate::filterpack::{FilterLibrary, FilterSet};
 use crate::project::PruneReport;
 use crate::rulepack::{Library, PackInfo};
 use crate::crawl;
@@ -48,6 +49,7 @@ pub struct Engine {
     recorder: mpsc::UnboundedSender<Exchange>,
     recorder_rx: Mutex<Option<mpsc::UnboundedReceiver<Exchange>>>,
     detection: Mutex<DetectionState>,
+    filters: Mutex<FilterState>,
     /// The listen address last asked for in the settings.
     applied_listen: Mutex<Option<SocketAddr>>,
     overrides: Mutex<UpstreamOptions>,
@@ -78,6 +80,14 @@ struct Interception {
 pub struct ProjectRef {
     pub id: String,
     pub dir: std::path::PathBuf,
+}
+
+/// Named Traffic filters in effect, reloaded when filter packs change.
+#[derive(Default)]
+struct FilterState {
+    library: Option<FilterLibrary>,
+    loaded_stamp: Option<Option<std::time::SystemTime>>,
+    set: Arc<FilterSet>,
 }
 
 /// Detection rules currently in effect. Reloaded when installed packs change
@@ -165,6 +175,7 @@ impl Engine {
             interception: RwLock::new(Interception { decrypt: true, passthrough: vec![] }),
             project_ref: OnceLock::new(),
             detection: Mutex::new(DetectionState::default()),
+            filters: Mutex::new(FilterState::default()),
             applied_listen: Mutex::new(None),
             overrides: Mutex::default(),
         }))
@@ -314,6 +325,32 @@ impl Engine {
 
     /// Loads installed rule packs from this library (built-in packs are
     /// always loaded).
+    /// Loads installed filter packs from this library (built-in packs are
+    /// always loaded).
+    pub fn set_filter_library(&self, library: FilterLibrary) {
+        let mut f = self.filters.lock().unwrap();
+        f.library = Some(library);
+        f.loaded_stamp = None;
+    }
+
+    /// Named filters in effect (`is:name`), reloading them if packs changed.
+    pub fn filters(&self) -> Arc<FilterSet> {
+        let mut f = self.filters.lock().unwrap();
+        let stamp = f.library.as_ref().and_then(FilterLibrary::stamp);
+        if f.loaded_stamp != Some(stamp) {
+            let set = match &f.library {
+                Some(lib) => lib.load(),
+                None => FilterLibrary::at(std::path::Path::new("/nonexistent")).load(),
+            };
+            for p in &set.problems {
+                tracing::warn!("filters: {p}");
+            }
+            f.set = Arc::new(set);
+            f.loaded_stamp = Some(stamp);
+        }
+        f.set.clone()
+    }
+
     pub fn set_rule_library(&self, library: Library) {
         let mut d = self.detection.lock().unwrap();
         d.library = Some(library);
@@ -896,6 +933,7 @@ pub async fn start(config: &EngineConfig) -> Result<Running> {
     let upstream = Upstream::new(config.insecure_upstream, vec![])?;
     let engine = Engine::new(project.name(), store, ca, upstream)?;
     engine.set_rule_library(Library::new(&config.home));
+    engine.set_filter_library(FilterLibrary::new(&config.home));
     start_with(engine, config).await
 }
 

@@ -17,6 +17,7 @@
 //! mime:json             substring of the response content type
 //! kind:static           images, fonts, stylesheets, scripts and media
 //! scope:in | scope:out  source:proxy | source:replay
+//! is:graphql            a named filter from a filter pack (see filterpack.rs)
 //! "set-cookie: sid"     quoted phrase, full text
 //! passw -logout         full text is substring and case-insensitive
 //! ```
@@ -38,7 +39,12 @@ pub enum Field {
     Text(String),
     /// Comma separated values of one field: matches if any of them does.
     AnyOf(Vec<Field>),
+    /// A named filter (`is:name`): all of its terms must match.
+    Group(Vec<Term>),
 }
+
+/// Looks up the query behind a named filter (`is:name`).
+pub type Resolver<'a> = &'a dyn Fn(&str) -> Option<String>;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Kind {
@@ -75,6 +81,12 @@ pub struct Query {
 
 impl Query {
     pub fn parse(input: &str) -> Result<Self> {
+        Self::parse_with(input, &|_| None)
+    }
+
+    /// Parses a query, expanding `is:name` through `resolve`. A named
+    /// filter's own query may not use `is:` (no nesting, so no loops).
+    pub fn parse_with(input: &str, resolve: Resolver) -> Result<Self> {
         let mut terms = Vec::new();
         for raw in tokenize(input) {
             let (negate, tok) = match raw.strip_prefix('-') {
@@ -82,7 +94,7 @@ impl Query {
                 _ => (false, raw.clone()),
             };
             let field = match tok.split_once(':') {
-                Some((k, v)) if !v.is_empty() && is_field(k) => parse_field(&k.to_ascii_lowercase(), v)?,
+                Some((k, v)) if !v.is_empty() && is_field(k) => parse_field(&k.to_ascii_lowercase(), v, resolve)?,
                 _ => Field::Text(tok.trim_matches('"').to_string()),
             };
             if let Field::Text(t) = &field {
@@ -193,23 +205,36 @@ fn field_sql(field: &Field, scope_hosts: &[String], params: &mut Vec<Value>) -> 
             let ors: Vec<String> = list.iter().map(|f| field_sql(f, scope_hosts, params)).collect();
             format!("({})", ors.join(" OR "))
         }
+        Field::Group(terms) => {
+            let (clause, mut inner) = Query { terms: terms.clone() }.to_sql(scope_hosts);
+            params.append(&mut inner);
+            format!("({clause})")
+        }
     }
 }
 
 fn is_field(k: &str) -> bool {
-    matches!(k.to_ascii_lowercase().as_str(), "host" | "method" | "status" | "path" | "mime" | "scope" | "source" | "ext" | "kind")
+    matches!(k.to_ascii_lowercase().as_str(), "host" | "method" | "status" | "path" | "mime" | "scope" | "source" | "ext" | "kind" | "is")
 }
 
-fn parse_field(k: &str, v: &str) -> Result<Field> {
+fn parse_field(k: &str, v: &str, resolve: Resolver) -> Result<Field> {
     let mut list = Vec::new();
     for one in v.trim_matches('"').split(',').map(str::trim).filter(|x| !x.is_empty()) {
-        list.push(parse_value(k, one)?);
+        list.push(if k == "is" { parse_named(one, resolve)? } else { parse_value(k, one)? });
     }
     Ok(match list.len() {
         0 => bail!("{k}: needs a value"),
         1 => list.pop().unwrap(),
         _ => Field::AnyOf(list),
     })
+}
+
+fn parse_named(name: &str, resolve: Resolver) -> Result<Field> {
+    let name = name.to_ascii_lowercase();
+    let Some(q) = resolve(&name) else { bail!("unknown filter is:{name} (see `plonix filters`)") };
+    // Expanded without a resolver: a named filter cannot refer to another.
+    let inner = Query::parse(&q).map_err(|e| anyhow::anyhow!("filter is:{name}: {e}"))?;
+    Ok(Field::Group(inner.terms))
 }
 
 fn parse_value(k: &str, v: &str) -> Result<Field> {
@@ -311,6 +336,25 @@ mod tests {
     fn unknown_prefix_is_text() {
         let q = Query::parse("https://x.test/a").unwrap();
         assert_eq!(q.terms[0].field, Field::Text("https://x.test/a".into()));
+    }
+
+    #[test]
+    fn named_filters_expand_and_negate_as_a_group() {
+        let defs = |n: &str| match n {
+            "graphql" => Some("path:/graphql method:POST".to_string()),
+            "loop" => Some("is:graphql".to_string()),
+            _ => None,
+        };
+        let q = Query::parse_with("-is:graphql host:a.com", &defs).unwrap();
+        assert_eq!(q.terms.len(), 2);
+        assert!(q.terms[0].negate);
+        assert!(matches!(&q.terms[0].field, Field::Group(t) if t.len() == 2));
+        let (sql, params) = q.to_sql(&[]);
+        assert!(sql.starts_with("NOT coalesce(("), "{sql}");
+        assert_eq!(sql.matches('?').count(), params.len());
+        assert!(Query::parse_with("is:graphql,nope", &defs).unwrap_err().to_string().contains("unknown filter is:nope"));
+        assert!(Query::parse_with("is:loop", &defs).is_err(), "named filters cannot nest");
+        assert!(Query::parse("is:graphql").is_err());
     }
 
     #[test]

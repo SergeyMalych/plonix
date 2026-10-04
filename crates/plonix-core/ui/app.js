@@ -93,6 +93,8 @@ const S = {
   engineUp: true,
   view: 'traffic',
   scope: { rules: [], suggestions: [] },
+  /** Named filters (is:id) from filter packs, for the filter builder and chips. */
+  named: [],
   exclusions: { groups: [], asked: true },
 };
 
@@ -523,6 +525,10 @@ async function loadFacets() {
   S.facetsBusy = true;
   try {
     S.facets = await api('/api/traffic/facets');
+    if (!S.namedAt || Date.now() - S.namedAt > 15000) {
+      S.named = (await api('/api/filters')).filters || [];
+      S.namedAt = Date.now();
+    }
   } catch (_) {
   } finally {
     S.facetsBusy = false;
@@ -647,6 +653,7 @@ const T = { text: '', filters: [], items: [], total: 0, sel: null, live: true, m
  * excludes are prefixed with "-".
  */
 const FILTER_FIELDS = {
+  is: 'Named filter',
   host: 'Host',
   path: 'Path',
   ext: 'Extension',
@@ -658,7 +665,7 @@ const FILTER_FIELDS = {
   source: 'Source',
   text: 'Text',
 };
-const FIELD_RE = /^(-?)(host|method|status|path|mime|scope|source|ext|kind):(.+)$/i;
+const FIELD_RE = /^(-?)(host|method|status|path|mime|scope|source|ext|kind|is):(.+)$/i;
 
 const fieldOf = (term) => (FIELD_RE.exec(term) || [])[2]?.toLowerCase() || 'text';
 const valueOf = (term) => (fieldOf(term) === 'text' ? term.replace(/^"|"$/g, '') : term.slice(term.indexOf(':') + 1));
@@ -716,6 +723,7 @@ function filterLabel(term) {
     'status:none': 'No response',
   }[term.toLowerCase()];
   if (named) return { key: '', value: named };
+  if (field === 'is') return { key: '', value: (S.named.find((n) => n.id === v.toLowerCase()) || {}).label || v };
   if (field === 'text') return { key: '', value: '“' + v + '”' };
   if (field === 'ext') return { key: 'ext', value: '.' + v.replace(/^\./, '') };
   if (field === 'mime') return { key: 'type', value: v };
@@ -1008,6 +1016,8 @@ function fieldValues(field) {
       return ['js', 'css', 'png', 'svg', 'woff2', 'map', 'json', 'html', 'php'];
     case 'kind':
       return ['static'];
+    case 'is':
+      return S.named.map((n) => n.id);
     case 'scope':
       return ['in', 'out'];
     case 'source':
@@ -1065,10 +1075,29 @@ function openFilterBuilder(anchor, preset = {}) {
   value.addEventListener('keydown', (e) => e.key === 'Enter' && add());
   drawSeg();
   fillValues();
+  // Named filters from filter packs: one click each, in the chosen mode.
+  const named = S.named.length
+    ? h(
+        'div',
+        { class: 'namedlist', 'aria-label': 'Named filters' },
+        S.named.map((n) =>
+          h('button', {
+            class: 'named',
+            text: n.label,
+            title: (n.description ? n.description + '\n' : '') + 'is:' + n.id + ' = ' + n.query + '\nfrom the ' + n.pack + ' filter pack',
+            onclick: () => {
+              closePopover();
+              addFilter('is:' + n.id, mode);
+            },
+          }),
+        ),
+      )
+    : null;
   const pop = h(
     'div',
     { class: 'popover', role: 'dialog', 'aria-label': 'Add filter' },
     seg,
+    named,
     h('div', { class: 'prow' }, field, value, list),
     err,
     h('div', { class: 'pfoot' }, h('button', { class: 'btn sm', text: 'Cancel', onclick: closePopover }), h('button', { class: 'btn sm primary', text: 'Add filter', onclick: add })),
