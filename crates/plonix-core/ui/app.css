@@ -145,6 +145,9 @@ code, .mono { font-family: var(--mono); }
 .popover input { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12px; }
 .popover .pfoot { display: flex; justify-content: flex-end; gap: 6px; }
 .perr { color: var(--crit); font-size: 11.5px; }
+.namedlist { display: flex; flex-wrap: wrap; gap: 4px; max-height: 132px; overflow: auto; padding-bottom: 6px; border-bottom: 1px solid var(--line-2); }
+.namedlist .named { border: 1px solid var(--line); background: var(--surface-2); border-radius: 999px; padding: 2px 9px; font-size: 11.5px; color: var(--fg); }
+.namedlist .named:hover { border-color: var(--accent); color: var(--accent); }
 .seg { display: flex; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 7px; padding: 2px; }
 .seg button { flex: 1; border: 0; background: transparent; border-radius: 5px; padding: 3px 8px; font-size: 11.5px; font-weight: 600; color: var(--fg-2); }
 .seg button.on.include { background: var(--accent); color: var(--accent-fg); }

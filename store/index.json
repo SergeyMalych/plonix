@@ -61,6 +61,26 @@
       "url": "packs/admin-panels.json",
       "sha256": "6900932344af6e9c187928da6e38c29ddcbb6b161112f736405c5de559c51e72",
       "homepage": "https://github.com/SergeyMalych/plonix"
+    },
+    {
+      "name": "common",
+      "kind": "filters",
+      "version": "1.0.0",
+      "description": "Everyday Traffic filters: API calls, auth flows, admin areas, writes, and tracker noise to hide.",
+      "author": "Plonix contributors",
+      "url": "filterpacks/common.json",
+      "sha256": "a4f4f392a0db973ab9d40273cede5598a20a7372856c9f98107eebcce27f9a59",
+      "homepage": "https://github.com/SergeyMalych/plonix"
+    },
+    {
+      "name": "leaks",
+      "kind": "filters",
+      "version": "1.0.0",
+      "description": "Find traffic that leaks secrets, stack traces or debug output.",
+      "author": "Plonix contributors",
+      "url": "filterpacks/leaks.json",
+      "sha256": "3e8bb6c56270ba8b6ab817d13f905fe4af97bf058ae38ca1e079443757457e3e",
+      "homepage": "https://github.com/SergeyMalych/plonix"
     }
   ]
 }

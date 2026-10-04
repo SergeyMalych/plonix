@@ -101,6 +101,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - Plonix recognises what runs behind every host (servers, frameworks, CMSs, CDNs and WAFs, identity providers, exposed admin consoles) and shows the evidence for each detection, down to the exchange.
 - Detection is driven by declarative **rule packs** that anyone can write and share. Install them from a file, a URL or the **store**, a JSON index hosted anywhere. New rules apply to traffic you already captured.
 - Packs are untrusted data: strictly validated, linear-time patterns only, pinned by SHA-256 and re-verified on load. They can't run code, reach the network or touch scope. See [docs/detection-rules.md](docs/detection-rules.md) and the extension design in [docs/extensions.md](docs/extensions.md).
+- **Filter packs** add named filters such as `is:auth`, `is:graphql` or `-is:trackers` to search, the CLI and the **+ Filter** builder in Traffic. Plonix ships a `common` pack, and the store has more. See [docs/filters.md](docs/filters.md).
 
 ### The Plonix app
 - **Plonix.app** is a Mac app: double-click it and the Plonix window opens with capture running. It starts the engine inside the app (or uses the one already running), signs itself in, and needs no terminal.
@@ -209,6 +210,7 @@ plonix replay 42 -H 'Authorization: Bearer other-user' -t '/api/users/2'
 
 plonix rules                               # detection rule packs in effect
 plonix rules add ./my-pack.json            # or an https:// URL, optionally --sha256
+plonix filters                             # named filters: is:auth, is:graphql, -is:trackers
 plonix store                               # browse community packs
 plonix store install admin-panels          # verified against the store's sha256
 plonix stop                                # captured traffic is kept
@@ -252,6 +254,7 @@ The API listens on port 8090 when it is free; `plonix status` shows the actual a
 | GET | `/api/hosts/{host}/endpoints` | Endpoints seen on a host |
 | GET | `/api/tech` · `/api/tech/{host}` | Detected technologies per host, with evidence |
 | GET | `/api/rules` | Detection rule packs in effect |
+| GET | `/api/filters` | Named filters (`is:name`) in effect, and their packs |
 | GET | `/api/scope` | Scope rules and pending suggestions |
 | POST | `/api/scope/accept` · `reject` · `remove` | Decide on a domain |
 | POST | `/api/send` | Send a new request (in-scope hosts only) |

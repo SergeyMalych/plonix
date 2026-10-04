@@ -29,7 +29,6 @@ use crate::codec;
 use crate::engine::{Engine, ReplayRequest, SendError, SendRequest};
 use crate::model::{Exchange, NewFinding, SEVERITIES};
 use crate::paths::Home;
-use crate::query;
 use crate::scope::Decision;
 use crate::ui::{self, LaunchCodes};
 
@@ -84,6 +83,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, proxy_a
         .route("/api/tech", get(tech_all))
         .route("/api/tech/{host}", get(tech_host))
         .route("/api/rules", get(rule_packs))
+        .route("/api/filters", get(named_filters))
         .route("/api/scope", get(scope))
         .route("/api/scope/accept", post(accept))
         .route("/api/scope/reject", post(reject))
@@ -246,7 +246,7 @@ fn default_limit() -> usize {
 
 async fn traffic(State(s): State<AppState>, caller: MaybeCaller, Query(p): Query<TrafficParams>) -> Response {
     let q = if agent_in_scope_only(&s, &caller) { format!("{} scope:in", p.q) } else { p.q };
-    let q = match query::Query::parse(&q) {
+    let q = match s.engine.filters().parse(&q) {
         Ok(q) => q,
         Err(e) => return err(StatusCode::BAD_REQUEST, "bad_query", &e.to_string()),
     };
@@ -430,6 +430,17 @@ async fn rule_packs(State(s): State<AppState>) -> Response {
     let engine = s.engine.clone();
     match tokio::task::spawn_blocking(move || engine.detection_rules()).await {
         Ok(r) => Json(json!({ "packs": r.packs, "rules": r.detector.rules.len(), "problems": r.problems })).into_response(),
+        Err(e) => internal(e.into()),
+    }
+}
+
+async fn named_filters(State(s): State<AppState>) -> Response {
+    let engine = s.engine.clone();
+    match tokio::task::spawn_blocking(move || engine.filters()).await {
+        Ok(f) => {
+            let filters: Vec<_> = f.filters.values().collect();
+            Json(json!({ "filters": filters, "packs": f.packs, "problems": f.problems })).into_response()
+        }
         Err(e) => internal(e.into()),
     }
 }

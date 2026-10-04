@@ -49,6 +49,8 @@ pub struct Index {
 pub enum Kind {
     /// A detection rule pack (declarative, installable today).
     Rules,
+    /// A filter pack: named Traffic filters (declarative, installable today).
+    Filters,
     /// A sandboxed extension (see docs/extensions.md; not installable yet).
     Extension,
 }
@@ -225,8 +227,13 @@ mod tests {
             let Location::File(path) = resolve(&base, &p.url).unwrap() else { panic!("expected a relative url for {}", p.name) };
             let data = std::fs::read(&path).unwrap();
             assert_eq!(crate::rulepack::sha256_hex(&data), p.sha256, "{}: sha256 in store/index.json is stale", p.name);
-            let pack = crate::rulepack::parse(&data).unwrap();
-            assert_eq!((pack.doc.name.as_str(), pack.doc.version.as_str()), (p.name.as_str(), p.version.as_str()));
+            let (name, version) = match p.kind {
+                Kind::Rules => crate::rulepack::parse(&data).map(|x| (x.doc.name, x.doc.version)).map_err(|e| e.to_string()),
+                Kind::Filters => crate::filterpack::parse(&data).map(|x| (x.doc.name, x.doc.version)),
+                Kind::Extension => continue,
+            }
+            .unwrap();
+            assert_eq!((name.as_str(), version.as_str()), (p.name.as_str(), p.version.as_str()));
         }
     }
 }

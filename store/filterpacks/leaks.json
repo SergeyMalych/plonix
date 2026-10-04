@@ -1,0 +1,20 @@
+{
+  "plonix_filters": 1,
+  "name": "leaks",
+  "version": "1.0.0",
+  "description": "Find traffic that leaks secrets, stack traces or debug output.",
+  "author": "Plonix contributors",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/SergeyMalych/plonix",
+  "filters": [
+    {"id": "aws-keys", "label": "AWS access keys", "query": "AKIA"},
+    {"id": "private-keys", "label": "Private keys", "query": "\"PRIVATE KEY-----\""},
+    {"id": "jwts", "label": "JWTs", "query": "eyJhbGci"},
+    {"id": "stack-traces", "label": "Stack traces", "description": "Python, Java and .NET traces in responses.", "query": "\"Traceback (most recent call last)\""},
+    {"id": "java-traces", "label": "Java stack traces", "query": "\"at java.\""},
+    {"id": "sql-errors", "label": "SQL errors", "query": "\"SQL syntax\""},
+    {"id": "debug-pages", "label": "Debug pages", "query": "\"Whoops! There was an error\""},
+    {"id": "source-maps", "label": "Source maps", "query": "ext:map"},
+    {"id": "internal-ips", "label": "Internal IPs", "description": "Responses mentioning 10.x addresses.", "query": "\"10.0.\""}
+  ]
+}

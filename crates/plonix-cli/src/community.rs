@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Subcommand};
+use plonix_core::filterpack::{self, FilterLibrary};
 use plonix_core::registry::{self, Index, Kind, Location};
 use plonix_core::rulepack::{self, BUILTIN, Library, MAX_PACK_BYTES};
 use serde_json::{Value, json};
@@ -39,6 +40,31 @@ pub enum RulesCmd {
     /// Validate a pack without installing it (for pack authors)
     Check {
         /// Path or URL of a pack
+        source: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum FiltersCmd {
+    /// Named filters in effect, for `is:<name>` (the default)
+    List,
+    /// Install a filter pack from a file or an https:// URL
+    Add {
+        /// Path or URL of a filter pack (.json)
+        source: String,
+        /// Refuse the pack unless its SHA-256 is exactly this
+        #[arg(long, value_name = "HEX")]
+        sha256: Option<String>,
+    },
+    /// Uninstall a filter pack
+    #[command(visible_alias = "rm")]
+    Remove {
+        #[arg(required = true)]
+        names: Vec<String>,
+    },
+    /// Validate a filter pack without installing it (for pack authors)
+    Check {
+        /// Path or URL of a filter pack
         source: String,
     },
 }
@@ -177,6 +203,74 @@ pub fn rules_cmd(ctx: &Ctx, cmd: RulesCmd) -> Result<()> {
     Ok(())
 }
 
+// ---- plonix filters ------------------------------------------------------------
+
+pub fn filters_cmd(ctx: &Ctx, cmd: FiltersCmd) -> Result<()> {
+    let lib = FilterLibrary::new(&ctx.home);
+    match cmd {
+        FiltersCmd::List => {
+            let set = lib.load();
+            if ctx.json {
+                let filters: Vec<_> = set.filters.values().collect();
+                return ctx.print_json(&json!({ "filters": filters, "packs": set.packs, "problems": set.problems }));
+            }
+            println!("{:<16} {:<22} {:<10} QUERY", "FILTER", "LABEL", "PACK");
+            for f in set.filters.values() {
+                println!("{:<16} {:<22} {:<10} {}", format!("is:{}", f.id), clip(&f.label, 22), clip(&f.pack, 10), clip(&f.query, 70));
+            }
+            println!(
+                "\n{} filters from {} pack(s) · use them in a search (`plonix search is:graphql -is:trackers`) or from + Filter in the window",
+                set.filters.len(),
+                set.packs.len()
+            );
+            for p in &set.problems {
+                eprintln!("warning: {p}");
+            }
+        }
+        FiltersCmd::Add { source, sha256 } => {
+            let loc = location(&source)?;
+            let bytes = fetch(&loc, MAX_PACK_BYTES)?;
+            let (pack, previous) = lib.install(&bytes, &source_label(&loc), sha256.as_deref())?;
+            if ctx.json {
+                return ctx.print_json(&json!({ "installed": pack.info(&source_label(&loc), false), "replaced": previous }));
+            }
+            let what = match previous {
+                Some(v) if v == pack.doc.version => format!("Reinstalled {} {}", pack.doc.name, pack.doc.version),
+                Some(v) => format!("Updated {} {} → {}", pack.doc.name, v, pack.doc.version),
+                None => format!("Installed {} {}", pack.doc.name, pack.doc.version),
+            };
+            let ids: Vec<String> = pack.doc.filters.iter().map(|f| format!("is:{}", f.id)).collect();
+            println!("{what}: {} filters by {}.", ids.len(), pack.doc.author);
+            println!("  {}", clip(&ids.join("  "), 200));
+            if sha256.is_some() {
+                println!("sha256 {} verified.", pack.sha256);
+            } else {
+                println!("Pinned to sha256 {} (pass --sha256 to require a specific build).", pack.sha256);
+            }
+        }
+        FiltersCmd::Remove { names } => {
+            for name in names {
+                if lib.remove(&name)? {
+                    println!("Removed {name}.");
+                } else {
+                    bail!("no installed filter pack named `{}` (see `plonix filters`)", plonix_core::detect::clean(&name, 64));
+                }
+            }
+        }
+        FiltersCmd::Check { source } => {
+            let loc = location(&source)?;
+            let bytes = fetch(&loc, MAX_PACK_BYTES)?;
+            let pack = filterpack::parse(&bytes).map_err(|e| anyhow!(e))?;
+            if ctx.json {
+                return ctx.print_json(&json!({ "valid": true, "pack": pack.info(&source_label(&loc), false) }));
+            }
+            println!("{} {} is valid: {} filters.", pack.doc.name, pack.doc.version, pack.doc.filters.len());
+            println!("sha256 {}", pack.sha256);
+        }
+    }
+    Ok(())
+}
+
 // ---- plonix tech ----------------------------------------------------------------
 
 pub fn tech_cmd(ctx: &Ctx, host: Option<String>) -> Result<()> {
@@ -241,15 +335,15 @@ fn load_index(loc: &Location) -> Result<Index> {
 pub fn store_cmd(ctx: &Ctx, a: StoreArgs) -> Result<()> {
     let loc = index_location(&a)?;
     let index = load_index(&loc)?;
-    let lib = Library::new(&ctx.home);
+    let shelves = Shelves::new(&ctx.home);
     let status = |p: &registry::Package| -> String {
-        if BUILTIN.iter().any(|(n, _)| *n == p.name) {
+        if shelves.builtin(p) {
             return "built-in".into();
         }
         if p.kind == Kind::Extension {
             return "needs runtime".into();
         }
-        match lib.installed_version(&p.name) {
+        match shelves.installed_version(p) {
             Some(v) if rulepack::newer(&p.version, &v) => format!("update {v}→{}", p.version),
             Some(_) => "installed".into(),
             None => "available".into(),
@@ -277,6 +371,7 @@ pub fn store_cmd(ctx: &Ctx, a: StoreArgs) -> Result<()> {
             for p in &items {
                 let kind = match p.kind {
                     Kind::Rules => "rules",
+                    Kind::Filters => "filter",
                     Kind::Extension => "ext",
                 };
                 println!("{:<18} {:<9} {:<6} {:<16} {}", p.name, p.version, kind, status(p), clip(&p.description, 70));
@@ -289,11 +384,11 @@ pub fn store_cmd(ctx: &Ctx, a: StoreArgs) -> Result<()> {
                 let Some(p) = index.packages.iter().find(|p| p.name == name) else {
                     bail!("`{}` is not in the store (see `plonix store list`)", plonix_core::detect::clean(&name, 64));
                 };
-                if BUILTIN.iter().any(|(n, _)| *n == p.name) {
+                if shelves.builtin(p) {
                     println!("{} is built in; nothing to install.", p.name);
                     continue;
                 }
-                results.push(install(&lib, &loc, p, ctx.json)?);
+                results.push(install(&shelves, &loc, p, ctx.json)?);
             }
             if ctx.json {
                 return ctx.print_json(&Value::Array(results));
@@ -302,11 +397,11 @@ pub fn store_cmd(ctx: &Ctx, a: StoreArgs) -> Result<()> {
         StoreCmd::Update => {
             let mut results = vec![];
             for p in &index.packages {
-                if p.kind == Kind::Rules
-                    && let Some(v) = lib.installed_version(&p.name)
+                if p.kind != Kind::Extension
+                    && let Some(v) = shelves.installed_version(p)
                     && rulepack::newer(&p.version, &v)
                 {
-                    results.push(install(&lib, &loc, p, ctx.json)?);
+                    results.push(install(&shelves, &loc, p, ctx.json)?);
                 }
             }
             if ctx.json {
@@ -320,7 +415,36 @@ pub fn store_cmd(ctx: &Ctx, a: StoreArgs) -> Result<()> {
     Ok(())
 }
 
-fn install(lib: &Library, index: &Location, p: &registry::Package, quiet: bool) -> Result<Value> {
+/// Where each kind of store package is installed.
+struct Shelves {
+    rules: Library,
+    filters: FilterLibrary,
+}
+
+impl Shelves {
+    fn new(home: &plonix_core::paths::Home) -> Self {
+        Self { rules: Library::new(home), filters: FilterLibrary::new(home) }
+    }
+
+    fn builtin(&self, p: &registry::Package) -> bool {
+        let list = match p.kind {
+            Kind::Rules => BUILTIN,
+            Kind::Filters => filterpack::BUILTIN,
+            Kind::Extension => return false,
+        };
+        list.iter().any(|(n, _)| *n == p.name)
+    }
+
+    fn installed_version(&self, p: &registry::Package) -> Option<String> {
+        match p.kind {
+            Kind::Rules => self.rules.installed_version(&p.name),
+            Kind::Filters => self.filters.installed_version(&p.name),
+            Kind::Extension => None,
+        }
+    }
+}
+
+fn install(shelves: &Shelves, index: &Location, p: &registry::Package, quiet: bool) -> Result<Value> {
     if p.kind == Kind::Extension {
         bail!(
             "{} is an extension. Extensions need the sandboxed extension runtime, which this version of Plonix does not have yet (see docs/extensions.md).",
@@ -334,16 +458,32 @@ fn install(lib: &Library, index: &Location, p: &registry::Package, quiet: bool) 
     if actual != p.sha256 {
         bail!("{}: checksum mismatch: the store lists sha256 {}, the download is {actual}. Nothing was installed.", p.name, p.sha256);
     }
-    let parsed = rulepack::parse(&bytes).map_err(|e| anyhow!("{}: {e}", p.name))?;
-    if parsed.doc.name != p.name || parsed.doc.version != p.version {
-        bail!("{}: the store lists {} {} but the file is {} {}", p.name, p.name, p.version, parsed.doc.name, parsed.doc.version);
+    let (name, version) = match p.kind {
+        Kind::Rules => rulepack::parse(&bytes).map(|x| (x.doc.name, x.doc.version)).map_err(|e| anyhow!("{}: {e}", p.name))?,
+        Kind::Filters => filterpack::parse(&bytes).map(|x| (x.doc.name, x.doc.version)).map_err(|e| anyhow!("{}: {e}", p.name))?,
+        Kind::Extension => unreachable!(),
+    };
+    if name != p.name || version != p.version {
+        bail!("{}: the store lists {} {} but the file is {name} {version}", p.name, p.name, p.version);
     }
-    let (pack, previous) = lib.install(&bytes, &src.to_string(), Some(&p.sha256)).with_context(|| format!("installing {}", p.name))?;
+    let source = src.to_string();
+    let installing = || format!("installing {}", p.name);
+    let (count, what, sha, previous) = match p.kind {
+        Kind::Rules => {
+            let (pack, prev) = shelves.rules.install(&bytes, &source, Some(&p.sha256)).with_context(installing)?;
+            (pack.rules.len(), "rules", pack.sha256, prev)
+        }
+        Kind::Filters => {
+            let (pack, prev) = shelves.filters.install(&bytes, &source, Some(&p.sha256)).with_context(installing)?;
+            (pack.doc.filters.len(), "filters", pack.sha256, prev)
+        }
+        Kind::Extension => unreachable!(),
+    };
     if !quiet {
         match &previous {
-            Some(v) => println!("Updated {} {v} → {} ({} rules, sha256 verified).", p.name, p.version, pack.rules.len()),
-            None => println!("Installed {} {} ({} rules, sha256 verified).", p.name, p.version, pack.rules.len()),
+            Some(v) => println!("Updated {} {v} → {} ({count} {what}, sha256 verified).", p.name, p.version),
+            None => println!("Installed {} {} ({count} {what}, sha256 verified).", p.name, p.version),
         }
     }
-    Ok(json!({ "name": p.name, "version": p.version, "rules": pack.rules.len(), "sha256": pack.sha256, "replaced": previous }))
+    Ok(json!({ "name": p.name, "kind": p.kind, "version": p.version, what: count, "sha256": sha, "replaced": previous }))
 }
