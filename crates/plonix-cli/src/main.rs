@@ -140,6 +140,8 @@ enum Cmd {
         #[command(subcommand)]
         cmd: scan::ScanCmd,
     },
+    /// Crawl a host to discover endpoints, parameters and forms
+    Crawl(scan::CrawlArgs),
     /// Detection rule packs: list, add from a file or URL, remove, check
     Rules {
         #[command(subcommand)]
@@ -403,6 +405,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
         }
         Cmd::Tech { host } => community::tech_cmd(&ctx, host)?,
         Cmd::Scan { cmd } => scan::scan_cmd(&ctx, cmd)?,
+        Cmd::Crawl(a) => scan::crawl_cmd(&ctx, a)?,
         Cmd::Rules { cmd } => community::rules_cmd(&ctx, cmd.unwrap_or(community::RulesCmd::List))?,
         Cmd::Store(a) => community::store_cmd(&ctx, a)?,
         Cmd::Connect { cmd } => connect::connect_cmd(&ctx, cmd)?,
