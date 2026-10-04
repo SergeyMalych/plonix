@@ -4152,13 +4152,43 @@ const fmtTok = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' 
  */
 async function askClaude(subject) {
   const st = { exclude: [], question: null, max: null, bundle: null, confirmBig: false };
+  // The live in-app conversation, if one has been started.
+  const convo = { id: null, since: 0, sessionId: null, running: false };
+
+  /* ---- compose view (what gets shared) ---- */
   const q = h('textarea', { class: 'askq', rows: 3 });
   const partsBox = h('div', { class: 'askparts' });
   const meter = h('div', { class: 'askmeter' });
   const warn = h('div', { class: 'askwarn', hidden: true });
   const clipSel = h('select', { title: 'Each request and response body is clipped to this length' }, [1000, 2000, 4000, 8000, 16000, 50000].map((n) => h('option', { value: n, text: fmtTok(n) + ' chars' })));
+  const cliHint = h('p', { class: 'muted fine', hidden: true });
+  const composeView = h(
+    'div',
+    null,
+    h('label', null, 'Your question', q),
+    h('div', { class: 'askhead' }, h('span', { text: 'What Claude Code gets' }), h('label', { class: 'askclip' }, 'Bodies up to ', clipSel)),
+    partsBox,
+    meter,
+    warn,
+    h('p', { class: 'muted fine', text: 'Only what is ticked is sent, straight from this Mac to Claude Code. It may include passwords or session tokens from captured traffic.' }),
+    cliHint,
+  );
+
+  /* ---- conversation view (the answer, in-app) ---- */
+  const transcript = h('div', { class: 'convo' });
+  const followIn = h('textarea', { class: 'cfollow', rows: 1, placeholder: 'Ask a follow-up…' });
+  const sendBtn = h('button', { class: 'btn primary sm', text: 'Send' });
+  const followRow = h('div', { class: 'cfollowrow', hidden: true }, followIn, sendBtn);
+  const convoView = h('div', { hidden: true }, transcript, followRow);
+
+  /* ---- footer buttons ---- */
   const copyBtn = h('button', { class: 'btn', text: 'Copy prompt' });
-  const openBtn = h('button', { class: 'btn primary', text: 'Open in Claude Code' });
+  const termBtn = h('button', { class: 'btn', text: 'Open in Terminal' });
+  const askBtn = h('button', { class: 'btn primary', text: '✦ Ask Claude' });
+  const stopBtn = h('button', { class: 'btn', text: 'Stop', hidden: true });
+  const newBtn = h('button', { class: 'btn', text: 'New question', hidden: true });
+
+  let askInApp = true;
   let timer;
   const rebuild = async () => {
     try {
@@ -4218,9 +4248,115 @@ async function askClaude(subject) {
   };
   const sync = () => {
     const blocked = !st.bundle || (st.bundle.over_budget && !st.confirmBig);
-    openBtn.disabled = blocked;
     copyBtn.disabled = blocked;
+    termBtn.disabled = blocked;
+    askBtn.disabled = blocked || !askInApp;
   };
+
+  /* ---- view switching ---- */
+  const showCompose = () => {
+    composeView.hidden = false;
+    convoView.hidden = true;
+    copyBtn.hidden = termBtn.hidden = askBtn.hidden = false;
+    stopBtn.hidden = newBtn.hidden = true;
+    sync();
+  };
+  const showConvo = () => {
+    composeView.hidden = true;
+    convoView.hidden = false;
+    copyBtn.hidden = termBtn.hidden = askBtn.hidden = true;
+    newBtn.hidden = false;
+  };
+
+  /* ---- transcript rendering ---- */
+  const scroll = () => (transcript.scrollTop = transcript.scrollHeight);
+  let thinking = null;
+  const setThinking = (on) => {
+    if (on && !thinking) {
+      thinking = h('div', { class: 'cthink' }, h('span', { class: 'dot' }), h('span', { class: 'dot' }), h('span', { class: 'dot' }));
+      transcript.append(thinking);
+      scroll();
+    } else if (!on && thinking) {
+      thinking.remove();
+      thinking = null;
+    }
+  };
+  const add = (node) => {
+    if (thinking) transcript.insertBefore(node, thinking);
+    else transcript.append(node);
+    scroll();
+  };
+  const bubble = (role, text) => h('div', { class: 'cmsg ' + role }, h('div', { class: 'cbub', text }));
+  const sayError = (text) => add(h('div', { class: 'cerr', text }));
+  const offerFallback = () => {
+    copyBtn.hidden = termBtn.hidden = false;
+  };
+
+  const alive = () => document.body.contains(transcript);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  const pollLoop = async () => {
+    while (convo.running && alive()) {
+      let snap;
+      try {
+        snap = await api(`/api/agents/run/${convo.id}?since=${convo.since}`);
+      } catch (e) {
+        setThinking(false);
+        sayError(e.message);
+        convo.running = false;
+        break;
+      }
+      for (const ev of snap.events) {
+        convo.since = ev.seq + 1;
+        if (ev.type === 'text') {
+          setThinking(false);
+          add(bubble('bot', ev.text));
+        } else if (ev.type === 'tool') {
+          add(h('div', { class: 'ctool', text: '✦ ' + ev.text }));
+        } else if (ev.type === 'error') {
+          setThinking(false);
+          sayError(ev.text);
+          offerFallback();
+        }
+      }
+      if (snap.session_id) convo.sessionId = snap.session_id;
+      if (snap.status !== 'running') {
+        convo.running = false;
+        setThinking(false);
+        if (snap.status === 'done') {
+          followRow.hidden = false;
+          followIn.disabled = sendBtn.disabled = false;
+        }
+        break;
+      }
+      // Keep the working indicator alive between turns.
+      if (!thinking) setThinking(true);
+      await sleep(500);
+    }
+    stopBtn.hidden = true;
+  };
+
+  const runTurn = async (prompt, resume) => {
+    convo.running = true;
+    convo.since = 0;
+    stopBtn.hidden = false;
+    followIn.disabled = sendBtn.disabled = true;
+    m.err.textContent = '';
+    setThinking(true);
+    try {
+      const { id } = await api('/api/agents/run', { method: 'POST', body: { prompt, resume } });
+      convo.id = id;
+    } catch (e) {
+      setThinking(false);
+      convo.running = false;
+      stopBtn.hidden = true;
+      sayError(e.message);
+      offerFallback();
+      return;
+    }
+    pollLoop();
+  };
+
   q.addEventListener('input', () => {
     st.question = q.value;
     later();
@@ -4230,14 +4366,51 @@ async function askClaude(subject) {
     st.confirmBig = false;
     rebuild();
   });
+  askBtn.onclick = () => {
+    if (!st.bundle) return;
+    showConvo();
+    add(bubble('user', st.bundle.question));
+    runTurn(st.bundle.prompt, null);
+  };
+  sendBtn.onclick = () => {
+    const t = followIn.value.trim();
+    if (!t || convo.running) return;
+    followIn.value = '';
+    followRow.hidden = true;
+    add(bubble('user', t));
+    runTurn(t, convo.sessionId);
+  };
+  followIn.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendBtn.onclick();
+    }
+  });
+  stopBtn.onclick = async () => {
+    if (!convo.id) return;
+    convo.running = false;
+    stopBtn.hidden = true;
+    setThinking(false);
+    try {
+      await api(`/api/agents/run/${convo.id}`, { method: 'DELETE' });
+    } catch (_) {}
+    sayError('Stopped.');
+    offerFallback();
+  };
+  newBtn.onclick = () => {
+    if (convo.running) return;
+    convo.id = convo.sessionId = null;
+    clear(transcript);
+    followRow.hidden = true;
+    showCompose();
+  };
   copyBtn.onclick = async () => {
     await copyText(st.bundle.prompt);
-    closeModal();
+    toast('Prompt copied', 'ok');
   };
-  openBtn.onclick = async () => {
+  termBtn.onclick = async () => {
     try {
       await api('/api/agents/launch', { method: 'POST', body: { prompt: st.bundle.prompt } });
-      closeModal();
       toast('Opened Claude Code in Terminal', 'ok');
     } catch (e) {
       if (e.code === 'unsupported') {
@@ -4246,19 +4419,19 @@ async function askClaude(subject) {
       } else m.err.textContent = e.message;
     }
   };
-  const m = modal(
-    'Ask Claude Code',
-    [
-      h('label', null, 'Your question', q),
-      h('div', { class: 'askhead' }, h('span', { text: 'What Claude Code gets' }), h('label', { class: 'askclip' }, 'Bodies up to ', clipSel)),
-      partsBox,
-      meter,
-      warn,
-      h('p', { class: 'muted fine', text: 'Only what is ticked is sent, straight from this Mac to Claude Code. It may include passwords or session tokens from captured traffic.' }),
-    ],
-    [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), copyBtn, openBtn],
-  );
+
+  const m = modal('Ask Claude Code', [composeView, convoView], [h('button', { class: 'btn', text: 'Close', onclick: closeModal }), newBtn, stopBtn, copyBtn, termBtn, askBtn]);
   m.el.querySelector('.mcard').classList.add('wide');
+
+  // Is the Claude Code CLI installed here? If not, keep Terminal/Copy only.
+  try {
+    const pol = await api('/api/agents');
+    askInApp = pol.ask_in_app !== false;
+  } catch (_) {}
+  if (!askInApp) {
+    cliHint.hidden = false;
+    cliHint.textContent = 'Claude Code is not installed on this machine, so the answer cannot run inside Plonix yet. Install it from claude.com/claude-code, or use Open in Terminal.';
+  }
   await rebuild();
 }
 

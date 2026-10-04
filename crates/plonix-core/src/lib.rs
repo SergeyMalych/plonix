@@ -10,6 +10,7 @@
 pub mod access;
 pub mod api;
 pub mod ask;
+pub mod assistant;
 pub mod browser;
 pub mod ca;
 pub mod crawl;

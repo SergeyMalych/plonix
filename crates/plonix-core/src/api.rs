@@ -24,6 +24,7 @@ use serde_json::{Value, json};
 
 use crate::access::{self, AgentActivity, AgentMode, AgentSettings, Caller, Group, SharedAgentSettings};
 use crate::ask::{self, AskError, AskRequest};
+use crate::assistant::{Conversations, StartError};
 use crate::browser;
 use crate::codec;
 use crate::engine::{Engine, ReplayRequest, SendError, SendRequest};
@@ -43,6 +44,7 @@ struct AppState {
     agent_token: String,
     agents: Arc<AgentActivity>,
     agent_settings: Arc<SharedAgentSettings>,
+    conversations: Arc<Conversations>,
     api_addr: SocketAddr,
     launch_codes: Arc<LaunchCodes>,
     home: Home,
@@ -69,6 +71,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         agent_token: tokens.agent,
         agents: Arc::default(),
         agent_settings: Arc::new(SharedAgentSettings::new(&home)),
+        conversations: Arc::default(),
         api_addr,
         launch_codes: Arc::default(),
         home,
@@ -133,6 +136,8 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/agents/settings", get(agent_settings).put(put_agent_settings))
         .route("/api/agents/ask", post(agent_ask))
         .route("/api/agents/launch", post(agent_launch))
+        .route("/api/agents/run", post(agent_run))
+        .route("/api/agents/run/{id}", get(agent_run_poll).delete(agent_run_cancel))
         .route("/api/shutdown", post(shutdown))
         .layer(middleware::from_fn_with_state(state.clone(), guard))
         .with_state(state)
@@ -1117,6 +1122,9 @@ async fn agents(State(s): State<AppState>, caller: MaybeCaller) -> Response {
             "command": "plonix connect claude",
             "server": { "command": "plonix", "args": ["mcp"] },
         },
+        // Whether "Ask Claude Code" can run inside Plonix: true when the
+        // `claude` CLI is installed on this machine.
+        "ask_in_app": Conversations::cli_available(),
     });
     // Only the user sees who else is connected.
     if caller.is_some_and(|c| c.0 == Caller::User) {
@@ -1171,6 +1179,58 @@ async fn agent_launch(State(s): State<AppState>, Json(b): Json<LaunchBody>) -> R
         Ok(Err(e)) if format!("{e:#}").starts_with("unsupported") => err(StatusCode::NOT_IMPLEMENTED, "unsupported", &format!("{e:#}")),
         Ok(Err(e)) => internal(e),
         Err(e) => internal(e.into()),
+    }
+}
+
+#[derive(Deserialize)]
+struct RunBody {
+    /// The prompt for a first turn, or the follow-up message when `resume` is set.
+    prompt: String,
+    /// Claude session id to continue, for a follow-up turn in the same chat.
+    #[serde(default)]
+    resume: Option<String>,
+}
+
+/// Starts an in-app "Ask Claude Code" conversation: runs `claude` headless,
+/// wired to the read-only Plonix MCP, and streams the answer into the panel.
+async fn agent_run(State(s): State<AppState>, Json(b): Json<RunBody>) -> Response {
+    let settings = s.agent_settings.get();
+    if !settings.enabled {
+        return err(StatusCode::FORBIDDEN, "agents_disabled", "agent access is turned off in Settings › AI agents");
+    }
+    if b.prompt.trim().is_empty() {
+        return err(StatusCode::BAD_REQUEST, "bad_request", "the message is empty");
+    }
+    match s.conversations.start(&s.home, b.prompt, b.resume) {
+        Ok(id) => Json(json!({ "id": id })).into_response(),
+        Err(StartError::NoCli) => err(
+            StatusCode::NOT_IMPLEMENTED,
+            "no_cli",
+            "Claude Code is not installed on this machine. Install it from claude.com/claude-code, or use \"Open in Terminal\".",
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+struct PollQuery {
+    #[serde(default)]
+    since: usize,
+}
+
+/// Returns whatever is new in a conversation since the last poll.
+async fn agent_run_poll(State(s): State<AppState>, Path(id): Path<String>, Query(q): Query<PollQuery>) -> Response {
+    match s.conversations.poll(&id, q.since) {
+        Some(snap) => Json(snap).into_response(),
+        None => err(StatusCode::NOT_FOUND, "not_found", "no such conversation"),
+    }
+}
+
+/// Stops a running conversation.
+async fn agent_run_cancel(State(s): State<AppState>, Path(id): Path<String>) -> Response {
+    if s.conversations.cancel(&id) {
+        Json(json!({ "ok": true })).into_response()
+    } else {
+        err(StatusCode::NOT_FOUND, "not_found", "no such conversation")
     }
 }
 
