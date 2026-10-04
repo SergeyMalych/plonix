@@ -174,6 +174,30 @@ pub struct Store {
 
 const SUMMARY_COLS: &str = "e.id, e.ts, e.method, e.scheme, e.host, e.port, e.path, e.query, e.status, e.mime, e.resp_len, e.duration_ms, e.source";
 
+/// The ORDER BY for a Traffic column sort (see [`Store::search_sorted`]).
+/// Only known columns map to SQL, so the value is never spliced in raw.
+fn sort_clause(sort: Option<&str>) -> String {
+    let Some(sort) = sort.map(str::trim).filter(|s| !s.is_empty()) else { return "e.id DESC".into() };
+    let (key, dir) = match sort.strip_prefix('-') {
+        Some(k) => (k, "DESC"),
+        None => (sort, "ASC"),
+    };
+    let col = match key {
+        "n" | "id" => return format!("e.id {dir}"),
+        "method" => "e.method",
+        "host" => "e.host",
+        "path" => "e.path",
+        "status" => "e.status",
+        "type" | "mime" => "e.mime",
+        "size" => "e.resp_len",
+        "ms" | "duration" => "e.duration_ms",
+        "time" | "ts" => "e.ts",
+        _ => return "e.id DESC".into(),
+    };
+    // Rows with no value (no response yet) go last either way.
+    format!("{col} IS NULL, {col} {dir}, e.id DESC")
+}
+
 /// The columns [`row_to_exchange`] reads, in order.
 const EXCHANGE_COLS: &str = "id, ts, scheme, host, port, method, path, query, req_headers, req_body, status, resp_headers,
     resp_body, duration_ms, error, tls_sans, source, initiator, req_truncated, req_size, resp_truncated, resp_size, http_version";
@@ -337,6 +361,14 @@ impl Store {
 
     /// Searches traffic, newest first. Returns the page and the total match count.
     pub fn search(&self, query: &Query, rules: &ScopeRules, limit: usize, offset: usize) -> Result<(Vec<ExchangeSummary>, i64)> {
+        self.search_sorted(query, rules, None, limit, offset)
+    }
+
+    /// Like [`Store::search`], ordered by a Traffic column instead: `status`
+    /// sorts ascending, `-status` descending, ties newest first. Unknown
+    /// columns fall back to newest first.
+    pub fn search_sorted(&self, query: &Query, rules: &ScopeRules, sort: Option<&str>, limit: usize, offset: usize) -> Result<(Vec<ExchangeSummary>, i64)> {
+        let order = sort_clause(sort);
         let scope_hosts: Vec<String> = self.distinct_hosts()?.into_iter().filter(|h| rules.in_scope(h)).collect();
         let (clause, mut params) = query.to_sql(&scope_hosts);
         let conn = self.conn.lock().unwrap();
@@ -348,7 +380,7 @@ impl Store {
         params.push((limit as i64).into());
         params.push((offset as i64).into());
         let mut stmt = conn.prepare(&format!(
-            "SELECT {SUMMARY_COLS} FROM exchanges e WHERE {clause} ORDER BY e.id DESC LIMIT ? OFFSET ?"
+            "SELECT {SUMMARY_COLS} FROM exchanges e WHERE {clause} ORDER BY {order} LIMIT ? OFFSET ?"
         ))?;
         let rows = stmt.query_map(params_from_iter(params.iter()), |r| {
             let host: String = r.get(4)?;
@@ -1091,6 +1123,17 @@ mod tests {
         let (page, total) = s.search(&Query::parse("").unwrap(), &rules, 2, 1).unwrap();
         assert_eq!((page.len(), total), (2, 4));
         assert!(page[0].id > page[1].id, "newest first");
+
+        let sorted = |sort: &str| -> Vec<Option<u16>> {
+            let (rows, _) = s.search_sorted(&Query::parse("").unwrap(), &rules, Some(sort), 50, 0).unwrap();
+            rows.into_iter().map(|r| r.status).collect()
+        };
+        assert_eq!(sorted("status"), vec![Some(200), Some(201), Some(404), Some(500)]);
+        assert_eq!(sorted("-status"), vec![Some(500), Some(404), Some(201), Some(200)]);
+        assert_eq!(sorted("id; DROP TABLE exchanges"), sorted("-n"), "unknown sorts fall back to newest first");
+        let (hosts, _) = s.search_sorted(&Query::parse("").unwrap(), &rules, Some("host"), 50, 0).unwrap();
+        assert_eq!(hosts.first().map(|r| r.host.as_str()), Some("api.example.com"));
+        assert_eq!(hosts.last().map(|r| r.host.as_str()), Some("www.example.com"));
     }
 
     #[test]

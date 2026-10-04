@@ -287,6 +287,9 @@ struct TrafficParams {
     limit: usize,
     #[serde(default)]
     offset: usize,
+    /// A Traffic column, `-` first for descending; newest first when absent.
+    #[serde(default)]
+    sort: Option<String>,
 }
 
 fn default_limit() -> usize {
@@ -299,7 +302,7 @@ async fn traffic(State(s): State<AppState>, caller: MaybeCaller, Query(p): Query
         Ok(q) => q,
         Err(e) => return err(StatusCode::BAD_REQUEST, "bad_query", &e.to_string()),
     };
-    match s.engine.store.search(&q, &s.engine.rules(), p.limit.min(5000), p.offset) {
+    match s.engine.store.search_sorted(&q, &s.engine.rules(), p.sort.as_deref(), p.limit.min(5000), p.offset) {
         Ok((items, total)) => Json(json!({ "total": total, "items": items })).into_response(),
         Err(e) => internal(e),
     }
