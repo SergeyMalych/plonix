@@ -319,7 +319,7 @@ fn check_field(f: &Field, v: &Value) -> Result<Value, String> {
 
 fn registry() -> &'static RwLock<Vec<Section>> {
     static REGISTRY: OnceLock<RwLock<Vec<Section>>> = OnceLock::new();
-    REGISTRY.get_or_init(|| RwLock::new(vec![proxy_section(), storage_section(), interface_section(), crate::access::settings_section(), crate::market::settings_section(), crate::intercept::settings_section()]))
+    REGISTRY.get_or_init(|| RwLock::new(vec![proxy_section(), storage_section(), interface_section(), crate::access::settings_section(), crate::market::settings_section(), crate::intercept::settings_section(), crate::replace::settings_section()]))
 }
 
 /// Adds a section, or replaces the one with the same id.

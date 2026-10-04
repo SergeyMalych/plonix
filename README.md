@@ -70,6 +70,12 @@ Plonix has a handful of tools, each with its own name. They are the same in the 
 - The record shows what was actually sent, marked **edited**, with the original kept: the Lens shows it on click, and `GET /api/traffic/{id}` returns it as `original_request` / `original_response`.
 - Intercept is yours alone: agents cannot see the queue or hold, edit, forward or drop anything.
 
+### Match and replace
+- Rules that change traffic as it passes through the proxy, applied to every request before Intercept sees it and to every response before the browser gets it: the request line, request headers, request body, response headers or response body. Use them to swap a token, force a header, strip `Content-Security-Policy`, or flip a feature flag in a JSON response.
+- A rule matches literal text or a regular expression (`$1` inserts a capture). Header rules see one `Name: value` line per header, so a rule can change a value, rename a header, add one or remove one. A rule can be limited to in-scope hosts.
+- Body rules apply to bodies within the body limit; longer, streaming and event-stream bodies pass unchanged. Compressed response bodies are matched decoded and sent uncompressed when changed. WebSocket handshakes and messages are not changed.
+- Manage rules in Settings › Match and replace (one switch turns them all off), with `plonix replace` or `/api/replace`. Each exchange records which rules changed it; the Lens marks it **replaced**. Agents cannot read or change rules.
+
 ### Full traffic capture
 - Every request and response is recorded into a per-project SQLite database, in scope or not, so nothing you browsed is lost.
 - Hosts and the endpoints seen on each host are listed for a quick map of the target.
@@ -125,6 +131,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 ### Settings
 - **Proxy** (per project, applies right away): listen address and port (use 0.0.0.0 to capture from phones and other devices), next-free-port fallback, HTTPS decryption on or off, hosts that are never decrypted (for apps that pin certificates), server certificate checks, an upstream HTTP or SOCKS5 proxy with login and a list of hosts to reach directly, timeouts, and how much of each body to keep.
 - **Intercept** (per project): hold in-scope hosts only or everything, an optional Traffic search to narrow what is held, whether responses are held too, and how long an unanswered item waits before it goes on unchanged.
+- **Match and replace** (per project): the rules, and one switch that turns them all off.
 - **Storage** (per project): keep only in-scope traffic, with a count of what it would delete and a button to delete it now.
 - **Interface** (all projects): open projects in a Plonix window or in your web browser.
 - Settings are a registry: a feature adds a section by describing its fields, and the Settings screens draw it with validation and storage included (see [docs/projects.md](docs/projects.md#adding-a-settings-section)).
@@ -249,6 +256,9 @@ plonix intercept on                        # hold requests to in-scope hosts (--
 plonix intercept list                      # what is held, oldest first
 plonix intercept forward 3 --edit          # edit in $EDITOR, then send on; or: drop 3, forward-all
 plonix intercept off                       # stop holding; anything held goes on unchanged
+plonix replace add request-header '(?i)^user-agent: .*$' 'User-Agent: plonix' --regex
+plonix replace add response-body '"debug":false' '"debug":true' --in-scope
+plonix replace                             # the rules in order; or: enable 2, disable 2, rm 2
 
 plonix findings                            # what you found, most severe first
 plonix findings add 'IDOR on /api/users' -s high -r 42,43
@@ -321,6 +331,8 @@ The API listens on port 8090 when it is free; `plonix status` shows the actual a
 | GET / PUT | `/api/intercept` | Intercept: on or off, its options and the held queue; change them (`{"on": true, "hold": "in_scope", "filter": "", "responses": false, "timeout_s": 300}`, any subset). User only |
 | POST | `/api/intercept/{id}/forward` | Send a held item on, as it was or edited (`{"raw": "POST /x HTTP/1.1\n..."}`). User only |
 | POST | `/api/intercept/{id}/drop` · `/api/intercept/forward-all` | Drop a held item (the client gets an error page), or send everything held on. User only |
+| GET / POST | `/api/replace` | Match-and-replace rules, and whether they apply; add one (`{"target": "request_header", "match": "...", "replace": "...", "regex": false, "in_scope_only": false, "note": ""}`). User only |
+| PATCH / DELETE | `/api/replace/{id}` | Change a rule (any of the fields above, or `{"enabled": false}`), or remove it. User only |
 | POST | `/api/send` | Send a new request (in-scope hosts only) |
 | POST | `/api/replay` | Replay a captured exchange, optionally modified |
 | GET / POST | `/api/findings` | List or record findings |
@@ -379,6 +391,7 @@ docs/             detection rules, agents and MCP, extension design
 - [x] Adaptive scope v1: suggestions with evidence, accept/reject, enforcement
 - [x] Replay and send
 - [x] Intercept: hold requests and responses in flight to edit, forward or drop them
+- [x] Match and replace: rules that change requests and responses in flight
 - [x] Token-authenticated, loopback-only local API
 - [x] `plonix` CLI: search, inspect, watch, replay and manage scope from the terminal
 - [x] `plonix open <target>`: one command from nothing to captured traffic, in a pre-configured browser

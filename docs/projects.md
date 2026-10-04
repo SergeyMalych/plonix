@@ -70,6 +70,7 @@ Settings come in sections. A section is either **global** (one value for all pro
 | --- | --- | --- |
 | Proxy | project | listen address and port, next-free-port fallback, decrypt HTTPS, hosts never decrypted, check server certificates, upstream proxy (`http://` or `socks5://`, with optional login), hosts reached directly, connect and request timeouts, how much of each body to keep (10 MB by default; longer bodies pass through in full and are marked as cut) |
 | Intercept | project | hold in-scope hosts only or everything, a Traffic search that narrows what is held, hold responses too, forward unanswered items after (300 seconds by default). Whether Intercept is on is not saved: a project always opens with it off |
+| Match and replace | project | apply the project's match-and-replace rules (on by default). The rules themselves are kept in `traffic.db` and managed under this section, with `plonix replace` or `/api/replace` |
 | Storage | project | keep only in-scope traffic |
 | Interface | global | open projects in a Plonix window or the web browser |
 | AI agents | global | let agents read projects or not, in-scope hosts only or everything, which kinds of data, and the Ask Claude size limits. Stored in `agents.json` through a section storage hook (`Section::stored_by`) |

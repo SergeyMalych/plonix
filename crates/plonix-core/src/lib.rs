@@ -33,6 +33,7 @@ pub mod proxy;
 pub mod query;
 pub mod report;
 pub mod registry;
+pub mod replace;
 pub mod rulepack;
 pub mod runs;
 pub mod scan;

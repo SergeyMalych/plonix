@@ -1660,6 +1660,7 @@ async function openInspector(id) {
         h('span', { text: fmtSize(ex.resp_size != null ? ex.resp_size : b64len(ex.resp_body)) }),
         ex.http_version ? h('span', { text: ex.http_version, title: 'The protocol spoken with the server' }) : null,
         ex.edited ? h('button', { class: 'tag edited', text: 'edited', title: 'Changed in Intercept before it went on. Show the original', onclick: () => showOriginal(ex) }) : null,
+        ex.replaced && ex.replaced.length ? h('span', { class: 'tag edited', text: 'replaced', title: 'Changed by match-and-replace rules:\n' + ex.replaced.join('\n') }) : null,
         h('span', { class: 'tag ' + scopeTag(decide(ex.host)), text: scopeLabel(decide(ex.host)) }),
       ),
       h('button', { class: 'btn sm primary', text: 'Send to Bench', title: 'Edit and re-send on the Bench (b, or double-click a row)', onclick: () => sendToBench(id) }),
@@ -4768,6 +4769,7 @@ async function renderSettings(main) {
     extra: (section, el) => {
       if (section.id === 'proxy') el.append(proxyPanel());
       if (section.id === 'storage') el.append(storagePanel());
+      if (section.id === 'replace') el.append(replacePanel());
     },
   });
 }
@@ -4802,6 +4804,84 @@ function storagePanel() {
       clear(panel, rows);
     })
     .catch((e) => clear(panel, h('p', { text: e.message })));
+  return panel;
+}
+
+const REPLACE_TARGETS = [
+  ['request_line', 'Request line'],
+  ['request_header', 'Request headers'],
+  ['request_body', 'Request body'],
+  ['response_header', 'Response headers'],
+  ['response_body', 'Response body'],
+];
+
+/** Match-and-replace rules: list, switch on or off, remove, add. */
+function replacePanel() {
+  const panel = h('div', { class: 'spanel replace' }, h('h4', { text: 'Rules' }), h('p', { text: 'Loading…' }));
+  const label = (t) => (REPLACE_TARGETS.find(([k]) => k === t) || [t, t])[1];
+  const call = async (path, opts) => {
+    try {
+      await api(path, opts);
+      load();
+      return true;
+    } catch (e) {
+      toast(e.message, 'err');
+      return false;
+    }
+  };
+  const row = (r) =>
+    h(
+      'div',
+      { class: 'rrule' + (r.enabled ? '' : ' off') },
+      h('input', { type: 'checkbox', checked: r.enabled, title: r.enabled ? 'On: switch off' : 'Off: switch on', onchange: (e) => call('/api/replace/' + r.id, { method: 'PATCH', body: { enabled: e.target.checked } }) }),
+      h('span', { class: 'rtarget', text: label(r.target) }),
+      h('span', { class: 'mono rpat', text: r.pattern, title: r.regex ? 'Regular expression' : 'Literal text' }),
+      h('span', { class: 'muted', text: '→' }),
+      h('span', { class: 'mono rpat', text: r.replace === '' ? '(removed)' : r.replace }),
+      r.regex ? h('span', { class: 'tag', text: 'regex' }) : null,
+      r.in_scope_only ? h('span', { class: 'tag', text: 'in scope only' }) : null,
+      r.note ? h('span', { class: 'muted', text: r.note }) : null,
+      h('button', { class: 'iconbtn', text: '✕', title: 'Remove this rule', onclick: () => call('/api/replace/' + r.id, { method: 'DELETE' }) }),
+    );
+  const form = () => {
+    const target = h('select', null, REPLACE_TARGETS.map(([k, l]) => h('option', { value: k, text: l })));
+    const pattern = h('input', { type: 'text', placeholder: 'Match, e.g. (?i)^user-agent: .*$', spellcheck: false });
+    const replace = h('input', { type: 'text', placeholder: 'Replace with (empty removes the match)', spellcheck: false });
+    const regex = h('input', { type: 'checkbox' });
+    const scoped = h('input', { type: 'checkbox' });
+    const note = h('input', { type: 'text', placeholder: 'Note (optional)' });
+    const add = async () => {
+      if (!pattern.value) return pattern.focus();
+      // In a text field, \n stands for a line break, so header rules can add a header.
+      const body = { target: target.value, match: pattern.value, replace: replace.value.replace(/\\n/g, '\n'), regex: regex.checked, in_scope_only: scoped.checked, note: note.value };
+      if (await call('/api/replace', { method: 'POST', body })) toast('Rule added. It applies to traffic from now on.', 'ok');
+    };
+    return h(
+      'div',
+      { class: 'rform' },
+      h('div', { class: 'row' }, target, pattern, replace),
+      h(
+        'div',
+        { class: 'row' },
+        h('label', null, regex, ' Regular expression ($1 inserts a capture)'),
+        h('label', null, scoped, ' In-scope hosts only'),
+        note,
+        h('button', { class: 'btn primary', text: 'Add Rule', onclick: add }),
+      ),
+      h('p', { class: 'muted', text: 'Header rules see one "Name: value" line per header: replace a whole line with nothing to remove a header, or use \\n in the replacement to add one.' }),
+    );
+  };
+  const load = () =>
+    api('/api/replace')
+      .then((v) => {
+        const rows = [h('h4', { text: 'Rules, in the order they apply' })];
+        if (!v.enabled) rows.push(h('p', { class: 'muted', text: 'Match and replace is switched off above; these rules change nothing until it is on.' }));
+        if (!v.rules.length) rows.push(h('p', { class: 'muted', text: 'No rules yet.' }));
+        rows.push(v.rules.map(row), form());
+        clear(panel, rows);
+      })
+      .catch((e) => clear(panel, h('p', { text: e.message })));
+  load();
   return panel;
 }
 

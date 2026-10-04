@@ -263,7 +263,7 @@ async fn proxy_settings_apply_to_the_running_session() {
     // Global sections are listed too, and saved for all projects.
     let all = api(&s, "GET", "/api/settings", None).unwrap();
     let ids: Vec<&str> = all["sections"].as_array().unwrap().iter().map(|s| s["id"].as_str().unwrap()).collect();
-    assert!(ids.starts_with(&["proxy", "intercept", "storage", "interface"]), "{ids:?}");
+    assert!(ids.starts_with(&["proxy", "intercept", "replace", "storage", "interface"]), "{ids:?}");
     api(&s, "PUT", "/api/settings/interface", Some(json!({ "values": { "open_projects_in": "browser" } }))).unwrap();
     assert!(settings::InterfaceSettings::load(&home).open_in_browser);
     blocking(move || s.close().unwrap()).await;

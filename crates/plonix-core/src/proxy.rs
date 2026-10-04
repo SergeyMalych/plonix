@@ -35,6 +35,7 @@ use crate::ca::LeafResolver;
 use crate::codec;
 use crate::engine::Engine;
 use crate::intercept::{self, Edit, HeldItem, HeldKind, Verdict};
+use crate::replace::Target;
 use crate::model::{Exchange, Headers, Source, now_ms};
 use crate::upstream::{BoxError, HOP_BY_HOP, OutboundRequest, StreamBody, Upgrade, full_body};
 
@@ -175,6 +176,8 @@ async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<ProxyResponse, Infal
         _ => Some(Tee::new(req.into_body(), req_cap, None).boxed()),
     };
 
+    replace_request(&ctx.engine, &mut outbound, &mut pending, stream.is_none(), limit);
+
     if ctx.engine.intercept.is_on() && !hold_request(&ctx.engine, &mut outbound, &mut pending, stream.is_none(), limit).await {
         return Ok(error_page(StatusCode::BAD_GATEWAY, "Plonix: this request was dropped in Intercept and was not sent."));
     }
@@ -196,6 +199,42 @@ fn size(n: usize) -> String {
         n if n >= 1024 => format!("{:.1} KB", n as f64 / 1024.0),
         n => format!("{n} bytes"),
     }
+}
+
+/// Applies the match-and-replace rules to a request on its way out. The
+/// body is only changed when it was read in full (`buffered`).
+fn replace_request(engine: &Arc<Engine>, outbound: &mut OutboundRequest, pending: &mut Pending, buffered: bool, limit: usize) {
+    let rules = engine.replace_rules();
+    if rules.is_empty() {
+        return;
+    }
+    let in_scope = engine.rules().in_scope(&pending.ex.host);
+    let mut applied = rules.request_line(in_scope, &mut outbound.method, &mut outbound.target);
+    if !applied.is_empty() {
+        pending.ex.method = outbound.method.clone();
+        (pending.ex.path, pending.ex.query) = match outbound.target.split_once('?') {
+            Some((p, q)) => (p.to_string(), q.to_string()),
+            None => (outbound.target.clone(), String::new()),
+        };
+    }
+    let changed = rules.headers(Target::RequestHeader, in_scope, &mut outbound.headers);
+    if !changed.is_empty() {
+        pending.ex.req_headers = outbound.headers.clone();
+        applied.extend(changed);
+    }
+    if buffered && rules.has(Target::RequestBody, in_scope) {
+        let mut body = outbound.body.to_vec();
+        let changed = rules.body(Target::RequestBody, in_scope, &mut body);
+        if !changed.is_empty() {
+            let mut cap = pending.req.lock().unwrap();
+            *cap = Captured::new(limit);
+            cap.add(&body);
+            cap.done = true;
+            outbound.body = Bytes::from(body);
+            applied.extend(changed);
+        }
+    }
+    pending.ex.replaced.extend(applied);
 }
 
 /// Holds a request in Intercept if the user wants it held, and applies
@@ -263,7 +302,15 @@ async fn hold_request(engine: &Arc<Engine>, outbound: &mut OutboundRequest, pend
 
 /// Answers the client with the server's response: streaming it, or holding
 /// it in Intercept first when the user holds responses.
-async fn respond(engine: &Arc<Engine>, status: u16, headers: Headers, body: Incoming, pending: Pending) -> ProxyResponse {
+async fn respond(engine: &Arc<Engine>, status: u16, headers: Headers, body: Incoming, mut pending: Pending) -> ProxyResponse {
+    let (headers, body) = match replace_response(engine, headers, body, &mut pending).await {
+        Ok(r) => r,
+        Err(e) => {
+            pending.ex.status = Some(status);
+            pending.ex.error = Some(format!("the response stopped early: {e}"));
+            return error_page(StatusCode::BAD_GATEWAY, &format!("Plonix: the response from {} stopped early: {e}", pending.ex.host));
+        }
+    };
     if engine.intercept.is_on() {
         let in_scope = engine.rules().in_scope(&pending.ex.host);
         let probe = Exchange { status: Some(status), resp_headers: headers.clone(), ..pending.ex.clone() };
@@ -271,7 +318,44 @@ async fn respond(engine: &Arc<Engine>, status: u16, headers: Headers, body: Inco
             return hold_response(engine, status, headers, body, pending, in_scope).await;
         }
     }
-    deliver(status, headers, RespBody::Stream(body), pending)
+    deliver(status, headers, body, pending)
+}
+
+fn is_event_stream(headers: &Headers) -> bool {
+    crate::model::header(headers, "content-type").is_some_and(|c| c.to_ascii_lowercase().contains("event-stream"))
+}
+
+/// Applies the match-and-replace rules to a response before the client (or
+/// Intercept) sees it. Body rules read the body first; one that is longer
+/// than the body limit, slow to arrive or an event stream passes unchanged.
+/// A compressed body is matched decoded, and sent uncompressed when changed.
+async fn replace_response(engine: &Arc<Engine>, mut headers: Headers, body: Incoming, pending: &mut Pending) -> Result<(Headers, RespBody), hyper::Error> {
+    let rules = engine.replace_rules();
+    if rules.is_empty() {
+        return Ok((headers, RespBody::Stream(body)));
+    }
+    let in_scope = engine.rules().in_scope(&pending.ex.host);
+    let mut applied = rules.headers(Target::ResponseHeader, in_scope, &mut headers);
+    let mut body = RespBody::Stream(body);
+    if rules.has(Target::ResponseBody, in_scope) && !is_event_stream(&headers) {
+        let RespBody::Stream(b) = body else { unreachable!() };
+        body = read_body(b, engine.body_limit()).await?;
+        if let RespBody::Whole(b) = &body {
+            let encoded = crate::model::header(&headers, "content-encoding").is_some();
+            let decoded = if encoded { codec::decode_whole(&headers, b, engine.body_limit()) } else { Some(b.to_vec()) };
+            if let Some(mut text) = decoded {
+                let changed = rules.body(Target::ResponseBody, in_scope, &mut text);
+                if !changed.is_empty() {
+                    headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-encoding"));
+                    set_length(&mut headers, text.len());
+                    body = RespBody::Whole(text.into());
+                    applied.extend(changed);
+                }
+            }
+        }
+    }
+    pending.ex.replaced.extend(applied);
+    Ok((headers, body))
 }
 
 /// How long a held response's body may take to arrive in full before only
@@ -325,10 +409,12 @@ async fn read_body(mut body: Incoming, limit: usize) -> Result<RespBody, hyper::
 
 /// Holds a response in Intercept and answers the client with it, edited or
 /// as it was, or with an error page when the user drops it.
-async fn hold_response(engine: &Arc<Engine>, status: u16, headers: Headers, body: Incoming, mut pending: Pending, in_scope: bool) -> ProxyResponse {
+async fn hold_response(engine: &Arc<Engine>, status: u16, headers: Headers, body: RespBody, mut pending: Pending, in_scope: bool) -> ProxyResponse {
     let limit = engine.body_limit();
-    let event_stream = crate::model::header(&headers, "content-type").is_some_and(|c| c.to_ascii_lowercase().contains("event-stream"));
-    let body = if event_stream { Ok(RespBody::Stream(body)) } else { read_body(body, limit).await };
+    let body = match body {
+        RespBody::Stream(b) if !is_event_stream(&headers) => read_body(b, limit).await,
+        other => Ok(other),
+    };
     let body = match body {
         Ok(b) => b,
         Err(e) => {

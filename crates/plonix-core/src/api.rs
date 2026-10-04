@@ -29,6 +29,7 @@ use crate::browser;
 use crate::codec;
 use crate::engine::{Engine, ReplayRequest, SendError, SendRequest};
 use crate::intercept;
+use crate::replace;
 use crate::model::{Exchange, FindingEdit, NewFinding, check_severity};
 use crate::report;
 use crate::paths::Home;
@@ -121,6 +122,8 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/intercept/forward-all", post(intercept_forward_all))
         .route("/api/intercept/{id}/forward", post(intercept_forward))
         .route("/api/intercept/{id}/drop", post(intercept_drop))
+        .route("/api/replace", get(replace_rules).post(add_replace_rule))
+        .route("/api/replace/{id}", axum::routing::patch(edit_replace_rule).delete(delete_replace_rule))
         .route("/api/send", post(send))
         .route("/api/replay", post(replay))
         .route("/api/run", post(run))
@@ -439,6 +442,79 @@ async fn intercept_forward_all(State(s): State<AppState>, caller: MaybeCaller) -
         return r;
     }
     Json(json!({ "forwarded": s.engine.intercept.forward_all() })).into_response()
+}
+
+// ---- match and replace -----------------------------------------------------
+
+/// Whether rules apply, and every rule in the order they apply. Rules change
+/// live traffic, so they are the user's alone, like Intercept.
+async fn replace_rules(State(s): State<AppState>, caller: MaybeCaller) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    let enabled = this_project(&s).and_then(|p| p.settings(replace::SETTINGS_SECTION).get("enabled").and_then(Value::as_bool)).unwrap_or(true);
+    match s.engine.store.replace_rules() {
+        Ok(rules) => Json(json!({ "enabled": enabled, "rules": rules })).into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+fn bad_rule(msg: &str) -> Response {
+    err(StatusCode::BAD_REQUEST, "bad_rule", msg)
+}
+
+/// The rules changed: apply them to the proxy at once.
+fn rules_changed(s: &AppState, rule: Value) -> Response {
+    match s.engine.reload_replace_rules() {
+        Ok(()) => Json(rule).into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+/// Adds a rule: `{"target": "request_header", "match": "...", "replace": "...", "regex": false, "in_scope_only": false, "note": ""}`.
+async fn add_replace_rule(State(s): State<AppState>, caller: MaybeCaller, Json(b): Json<replace::RuleInput>) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    let rule = match b.new_rule() {
+        Ok(r) => r,
+        Err(e) => return bad_rule(&e),
+    };
+    match s.engine.store.add_replace_rule(&rule) {
+        Ok(rule) => rules_changed(&s, json!(rule)),
+        Err(e) => internal(e),
+    }
+}
+
+/// Changes some fields of a rule, or switches it on or off (`{"enabled": false}`).
+async fn edit_replace_rule(State(s): State<AppState>, caller: MaybeCaller, Path(id): Path<i64>, Json(b): Json<replace::RuleInput>) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    let rule = match s.engine.store.replace_rule(id) {
+        Ok(Some(r)) => r,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "not_found", &format!("no match-and-replace rule {id}")),
+        Err(e) => return internal(e),
+    };
+    let rule = match b.apply_to(rule) {
+        Ok(r) => r,
+        Err(e) => return bad_rule(&e),
+    };
+    match s.engine.store.update_replace_rule(&rule) {
+        Ok(_) => rules_changed(&s, json!(rule)),
+        Err(e) => internal(e),
+    }
+}
+
+async fn delete_replace_rule(State(s): State<AppState>, caller: MaybeCaller, Path(id): Path<i64>) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    match s.engine.store.delete_replace_rule(id) {
+        Ok(true) => rules_changed(&s, json!({ "deleted": id })),
+        Ok(false) => err(StatusCode::NOT_FOUND, "not_found", &format!("no match-and-replace rule {id}")),
+        Err(e) => internal(e),
+    }
 }
 
 #[derive(Deserialize)]
@@ -1443,6 +1519,11 @@ async fn put_settings(State(s): State<AppState>, Path(id): Path<String>, Json(b)
                 .into_response();
         }
         crate::session::refresh(&s.home, &s.engine, s.api_addr);
+    }
+    if id == replace::SETTINGS_SECTION
+        && let Err(e) = s.engine.set_replace_on(values.get("enabled").and_then(Value::as_bool).unwrap_or(true))
+    {
+        return internal(e);
     }
     if id == intercept::SETTINGS_SECTION
         && let Err(e) = s.engine.set_intercept_options(intercept::InterceptOptions::from_values(&values))

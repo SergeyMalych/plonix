@@ -497,6 +497,10 @@ mod tests {
             ("POST", "/api/intercept/1/forward"),
             ("POST", "/api/intercept/1/drop"),
             ("POST", "/api/intercept/forward-all"),
+            ("GET", "/api/replace"),
+            ("POST", "/api/replace"),
+            ("PATCH", "/api/replace/1"),
+            ("DELETE", "/api/replace/1"),
         ] {
             assert!(!allowed(m, method, path), "{method} {path} should be refused");
         }

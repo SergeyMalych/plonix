@@ -44,6 +44,15 @@ async fn upstream_handler(req: Request<Incoming>) -> Result<Response<Full<Bytes>
             text.push_str(&String::from_utf8_lossy(&body));
             Response::builder().header("content-type", "text/plain").body(Full::new(Bytes::from(text)))
         }
+        "/gz" => {
+            use std::io::Write;
+            let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            gz.write_all(b"compressed hello").unwrap();
+            Response::builder()
+                .header("content-type", "text/plain")
+                .header("content-encoding", "gzip")
+                .body(Full::new(Bytes::from(gz.finish().unwrap())))
+        }
         "/site" => Response::builder().header("content-type", "text/html").body(Full::new(Bytes::from(
             "<a href=\"/site/a\">a</a> <a href='/site/b?id=1'>b</a> <a href=\"https://evil.test/x\">off</a><form method=\"post\" action=\"/login\"><input name=\"user\"></form>",
         ))),
@@ -1601,4 +1610,86 @@ async fn agents_have_no_access_to_intercept() {
     let (code, st) = call_api(&r, &agent, "GET", "/api/status", serde_json::json!(null)).await;
     assert_eq!(code, 200);
     assert!(st.get("intercept").is_none(), "agents learn nothing about the queue: {st}");
+}
+
+// ---- match and replace -------------------------------------------------------
+
+#[tokio::test]
+async fn match_and_replace_rules_change_traffic_in_flight() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let up = serve_http().await;
+    let r = start(&home, None).await;
+    r.engine.decide("localhost", Decision::Accepted, false, "").unwrap();
+
+    let add = |rule: serde_json::Value| call_api(&r, &r.token, "POST", "/api/replace", rule);
+    let (code, v) = add(serde_json::json!({ "target": "request_body", "match": "(", "regex": true })).await;
+    assert_eq!((code, v["code"].as_str()), (400, Some("bad_rule")), "{v}");
+    let (code, v) = add(serde_json::json!({ "target": "nowhere", "match": "x" })).await;
+    assert!(code == 400 || code == 422, "{code} {v}");
+    let (code, line) = add(serde_json::json!({ "target": "request_line", "match": r"^POST /echo\?v=1", "replace": "POST /echo?v=2", "regex": true })).await;
+    assert_eq!(code, 200, "{line}");
+    add(serde_json::json!({ "target": "request_header", "match": r"(?i)^content-type: (.*)$", "replace": "Content-Type: $1+replaced\nX-Added: yes", "regex": true })).await;
+    add(serde_json::json!({ "target": "request_body", "match": "secret", "replace": "public" })).await;
+    let (_, home_rule) = add(serde_json::json!({ "target": "response_body", "match": "welcome home", "replace": "rewritten", "in_scope_only": true, "note": "home page" })).await;
+    add(serde_json::json!({ "target": "response_body", "match": "compressed", "replace": "decoded" })).await;
+    add(serde_json::json!({ "target": "response_header", "match": "^set-cookie: .*$", "replace": "", "regex": true })).await;
+    let (_, list) = call_api(&r, &r.token, "GET", "/api/replace", serde_json::json!(null)).await;
+    assert_eq!((list["enabled"].as_bool(), list["rules"].as_array().unwrap().len()), (Some(true), 6), "{list}");
+
+    // The request line, a header and the body change on the way out.
+    let (status, body) = send_via_proxy(r.proxy_addr, "POST", &format!("http://localhost:{}/echo?v=1", up.port()), "my secret").await;
+    assert_eq!(status, 200);
+    assert!(body.starts_with("POST /echo?v=2\n") && body.contains("content-type: text/plain+replaced\n") && body.contains("x-added: yes"), "{body}");
+    assert!(body.ends_with("\n\nmy public"), "{body}");
+    wait_for_count(&r.engine, 1).await;
+    let ex = r.engine.store.get_exchange(1).unwrap().unwrap();
+    assert_eq!((ex.query.as_str(), ex.req_body.as_slice(), ex.replaced.len()), ("v=2", &b"my public"[..], 3), "{:?}", ex.replaced);
+    assert!(!ex.edited, "rules are not hand edits");
+
+    // Response rules: a body (in scope only), a removed header, a compressed body.
+    let (status, body) = send_via_proxy(r.proxy_addr, "GET", &format!("http://localhost:{}/", up.port()), "").await;
+    assert_eq!(status, 200);
+    assert!(body.contains("<h1>rewritten</h1>"), "{body}");
+    wait_for_count(&r.engine, 2).await;
+    let ex = r.engine.store.get_exchange(2).unwrap().unwrap();
+    assert!(ex.resp_headers.iter().all(|(k, _)| !k.eq_ignore_ascii_case("set-cookie")), "{:?}", ex.resp_headers);
+    assert!(ex.replaced.iter().any(|l| l == &format!("#{} home page", home_rule["id"])), "{:?}", ex.replaced);
+    let (_, body) = send_via_proxy(r.proxy_addr, "GET", &format!("http://127.0.0.1:{}/", up.port()), "").await;
+    assert!(body.contains("welcome home"), "out of scope: {body}");
+    let (status, body) = send_via_proxy(r.proxy_addr, "GET", &format!("http://localhost:{}/gz", up.port()), "").await;
+    assert_eq!((status, body.as_str()), (200, "decoded hello"));
+
+    // Intercept sees the request after the rules.
+    call_api(&r, &r.token, "PUT", "/api/intercept", serde_json::json!({ "on": true })).await;
+    let client = tokio::spawn(send_via_proxy(r.proxy_addr, "POST", &format!("http://localhost:{}/echo?v=1", up.port()), "secret"));
+    let item = wait_held(&r.engine, 1).await.remove(0);
+    assert!(item.raw.starts_with("POST /echo?v=2 ") && item.raw.ends_with("\n\npublic"), "{}", item.raw);
+    call_api(&r, &r.token, "POST", "/api/intercept/forward-all", serde_json::json!({})).await;
+    assert_eq!(client.await.unwrap().0, 200);
+    call_api(&r, &r.token, "PUT", "/api/intercept", serde_json::json!({ "on": false })).await;
+
+    // A rule switched off, a rule deleted, and all rules off.
+    let (code, v) = call_api(&r, &r.token, "PATCH", &format!("/api/replace/{}", line["id"]), serde_json::json!({ "enabled": false })).await;
+    assert_eq!((code, v["enabled"].as_bool()), (200, Some(false)), "{v}");
+    let (code, _) = call_api(&r, &r.token, "PATCH", &format!("/api/replace/{}", line["id"]), serde_json::json!({ "match": "(", "regex": true })).await;
+    assert_eq!(code, 400, "an edit that does not compile is refused");
+    let (_, body) = send_via_proxy(r.proxy_addr, "POST", &format!("http://localhost:{}/echo?v=1", up.port()), "secret").await;
+    assert!(body.starts_with("POST /echo?v=1\n") && body.ends_with("public"), "{body}");
+    let (code, _) = call_api(&r, &r.token, "DELETE", &format!("/api/replace/{}", home_rule["id"]), serde_json::json!({})).await;
+    assert_eq!(code, 200);
+    let (code, _) = call_api(&r, &r.token, "DELETE", &format!("/api/replace/{}", home_rule["id"]), serde_json::json!({})).await;
+    assert_eq!(code, 404);
+    let (_, body) = send_via_proxy(r.proxy_addr, "GET", &format!("http://localhost:{}/", up.port()), "").await;
+    assert!(body.contains("welcome home"), "{body}");
+    r.engine.set_replace_on(false).unwrap();
+    let (_, body) = send_via_proxy(r.proxy_addr, "POST", &format!("http://localhost:{}/echo", up.port()), "secret").await;
+    assert!(body.ends_with("\n\nsecret") && !body.contains("x-added"), "{body}");
+
+    // Agents can neither read nor change rules.
+    for (method, path) in [("GET", "/api/replace"), ("POST", "/api/replace"), ("PATCH", "/api/replace/1"), ("DELETE", "/api/replace/1")] {
+        let (code, v) = call_api(&r, &r.agent_token, method, path, serde_json::json!({ "target": "request_body", "match": "x" })).await;
+        assert_eq!((code, v["code"].as_str()), (403, Some("agent_not_allowed")), "{method} {path}");
+    }
+    assert_eq!(r.engine.store.replace_rules().unwrap().len(), 5);
 }

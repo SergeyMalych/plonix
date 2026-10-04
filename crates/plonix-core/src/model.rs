@@ -96,6 +96,10 @@ pub struct Exchange {
     /// The response as the server sent it, when it was edited.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original_response: Option<String>,
+    /// Match-and-replace rules that changed this exchange in the proxy
+    /// (`#3 request header: ...`); the fields above are what was sent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replaced: Vec<String>,
 }
 
 impl Exchange {

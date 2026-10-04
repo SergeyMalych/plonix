@@ -13,6 +13,7 @@ mod intercept;
 mod market;
 mod mcp;
 mod open;
+mod replace;
 mod render;
 mod bench;
 mod scan;
@@ -44,6 +45,7 @@ Get started:
   plonix scope                     review domains Plonix thinks belong in scope
   plonix replay 42 -H 'X-Debug: 1'
   plonix intercept on              hold requests to in-scope hosts; `plonix intercept list` to see them
+  plonix replace                   rules that change traffic as it passes through the proxy
   plonix tech                      technologies detected on each host
   plonix findings                  what you found; `plonix findings export -o report.html` for a report
   plonix store                     community detection rule packs
@@ -133,6 +135,11 @@ enum Cmd {
     Intercept {
         #[command(subcommand)]
         cmd: Option<intercept::InterceptCmd>,
+    },
+    /// Rules that change requests and responses as they pass through the proxy
+    Replace {
+        #[command(subcommand)]
+        cmd: Option<replace::ReplaceCmd>,
     },
     /// Review and change scope
     Scope {
@@ -457,6 +464,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Cmd::Findings { cmd } => findings::findings_cmd(&ctx, cmd.unwrap_or(findings::FindingsCmd::List { status: None }))?,
         Cmd::Bench { cmd } => bench::bench_cmd(&ctx, cmd)?,
         Cmd::Intercept { cmd } => intercept::intercept_cmd(&ctx, cmd.unwrap_or(intercept::InterceptCmd::Status))?,
+        Cmd::Replace { cmd } => replace::replace_cmd(&ctx, cmd.unwrap_or(replace::ReplaceCmd::List))?,
         Cmd::Rules { cmd } => community::rules_cmd(&ctx, cmd.unwrap_or(community::RulesCmd::List))?,
         Cmd::Filters { cmd } => community::filters_cmd(&ctx, cmd.unwrap_or(community::FiltersCmd::List))?,
         Cmd::Market(a) => market::market_cmd(&ctx, a)?,
