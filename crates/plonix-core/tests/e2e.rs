@@ -44,6 +44,12 @@ async fn upstream_handler(req: Request<Incoming>) -> Result<Response<Full<Bytes>
             text.push_str(&String::from_utf8_lossy(&body));
             Response::builder().header("content-type", "text/plain").body(Full::new(Bytes::from(text)))
         }
+        "/site" => Response::builder().header("content-type", "text/html").body(Full::new(Bytes::from(
+            "<a href=\"/site/a\">a</a> <a href='/site/b?id=1'>b</a> <a href=\"https://evil.test/x\">off</a><form method=\"post\" action=\"/login\"><input name=\"user\"></form>",
+        ))),
+        "/site/a" => Response::builder().header("content-type", "text/html").body(Full::new(Bytes::from("<a href=\"/site/c\">c</a>"))),
+        "/site/b" => Response::builder().header("content-type", "text/html").body(Full::new(Bytes::from("<p>b</p>"))),
+        "/site/c" => Response::builder().header("content-type", "text/html").body(Full::new(Bytes::from("<p>c</p>"))),
         "/.git/config" => Response::builder()
             .header("content-type", "text/plain")
             .body(Full::new(Bytes::from_static(b"[core]\n\trepositoryformatversion = 0\n"))),
@@ -105,6 +111,7 @@ impl rustls::server::ResolvesServerCert for Fixed {
 async fn start(home: &Home, extra_root: Option<CertificateDer<'static>>) -> Running {
     home.ensure().unwrap();
     let ca = Arc::new(CertAuthority::load_or_create(home).unwrap());
+    std::fs::create_dir_all(home.root.join("projects")).unwrap();
     let store = Store::open(&home.project_db("test")).unwrap();
     let upstream = Upstream::new(false, extra_root.into_iter().collect()).unwrap();
     let engine = Engine::new("test", store, ca, upstream).unwrap();
@@ -253,6 +260,41 @@ async fn adaptive_scope_suggests_with_evidence() {
     assert!(!r.engine.store.suggestions(&r.engine.rules()).unwrap().iter().any(|s| s.domain == "127.0.0.1"));
     r.engine.remove_rule("127.0.0.1").unwrap();
     assert!(r.engine.store.suggestions(&r.engine.rules()).unwrap().iter().any(|s| s.domain == "127.0.0.1"));
+}
+
+#[tokio::test]
+async fn crawl_discovers_linked_pages_and_stays_in_scope() {
+    use plonix_core::crawl::CrawlRequest;
+
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let up = serve_http().await;
+    let r = start(&home, None).await;
+
+    // One captured request so the engine knows the host's scheme and port.
+    via_proxy(r.proxy_addr, &format!("http://localhost:{}/site", up.port()), &[]).await;
+    wait_for_count(&r.engine, 1).await;
+
+    // Refused until the host is accepted.
+    let refused = r.engine.crawl(CrawlRequest { host: "localhost".into(), ..Default::default() }, "crawl").await;
+    assert!(matches!(refused, Err(SendError::OutOfScope { .. })));
+
+    r.engine.decide("localhost", Decision::Accepted, false, "").unwrap();
+    let report = r
+        .engine
+        .crawl(CrawlRequest { host: "localhost".into(), start: Some("/site".into()), ..Default::default() }, "crawl")
+        .await
+        .unwrap();
+
+    assert!(report.pages_fetched >= 4, "should have followed links to /site/a,b,c: {report:?}");
+    // The off-host link was not followed.
+    let endpoints = r.engine.store.endpoints("localhost").unwrap();
+    let paths: Vec<&str> = endpoints.iter().map(|e| e.path.as_str()).collect();
+    assert!(paths.contains(&"/site/a") && paths.contains(&"/site/c"), "crawl should reach linked pages: {paths:?}");
+    assert!(report.forms.iter().any(|f| f.action.ends_with("/login") && f.fields.contains(&"user".to_string())));
+    assert!(!r.engine.store.count().is_err());
+    // evil.test was never requested.
+    assert!(r.engine.rules().decide("evil.test") != Decision::Accepted);
 }
 
 #[tokio::test]

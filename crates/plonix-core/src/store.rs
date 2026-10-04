@@ -406,6 +406,65 @@ impl Store {
         Ok(())
     }
 
+    /// Drops evidence for any domain the current rules now decide, so the
+    /// wait list only ever holds domains still waiting on a decision. Called
+    /// whenever a rule is added: a new rule can cover domains that were
+    /// pending before it existed. Returns how many were pruned.
+    pub fn prune_decided(&self, rules: &ScopeRules) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        let domains: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT DISTINCT domain FROM evidence")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            rows.filter_map(Result::ok).filter(|d| rules.decide_domain(d) != Decision::Unknown).collect()
+        };
+        let mut pruned = 0;
+        for d in &domains {
+            pruned += conn.execute("DELETE FROM evidence WHERE domain = ?1", [d])?;
+        }
+        Ok(pruned)
+    }
+
+    /// Exchanges to these hosts, not counting the `keep` ids.
+    pub fn count_for_hosts(&self, hosts: &[String], keep: &BTreeSet<i64>) -> Result<i64> {
+        let conn = self.conn.lock().unwrap();
+        let mut n = 0;
+        for h in hosts {
+            n += conn.query_row("SELECT count(*) FROM exchanges WHERE host = ?1", [h], |r| r.get::<_, i64>(0))?;
+            for id in keep {
+                n -= conn.query_row("SELECT count(*) FROM exchanges WHERE host = ?1 AND id = ?2", params![h, id], |r| r.get::<_, i64>(0))?;
+            }
+        }
+        Ok(n)
+    }
+
+    /// Deletes exchanges to these hosts (and their search index and scope
+    /// evidence), except the `keep` ids. Returns how many were deleted.
+    pub fn delete_for_hosts(&self, hosts: &[String], keep: &BTreeSet<i64>) -> Result<i64> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute_batch("CREATE TEMP TABLE IF NOT EXISTS doomed (id INTEGER PRIMARY KEY); DELETE FROM doomed;")?;
+        for h in hosts {
+            tx.execute("INSERT OR IGNORE INTO doomed SELECT id FROM exchanges WHERE host = ?1", [h])?;
+        }
+        for id in keep {
+            tx.execute("DELETE FROM doomed WHERE id = ?1", [id])?;
+        }
+        let n = tx.execute("DELETE FROM exchanges WHERE id IN (SELECT id FROM doomed)", [])?;
+        tx.execute("DELETE FROM exchanges_fts WHERE rowid IN (SELECT id FROM doomed)", [])?;
+        tx.execute("DELETE FROM evidence WHERE exchange_id IN (SELECT id FROM doomed)", [])?;
+        tx.execute("DELETE FROM doomed", [])?;
+        tx.commit()?;
+        Ok(n as i64)
+    }
+
+    /// Rewrites the database without free space, so deleted traffic is
+    /// gone from the file (and from the search index and write-ahead log).
+    pub fn compact(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch("INSERT INTO exchanges_fts(exchanges_fts) VALUES('optimize'); VACUUM; PRAGMA wal_checkpoint(TRUNCATE);")?;
+        Ok(())
+    }
+
     /// Forgets derived scope state so it can be rebuilt by a rescan.
     pub fn clear_analysis(&self) -> Result<()> {
         self.conn.lock().unwrap().execute_batch("DELETE FROM evidence; DELETE FROM session_tokens;")?;
@@ -780,6 +839,33 @@ mod tests {
             .unwrap();
         let sug = s.suggestions(&s.rules().unwrap()).unwrap();
         assert_eq!(sug.len(), 1);
+    }
+
+    #[test]
+    fn adding_a_covering_rule_clears_matching_pending_items() {
+        let s = Store::open_in_memory().unwrap();
+        let ev = |d: &str, k: EvidenceKind, via: &str| NewEvidence { domain: d.into(), kind: k, via: via.into(), detail: "x".into() };
+        // Three domains wait on a decision: a subdomain, a wildcard under the
+        // same base, and an unrelated sibling.
+        s.add_evidence(&ev("api.shop.test", EvidenceKind::RequestedFrom, "shop.test"), 1, 10).unwrap();
+        s.add_evidence(&ev("*.cdn.shop.test", EvidenceKind::LinkedFrom, "shop.test"), 2, 20).unwrap();
+        s.add_evidence(&ev("auth.other.test", EvidenceKind::SharesSession, "shop.test"), 3, 30).unwrap();
+        assert_eq!(s.suggestions(&ScopeRules::default()).unwrap().len(), 3);
+
+        // Accepting shop.test with its subdomains covers the first two. Pruning
+        // against the new rule set drops exactly those from the wait list.
+        s.put_rule(&Rule { pattern: "shop.test".into(), include_subdomains: true, decision: Decision::Accepted, created_at: 1, note: String::new() }).unwrap();
+        let pruned = s.prune_decided(&s.rules().unwrap()).unwrap();
+        assert_eq!(pruned, 2);
+        let left: Vec<_> = s.suggestions(&s.rules().unwrap()).unwrap().into_iter().map(|x| x.domain).collect();
+        assert_eq!(left, vec!["auth.other.test"]);
+
+        // A later rejection of the sibling clears the wait list entirely, and
+        // pruning is idempotent once nothing matches.
+        s.put_rule(&Rule { pattern: "auth.other.test".into(), include_subdomains: false, decision: Decision::Rejected, created_at: 2, note: String::new() }).unwrap();
+        assert_eq!(s.prune_decided(&s.rules().unwrap()).unwrap(), 1);
+        assert_eq!(s.prune_decided(&s.rules().unwrap()).unwrap(), 0);
+        assert!(s.suggestions(&s.rules().unwrap()).unwrap().is_empty());
     }
 
     #[test]

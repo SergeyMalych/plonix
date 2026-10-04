@@ -1,7 +1,9 @@
 //! The engine ties the proxy, store, scope and upstream client together.
 
+use std::collections::BTreeSet;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
@@ -10,32 +12,46 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tokio::sync::{Notify, mpsc};
+use tokio::task::JoinHandle;
 
 use crate::ca::CertAuthority;
 use crate::detect::{self, Detection, Detector, HostTech};
 use crate::model::{Exchange, Headers, Source, now_ms};
 use crate::paths::{EngineInfo, Home};
 use crate::filterpack::{FilterLibrary, FilterSet};
+use crate::project::PruneReport;
 use crate::rulepack::{Library, PackInfo};
+use crate::crawl;
 use crate::scan;
 use crate::scope::{self, Decision, Rule, ScopeRules};
+use crate::settings::ProxySettings;
 use crate::store::Store;
-use crate::upstream::{OutboundRequest, Upstream};
+use crate::upstream::{OutboundRequest, Upstream, UpstreamOptions, host_matches};
 
 pub struct Engine {
     pub project: String,
     pub store: Store,
     pub ca: Arc<CertAuthority>,
-    pub upstream: Upstream,
+    upstream: RwLock<Arc<Upstream>>,
     rules: RwLock<ScopeRules>,
     pub started_at: i64,
+    /// Wakes everything waiting for the engine to stop. Use
+    /// [`Engine::request_shutdown`] and [`Engine::stopped`].
     pub shutdown: Notify,
+    stopping: AtomicBool,
+    proxy: Mutex<ProxyListener>,
+    interception: RwLock<Interception>,
+    /// The project folder this engine records into, when it has one.
+    pub project_ref: OnceLock<ProjectRef>,
     /// Captured exchanges are recorded in arrival order by one worker, so a
     /// response is always analyzed before requests that follow it.
     recorder: mpsc::UnboundedSender<Exchange>,
     recorder_rx: Mutex<Option<mpsc::UnboundedReceiver<Exchange>>>,
     detection: Mutex<DetectionState>,
     filters: Mutex<FilterState>,
+    /// The listen address last asked for in the settings.
+    applied_listen: Mutex<Option<SocketAddr>>,
+    overrides: Mutex<UpstreamOptions>,
 }
 
 /// Named Traffic filters in effect, reloaded when filter packs change.
@@ -44,6 +60,33 @@ struct FilterState {
     library: Option<FilterLibrary>,
     loaded_stamp: Option<Option<std::time::SystemTime>>,
     set: Arc<FilterSet>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StorageStats {
+    pub total: i64,
+    pub out_of_scope: i64,
+    pub in_scope_rules: usize,
+}
+
+#[derive(Default)]
+struct ProxyListener {
+    addr: Option<SocketAddr>,
+    task: Option<JoinHandle<()>>,
+}
+
+/// Which HTTPS tunnels are decrypted.
+#[derive(Debug, Clone)]
+struct Interception {
+    decrypt: bool,
+    passthrough: Vec<String>,
+}
+
+/// Identifies the project an engine serves.
+#[derive(Debug, Clone)]
+pub struct ProjectRef {
+    pub id: String,
+    pub dir: std::path::PathBuf,
 }
 
 /// Detection rules currently in effect. Reloaded when installed packs change
@@ -122,13 +165,157 @@ impl Engine {
             project: project.to_string(),
             store,
             ca,
-            upstream,
+            upstream: RwLock::new(Arc::new(upstream)),
             rules: RwLock::new(rules),
             started_at: now_ms(),
             shutdown: Notify::new(),
+            stopping: AtomicBool::new(false),
+            proxy: Mutex::default(),
+            interception: RwLock::new(Interception { decrypt: true, passthrough: vec![] }),
+            project_ref: OnceLock::new(),
             detection: Mutex::new(DetectionState::default()),
             filters: Mutex::new(FilterState::default()),
+            applied_listen: Mutex::new(None),
+            overrides: Mutex::default(),
         }))
+    }
+
+    /// The client used for outbound requests.
+    pub fn upstream(&self) -> Arc<Upstream> {
+        self.upstream.read().unwrap().clone()
+    }
+
+    pub fn set_upstream(&self, upstream: Upstream) {
+        *self.upstream.write().unwrap() = Arc::new(upstream);
+    }
+
+    /// Whether HTTPS to `host` is decrypted (and recorded) or tunneled as is.
+    pub fn decrypts(&self, host: &str) -> bool {
+        let i = self.interception.read().unwrap();
+        i.decrypt && !host_matches(host, &i.passthrough)
+    }
+
+    /// Where the proxy listens, once it is bound.
+    pub fn proxy_addr(&self) -> Option<SocketAddr> {
+        self.proxy.lock().unwrap().addr
+    }
+
+    /// Binds the proxy listener and serves on it, replacing the current one.
+    /// Connections already open keep working. With `fallback`, a taken port
+    /// moves to the next free one.
+    pub async fn bind_proxy(self: &Arc<Self>, addr: SocketAddr, fallback: bool) -> Result<SocketAddr> {
+        if self.proxy_addr() == Some(addr) {
+            return Ok(addr);
+        }
+        let listener = bind_listener(addr, fallback, self.proxy_addr()).await.with_context(|| format!("binding the proxy to {addr}"))?;
+        let bound = listener.local_addr()?;
+        let task = tokio::spawn(crate::proxy::serve(listener, self.clone()));
+        let old = {
+            let mut p = self.proxy.lock().unwrap();
+            p.addr = Some(bound);
+            p.task.replace(task)
+        };
+        if let Some(old) = old {
+            // Wait until the old listener is dropped, so its port is free
+            // when this returns. Connections it accepted carry on.
+            old.abort();
+            let _ = old.await;
+        }
+        Ok(bound)
+    }
+
+    /// Applies proxy settings: the upstream client, HTTPS interception and,
+    /// if they changed, the listen address. Returns the proxy's address.
+    pub async fn apply_proxy_settings(self: &Arc<Self>, p: &ProxySettings) -> Result<SocketAddr> {
+        let mut options = UpstreamOptions::from_settings(p)?;
+        {
+            let extra = self.overrides.lock().unwrap();
+            options.insecure |= extra.insecure;
+            options.extra_roots.extend(extra.extra_roots.iter().cloned());
+        }
+        let upstream = Upstream::with_options(options)?;
+        let addr = SocketAddr::new(p.listen_host, p.listen_port);
+        let current = self.proxy_addr();
+        // A fallback port stays put as long as the setting does not change.
+        let keep = current.is_some_and(|c| c.ip() == addr.ip() && (c.port() == addr.port() || (p.port_fallback && p.listen_port != 0)))
+            && self.applied_listen() == Some(addr);
+        let bound = if keep { current.unwrap() } else { self.bind_proxy(addr, p.port_fallback).await? };
+        *self.applied_listen.lock().unwrap() = Some(addr);
+        self.set_upstream(upstream);
+        *self.interception.write().unwrap() = Interception { decrypt: p.intercept_tls, passthrough: p.passthrough_hosts.clone() };
+        Ok(bound)
+    }
+
+    /// Upstream options that apply on top of the settings for this run
+    /// (`--insecure-upstream`, extra trusted roots).
+    pub fn set_overrides(&self, o: UpstreamOptions) {
+        *self.overrides.lock().unwrap() = o;
+    }
+
+    fn applied_listen(&self) -> Option<SocketAddr> {
+        *self.applied_listen.lock().unwrap()
+    }
+
+    /// Asks the engine to stop: the API stops serving and waiters wake up.
+    pub fn request_shutdown(&self) {
+        self.stopping.store(true, Ordering::SeqCst);
+        if let Some(task) = self.proxy.lock().unwrap().task.take() {
+            task.abort();
+        }
+        self.shutdown.notify_waiters();
+    }
+
+    pub fn is_stopping(&self) -> bool {
+        self.stopping.load(Ordering::SeqCst)
+    }
+
+    /// Resolves once [`Engine::request_shutdown`] has been called.
+    pub async fn stopped(&self) {
+        loop {
+            let notified = self.shutdown.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.is_stopping() {
+                return;
+            }
+            notified.await;
+        }
+    }
+
+    /// Traffic that "keep only in-scope traffic" would delete right now.
+    pub fn storage_stats(&self) -> Result<StorageStats> {
+        let rules = self.rules();
+        let out_hosts: Vec<String> = self.store.distinct_hosts()?.into_iter().filter(|h| !rules.in_scope(h)).collect();
+        let keep = self.finding_exchange_ids()?;
+        Ok(StorageStats {
+            total: self.store.count()?,
+            out_of_scope: self.store.count_for_hosts(&out_hosts, &keep)?,
+            in_scope_rules: rules.rules.iter().filter(|r| r.decision == Decision::Accepted).count(),
+        })
+    }
+
+    fn finding_exchange_ids(&self) -> Result<BTreeSet<i64>> {
+        Ok(self.store.findings()?.into_iter().flat_map(|f| f.exchange_ids).collect())
+    }
+
+    /// Deletes traffic to hosts that are not in scope (keeping requests that
+    /// findings point to) and compacts the database so it is gone from disk.
+    /// Does nothing while no host is in scope.
+    pub fn prune_out_of_scope(&self) -> Result<PruneReport> {
+        let rules = self.rules();
+        let at = now_ms();
+        if !rules.rules.iter().any(|r| r.decision == Decision::Accepted) {
+            let kept = self.store.count()?;
+            return Ok(PruneReport { at, removed: 0, kept, skipped: "nothing is in scope yet, so nothing was deleted".into() });
+        }
+        let out_hosts: Vec<String> = self.store.distinct_hosts()?.into_iter().filter(|h| !rules.in_scope(h)).collect();
+        let keep = self.finding_exchange_ids()?;
+        let removed = self.store.delete_for_hosts(&out_hosts, &keep)?;
+        if removed > 0 {
+            self.rescan()?;
+        }
+        self.store.compact()?;
+        Ok(PruneReport { at, removed, kept: self.store.count()?, skipped: String::new() })
     }
 
     pub fn rules(&self) -> ScopeRules {
@@ -287,7 +474,13 @@ impl Engine {
         self.store.put_rule(&rule)?;
         *self.rules.write().unwrap() = self.store.rules()?;
         if decision == Decision::Accepted {
+            // A rescan rebuilds evidence from scratch against the new rules,
+            // which drops anything the rule now covers.
             self.rescan()?;
+        } else {
+            // A rejection keeps the rest of the evidence, so prune just the
+            // domains this rule now decides out of the wait list.
+            self.store.prune_decided(&self.rules())?;
         }
         Ok(rule)
     }
@@ -356,8 +549,8 @@ impl Engine {
             ..Default::default()
         };
         let result = self
-            .upstream
-            .send(OutboundRequest { scheme, host, port, method, target, headers: req.headers, body: Bytes::from(body) })
+            .upstream()
+            .send(OutboundRequest { scheme, host, port, method, target, headers: req.headers, body: Bytes::from(body), extra_headers: vec![] })
             .await;
         ex.duration_ms = started.elapsed().as_millis() as i64;
         match result {
@@ -525,6 +718,91 @@ impl Engine {
         }
         Ok(report)
     }
+
+    /// Crawls an accepted host: fetches in-scope pages through `send`, follows
+    /// the same-host links it finds, and records what it sees. GET only; it
+    /// never submits a form and never leaves accepted scope.
+    pub async fn crawl(&self, req: crawl::CrawlRequest, initiator: &str) -> Result<crawl::CrawlReport, SendError> {
+        let host = scope::normalize_host(&req.host);
+        let decision = self.rules().decide(&host);
+        if decision != Decision::Accepted {
+            return Err(SendError::OutOfScope { host, decision: decision.as_str() });
+        }
+
+        let exchanges = self.store.exchanges_for_host(&host, 50).map_err(SendError::Other)?;
+        let (scheme, port) = exchanges.first().map(|e| (e.scheme.clone(), e.port)).unwrap_or_else(|| ("https".into(), 443));
+        let default_port = (scheme == "https" && port == 443) || (scheme == "http" && port == 80);
+        let authority = if default_port { host.clone() } else { format!("{host}:{port}") };
+
+        let max_pages = req.max_pages.unwrap_or(crawl::DEFAULT_MAX_PAGES).min(crawl::MAX_PAGES_CEIL);
+        let max_depth = req.max_depth.unwrap_or(crawl::DEFAULT_MAX_DEPTH);
+
+        let mut report = crawl::CrawlReport { host: host.clone(), pages_fetched: 0, urls_found: 0, forms: vec![], notes: vec![] };
+        if req.browser {
+            report.notes.push("the browser crawl mode is not available yet; ran a plain crawl".into());
+        }
+
+        // Seed with the start path and any already-discovered endpoints.
+        let start = req.start.as_deref().unwrap_or("/");
+        let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut queue: std::collections::VecDeque<(String, usize)> = std::collections::VecDeque::new();
+        let enqueue = |url: String, depth: usize, seen: &mut std::collections::BTreeSet<String>, queue: &mut std::collections::VecDeque<(String, usize)>| {
+            let key = crawl::dedup_key(&url);
+            if seen.insert(key) {
+                queue.push_back((url, depth));
+            }
+        };
+        enqueue(format!("{scheme}://{authority}{}", if start.starts_with('/') { start.to_string() } else { format!("/{start}") }), 0, &mut seen, &mut queue);
+        for e in self.store.endpoints(&host).map_err(SendError::Other)?.into_iter().filter(|e| e.method.eq_ignore_ascii_case("GET")) {
+            enqueue(format!("{scheme}://{authority}{}", e.path), 0, &mut seen, &mut queue);
+        }
+        report.urls_found = seen.len();
+
+        let mut budget_hit = false;
+        while let Some((url, depth)) = queue.pop_front() {
+            if report.pages_fetched >= max_pages {
+                budget_hit = true;
+                break;
+            }
+            report.pages_fetched += 1;
+            let ex = match self.send(SendRequest { method: "GET".into(), url: url.clone(), ..Default::default() }, initiator).await {
+                Ok(ex) => ex,
+                Err(SendError::OutOfScope { .. }) => continue,
+                Err(e) => {
+                    report.notes.push(format!("fetch failed: {e}"));
+                    continue;
+                }
+            };
+            let is_html = crate::model::header(&ex.resp_headers, "content-type").is_some_and(|c| c.to_ascii_lowercase().contains("html"));
+            if !is_html {
+                continue;
+            }
+            let Some(body) = crate::codec::body_text(&ex.resp_headers, &ex.resp_body) else { continue };
+            for form in crawl::extract_forms(&body) {
+                let action = if form.action.is_empty() {
+                    url.clone()
+                } else {
+                    crawl::resolve_same_host(&scheme, &authority, &ex.path, &form.action).unwrap_or(form.action.clone())
+                };
+                let resolved = crawl::Form { action, ..form };
+                if !report.forms.contains(&resolved) {
+                    report.forms.push(resolved);
+                }
+            }
+            if depth < max_depth {
+                for raw in crawl::extract_links(&body) {
+                    if let Some(next) = crawl::resolve_same_host(&scheme, &authority, &ex.path, &raw) {
+                        enqueue(next, depth + 1, &mut seen, &mut queue);
+                    }
+                }
+            }
+            report.urls_found = seen.len();
+        }
+        if budget_hit {
+            report.notes.push(format!("page budget of {max_pages} reached; more pages remain uncrawled"));
+        }
+        Ok(report)
+    }
 }
 
 fn severity_str(s: scan::Severity) -> &'static str {
@@ -543,7 +821,7 @@ pub struct EngineConfig {
     pub home: Home,
     pub project: String,
     pub proxy_addr: SocketAddr,
-    /// When true and `proxy_addr`'s port is taken, fall back to a free port.
+    /// When true and `proxy_addr`'s port is taken, use the next free port.
     pub proxy_port_fallback: bool,
     pub api_addr: SocketAddr,
     pub insecure_upstream: bool,
@@ -558,13 +836,16 @@ pub struct Running {
     pub agent_token: String,
 }
 
-/// Binds the proxy and the API and starts serving in the background.
+/// Starts an engine for a project by name, the way earlier versions did.
+/// Opening a [`crate::session`] is the full version: a project folder,
+/// its settings and a lock.
 pub async fn start(config: &EngineConfig) -> Result<Running> {
     config.home.ensure()?;
     let ca = Arc::new(CertAuthority::load_or_create(&config.home)?);
-    let store = Store::open(&config.home.project_db(&config.project))?;
+    let project = crate::project::resolve(&config.home, &config.project)?;
+    let store = Store::open(&project.db_path())?;
     let upstream = Upstream::new(config.insecure_upstream, vec![])?;
-    let engine = Engine::new(&config.project, store, ca, upstream)?;
+    let engine = Engine::new(project.name(), store, ca, upstream)?;
     engine.set_rule_library(Library::new(&config.home));
     engine.set_filter_library(FilterLibrary::new(&config.home));
     start_with(engine, config).await
@@ -574,56 +855,56 @@ pub async fn start_with(engine: Arc<Engine>, config: &EngineConfig) -> Result<Ru
     let token = config.home.load_or_create_token()?;
     let agent_token = config.home.load_or_create_agent_token()?;
     engine.start_recorder();
-    let proxy = match TcpListener::bind(config.proxy_addr).await {
-        Ok(l) => l,
-        Err(e) if config.proxy_port_fallback && e.kind() == std::io::ErrorKind::AddrInUse => {
-            let mut addr = config.proxy_addr;
-            addr.set_port(0);
-            TcpListener::bind(addr).await?
-        }
-        Err(e) => return Err(e).with_context(|| format!("binding proxy to {}", config.proxy_addr)),
-    };
     let api = TcpListener::bind(config.api_addr).await.with_context(|| format!("binding API to {}", config.api_addr))?;
-    let proxy_addr = proxy.local_addr()?;
+    let proxy_addr = engine.bind_proxy(config.proxy_addr, config.proxy_port_fallback).await?;
     let api_addr = api.local_addr()?;
-    tokio::spawn(crate::proxy::serve(proxy, engine.clone()));
     let router = crate::api::router(
         engine.clone(),
         crate::api::Tokens { user: token.clone(), agent: agent_token.clone() },
         api_addr,
-        proxy_addr,
         config.home.clone(),
     );
     let shutdown_engine = engine.clone();
     tokio::spawn(async move {
-        let _ = axum::serve(api, router)
-            .with_graceful_shutdown(async move { shutdown_engine.shutdown.notified().await })
-            .await;
+        let _ = axum::serve(api, router).with_graceful_shutdown(async move { shutdown_engine.stopped().await }).await;
     });
     Ok(Running { engine, proxy_addr, api_addr, token, agent_token })
 }
 
-/// Runs an engine in the foreground until shutdown is requested.
-pub async fn run(config: EngineConfig) -> Result<()> {
-    let running = start(&config).await?;
-    let info = EngineInfo {
-        pid: std::process::id(),
-        api: format!("http://{}", running.api_addr),
-        proxy: running.proxy_addr.to_string(),
-        project: config.project.clone(),
-        started_at: running.engine.started_at,
+/// Binds `addr`. With `fallback`, a taken port moves to the next free one
+/// (up to 20 above it), then to any free port. `current` is the address
+/// being replaced, which counts as free.
+async fn bind_listener(addr: SocketAddr, fallback: bool, current: Option<SocketAddr>) -> std::io::Result<TcpListener> {
+    let first = TcpListener::bind(addr).await;
+    let err = match first {
+        Ok(l) => return Ok(l),
+        Err(e) if fallback && e.kind() == std::io::ErrorKind::AddrInUse => e,
+        Err(e) => return Err(e),
     };
-    std::fs::write(config.home.engine_file(), serde_json::to_vec_pretty(&info)?)?;
-    tracing::info!("proxy listening on {}, API on {}", running.proxy_addr, running.api_addr);
-    println!("Plonix engine running: proxy {} · API {} · project {}", running.proxy_addr, running.api_addr, config.project);
+    if addr.port() != 0 {
+        for port in addr.port().saturating_add(1)..=addr.port().saturating_add(20) {
+            let a = SocketAddr::new(addr.ip(), port);
+            if Some(a) == current {
+                continue;
+            }
+            if let Ok(l) = TcpListener::bind(a).await {
+                return Ok(l);
+            }
+        }
+    }
+    TcpListener::bind(SocketAddr::new(addr.ip(), 0)).await.map_err(|_| err)
+}
 
-    tokio::select! {
-        _ = running.engine.shutdown.notified() => {}
-        _ = tokio::signal::ctrl_c() => {}
+/// The announcement clients use to find an engine.
+pub fn info(engine: &Engine, api_addr: SocketAddr) -> EngineInfo {
+    let project = engine.project_ref.get();
+    EngineInfo {
+        pid: std::process::id(),
+        api: format!("http://{api_addr}"),
+        proxy: engine.proxy_addr().map(|a| a.to_string()).unwrap_or_default(),
+        project: engine.project.clone(),
+        started_at: engine.started_at,
+        project_id: project.map(|p| p.id.clone()).unwrap_or_default(),
+        project_dir: project.map(|p| p.dir.clone()),
     }
-    // Only remove the file if it still describes this process.
-    if config.home.read_engine_info().is_some_and(|i| i.pid == std::process::id()) {
-        let _ = std::fs::remove_file(config.home.engine_file());
-    }
-    Ok(())
 }
