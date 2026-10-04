@@ -550,6 +550,15 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .demobar b { color: var(--accent); }
 .demobar .tour { display: flex; gap: 6px; flex-wrap: wrap; }
 .demobar .x { margin-left: auto; }
+.ftour { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 10px; margin: 10px 0 14px; }
+.ftour-row { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-top: 1px solid var(--line); }
+.ftour-row:first-child { border-top: 0; }
+.ftour-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
+.ftour-row .n { font-size: 11.5px; white-space: nowrap; }
+.ftour .fchip .fpad { width: 8px; }
+.ftour-h { margin: 0 0 6px; font-size: 12.5px; }
+.ftour-lang { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 12px; }
+.ftour-lang code { font-family: var(--mono); font-size: 11.5px; }
 .popmenu { position: fixed; z-index: 70; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; box-shadow: var(--shadow); padding: 4px; display: flex; flex-direction: column; min-width: 170px; }
 .popmenu button { border: 0; background: transparent; text-align: left; padding: 6px 10px; border-radius: 6px; }
 .popmenu button:hover { background: var(--accent); color: #fff; }
