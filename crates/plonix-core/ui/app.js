@@ -2768,7 +2768,7 @@ async function askClaude(subject) {
   await rebuild();
 }
 
-/** Claude Code settings: on or off, what it may see, and how much context to hand over. */
+/** What agents may do, in one line, with the way to change it: Settings › AI agents. */
 async function renderAgentSettings(box) {
   let cfg;
   try {
@@ -2778,44 +2778,21 @@ async function renderAgentSettings(box) {
   }
   S.agentSettings = cfg;
   const st = cfg.settings;
-  const save = async (patch) => {
-    try {
-      S.agentSettings = await api('/api/agents/settings', { method: 'PUT', body: { ...S.agentSettings.settings, ...patch } });
-      toast('Saved', 'ok');
-    } catch (e) {
-      toast(e.message, 'err');
-    }
-    for (const b of document.querySelectorAll('.askbtn')) b.hidden = !agentsOn();
-    renderAgentSettings(box);
+  const on = cfg.groups.filter((g) => g.on).length;
+  const summary = st.enabled
+    ? `Agents see ${st.data === 'all' ? 'everything captured' : 'in-scope hosts only'} · ${on} of ${cfg.groups.length} kinds of data · Ask Claude up to ${fmtTok(st.context_budget)} tokens`
+    : 'Agent access is off: every agent request is refused.';
+  const open = () => {
+    S.settingsSection = 'agents';
+    leaveTo('settings');
   };
-  const on = h('input', { type: 'checkbox', checked: st.enabled, onchange: () => save({ enabled: on.checked }) });
-  const radio = (value, label, note) =>
-    h('label', { class: 'opt' }, h('input', { type: 'radio', name: 'agentdata', checked: st.data === value, disabled: !st.enabled, onchange: () => save({ data: value }) }), h('span', null, h('b', { text: label }), h('small', { text: note })));
-  const budget = h('select', { disabled: !st.enabled, onchange: () => save({ context_budget: Number(budget.value) }) }, cfg.budgets.map((n) => h('option', { value: n, text: `${fmtTok(n)} tokens`, selected: n === st.context_budget })));
-  const clip = h('select', { disabled: !st.enabled, onchange: () => save({ max_body_chars: Number(clip.value) }) }, [1000, 2000, 4000, 8000, 16000].map((n) => h('option', { value: n, text: `${fmtTok(n)} characters`, selected: n === st.max_body_chars })));
   clear(
     box,
-    h('div', { class: 'ab setrow' }, h('label', { class: 'switch' }, on, h('span', { text: st.enabled ? 'Claude Code and other agents can read this project' : 'Agent access is off: every agent request is refused' })), h('span', { class: 'mode', text: 'Read-only' })),
     h(
       'div',
-      { class: 'setgrid' + (st.enabled ? '' : ' disabled') },
-      h('div', null, h('div', { class: 'caph', text: 'What agents can see' }), radio('in_scope', 'In-scope hosts only', 'Requests, hosts and technologies for hosts you accepted into scope'), radio('all', 'Everything captured', 'Also third-party and out-of-scope traffic')),
-      h(
-        'div',
-        null,
-        h('div', { class: 'caph', text: 'Tools agents get' }),
-        cfg.groups.map((g) => {
-          const c = h('input', { type: 'checkbox', checked: g.on, disabled: !st.enabled, onchange: () => save({ off: c.checked ? st.off.filter((x) => x !== g.group) : [...st.off, g.group] }) });
-          return h('label', { class: 'opt' }, c, h('span', { text: g.label }));
-        }),
-      ),
-      h(
-        'div',
-        null,
-        h('div', { class: 'caph', text: 'Ask Claude' }),
-        h('label', { class: 'opt col' }, h('span', { text: 'Warn me before sending more than' }), budget),
-        h('label', { class: 'opt col' }, h('span', { text: 'Clip each request and response body to' }), clip),
-      ),
+      { class: 'ab setrow' },
+      h('span', null, h('b', { text: 'Agent settings' }), h('br'), h('span', { class: 'muted', text: summary })),
+      h('button', { class: 'btn sm', text: 'Change in Settings…', onclick: open }),
     ),
   );
 }
@@ -2870,11 +2847,15 @@ async function renderSettings(main) {
     return;
   }
   if (S.view !== 'settings') return;
-  PlonixSettings.render(box, data, {
+  const host = h('div', { style: { flex: '1', minHeight: '0', display: 'flex' } });
+  const back = backButton();
+  clear(box, back ? h('div', { class: 'toolbar' }, back) : null, host);
+  PlonixSettings.render(host, data, {
     select: S.settingsSection || 'proxy',
     onSelect: (id) => (S.settingsSection = id),
     save: async (section, values) => {
       const r = await api('/api/settings/' + section, { method: 'PUT', body: { values } });
+      if (section === 'agents') loadAgentSettings();
       if (section === 'proxy') {
         S.status = await api('/api/status');
         updateChrome();
