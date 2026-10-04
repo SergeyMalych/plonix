@@ -1,0 +1,38 @@
+name: Rule pack
+description: Propose or request a detection rule pack, or report a wrong detection.
+labels: ["rule pack"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Rule packs teach Plonix to recognise technologies. You can also open a pull request that adds the pack directly: see [Contributing a pack](https://github.com/SergeyMalych/plonix/blob/main/docs/detection-rules.md#contributing-a-pack).
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What is this about?
+      options:
+        - A new pack or new rules
+        - A detection that is wrong (false positive)
+        - A technology Plonix misses (false negative)
+    validations:
+      required: true
+  - type: input
+    id: technology
+    attributes:
+      label: Technology
+      placeholder: Name, and a link to its homepage or docs
+    validations:
+      required: true
+  - type: textarea
+    id: signals
+    attributes:
+      label: Signals
+      description: The headers, cookies, paths or body content that identify it. Please remove secrets and anything that identifies a specific site.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: pack
+    attributes:
+      label: Existing pack, if any
+      placeholder: e.g. frameworks

@@ -8,7 +8,7 @@ Plonix captures everything your browser does, learns the real shape of the targe
 
 ![The Plonix window: live traffic with an adaptive-scope suggestion and the Lens showing a request and its response](docs/images/plonix-window.png)
 
-> **Status: early development.** The core engine (proxy, traffic store, search, adaptive scope, local API), the `plonix` CLI, the Plonix app and read-only MCP access for AI agents work today and are covered by tests. See [Roadmap](#roadmap).
+> **Status: early development.** The core engine (proxy, traffic store, search, adaptive scope, local API), the `plonix` CLI, the Plonix app, crawl and scope-gated active scans, and read-only MCP access for AI agents work today and are covered by tests. See [Roadmap](#roadmap).
 
 ---
 
@@ -153,6 +153,12 @@ claude                       # then ask:
 
 > Use Plonix to find in-scope API endpoints that returned errors, then read the most interesting request and tell me what stands out.
 
+### Scanning and crawl
+- **Crawl** a host to discover its endpoints, parameters and forms (`plonix crawl example.com`). It starts from the traffic you captured, follows same-host links within a page and depth budget, and never submits a form.
+- **Active scans** run checks chosen from the target's fingerprint: a check only runs where its detector found something it applies to, so checks that cannot apply are never sent. `plonix scan suggest example.com` shows the suggested profile without sending anything, and `plonix scan run example.com` runs it.
+- The built-in checks are benign (exposed `.git/config` and `.env`, `server-status`, a harmless reflection marker). Intrusive checks are off unless you turn them on for a scan, and every scan is capped by a request budget.
+- Every scan and crawl request goes through the same scope choke point as a replay, so it can only reach hosts you accepted, and it is recorded in Traffic. Nothing scans on its own: a person starts every scan, and agents cannot. Findings land in Findings with the requests that prove them. See [docs/scanning.md](docs/scanning.md).
+
 ### Local API
 - An HTTP API on loopback only, protected by a bearer token stored at `~/.plonix/api-token` (mode `0600`).
 - Requests must target the loopback address, which keeps web pages in your browser from reaching it.
@@ -217,6 +223,9 @@ plonix show 42                             # one request and its response
 plonix watch scope:in                      # print new traffic as it arrives
 plonix hosts                               # every host seen, busiest first
 plonix tech                                # technologies detected on each host, with evidence
+plonix crawl example.com                   # discover endpoints, parameters and forms (accepted hosts only)
+plonix scan suggest example.com            # the checks that apply to this host; sends nothing
+plonix scan run example.com                # run them
 
 plonix scope                               # rules, plus suggested domains with evidence
 plonix scope review                        # decide on suggestions one by one
@@ -295,6 +304,8 @@ The API listens on port 8090 when it is free; `plonix status` shows the actual a
 | GET / POST | `/api/findings` | List or record findings |
 | GET / PATCH / DELETE | `/api/findings/{id}` | One finding; change its `title`, `severity`, `status` or `description`; delete it (user only for changes) |
 | GET | `/api/findings/export?format=md\|html\|json` | The findings as a report with their evidence; `ids=1,2` and `status=open,confirmed` choose which (default: all but false positives) |
+| GET | `/api/scan/catalog` · `/api/scan/suggest/{host}` | Scan detectors and checks, and the suggested profile for a host |
+| POST | `/api/scan` · `/api/crawl` | Run an active scan or a crawl against an accepted host (user only) |
 | GET | `/api/settings` | Settings sections, with their fields and values |
 | PUT | `/api/settings/{section}` | Save a section (`{"values": {...}}`); proxy changes apply at once |
 | GET | `/api/storage` | How much traffic is out of scope, and the storage policy |
@@ -355,23 +366,28 @@ docs/             detection rules, agents and MCP, extension design
 - [x] Plonix.app for macOS: the window as a desktop app with the engine built in, Open target from the app, native menu bar
 - [x] Read-only MCP server (`plonix mcp`), `plonix connect claude` and the Agents screen
 - [x] Projects in folders you choose, several open at once with a session each, a Start screen, and Settings (proxy, storage, interface)
+- [x] Scope decisions per host, in bulk or later
+- [x] Include and exclude filters in Traffic, with suggestions drawn from your traffic
+- [x] Spotted in the Lens: tokens to decode, personal data, leaked secrets and internal addresses in a request or response
+- [x] Ask Claude Code from a request, finding, host or scope suggestion, with scoped context you review first
+- [x] Scanning foundation: detectors, checks and scan packs, fingerprint-driven suggestions, and active scans with benign built-in checks (`plonix scan`)
+- [x] Crawl to discover endpoints, parameters and forms (`plonix crawl`)
 
 **Coming**
 - [ ] Opt-in active mode for agents: replay and send within accepted scope, switched on by you ([design](docs/agents.md#later-an-opt-in-active-mode))
 - [ ] Signed and notarized app downloads
+- [ ] Crawl with a browser for JavaScript-heavy apps, and a Scans screen in the window
 - [ ] Sandboxed WebAssembly extensions with a closed capability list that can never bypass scope ([design](docs/extensions.md))
 
-Deliberately out of scope: automated vulnerability scanning and token-randomness analysis. Plonix stays small on purpose.
+Deliberately out of scope: token-randomness analysis, and scans that run unattended or reach beyond accepted scope. Scanning in Plonix is something you start, against a host you accepted, with checks chosen from what it runs. Plonix stays small on purpose.
 
 ## Contributing
 
-Plonix is early, and this is a good time to shape it. Issues and discussions about workflows, pain points and design are as valuable as code.
+Plonix is early, and this is a good time to shape it. Issues and discussions about workflows, pain points and design are as valuable as code. The easiest way to contribute is a **detection rule pack**: no Rust needed.
 
-1. Open an issue describing the problem or idea before large changes.
-2. Keep pull requests focused, and include tests for engine behavior.
-3. Run `cargo fmt`, `cargo clippy --workspace` and `cargo test --workspace` before pushing.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test and send changes, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for how we work together. Found a security problem in Plonix itself? Please report it privately as described in [SECURITY.md](SECURITY.md), not in a public issue.
 
-The easiest way to contribute is a **detection rule pack**: no Rust needed. Write one, check it with `plonix rules check`, and open a pull request that adds it to `store/`. Skills work the same way: Markdown with a short header ([docs/market.md](docs/market.md#writing-a-skill)). See [docs/detection-rules.md](docs/detection-rules.md#contributing-a-pack).
+The easiest way to contribute is a **detection rule pack** or a **skill**: no Rust needed. See [docs/detection-rules.md](docs/detection-rules.md#contributing-a-pack) and [docs/market.md](docs/market.md#writing-a-skill).
 
 Use Plonix only against systems you are authorized to test.
 
