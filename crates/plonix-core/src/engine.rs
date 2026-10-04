@@ -436,7 +436,13 @@ impl Engine {
         self.store.put_rule(&rule)?;
         *self.rules.write().unwrap() = self.store.rules()?;
         if decision == Decision::Accepted {
+            // A rescan rebuilds evidence from scratch against the new rules,
+            // which drops anything the rule now covers.
             self.rescan()?;
+        } else {
+            // A rejection keeps the rest of the evidence, so prune just the
+            // domains this rule now decides out of the wait list.
+            self.store.prune_decided(&self.rules())?;
         }
         Ok(rule)
     }
