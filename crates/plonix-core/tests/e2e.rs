@@ -360,7 +360,7 @@ async fn payload_run_feeds_positions_and_stays_in_scope() {
 
     // A run against an un-accepted host is refused before any request goes out.
     let req = RunRequest {
-        url: format!("{base}/echo?id=§1§"),
+        url: format!("{base}/echo?id=•1•"),
         raw: "Accept: */*\n\n".into(),
         lists: vec![list(&["1", "2", "3"])],
         mode: RunMode::Sweep,
@@ -394,7 +394,7 @@ async fn payload_run_feeds_positions_and_stays_in_scope() {
         .engine
         .run(
             RunRequest {
-                url: format!("{base}/echo?id=§1§"),
+                url: format!("{base}/echo?id=•1•"),
                 lists: vec![Payloads::Range { from: 1, to: 100, step: 1 }],
                 mode: RunMode::Sweep,
                 max_requests: Some(5),
@@ -413,10 +413,46 @@ async fn payload_run_feeds_positions_and_stays_in_scope() {
     r.engine.decide("localhost", Decision::Rejected, false, "").unwrap();
     assert!(matches!(
         r.engine
-            .run(RunRequest { url: format!("{base}/echo?id=§1§"), lists: vec![list(&["1"])], mode: RunMode::Sweep, delay_ms: Some(0), ..Default::default() }, "bench")
+            .run(RunRequest { url: format!("{base}/echo?id=•1•"), lists: vec![list(&["1"])], mode: RunMode::Sweep, delay_ms: Some(0), ..Default::default() }, "bench")
             .await,
         Err(SendError::OutOfScope { decision: "rejected", .. })
     ));
+}
+
+#[tokio::test]
+async fn demo_responder_answers_a_run_with_no_network() {
+    use plonix_core::runs::{Payloads, RunMode, RunRequest};
+
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    // No upstream server is started: the only way a request can get a response
+    // is through the installed responder.
+    let r = start(&home, None).await;
+    r.engine.set_responder(plonix_core::demo::responder());
+    r.engine.decide("api.brightcart.example", Decision::Accepted, false, "").unwrap();
+
+    let report = r
+        .engine
+        .run(
+            RunRequest {
+                url: "https://api.brightcart.example/v1/orders/•1042•".into(),
+                raw: "Accept: application/json\n\n".into(),
+                lists: vec![Payloads::Range { from: 1038, to: 1046, step: 1 }],
+                mode: RunMode::Sweep,
+                delay_ms: Some(0),
+                ..Default::default()
+            },
+            "bench",
+        )
+        .await
+        .unwrap();
+
+    // Every id in range answered 200 without a real network, and the responses
+    // are not all identical (different ids, different customers).
+    assert_eq!(report.requests_sent, 9);
+    assert!(report.rows.iter().all(|row| row.status == Some(200)), "every demo id answers 200");
+    let lengths: std::collections::BTreeSet<usize> = report.rows.iter().map(|row| row.length).collect();
+    assert!(lengths.len() > 1, "orders differ in length across ids");
 }
 
 #[tokio::test]

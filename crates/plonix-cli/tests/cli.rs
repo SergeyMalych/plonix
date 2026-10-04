@@ -355,7 +355,7 @@ fn bench_runs_payloads_through_marked_positions_and_stays_in_scope() {
     let out = p.run(&["bench", "lists"]).ok().stdout();
     assert!(out.contains("numbers-1-100") && out.contains("input-probes"), "{out}");
 
-    let url = format!("http://localhost:{target}/echo?id=\u{a7}1\u{a7}");
+    let url = format!("http://localhost:{target}/echo?id=\u{2022}1\u{2022}");
 
     // A run against a host that is not accepted is refused, and sends nothing.
     let r = p.run(&["bench", "run", &url, "--list", "range:1-3", "--delay-ms", "0"]);
@@ -409,7 +409,7 @@ fn market_installs_a_list_pack_and_the_bench_can_use_it() {
     assert!(out.contains("id-formats"), "installed list should be offered:\n{out}");
 
     p.run(&["scope", "accept", "localhost"]).ok();
-    let v = p.run(&["bench", "run", "http://localhost:1/x?id=\u{a7}1\u{a7}", "--list", "builtin:id-formats", "--max-requests", "3", "--delay-ms", "0", "--json"]);
+    let v = p.run(&["bench", "run", "http://localhost:1/x?id=\u{2022}1\u{2022}", "--list", "builtin:id-formats", "--max-requests", "3", "--delay-ms", "0", "--json"]);
     // The host does not answer, but the run still plans from the installed list
     // and reports requests attempted against the accepted host.
     let out = v.ok().stdout();

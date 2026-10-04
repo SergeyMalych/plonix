@@ -1,6 +1,6 @@
 //! `plonix bench`: payload runs from the command line.
 //!
-//! Mark positions in the URL, a header or the body with `§…§`, point one or
+//! Mark positions in the URL, a header or the body with `•…•`, point one or
 //! more lists at them, and `bench run` sends the whole set through the engine.
 //! Every request is a Bench send, so it only reaches hosts that are accepted
 //! into scope.
@@ -23,15 +23,15 @@ pub enum BenchCmd {
 
 #[derive(Args)]
 pub struct RunArgs {
-    /// The request URL; mark positions with §…§, e.g. 'https://h/api?id=§1§'
+    /// The request URL; mark positions with •…•, e.g. 'https://h/api?id=•1•'
     pub url: String,
     /// HTTP method
     #[arg(short = 'X', long, default_value = "GET")]
     pub method: String,
-    /// A request header (repeatable); values may contain §…§
+    /// A request header (repeatable); values may contain •…•
     #[arg(short = 'H', long = "header", value_name = "NAME: VALUE")]
     pub headers: Vec<String>,
-    /// The request body; may contain §…§, or '@file', or '-' for stdin
+    /// The request body; may contain •…•, or '@file', or '-' for stdin
     #[arg(long, value_name = "TEXT|@FILE|-")]
     pub body: Option<String>,
     /// How to spread the values: sweep (one position at a time), parallel, matrix

@@ -15,12 +15,15 @@ use anyhow::{Result, bail};
 use base64::Engine as _;
 use serde_json::json;
 
-use crate::engine;
+use bytes::Bytes;
+
+use crate::engine::{self, Responder};
 use crate::model::{Exchange, FindingEdit, Headers, NewFinding, Source, now_ms};
 use crate::paths::Home;
 use crate::project::{self, PROJECT_FILE, Project};
 use crate::scope::{Decision, Rule};
 use crate::store::Store;
+use crate::upstream::{InboundResponse, OutboundRequest};
 
 pub const NAME: &str = "Demo: Brightcart shop";
 const FOLDER: &str = "plonix-demo";
@@ -128,6 +131,121 @@ fn unsigned_admin_jwt(now: i64) -> String {
         b64url(r#"{"alg":"none","typ":"JWT"}"#),
         b64url(&format!(r#"{{"sub":"usr_8f2c41","email":"maya.lopez@mail.example","role":"admin","iat":{iat},"exp":{}}}"#, iat + 3600)),
     )
+}
+
+// ---- the demo responder ----------------------------------------------------
+//
+// The demo's hosts are made-up `.example` names that resolve nowhere, so a real
+// send fails. This stand-in answers them locally, as the made-up API would, so
+// a Bench run against the demo returns varied results to explore. It is wired
+// in only for the demo project (see `engine::start` / `session::open`); it never
+// answers a real host, so it can never stand in for live traffic.
+
+/// The engine responder the demo installs.
+pub fn responder() -> Responder {
+    std::sync::Arc::new(respond)
+}
+
+/// Answers a demo host, or `None` to let the request go out as usual.
+fn respond(req: &OutboundRequest) -> Option<InboundResponse> {
+    // Only ever answer the reserved `.example` hosts the demo is built on.
+    if !req.host.ends_with(".example") {
+        return None;
+    }
+    let path = req.target.split('?').next().unwrap_or("/");
+    let (status, mime, body) = route(&req.method, &req.host, path, &req.headers);
+    Some(inbound(req, status, mime, body))
+}
+
+/// Routes one demo request to a status and body.
+fn route(method: &str, host: &str, path: &str, headers: &Headers) -> (u16, &'static str, String) {
+    let json = "application/json";
+    let auth = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("authorization")).map(|(_, v)| v.as_str()).unwrap_or("");
+
+    if host == API {
+        // The admin endpoint enforces the signature: an unsigned (`alg: none`)
+        // token is refused outright; a customer token lacks the role.
+        if path.starts_with("/v1/admin/") {
+            return if is_none_alg(auth) {
+                (401, json, json!({ "error": "invalid_token", "message": "unsupported algorithm: none" }).to_string())
+            } else {
+                (403, json, json!({ "error": "forbidden", "message": "admin role required" }).to_string())
+            };
+        }
+        // The order lookup: any id returns an order, not only the caller's own
+        // (the finding the demo is built around). Ids outside the demo range
+        // are not found, so a run shows a mix of hits and misses.
+        if let Some(rest) = path.strip_prefix("/v1/orders/") {
+            if let Ok(id) = rest.parse::<i64>() {
+                return match order_value(id) {
+                    Some(v) => (200, json, serde_json::to_string_pretty(&v).unwrap_or_default()),
+                    None => (404, json, json!({ "error": "not_found", "message": "no such order" }).to_string()),
+                };
+            }
+        }
+        if path == "/v1/me" {
+            return (200, json, json!({ "id": "usr_8f2c41", "email": "maya.lopez@mail.example", "name": "Maya Lopez", "role": "customer" }).to_string());
+        }
+        if method == "GET" {
+            return (200, json, json!({ "ok": true, "path": path }).to_string());
+        }
+    }
+
+    (404, json, json!({ "error": "not_found", "path": path }).to_string())
+}
+
+/// The order the demo API returns for `id`, or `None` outside the demo range.
+/// Each id maps to a different customer and a slightly different order, so a
+/// run through the ids returns responses that visibly differ.
+fn order_value(id: i64) -> Option<serde_json::Value> {
+    if !(1000..=1099).contains(&id) {
+        return None;
+    }
+    let people = [
+        ("Maya Lopez", "maya.lopez@mail.example", "4111 1111 1111 1111"),
+        ("Daniel Okafor", "d.okafor@mail.example", "5555 5555 5555 4444"),
+        ("Priya Nair", "priya.nair@mail.example", "4000 0566 5566 5556"),
+        ("Tom Becker", "t.becker@mail.example", "6011 0009 9013 9424"),
+        ("Sofia Rossi", "sofia.rossi@mail.example", "3782 822463 10005"),
+    ];
+    let (name, email, card) = people[(id as usize) % people.len()];
+    // Vary the line items by id so response lengths differ down the run.
+    let catalog = [(1001, "Trail running shoes", 8900), (1002, "Merino hoodie", 7400), (1003, "Insulated bottle", 2400)];
+    let n = 1 + (id as usize % catalog.len());
+    let items: Vec<_> = catalog.iter().take(n).map(|(p, nm, price)| json!({ "product": p, "name": nm, "qty": 1, "price": price })).collect();
+    let total: i64 = catalog.iter().take(n).map(|(_, _, p)| *p as i64).sum();
+    Some(json!({
+        "id": id, "status": "shipped", "total": total, "currency": "EUR",
+        "customer": { "name": name, "email": email },
+        "payment": { "method": "card", "card_number": card, "expiry": "08/29", "holder": name },
+        "items": items,
+        "shipping": { "carrier": "Parcelline", "tracking": format!("PL00{id}178826GB") }
+    }))
+}
+
+/// Whether a bearer token is unsigned (`alg: none`), by reading its header.
+fn is_none_alg(auth: &str) -> bool {
+    let tok = auth.strip_prefix("Bearer ").unwrap_or(auth);
+    let head = tok.split('.').next().unwrap_or("");
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(head)
+        .ok()
+        .and_then(|b| String::from_utf8(b).ok())
+        .map(|s| s.replace([' ', '\t'], "").contains("\"alg\":\"none\""))
+        .unwrap_or(false)
+}
+
+/// Wraps a demo body as the response the engine records.
+fn inbound(req: &OutboundRequest, status: u16, mime: &str, body: String) -> InboundResponse {
+    let bytes = Bytes::from(body.into_bytes());
+    let headers: Headers = vec![
+        ("Content-Type".into(), mime.into()),
+        ("Content-Length".into(), bytes.len().to_string()),
+        ("Server".into(), "nginx/1.25.4".into()),
+        ("X-Powered-By".into(), "Express".into()),
+    ];
+    let tls_sans = if req.scheme == "https" { vec![req.host.clone()] } else { vec![] };
+    InboundResponse { status, headers, body: bytes, tls_sans, version: "HTTP/2".into() }
 }
 
 struct Seeder<'a> {
@@ -651,7 +769,23 @@ export async function api(path, opts = {{}}) {{
         "cur": alg_none,
         "picks": []
     });
-    store.set_view_state("bench", &json!({ "tabs": [lookup, none_tab], "active": 0 }))?;
+    // A run ready to try: the order id is marked as a position, with a range of
+    // ids queued. Pressing Start walks the ids and shows how each one returns a
+    // different customer's order.
+    let order_run = json!({
+        "name": "Order IDs — run",
+        "from": own_order,
+        "method": "GET",
+        "url": format!("https://{API}/v1/orders/\u{2022}1042\u{2022}"),
+        "raw": raw(&bearer),
+        "bodyB64": null,
+        "history": [],
+        "cur": null,
+        "picks": [],
+        "panel": "run",
+        "run": { "mode": "sweep", "lists": [{ "kind": "range", "from": 1038, "to": 1046, "step": 1 }], "base": true, "max": "", "delay": "40" }
+    });
+    store.set_view_state("bench", &json!({ "tabs": [order_run, lookup, none_tab], "active": 0 }))?;
     seed_filters(store)?;
     Ok(())
 }
@@ -724,7 +858,7 @@ mod tests {
             assert!(n > 0, "{} shows something ({q})", v["title"]);
         }
         let bench = store.view_state("bench").unwrap().unwrap();
-        assert_eq!(bench["tabs"].as_array().unwrap().len(), 2);
+        assert_eq!(bench["tabs"].as_array().unwrap().len(), 3);
         let all = store.exchanges_after(0, 500).unwrap();
         let kinds: std::collections::BTreeSet<String> =
             all.iter().flat_map(|ex| insight::analyze(ex, insight::detectors()).into_iter().map(|i| i.kind)).collect();
@@ -732,6 +866,49 @@ mod tests {
             assert!(kinds.contains(k), "Lens spots {k}, got {kinds:?}");
         }
         assert!(all.iter().all(|ex| ex.host.ends_with(".example") || !rules.in_scope(&ex.host)), "only made-up hosts are in scope");
+    }
+
+    #[test]
+    fn the_responder_answers_demo_hosts_with_varied_orders() {
+        let out = |method: &str, url: &str, auth: &str| {
+            let rest = url.split_once("://").unwrap().1;
+            let (host, target) = rest.find('/').map_or((rest, "/"), |i| (&rest[..i], &rest[i..]));
+            let mut headers: Headers = vec![];
+            if !auth.is_empty() {
+                headers.push(("Authorization".into(), auth.into()));
+            }
+            OutboundRequest {
+                scheme: "https".into(),
+                host: host.into(),
+                port: 443,
+                method: method.into(),
+                target: target.into(),
+                headers,
+                body: Bytes::new(),
+                extra_headers: vec![],
+            }
+        };
+        let signed = format!("Bearer {}", jwt(now_ms()));
+
+        // Any id in range returns an order, and different ids differ in length.
+        let a = respond(&out("GET", "https://api.brightcart.example/v1/orders/1041", &signed)).unwrap();
+        let b = respond(&out("GET", "https://api.brightcart.example/v1/orders/1042", &signed)).unwrap();
+        assert_eq!(a.status, 200);
+        assert_eq!(b.status, 200);
+        assert_ne!(a.body.len(), b.body.len(), "different ids return different orders");
+        assert!(String::from_utf8_lossy(&b.body).contains("card_number"));
+
+        // Out of range is not found.
+        assert_eq!(respond(&out("GET", "https://api.brightcart.example/v1/orders/5", &signed)).unwrap().status, 404);
+
+        // The admin endpoint: a signed customer token is forbidden, an unsigned
+        // one is refused outright.
+        let unsigned = format!("Bearer {}", unsigned_admin_jwt(now_ms()));
+        assert_eq!(respond(&out("GET", "https://api.brightcart.example/v1/admin/orders", &signed)).unwrap().status, 403);
+        assert_eq!(respond(&out("GET", "https://api.brightcart.example/v1/admin/orders", &unsigned)).unwrap().status, 401);
+
+        // A real host is never answered by the demo responder.
+        assert!(respond(&out("GET", "https://api.github.com/", "")).is_none());
     }
 
     #[test]
