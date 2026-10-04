@@ -251,6 +251,10 @@ impl FilterLibrary {
         self.shelf.installed_version(name)
     }
 
+    pub fn installed(&self) -> Vec<crate::shelf::Installed> {
+        self.shelf.installed()
+    }
+
     pub fn load(&self) -> FilterSet {
         let mut set = FilterSet::default();
         for (name, text) in BUILTIN {

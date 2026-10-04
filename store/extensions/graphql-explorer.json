@@ -1,0 +1,11 @@
+{
+  "plonix_extension": 1,
+  "name": "graphql-explorer",
+  "version": "0.1.0",
+  "description": "A GraphQL tab: every operation seen in traffic, grouped by type, with its variables and the requests that used it.",
+  "author": "Plonix contributors",
+  "homepage": "https://github.com/SergeyMalych/plonix",
+  "runtime": "wasm",
+  "entry": "graphql-explorer.wasm",
+  "capabilities": ["read-traffic", "ui-tab"]
+}

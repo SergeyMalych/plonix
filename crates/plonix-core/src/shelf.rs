@@ -48,6 +48,14 @@ pub struct Verified {
     pub bytes: Vec<u8>,
 }
 
+/// An installed pack and whether its file still matches the pinned checksum.
+#[derive(Debug, Clone)]
+pub struct Installed {
+    pub name: String,
+    pub entry: LockEntry,
+    pub intact: bool,
+}
+
 impl Shelf {
     pub fn new(dir: &Path, what: &'static str, cmd: &'static str, max: usize) -> Self {
         Self { dir: dir.to_path_buf(), what, cmd, max }
@@ -127,6 +135,20 @@ impl Shelf {
 
     pub fn installed_version(&self, name: &str) -> Option<String> {
         self.read_lock().ok()?.packs.get(name).map(|e| e.version.clone())
+    }
+
+    /// Everything installed here, with whether each file is still the one
+    /// that was verified.
+    pub fn installed(&self) -> Vec<Installed> {
+        let Ok(lock) = self.read_lock() else { return vec![] };
+        lock.packs
+            .into_iter()
+            .filter(|(name, _)| check_pack_name(name).is_ok())
+            .map(|(name, entry)| {
+                let intact = std::fs::read(self.pack_path(&name)).is_ok_and(|b| sha256_hex(&b) == entry.sha256);
+                Installed { name, entry, intact }
+            })
+            .collect()
     }
 
     /// Installed packs whose files still match their pinned checksums, and

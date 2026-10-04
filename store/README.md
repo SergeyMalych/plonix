@@ -1,14 +1,26 @@
-# Plonix community store
+# The Plonix Market
 
-This folder is the default Plonix store: `index.json` lists community packages, and `packs/` holds the rule packs it points to. `plonix store` reads it from this repository's `main` branch.
+This folder is the Plonix Market: `index.json` lists every package, `index.json.sig` is its signature, and the folders hold the files it points to:
 
-To add or update a pack:
+- `skills/`: agent skills ([format](../docs/market.md#writing-a-skill))
+- `packs/`: detection rule packs ([format](../docs/detection-rules.md))
+- `filterpacks/`: filter packs ([format](../docs/filters.md))
+- `extensions/`: extension manifests ([design](../docs/extensions.md))
 
-1. Add or edit `packs/<name>.json` ([format](../docs/detection-rules.md)).
-2. Run `plonix rules check packs/<name>.json`. It must be valid, and it prints the pack's `sha256`.
-3. Add or update the pack's entry in `index.json` with that `sha256`, the same `name` and `version` as the pack, and `"url": "packs/<name>.json"`. Bump `version` whenever the pack changes.
-4. Run `cargo test`: it fails if any entry in `index.json` doesn't match its file.
+Bundles live only in `index.json`: a bundle entry has no `url` or `sha256`, just `requires`.
 
-Packs named in `crates/plonix-core/src/rulepack.rs` (`BUILTIN`) are also compiled into Plonix, so they work without installing anything.
+Plonix reads the index from this repository's `main` branch, and a copy is built into every Plonix (`SNAPSHOT` in `crates/plonix-core/src/market.rs`).
 
-Everything here is treated as untrusted by Plonix: validated, checksum-verified, never executed. See [docs/extensions.md](../docs/extensions.md#the-trust-boundary).
+## Adding or updating a package
+
+1. Add or edit the file. Validate it: `plonix skills check`, `plonix rules check` or `plonix filters check`. Each prints the file's `sha256`.
+2. Add or update its entry in `index.json` with that `sha256`, the same `name` and `version` as the file, and its relative `url`. Bump `version` whenever the file changes. Names are unique across the whole index.
+3. A new file also goes in `SNAPSHOT` in `crates/plonix-core/src/market.rs`.
+4. Open a pull request. `cargo test` fails until a maintainer reviews it and re-signs the index:
+
+```sh
+plonix market check store/index.json
+plonix market sign store/index.json --key <maintainer key>
+```
+
+Everything here is treated as untrusted by Plonix: validated, checksum-verified against the signed index, never executed. See [docs/market.md](../docs/market.md#validated-packages).

@@ -249,6 +249,7 @@ const VIEWS = {
   map: { label: 'Map', ico: '⊞', render: renderMap },
   findings: { label: 'Findings', ico: '⚑', render: renderFindings },
   agents: { label: 'Agents', ico: '✦', render: renderAgents },
+  market: { label: 'Market', ico: '⬢', render: renderMarket },
   settings: { label: 'Settings', ico: '⚙', render: renderSettings, footer: true },
 };
 
@@ -2837,6 +2838,8 @@ async function loadAgents() {
       { class: 'muted fine' },
       'The engine enforces this: agents sign in with their own token, and anything outside this list is refused. Captured traffic never leaves this Mac through Plonix, but it can hold passwords and session tokens, so connect only agents you trust.',
     ),
+    h('div', { class: 'sechead' }, h('h3', { text: 'Skills' }), h('button', { class: 'btn sm ghost', text: 'Get more in the Market', onclick: () => leaveTo('market') })),
+    h('div', { class: 'card', id: 'agentskills' }, h('div', { class: 'ab muted', text: 'Loading skills…' })),
     h('div', { class: 'sechead' }, h('h3', { text: 'Try asking' })),
     h(
       'div',
@@ -2845,6 +2848,360 @@ async function loadAgents() {
     ),
   );
   if (fresh) renderAgentSettings(settingsCard);
+  loadAgentSkills();
+}
+
+/** Skills on the Agents screen: what agents are offered, and what is switched off. */
+async function loadAgentSkills() {
+  let r;
+  try {
+    r = await api('/api/skills');
+  } catch (e) {
+    return;
+  }
+  const box = $('#agentskills');
+  if (!box) return;
+  const skills = r.skills || [];
+  clear(
+    box,
+    h('div', { class: 'ab muted', text: 'Playbooks agents follow for a job in Plonix. Claude Code offers them as slash commands; any MCP client sees them as prompts.' }),
+    skills.map((sk) =>
+      h(
+        'div',
+        { class: 'skillrow' + (sk.available ? '' : ' off') },
+        h('div', { class: 'sk-main' }, h('b', { text: sk.title }), h('span', { class: 'muted', text: sk.description })),
+        h('code', { class: 'sk-cmd', text: '/mcp__plonix__' + sk.name }),
+        trustBadge(sk.verification, false),
+        sk.available
+          ? h('span', { class: 'tag in', text: 'offered' })
+          : h('span', { class: 'tag out', title: 'Uses ' + sk.missing.map(groupLabel).join(', ') + ', which is switched off in Settings', text: 'off' }),
+      ),
+    ),
+  );
+}
+
+/* ======================================================================
+   Market: skills, rules, filters, bundles and extensions from a signed catalog
+   ====================================================================== */
+
+const KIND_INFO = {
+  skill: { label: 'Skills', one: 'Skill', ico: '✦' },
+  rules: { label: 'Rules', one: 'Rule pack', ico: '◎' },
+  filters: { label: 'Filters', one: 'Filter pack', ico: '⧩' },
+  bundle: { label: 'Bundles', one: 'Bundle', ico: '❖' },
+  extension: { label: 'Extensions', one: 'Extension', ico: '⬡' },
+};
+
+const GROUP_LABELS = { traffic: 'Traffic', insights: 'Insights', map: 'Map', scope: 'Scope', findings: 'Findings', scan: 'Scans' };
+const groupLabel = (g) => GROUP_LABELS[g] || g;
+
+const MK = { data: null, kind: 'all', q: '', sel: null, busy: null };
+
+function renderMarket(main) {
+  const q = h('input', {
+    id: 'mq',
+    placeholder: 'Search skills, rules, filters, bundles and extensions',
+    spellcheck: 'false',
+    autocomplete: 'off',
+    value: MK.q,
+    oninput: (e) => {
+      MK.q = e.target.value;
+      closePackage();
+      drawMarket();
+    },
+  });
+  clear(
+    main,
+    h(
+      'div',
+      { class: 'view market' },
+      h(
+        'div',
+        { class: 'toolbar' },
+        h('h2', { text: 'Market' }),
+        h('div', { class: 'search' }, h('span', { class: 'mg', text: '⌕' }), q),
+        h('button', { class: 'btn sm', id: 'mupdate', hidden: true, onclick: updateAll }),
+        h('button', { class: 'btn sm', text: 'Add from a file or link', title: 'Add a skill, rule pack or filter pack from outside the Market. It is marked Not verified.', onclick: addExternal }),
+        h('button', { class: 'iconbtn', title: 'Check the Market again', text: '↻', onclick: () => loadMarket(true) }),
+      ),
+      h('div', { class: 'mtrust', id: 'mtrust' }),
+      h('div', { class: 'filterchips mkinds', id: 'mkinds' }),
+      h('div', { class: 'mbody', id: 'mbody' }, h('div', { class: 'pane' }, h('div', { class: 'mgrid', id: 'mgrid' }, h('div', { class: 'muted', text: 'Loading the Market…' }))), h('div', { id: 'mdetail' })),
+    ),
+  );
+  loadMarket(false);
+}
+
+async function loadMarket(refresh) {
+  try {
+    MK.data = await api('/api/market' + (refresh ? '?refresh=true' : ''));
+  } catch (e) {
+    const grid = $('#mgrid');
+    if (grid) clear(grid, h('div', { class: 'empty' }, h('h3', { text: 'The Market is not available' }), h('p', { text: e.message })));
+    return;
+  }
+  if (S.view !== 'market') return;
+  drawMarket();
+  if (MK.sel) showPackage(MK.sel);
+}
+
+/** The trust mark shown next to every package: verified, built in, not verified, or changed. */
+function trustBadge(v, full) {
+  if (!v) return null;
+  const cls = { verified: 'ok', built_in: 'in', unverified: 'warn', changed: 'bad' }[v.level] || 'warn';
+  const mark = v.level === 'verified' || v.level === 'built_in' ? '✓' : '!';
+  return h('span', { class: 'trust ' + cls, title: v.detail }, h('i', { text: mark }), full ? v.label : v.level === 'verified' ? 'Verified' : v.level === 'built_in' ? 'Built in' : v.level === 'changed' ? 'Changed' : 'Not verified');
+}
+
+const isUnverified = (p) => p.verification && ['unverified', 'changed'].includes(p.verification.level);
+
+function marketStatus(p) {
+  const st = p.status.state;
+  if (st === 'built_in') return { text: 'Built in', cls: 'tag in', action: null };
+  if (st === 'installed') return { text: 'Installed', cls: 'tag in', action: 'remove' };
+  if (st === 'update') return { text: 'Update ' + p.status.installed + ' → ' + p.version, cls: 'tag upd', action: 'update' };
+  if (st === 'needs_runtime') return { text: 'Coming soon', cls: 'tag out', action: null };
+  return { text: 'Available', cls: 'tag out', action: 'install' };
+}
+
+function drawMarket() {
+  const d = MK.data;
+  if (!d) return;
+  const trust = $('#mtrust');
+  if (trust) {
+    const ok = d.trust && d.trust.state === 'verified';
+    clear(
+      trust,
+      h('span', { class: 'mshield' + (ok ? ' ok' : ' bad'), text: ok ? '✓' : '!' }),
+      h('b', { text: ok ? 'Signed by ' + d.trust.publisher : 'Not signed' }),
+      h('span', { class: 'muted', text: ok ? ' · every package is checked against the signed list before it installs' : ' · nobody vouches for this list' }),
+      d.offline_reason ? h('span', { class: 'muted', title: d.offline_reason, text: ' · showing the copy built into Plonix' }) : null,
+    );
+  }
+  const counts = { all: d.packages.length };
+  for (const p of d.packages) counts[p.kind] = (counts[p.kind] || 0) + 1;
+  counts.installed = d.packages.filter((p) => ['installed', 'update'].includes(p.status.state)).length;
+  counts.unverified = d.packages.filter(isUnverified).length;
+  const kinds = $('#mkinds');
+  if (kinds) {
+    const chip = (key, label) =>
+      h('button', { class: 'chip' + (MK.kind === key ? ' on' : ''), onclick: () => ((MK.kind = key), drawMarket()) }, h('span', { text: label }), h('span', { class: 'n', text: counts[key] || 0 }));
+    clear(kinds, chip('all', 'All'), Object.entries(KIND_INFO).map(([k, v]) => chip(k, v.label)), h('span', { class: 'fsep' }), chip('installed', 'Installed'), counts.unverified ? chip('unverified', 'Not verified') : null);
+  }
+  const updates = d.packages.filter((p) => p.status.state === 'update');
+  const ub = $('#mupdate');
+  if (ub) {
+    ub.hidden = !updates.length;
+    ub.textContent = updates.length === 1 ? 'Install 1 update' : `Install ${updates.length} updates`;
+  }
+  const q = MK.q.trim().toLowerCase();
+  const list = d.packages.filter(
+    (p) =>
+      (MK.kind === 'all' || p.kind === MK.kind || (MK.kind === 'installed' && ['installed', 'update'].includes(p.status.state)) || (MK.kind === 'unverified' && isUnverified(p))) &&
+      (!q || p.name.includes(q) || p.description.toLowerCase().includes(q) || (KIND_INFO[p.kind] || {}).one.toLowerCase().includes(q)),
+  );
+  const grid = $('#mgrid');
+  if (!grid) return;
+  if (!list.length) return clear(grid, h('div', { class: 'empty', text: MK.kind === 'installed' ? 'Nothing installed from the Market yet.' : 'Nothing matches.' }));
+  clear(
+    grid,
+    list.map((p) => {
+      const st = marketStatus(p);
+      const k = KIND_INFO[p.kind] || { one: p.kind, ico: '•' };
+      return h(
+        'div',
+        { class: 'mpkg' + (MK.sel === p.name ? ' sel' : '') + (isUnverified(p) ? ' unv' : ''), tabindex: 0, onclick: () => showPackage(p.name), onkeydown: (e) => e.key === 'Enter' && showPackage(p.name) },
+        h('div', { class: 'mph' }, h('span', { class: 'mico k-' + p.kind, text: k.ico }), h('div', { class: 'mpn' }, h('b', { text: p.name }), h('span', { class: 'muted', text: k.one + ' · ' + p.version + (p.local ? ' · added by you' : '') })), h('span', { class: st.cls, text: st.text })),
+        h('div', { class: 'mpd', text: p.description }),
+        p.includes && p.includes.length ? h('div', { class: 'mpinc muted', text: 'Includes ' + p.includes.join(', ') }) : null,
+        h(
+          'div',
+          { class: 'mpf' },
+          trustBadge(p.verification, false),
+          st.action ? marketButton(p, st.action, true) : null,
+        ),
+      );
+    }),
+  );
+}
+
+function marketButton(p, action, small) {
+  const label = { install: p.kind === 'bundle' ? 'Install all' : 'Install', update: 'Update', remove: 'Remove' }[action];
+  const busy = MK.busy === p.name;
+  return h('button', {
+    class: 'btn' + (small ? ' sm' : '') + (action === 'remove' ? ' danger ghost' : ' primary'),
+    disabled: busy,
+    text: busy ? 'Working…' : label,
+    onclick: (e) => {
+      e.stopPropagation();
+      marketAction(p, action);
+    },
+  });
+}
+
+async function marketAction(p, action) {
+  if (action === 'remove' && p.kind === 'bundle' && !confirm(`Remove ${p.name} and the packages it installed?`)) return;
+  MK.busy = p.name;
+  drawMarket();
+  try {
+    const r = await api('/api/market/' + (action === 'remove' ? 'remove' : 'install'), { method: 'POST', body: { name: p.name } });
+    const changed = (r.changes || []).filter((c) => c.action !== 'unchanged');
+    const verb = action === 'remove' ? 'Removed' : action === 'update' ? 'Updated' : 'Installed';
+    toast(changed.length > 1 ? `${verb} ${p.name} with ${changed.length - 1} more` : `${verb} ${p.name}`, 'ok');
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+  MK.busy = null;
+  await loadMarket(false);
+  loadFacets();
+}
+
+/** Adds a file from outside the Market: look at it first, then confirm. It is always marked Not verified. */
+function addExternal() {
+  const input = h('input', { placeholder: 'https://example.com/skill.md  or  /path/to/pack.json', spellcheck: 'false', autocomplete: 'off' });
+  const preview = h('div', { class: 'xpreview' });
+  const check = h('button', { class: 'btn', text: 'Look at it' });
+  const confirmBtn = h('button', { class: 'btn primary', text: 'Add it, not verified', hidden: true });
+  const m = modal(
+    'Add from a file or link',
+    [
+      h('p', { class: 'muted mnote', text: 'A skill (Markdown), rule pack or filter pack. Plonix checks it in full, shows you what it does, and adds it only after you confirm. Nobody vouches for it, so it is marked Not verified.' }),
+      h('label', null, 'Address or path', input),
+      preview,
+    ],
+    [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), check, confirmBtn],
+  );
+  const run = async (confirm) => {
+    m.err.textContent = '';
+    const source = input.value.trim();
+    if (!source) return input.focus();
+    check.disabled = confirmBtn.disabled = true;
+    try {
+      const r = await api('/api/market/add', { method: 'POST', body: { source, confirm } });
+      if (r.added) {
+        closeModal();
+        toast(`Added ${r.file.name} (not verified)`, 'ok');
+        MK.kind = 'unverified';
+        await loadMarket(true);
+        return showPackage(r.file.name);
+      }
+      const f = r.file;
+      clear(
+        preview,
+        h('div', { class: 'xhead' }, h('b', { class: 'mono', text: f.name }), h('span', { class: 'muted', text: ` ${KIND_INFO[f.kind].one} · ${f.version} · ${f.author}` })),
+        h('p', { text: f.description }),
+        f.effects.map((e) => h('div', { class: 'mcap' }, h('span', { text: '•' }), e)),
+        f.replaces ? h('p', { class: 'muted', text: `This replaces ${f.name} ${f.replaces}, which is installed.` }) : null,
+        h('div', { class: 'mtrustbox warn' }, h('span', { class: 'trust warn' }, h('i', { text: '!' }), 'Not verified'), h('p', { text: 'It did not come from a signed Market. It is checked and cannot run code, but nobody has reviewed what it says or does.' })),
+        h('p', { class: 'muted fine mono', text: 'sha256 ' + f.sha256 }),
+      );
+      confirmBtn.hidden = false;
+    } catch (e) {
+      m.err.textContent = e.message;
+      confirmBtn.hidden = true;
+      clear(preview);
+    }
+    check.disabled = confirmBtn.disabled = false;
+  };
+  check.onclick = () => run(false);
+  confirmBtn.onclick = () => run(true);
+  input.addEventListener('input', () => ((confirmBtn.hidden = true), clear(preview)));
+  input.addEventListener('keydown', (e) => e.key === 'Enter' && run(false));
+}
+
+async function updateAll() {
+  try {
+    const r = await api('/api/market/update', { method: 'POST', body: {} });
+    toast(`Updated ${(r.changes || []).length} package(s)`, 'ok');
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+  loadMarket(false);
+}
+
+function closePackage() {
+  MK.sel = null;
+  const body = $('#mbody');
+  if (body) body.classList.remove('paged');
+  const slot = $('#mdetail');
+  if (slot) clear(slot);
+  for (const c of document.querySelectorAll('.mpkg')) c.classList.remove('sel');
+}
+
+/** An item's own page: what it is, what it does, what it needs, who made it and how far to trust it. */
+async function showPackage(name) {
+  MK.sel = name;
+  const mbody = $('#mbody');
+  if (mbody) mbody.classList.add('paged');
+  for (const c of document.querySelectorAll('.mpkg')) c.classList.toggle('sel', c.querySelector('b').textContent === name);
+  const slot = $('#mdetail');
+  if (!slot) return;
+  const p = MK.data && MK.data.packages.find((x) => x.name === name);
+  if (!p) return;
+  const panel = h('article', { class: 'mside mpage' }, h('div', { class: 'muted', text: 'Loading…' }));
+  clear(slot, panel);
+  let d;
+  try {
+    d = await api('/api/market/' + encodeURIComponent(name));
+  } catch (e) {
+    return clear(panel, h('div', { class: 'perr', text: e.message }));
+  }
+  if (MK.sel !== name) return;
+  const k = KIND_INFO[p.kind] || { one: p.kind, ico: '•' };
+  const st = marketStatus(p);
+  const det = d.detail || {};
+  const sec = (title, ...kids) => h('div', { class: 'msec' }, h('h4', { text: title }), kids);
+  const parts = [];
+  const about = p.about && p.about.length ? p.about : [p.description];
+  parts.push(sec('About', about.map((t) => h('p', { class: 'mabout', text: t }))));
+  const rows = [
+    ['Type', k.one],
+    ['Version', p.version + (st.action === 'update' ? ` (you have ${p.status.installed})` : '')],
+    ['Made by', p.author + (p.local ? ' · added by you' : '')],
+    ['Status', st.text],
+    p.sha256 ? ['Checksum', h('span', { class: 'mono fine', text: 'sha256 ' + p.sha256 })] : null,
+    p.url ? ['Source', h('span', { class: 'mono fine', text: p.url })] : null,
+    p.homepage ? ['Homepage', h('a', { class: 'link', href: p.homepage, target: '_blank', rel: 'noopener', text: p.homepage })] : null,
+  ].filter(Boolean);
+  parts.push(sec('Details', h('dl', { class: 'mdl' }, rows.map(([a, b]) => [h('dt', { text: a }), h('dd', null, b)]))));
+  const within = (MK.data.packages || []).filter((x) => x.kind === 'bundle' && (x.includes || []).includes(name) && x.name !== name);
+  if (within.length) parts.push(sec('Part of', h('div', { class: 'mchips' }, within.map((b) => h('button', { class: 'chip', text: b.name, onclick: () => showPackage(b.name) })))));
+  if (p.includes && p.includes.length) {
+    parts.push(sec(p.kind === 'bundle' ? 'Installs' : 'Also installs', h('div', { class: 'mchips' }, p.includes.map((n) => h('button', { class: 'chip', text: n, onclick: () => showPackage(n) })))));
+  }
+  if (det.skill) {
+    const sk = det.skill;
+    parts.push(
+      sec(
+        'What agents can read with it',
+        h('div', { class: 'mchips' }, sk.uses.map((g) => h('span', { class: 'chip' + (sk.missing.includes(g) ? ' k-neg' : ''), text: groupLabel(g) }))),
+        h('p', { class: 'muted fine', text: sk.available ? 'Read-only, like every agent tool. A skill never gives an agent more than your agent settings allow.' : 'Agents will not be offered this skill: ' + sk.missing.map(groupLabel).join(', ') + ' is switched off in Settings › AI agents.' }),
+      ),
+    );
+    if (sk.arguments.length) parts.push(sec('Asks for', sk.arguments.map((a) => h('div', { class: 'marg' }, h('code', { text: a.name }), h('span', { class: 'muted', text: (a.required ? '' : '(optional) ') + a.description })))));
+    parts.push(sec('Instructions', h('pre', { class: 'mpre', text: sk.instructions })));
+    parts.push(h('p', { class: 'muted fine' }, 'In Claude Code, run ', h('code', { text: '/mcp__plonix__' + p.name }), ' once it is installed.'));
+  }
+  if (det.extension) {
+    parts.push(
+      sec(
+        'Would be allowed to',
+        det.extension.capabilities.map((c) => h('div', { class: 'mcap' + (c.sensitive ? ' warn' : '') }, h('span', { text: c.sensitive ? '!' : '✓' }), c.what)),
+        h('p', { class: 'muted fine', text: 'Extensions that run code need the sandboxed extension runtime, which is not in this version of Plonix yet. Until then they are listed so you can see what is coming.' }),
+      ),
+    );
+  }
+  if (det.rules) parts.push(sec(`Detects ${det.rules.count} technologies`, h('div', { class: 'mchips' }, det.rules.detects.map((n) => h('span', { class: 'chip', text: n })))));
+  if (det.filters) parts.push(sec('Filters', det.filters.map((f) => h('div', { class: 'marg' }, h('code', { text: 'is:' + f.id }), h('span', { class: 'muted', text: f.label + ' · ' + f.query })))));
+  clear(
+    panel,
+    h('div', { class: 'mback' }, h('button', { class: 'btn sm', text: '← Market', title: 'Back to the list', onclick: () => (closePackage(), drawMarket()) })),
+    h('div', { class: 'mside-h' }, h('span', { class: 'mico big k-' + p.kind, text: k.ico }), h('div', null, h('h3', { text: p.name }), h('div', { class: 'muted', text: `${k.one} · ${p.version} · ${p.author}` }))),
+    h('p', { class: 'mdesc', text: p.description }),
+    h('div', { class: 'mact' }, h('span', { class: st.cls, text: st.text }), st.action ? marketButton(p, st.action, false) : null, st.action === 'update' ? marketButton(p, 'remove', false) : null),
+    h('div', { class: 'mtrustbox ' + ({ verified: 'ok', built_in: 'ok', unverified: 'warn', changed: 'bad' }[p.verification.level] || 'warn') }, trustBadge(p.verification, true), h('p', { text: p.verification.detail })),
+    parts,
+  );
 }
 
 /* ======================================================================
@@ -3068,7 +3425,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   const keys = Object.keys(VIEWS).filter((k) => !VIEWS[k].footer);
-  if (/^[1-6]$/.test(e.key)) return go(keys[Number(e.key) - 1]);
+  if (/^[1-9]$/.test(e.key) && keys[Number(e.key) - 1]) return go(keys[Number(e.key) - 1]);
   if (e.key === '\\') return toggleSidebar();
   if (S.view !== 'traffic') return;
   if (e.key === '/') {

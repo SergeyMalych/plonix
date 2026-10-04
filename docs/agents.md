@@ -113,3 +113,7 @@ The access model is built to grow one step, without loosening anything that exis
 3. Matching MCP tools appear only when the engine reports that mode.
 
 Changing scope, recording findings and controlling the engine stay with you in every mode. Active mode is not built yet.
+
+## Skills
+
+Skills are playbooks for one job in Plonix (get to know a host, explain a request, draft a finding). `plonix mcp` offers them as MCP prompts, so Claude Code lists them as `/mcp__plonix__<name>` commands, and as the `list_skills` and `get_skill` tools. A skill can only use what these settings allow: when a capability it reads is switched off, agents are not offered it. More skills come from the Market. See [market.md](market.md#skills).
