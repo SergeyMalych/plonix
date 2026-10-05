@@ -6,7 +6,7 @@ This folder is the Plonix Market: `index.json` lists every package, `index.json.
 - `packs/`: detection rule packs ([format](../docs/detection-rules.md))
 - `filterpacks/`: filter packs ([format](../docs/filters.md))
 - `lists/`: payload list packs ([format](../docs/bench.md))
-- `platforms/`: bug bounty platform packs ([format](../docs/programs.md#platform-packs))
+- `platforms/`: bug bounty platform packs ([format](../docs/programs.md#platform-packs)). Packs built into Plonix, such as `hackerone.json`, are listed in the official Market automatically and stay out of `index.json`.
 - `extensions/`: extension packages (`.plonixext`) and listings of ones still to come ([extensions](../docs/extensions.md))
 
 Bundles live only in `index.json`: a bundle entry has no `url` or `sha256`, just `requires`.
