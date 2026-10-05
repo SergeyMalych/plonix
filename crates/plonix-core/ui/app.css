@@ -717,7 +717,13 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .cmsg.user .cbub { background: var(--accent); color: var(--accent-fg); border-top-right-radius: 4px; }
 .ctool { align-self: flex-start; font-size: 11px; color: var(--fg-2); background: var(--accent-soft); border-radius: 6px; padding: 3px 9px; }
 .cerr { align-self: flex-start; font-size: 12px; color: var(--crit); background: var(--crit-soft); border: 1px solid var(--crit); border-radius: 8px; padding: 7px 11px; line-height: 1.5; max-width: 90%; }
-.cthink { display: flex; gap: 4px; align-self: flex-start; padding: 8px 12px; }
+.cthink { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 4px; align-self: stretch; padding: 6px 12px; font-size: 12px; }
+.cthink .dots { display: flex; gap: 4px; }
+.cthink .cstep { font-weight: 600; color: var(--fg-2); }
+.cthink .cstat { color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.cthink .cquiet { flex-basis: 100%; color: var(--fg-3); font-size: 11px; line-height: 1.5; }
+.cmsg.draft .cbub::after { content: '▍'; margin-left: 1px; color: var(--fg-3); animation: cblink 1s infinite steps(1); }
+.cdone { align-self: flex-start; font-size: 11px; color: var(--fg-3); font-variant-numeric: tabular-nums; padding: 0 2px; }
 .cthink .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fg-3); animation: cblink 1.2s infinite ease-in-out both; }
 .cthink .dot:nth-child(2) { animation-delay: .2s; }
 .cthink .dot:nth-child(3) { animation-delay: .4s; }

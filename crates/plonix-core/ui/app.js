@@ -2354,10 +2354,11 @@ async function writeFindingWithClaude(ids, note, onProgress, signal) {
     for (const ev of snap.events) {
       since = ev.seq + 1;
       if (ev.type === 'text') text += ev.text + '\n';
-      else if (ev.type === 'tool') onProgress('Reading ' + ev.text.replace(/^mcp__plonix__/, '').replace(/_/g, ' ') + '…');
       else if (ev.type === 'error') throw new Error(ev.text);
     }
     if (snap.status !== 'running') break;
+    const p = snap.progress;
+    if (p) onProgress(`${p.step}… ${claudeStats(p)}` + (p.idle_ms > CLAUDE_QUIET_MS ? ' · waiting on Claude Code' : ''));
     await new Promise((r) => setTimeout(r, 600));
   }
   const o = parseFindingAnswer(text);
@@ -6386,6 +6387,14 @@ function askButton(subject, title) {
 }
 
 const fmtTok = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n));
+const fmtDur = (ms) => {
+  const s = Math.floor(ms / 1000);
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+};
+/** How much Claude has read and written so far, and for how long: "38k read · 120 written · 0:14". */
+const claudeStats = (p) => [p.tokens_in ? fmtTok(p.tokens_in) + ' tokens read' : null, p.tokens_out ? fmtTok(p.tokens_out) + ' written' : null, fmtDur(p.elapsed_ms)].filter(Boolean).join(' · ');
+/** Claude Code says nothing for this long: tell the user it is still waiting, not frozen. */
+const CLAUDE_QUIET_MS = 15000;
 
 /**
  * The Ask sheet: shows exactly what will be shared and how big it is, lets
@@ -6512,15 +6521,47 @@ async function askClaude(subject, opts = {}) {
 
   /* ---- transcript rendering ---- */
   const scroll = () => (transcript.scrollTop = transcript.scrollHeight);
+  // While Claude works: what it is doing, tokens read and written, time.
   let thinking = null;
+  let draft = null;
   const setThinking = (on) => {
     if (on && !thinking) {
-      thinking = h('div', { class: 'cthink' }, h('span', { class: 'dot' }), h('span', { class: 'dot' }), h('span', { class: 'dot' }));
+      thinking = h(
+        'div',
+        { class: 'cthink' },
+        h('span', { class: 'dots' }, h('span', { class: 'dot' }), h('span', { class: 'dot' }), h('span', { class: 'dot' })),
+        h('span', { class: 'cstep', text: 'Starting Claude Code' }),
+        h('span', { class: 'cstat' }),
+        h('div', { class: 'cquiet', hidden: true }),
+      );
       transcript.append(thinking);
       scroll();
     } else if (!on && thinking) {
       thinking.remove();
       thinking = null;
+    }
+    if (!on) dropDraft();
+  };
+  const dropDraft = () => {
+    if (draft) draft.remove();
+    draft = null;
+  };
+  const showProgress = (p) => {
+    if (!p || !thinking) return;
+    thinking.querySelector('.cstep').textContent = p.step;
+    thinking.querySelector('.cstat').textContent = claudeStats(p);
+    const quiet = thinking.querySelector('.cquiet');
+    quiet.hidden = p.idle_ms < CLAUDE_QUIET_MS;
+    quiet.textContent = `No word from Claude Code for ${Math.round(p.idle_ms / 1000)}s. It may be busy or slow to connect; it is stopped after 2 minutes of silence.`;
+    // The answer as it is being written, replaced by the finished text.
+    if (p.draft) {
+      if (!draft) {
+        draft = bubble('bot draft', '');
+        add(draft);
+      }
+      const atEnd = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 40;
+      draft.firstChild.textContent = p.draft;
+      if (atEnd) scroll();
     }
   };
   const add = (node) => {
@@ -6578,7 +6619,7 @@ async function askClaude(subject, opts = {}) {
       for (const ev of snap.events) {
         convo.since = ev.seq + 1;
         if (ev.type === 'text') {
-          setThinking(false);
+          dropDraft();
           add(bubble('bot', ev.text));
         } else if (ev.type === 'tool') {
           add(h('div', { class: 'ctool', text: '✦ ' + ev.text }));
@@ -6595,6 +6636,8 @@ async function askClaude(subject, opts = {}) {
       if (snap.status !== 'running') {
         convo.running = false;
         setThinking(false);
+        const p = snap.progress;
+        if (snap.status === 'done' && p) add(h('div', { class: 'cdone', text: `Answered in ${claudeStats(p).replace(/^(.*) · ([\d:]+)$/, '$2 · $1')}` }));
         if (convo.proposed) offerReview();
         if (snap.status === 'done') {
           followRow.hidden = false;
@@ -6604,6 +6647,7 @@ async function askClaude(subject, opts = {}) {
       }
       // Keep the working indicator alive between turns.
       if (!thinking) setThinking(true);
+      showProgress(snap.progress);
       await sleep(500);
     }
     stopBtn.hidden = true;
