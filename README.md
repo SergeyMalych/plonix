@@ -50,7 +50,8 @@ Plonix has a handful of tools, each with its own name. They are the same in the 
 | **Map** | Hosts, the technologies behind them and their endpoints and parameters | `plonix hosts`, `plonix tech` |
 | **Findings** | What you found, with the requests that prove it attached as evidence. Edit, confirm, close and export them as a report | `plonix findings` |
 | **Agents** | Which AI agents are connected to the project, what they may do, and how to connect one | `plonix connect claude`, `plonix mcp` |
-| **Market** | One signed catalog of skills, rule packs, filter packs, bundles and extensions | `plonix market`, ⌘7 |
+| **Programs** | Bug bounty and disclosure programs: bring one in, and its scope and rules (request rate, required headers, no automated testing) apply to everything Plonix sends | `plonix program`, ⌘9 |
+| **Market** | One signed catalog of skills, rule packs, filter packs, platforms, bundles and extensions | `plonix market`, ⌘7 |
 | **Extensions** | Sandboxed analyzers that add notes to the Lens and propose findings for you to confirm | `plonix extensions` |
 | **Skills** | Playbooks AI agents follow for a job in Plonix, offered over MCP | `plonix skills` |
 | **Rules** | Community rule packs that teach Plonix to recognise technologies | `plonix rules` |
@@ -458,6 +459,7 @@ site/             the plonix.io website; site/docs is generated from docs/ by sc
 - [x] The Scans screen in the window (⌘8)
 - [x] Crawl with a browser for JavaScript-heavy apps (`plonix crawl --browser`)
 - [x] Downloadable releases: a disk image for Apple silicon and Intel, with updates you approve
+- [x] Programs: bring in a bug bounty or disclosure program (HackerOne, a pasted policy, or a domain's security.txt) and Plonix follows its scope and rules (`plonix program`, ⌘9)
 
 **Coming**
 - [ ] Opt-in active mode for agents: replay and send within accepted scope, switched on by you ([design](docs/agents.md#later-an-opt-in-active-mode))

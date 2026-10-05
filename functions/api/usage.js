@@ -17,6 +17,7 @@ const EVENTS = new Set([
   'bench_send',
   'bench_run',
   'scan_run',
+  'program_applied',
   'crawl_run',
   'finding_added',
   'report_exported',
@@ -32,6 +33,7 @@ const EVENTS = new Set([
   'screen_agents',
   'screen_market',
   'screen_scans',
+  'screen_programs',
   'screen_settings',
 ]);
 

@@ -22,7 +22,7 @@ const REPO = 'https://github.com/SergeyMalych/plonix';
 const RAW = 'https://raw.githubusercontent.com/SergeyMalych/plonix/main';
 
 // Sidebar order; docs not listed here follow, by name.
-const ORDER = ['projects', 'bench', 'filters', 'scanning', 'agents', 'market', 'detection-rules', 'extensions', 'updates', 'privacy', 'crash-reports', 'releasing'];
+const ORDER = ['projects', 'bench', 'filters', 'scanning', 'programs', 'agents', 'market', 'detection-rules', 'extensions', 'updates', 'privacy', 'crash-reports', 'releasing'];
 
 // ---------------------------------------------------------------- markdown
 

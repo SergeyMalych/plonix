@@ -46,6 +46,7 @@ pub const EVENTS: &[&str] = &[
     "bench_send",
     "bench_run",
     "scan_run",
+    "program_applied",
     "crawl_run",
     "finding_added",
     "report_exported",
@@ -61,6 +62,7 @@ pub const EVENTS: &[&str] = &[
     "screen_agents",
     "screen_market",
     "screen_scans",
+    "screen_programs",
     "screen_settings",
 ];
 

@@ -710,6 +710,11 @@ impl Store {
             > 0)
     }
 
+    /// Removes every scope rule carrying exactly this note (a program's rules).
+    pub fn delete_rules_noted(&self, note: &str) -> Result<usize> {
+        Ok(self.conn.lock().unwrap().execute("DELETE FROM scope_rules WHERE note = ?1", [note])?)
+    }
+
     /// Removes every exclusion rule a group owns.
     pub fn delete_group_rules(&self, group_id: &str) -> Result<usize> {
         Ok(self.conn.lock().unwrap().execute("DELETE FROM scope_rules WHERE note = ?1", [format!("group:{group_id}")])?)

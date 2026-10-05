@@ -8,6 +8,7 @@ The Market is where Plonix gets everything modular, in one catalog:
 | **Rule pack** | Technology detection rules ([format](detection-rules.md)) | `$PLONIX_HOME/rules` |
 | **Filter pack** | Named Traffic filters such as `is:auth` ([format](filters.md)) | `$PLONIX_HOME/filters` |
 | **List pack** | Named payload lists for the Bench ([format](bench.md)) | `$PLONIX_HOME/lists` |
+| **Platform** | Where bug bounty programs come from: a platform's API address, sign-in and data shape ([format](programs.md#platform-packs)) | `$PLONIX_HOME/platforms` |
 | **Bundle** | A set of other packages, installed and removed together | `$PLONIX_HOME/market/bundles.json` |
 | **Extension** | Code that runs in the Plonix sandbox: today, passive analyzers ([extensions.md](extensions.md)) | `$PLONIX_HOME/extensions` |
 

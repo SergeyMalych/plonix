@@ -38,6 +38,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
 use ring::signature::{ED25519, Ed25519KeyPair, KeyPair, UnparsedPublicKey};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::detect::{check_text, clean};
 use crate::rulepack::{check_pack_name, check_version};
@@ -88,12 +89,14 @@ pub enum Kind {
     Bundle,
     /// A sandboxed extension (see docs/extensions.md; not installable yet).
     Extension,
+    /// A bug bounty platform: where programs and their scope come from (declarative).
+    Platform,
     /// A tool: switches on a capability built into Plonix (see [`crate::tool`]).
     Tool,
 }
 
 impl Kind {
-    pub const ALL: &[Kind] = &[Kind::Skill, Kind::Rules, Kind::Filters, Kind::List, Kind::Bundle, Kind::Extension, Kind::Tool];
+    pub const ALL: &[Kind] = &[Kind::Skill, Kind::Rules, Kind::Filters, Kind::List, Kind::Bundle, Kind::Extension, Kind::Platform, Kind::Tool];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -103,6 +106,7 @@ impl Kind {
             Kind::List => "list",
             Kind::Bundle => "bundle",
             Kind::Extension => "extension",
+            Kind::Platform => "platform",
             Kind::Tool => "tool",
         }
     }
@@ -116,6 +120,7 @@ impl Kind {
             Kind::List => "list pack",
             Kind::Bundle => "bundle",
             Kind::Extension => "extension",
+            Kind::Platform => "platform",
             Kind::Tool => "tool",
         }
     }
@@ -149,7 +154,13 @@ pub fn parse(bytes: &[u8]) -> Result<Index, String> {
     if bytes.len() > MAX_INDEX_BYTES {
         return Err(format!("index is larger than {MAX_INDEX_BYTES} bytes"));
     }
-    let index: Index = serde_json::from_slice(bytes).map_err(|e| format!("not a valid Market index: {}", clean(&e.to_string(), 300)))?;
+    let mut raw: Value = serde_json::from_slice(bytes).map_err(|e| format!("not a valid Market index: {}", clean(&e.to_string(), 300)))?;
+    // A newer Market can list kinds of package this Plonix does not know yet:
+    // leave those out instead of refusing the whole Market.
+    if let Some(Value::Array(packages)) = raw.get_mut("packages") {
+        packages.retain(|p| p.get("kind").and_then(Value::as_str).is_none_or(|k| Kind::ALL.iter().any(|known| known.as_str() == k)));
+    }
+    let index: Index = serde_json::from_value(raw).map_err(|e| format!("not a valid Market index: {}", clean(&e.to_string(), 300)))?;
     if !(1..=FORMAT_VERSION).contains(&index.plonix_index) {
         return Err(format!("index format {} is not supported (this Plonix reads formats 1 to {FORMAT_VERSION})", index.plonix_index));
     }
@@ -165,8 +176,8 @@ pub fn parse(bytes: &[u8]) -> Result<Index, String> {
         if !seen.insert(p.name.clone()) {
             return Err(at("listed twice".into()));
         }
-        if index.plonix_index < 2 && (matches!(p.kind, Kind::Skill | Kind::List | Kind::Bundle | Kind::Tool) || !p.requires.is_empty()) {
-            return Err(at("skills, list packs, tools, bundles and requirements need index format 2".into()));
+        if index.plonix_index < 2 && (matches!(p.kind, Kind::Skill | Kind::List | Kind::Bundle | Kind::Platform | Kind::Tool) || !p.requires.is_empty()) {
+            return Err(at("skills, list packs, platforms, tools, bundles and requirements need index format 2".into()));
         }
         check_version(&p.version).map_err(|e| at(format!("version: {e}")))?;
         check_text(&p.description, 300, false).map_err(|e| at(format!("description: {e}")))?;
@@ -483,7 +494,9 @@ mod tests {
             "a".repeat(64)
         );
         assert_eq!(parse(good.as_bytes()).unwrap().packages.len(), 1);
-        assert!(parse(good.replace("\"rules\"", "\"binary\"").as_bytes()).is_err());
+        // A kind this Plonix does not know yet is left out, not fatal.
+        assert!(parse(good.replace("\"rules\"", "\"binary\"").as_bytes()).unwrap().packages.is_empty());
+        assert!(parse(good.replace("\"rules\"", "7").as_bytes()).is_err());
         assert!(parse(good.replace(&"a".repeat(64), "abc").as_bytes()).unwrap_err().contains("sha256"));
         assert!(parse(good.replace("\"name\":\"a\"", "\"name\":\"../a\"").as_bytes()).is_err());
     }
@@ -557,6 +570,7 @@ mod tests {
                 Kind::Tool => crate::tool::parse(&data).map(|x| (x.doc.name, x.doc.version)),
                 Kind::Skill => crate::skill::parse(&data).map(|x| (x.name, x.version)),
                 Kind::Extension => crate::market::extension_manifest(&data).map(|m| (m.name, m.version)),
+                Kind::Platform => crate::platform::parse(&data).map(|x| (x.doc.name, x.doc.version)),
                 Kind::Bundle => unreachable!(),
             }
             .unwrap();

@@ -32,6 +32,7 @@ use crate::extension::{self, Capability, Consent, ExtensionLibrary};
 use crate::filterpack::{self, FilterLibrary};
 use crate::listpack::{self, ListLibrary};
 use crate::paths::{Home, write_private};
+use crate::platform::{self, PlatformLibrary};
 use crate::registry::{self, Index, Kind, Location, OFFICIAL_PUBLISHER, Package, TrustedKey};
 use crate::rulepack::{self, Library, MAX_PACK_BYTES, newer, sha256_hex};
 use crate::settings::{self, Field, Level, Section};
@@ -53,6 +54,7 @@ pub const SNAPSHOT: &[(&str, &str)] = &[
     ("filterpacks/leaks.json", include_str!("../../../store/filterpacks/leaks.json")),
     ("lists/starter-lists.json", include_str!("../../../store/lists/starter-lists.json")),
     ("lists/extra-wordlists.json", include_str!("../../../store/lists/extra-wordlists.json")),
+    ("platforms/hackerone.json", include_str!("../../../store/platforms/hackerone.json")),
     ("tools/saved-users.json", include_str!("../../../store/tools/saved-users.json")),
     ("tools/access-check.json", include_str!("../../../store/tools/access-check.json")),
     ("skills/triage-host.md", include_str!("../../../store/skills/triage-host.md")),
@@ -238,7 +240,9 @@ impl Catalog {
     /// Downloads a package and checks it against the index: checksum,
     /// format, name and version. Nothing is installed.
     pub fn fetch(&self, p: &Package) -> Result<Vec<u8>> {
+        let builtin = (p.kind == Kind::Platform).then(|| platform::BUILTIN.iter().find(|(n, _)| *n == p.name)).flatten();
         let bytes = match &self.origin {
+            _ if builtin.is_some() => builtin.unwrap().1.as_bytes().to_vec(),
             Origin::Bundled => SNAPSHOT
                 .iter()
                 .find(|(path, _)| *path == p.url)
@@ -277,6 +281,7 @@ pub fn describe(kind: Kind, bytes: &[u8]) -> Result<(String, String), String> {
         Kind::List => listpack::parse(bytes).map(|x| (x.doc.name, x.doc.version)),
         Kind::Tool => tool::parse(bytes).map(|x| (x.doc.name, x.doc.version)),
         Kind::Skill => skill::parse(bytes).map(|x| (x.name, x.version)),
+        Kind::Platform => platform::parse(bytes).map(|x| (x.doc.name, x.doc.version)),
         // A package with code, or a bare manifest: an extension listed before its code is published.
         Kind::Extension => match extension::parse_package(bytes) {
             Ok(p) => Ok((p.manifest.name, p.manifest.version)),
@@ -364,7 +369,36 @@ fn open_at(loc: &Location, trusted: &[TrustedKey], allow_unsigned: bool) -> Resu
         ),
     };
     inject_builtin_tools(&mut index, &trust);
+    inject_builtin_platforms(&mut index, &trust);
     Ok(Catalog { origin: Origin::Remote(loc.clone()), index, trust, offline_reason: None })
+}
+
+/// Lists the platform packs built into Plonix in the official Market. They
+/// ship inside Plonix, so they are not in the signed index, and adding one
+/// needs no new signature. Other catalogs never get them.
+fn inject_builtin_platforms(index: &mut Index, trust: &Trust) {
+    if !matches!(trust, Trust::Verified { key, .. } if key == registry::OFFICIAL_KEY) {
+        return;
+    }
+    for (name, text) in platform::BUILTIN {
+        if index.get(name).is_some() {
+            continue;
+        }
+        let Ok(pack) = platform::parse(text.as_bytes()) else { continue };
+        let d = pack.doc;
+        index.packages.push(Package {
+            name: d.name,
+            kind: Kind::Platform,
+            version: d.version,
+            description: d.description,
+            author: d.author,
+            url: format!("platforms/{name}.json"),
+            sha256: pack.sha256,
+            homepage: d.homepage,
+            about: d.about,
+            requires: vec![],
+        });
+    }
 }
 
 /// The copy of the Plonix Market built into this Plonix.
@@ -375,6 +409,7 @@ pub fn bundled(trusted: &[TrustedKey]) -> Result<Catalog> {
     let key = registry::verify(bytes, file("index.json.sig"), trusted).map_err(|e| anyhow!("built-in Market index: {e}"))?;
     let trust = Trust::Verified { key: key.key, publisher: key.publisher };
     inject_builtin_tools(&mut index, &trust);
+    inject_builtin_platforms(&mut index, &trust);
     Ok(Catalog { origin: Origin::Bundled, index, trust, offline_reason: None })
 }
 
@@ -563,6 +598,7 @@ pub struct Market {
     pub tools: ToolLibrary,
     pub skills: SkillLibrary,
     pub extensions: ExtensionLibrary,
+    pub platforms: PlatformLibrary,
 }
 
 impl Market {
@@ -575,6 +611,7 @@ impl Market {
             tools: ToolLibrary::new(home),
             skills: SkillLibrary::new(home),
             extensions: ExtensionLibrary::new(home),
+            platforms: PlatformLibrary::new(home),
         }
     }
 
@@ -634,6 +671,7 @@ impl Market {
         v.extend(self.tools.installed().into_iter().map(|i| (Kind::Tool, i)));
         v.extend(self.skills.installed().into_iter().map(|i| (Kind::Skill, i)));
         v.extend(self.extensions.installed().into_iter().map(|i| (Kind::Extension, i)));
+        v.extend(self.platforms.installed().into_iter().map(|i| (Kind::Platform, i)));
         v
     }
 
@@ -731,6 +769,8 @@ pub fn detect_kind(bytes: &[u8]) -> Result<Kind, String> {
         Ok(Kind::Filters)
     } else if v.get("plonix_lists").is_some() {
         Ok(Kind::List)
+    } else if v.get("plonix_platform").is_some() {
+        Ok(Kind::Platform)
     } else if v.get("plonix_tool").is_some() {
         Ok(Kind::Tool)
     } else if v.get("plonix_extension_package").is_some() {
@@ -789,6 +829,17 @@ impl Market {
                     vec![format!("Adds {} payload lists for the Bench. Data only; you choose when to send them.", p.doc.lists.len())],
                 )
             }
+            Kind::Platform => {
+                let p = platform::parse(&bytes)?;
+                (
+                    p.doc.description.clone(),
+                    p.doc.author.clone(),
+                    vec![
+                        format!("Lets Plonix read your programs from {} at {}, with a token you give it. It talks to no other address.", p.doc.title, p.doc.api),
+                        "Data only; it cannot run code, and the program's scope still needs your review before it applies.".into(),
+                    ],
+                )
+            }
             Kind::Tool => {
                 let p = tool::parse(&bytes)?;
                 let on = tool::feature(&p.doc.feature).map(|f| f.title).unwrap_or("a built-in tool");
@@ -821,6 +872,7 @@ impl Market {
             Kind::List => self.lists.install(&ext.bytes, src, Some(&ext.sha256))?.1,
             Kind::Tool => self.tools.install(&ext.bytes, src, Some(&ext.sha256))?.1,
             Kind::Skill => self.skills.install(&ext.bytes, src, Some(&ext.sha256))?.1,
+            Kind::Platform => self.platforms.install(&ext.bytes, src, Some(&ext.sha256))?.1,
             Kind::Extension => self.extensions.install(&ext.bytes, src, Some(&ext.sha256), &Consent { approve_new: true, ..consent.clone() })?.1,
             Kind::Bundle => bail!("a bundle cannot be added from a file"),
         };
@@ -844,6 +896,7 @@ impl Market {
         let lists = self.lists.load();
         let skills = self.skills.load();
         let extensions = self.extensions.list();
+        let platforms = self.platforms.load().0;
         let mut out = vec![];
         for (kind, item) in self.installed_all() {
             if cat.index.get(&item.name).is_some() {
@@ -855,6 +908,7 @@ impl Market {
                 Kind::List => lists.packs.iter().find(|i| i.name == item.name).map(|i| (i.description.clone(), i.author.clone())),
                 Kind::Skill => skills.get(&item.name).map(|(s, ..)| (s.description.clone(), s.author.clone())),
                 Kind::Extension => extensions.iter().find(|e| e.name == item.name && e.intact).map(|e| (e.description.clone(), e.author.clone())),
+                Kind::Platform => platforms.iter().find(|(p, ..)| p.doc.name == item.name).map(|(p, ..)| (p.doc.description.clone(), p.doc.author.clone())),
                 Kind::Tool => tool::feature(&item.name).map(|f| (f.summary.to_string(), "Plonix contributors".to_string())),
                 _ => None,
             }
@@ -887,6 +941,7 @@ impl Market {
             Kind::Filters => filterpack::BUILTIN,
             Kind::List => listpack::BUILTIN,
             Kind::Skill => skill::BUILTIN,
+            Kind::Platform => platform::BUILTIN,
             Kind::Bundle | Kind::Extension | Kind::Tool => return false,
         };
         list.iter().any(|(n, _)| *n == name)
@@ -901,6 +956,7 @@ impl Market {
             Kind::Skill => self.skills.installed_version(name),
             Kind::Bundle => self.read_bundles().bundles.get(name).map(|b| b.version.clone()),
             Kind::Extension => self.extensions.installed_version(name),
+            Kind::Platform => self.platforms.installed_version(name),
         }
     }
 
@@ -997,6 +1053,7 @@ impl Market {
                 (Kind::Tool, Some(b)) => drop(self.tools.install(&b, &source(p), Some(&p.sha256))?),
                 (Kind::Skill, Some(b)) => drop(self.skills.install(&b, &source(p), Some(&p.sha256))?),
                 (Kind::Extension, Some(b)) => drop(self.extensions.install(&b, &source(p), Some(&p.sha256), consent)?),
+                (Kind::Platform, Some(b)) => drop(self.platforms.install(&b, &source(p), Some(&p.sha256))?),
                 (Kind::Bundle, _) => {}
                 _ => unreachable!("files are fetched for every kind but bundles"),
             }
@@ -1052,7 +1109,7 @@ impl Market {
         }
         let changes = self.remove_one(name)?;
         if changes.is_empty() {
-            for kind in [Kind::Rules, Kind::Filters, Kind::List, Kind::Tool, Kind::Skill, Kind::Extension] {
+            for kind in [Kind::Rules, Kind::Filters, Kind::List, Kind::Tool, Kind::Skill, Kind::Extension, Kind::Platform] {
                 if Self::builtin(kind, name) {
                     bail!("`{name}` is a built-in {} and cannot be removed", kind.noun());
                 }
@@ -1070,13 +1127,14 @@ impl Market {
 
     fn remove_one(&self, name: &str) -> Result<Vec<Change>> {
         let mut changes = vec![];
-        for kind in [Kind::Rules, Kind::Filters, Kind::List, Kind::Tool, Kind::Skill, Kind::Extension] {
+        for kind in [Kind::Rules, Kind::Filters, Kind::List, Kind::Tool, Kind::Skill, Kind::Extension, Kind::Platform] {
             let Some(version) = self.installed_version(kind, name) else { continue };
             match kind {
                 Kind::Rules => self.rules.remove(name)?,
                 Kind::Filters => self.filters.remove(name)?,
                 Kind::List => self.lists.remove(name)?,
                 Kind::Extension => self.extensions.remove(name)?,
+                Kind::Platform => self.platforms.remove(name)?,
                 Kind::Tool => self.tools.remove(name)?,
                 _ => self.skills.remove(name)?,
             };
@@ -1098,6 +1156,21 @@ mod tests {
 
     fn official() -> Catalog {
         bundled(&registry::trusted_keys(&[])).unwrap()
+    }
+
+    #[test]
+    fn built_in_platforms_are_listed_only_in_the_official_market() {
+        let c = official();
+        let p = c.index.get("hackerone").expect("listed");
+        assert_eq!(p.kind, Kind::Platform);
+        assert!(!p.about.is_empty());
+        assert_eq!(c.fetch(p).unwrap(), platform::BUILTIN[0].1.as_bytes());
+
+        let mut other = official();
+        other.index.packages.retain(|p| p.kind != Kind::Platform);
+        other.trust = Trust::Verified { key: "ed25519:someone-else".into(), publisher: "Someone".into() };
+        inject_builtin_platforms(&mut other.index, &other.trust);
+        assert!(other.index.get("hackerone").is_none());
     }
 
     #[test]

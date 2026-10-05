@@ -176,6 +176,13 @@ async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<ProxyResponse, Infal
         _ => Some(Tee::new(req.into_body(), req_cap, None).boxed()),
     };
 
+    // Headers the program asks for go on browser traffic to its in-scope hosts too.
+    if let Some(guard) = ctx.engine.program()
+        && ctx.engine.rules().in_scope(&pending.ex.host)
+        && guard.add_headers(&mut outbound.headers)
+    {
+        pending.ex.req_headers = outbound.headers.clone();
+    }
     replace_request(&ctx.engine, &mut outbound, &mut pending, stream.is_none(), limit);
 
     if ctx.engine.intercept.is_on() && !hold_request(&ctx.engine, &mut outbound, &mut pending, stream.is_none(), limit).await {

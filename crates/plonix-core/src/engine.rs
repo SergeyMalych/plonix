@@ -32,6 +32,7 @@ use crate::replace::RuleSet;
 use crate::rulepack::{Library, PackInfo, sha256_hex};
 use crate::crawl;
 use crate::exclude::{self, ExcludedDomain, Exclusions, Group, GroupStatus};
+use crate::bounty;
 use crate::runs;
 use crate::scan;
 use crate::scope::{self, Decision, Rule, ScopeRules};
@@ -85,6 +86,34 @@ pub struct Engine {
     /// Client certificates presented to servers (see [`crate::clientcert`]); empty while switched off.
     client_certs: RwLock<Arc<ClientCerts>>,
     client_certs_on: AtomicBool,
+    /// The bug bounty or disclosure program this project follows, if any
+    /// (see [`crate::bounty`]): its rules are enforced on every send.
+    program: RwLock<Option<Arc<bounty::Guard>>>,
+}
+
+/// Where a project keeps the program it follows.
+const PROGRAM_STATE: &str = "program";
+
+/// One scope rule a program would add, change or remove.
+#[derive(Debug, Clone, Serialize)]
+pub struct ScopeChange {
+    pub pattern: String,
+    pub include_subdomains: bool,
+    pub decision: Decision,
+    /// `add`, `update`, `same` or `remove`.
+    pub change: &'static str,
+}
+
+/// What applying a program would change, for the user to review.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProgramPreview {
+    pub program: bounty::Program,
+    pub scope: Vec<ScopeChange>,
+    /// Assets Plonix cannot test as hosts (mobile apps, source code, `*.example.*`).
+    pub not_scoped: Vec<bounty::Asset>,
+    /// The project already follows a different program.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replaces: Option<String>,
 }
 
 /// A stand-in for the network: given an outbound request it may return a
@@ -211,6 +240,9 @@ pub enum SendError {
     BadRequest(String),
     #[error("exchange {0} not found")]
     NotFound(i64),
+    /// The program this project follows does not allow it.
+    #[error("{0}")]
+    NotAllowed(String),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -219,6 +251,16 @@ impl Engine {
     pub fn new(project: &str, store: Store, ca: Arc<CertAuthority>, upstream: Upstream) -> Result<Arc<Self>> {
         let rules = store.rules()?;
         let replace = RuleSet::new(&store.replace_rules()?);
+        let guard = match store.view_state(PROGRAM_STATE)? {
+            Some(v) => match serde_json::from_value::<bounty::Program>(v) {
+                Ok(p) => Some(Arc::new(bounty::Guard::new(p))),
+                Err(e) => {
+                    tracing::warn!("the saved program could not be read: {e}");
+                    None
+                }
+            },
+            None => None,
+        };
         let (recorder, rx) = mpsc::unbounded_channel();
         let engine = Arc::new(Self {
             recorder,
@@ -250,6 +292,7 @@ impl Engine {
             program_problems: Mutex::default(),
             client_certs: RwLock::default(),
             client_certs_on: AtomicBool::new(true),
+            program: RwLock::new(guard),
         });
         engine.reload_client_certs()?;
         Ok(engine)
@@ -482,6 +525,75 @@ impl Engine {
 
     pub fn rules(&self) -> ScopeRules {
         self.rules.read().unwrap().clone()
+    }
+
+    // ---- program ---------------------------------------------------------
+
+    /// The program this project follows, as enforced.
+    pub fn program(&self) -> Option<Arc<bounty::Guard>> {
+        self.program.read().unwrap().clone()
+    }
+
+    /// What applying `p` would change. Nothing is changed.
+    pub fn program_preview(&self, p: bounty::Program) -> Result<ProgramPreview> {
+        p.validate()?;
+        let wanted = p.scope_rules(now_ms());
+        let current = self.rules();
+        let note = p.rule_note();
+        let mut scope: Vec<ScopeChange> = wanted
+            .iter()
+            .map(|w| {
+                let change = match current.rules.iter().find(|r| r.pattern == w.pattern) {
+                    Some(r) if r.decision == w.decision && r.include_subdomains == w.include_subdomains => "same",
+                    Some(_) => "update",
+                    None => "add",
+                };
+                ScopeChange { pattern: w.pattern.clone(), include_subdomains: w.include_subdomains, decision: w.decision, change }
+            })
+            .collect();
+        for r in current.rules.iter().filter(|r| r.note == note && !wanted.iter().any(|w| w.pattern == r.pattern)) {
+            scope.push(ScopeChange { pattern: r.pattern.clone(), include_subdomains: r.include_subdomains, decision: r.decision, change: "remove" });
+        }
+        let not_scoped = p.assets.iter().filter(|a| !a.kind.testable() || bounty::scope_targets(&a.identifier, a.kind).is_empty()).cloned().collect();
+        let replaces = self.program().map(|g| g.program.clone()).filter(|old| old.key() != p.key()).map(|old| old.name);
+        Ok(ProgramPreview { program: p, scope, not_scoped, replaces })
+    }
+
+    /// Makes this project follow `p`: its scope rules replace the ones an
+    /// earlier sync of it (or another program) added, and its rules of
+    /// engagement apply to every send from now on.
+    pub fn apply_program(&self, p: bounty::Program) -> Result<ProgramPreview> {
+        let preview = self.program_preview(p.clone())?;
+        if let Some(old) = self.program() {
+            self.store.delete_rules_noted(&old.program.rule_note())?;
+        }
+        self.store.delete_rules_noted(&p.rule_note())?;
+        self.store.put_rules(&p.scope_rules(now_ms()))?;
+        *self.rules.write().unwrap() = self.store.rules()?;
+        self.rescan()?;
+        self.store.set_view_state(PROGRAM_STATE, &serde_json::to_value(&p)?)?;
+        *self.program.write().unwrap() = Some(Arc::new(bounty::Guard::new(p)));
+        Ok(preview)
+    }
+
+    /// Stops following the program. Its scope rules stay unless `remove_scope`.
+    pub fn clear_program(&self, remove_scope: bool) -> Result<bool> {
+        let Some(old) = self.program.write().unwrap().take() else { return Ok(false) };
+        if remove_scope {
+            self.store.delete_rules_noted(&old.program.rule_note())?;
+            *self.rules.write().unwrap() = self.store.rules()?;
+            self.rescan()?;
+        }
+        self.store.set_view_state(PROGRAM_STATE, &serde_json::Value::Null)?;
+        Ok(true)
+    }
+
+    /// Refuses automated testing when the program in effect bans it.
+    fn check_automation(&self, what: &str) -> Result<(), SendError> {
+        match self.program() {
+            Some(g) => g.check_automation(what).map_err(SendError::NotAllowed),
+            None => Ok(()),
+        }
     }
 
     /// Loads installed rule packs from this library (built-in packs are
@@ -873,6 +985,11 @@ impl Engine {
         if decision != Decision::Accepted {
             return Err(SendError::OutOfScope { host, decision: decision.as_str() });
         }
+        // The program's rules of engagement: the headers it asks for, at the rate it allows.
+        if let Some(guard) = self.program() {
+            guard.add_headers(&mut req.headers);
+            guard.pace().await;
+        }
 
         let body: Vec<u8> = match (&req.body_base64, &req.body) {
             (Some(b64), _) => base64::engine::general_purpose::STANDARD
@@ -1002,6 +1119,12 @@ impl Engine {
         if decision != Decision::Accepted {
             return Err(SendError::OutOfScope { host, decision: decision.as_str() });
         }
+        self.check_automation("scanning")?;
+        let mut req = req;
+        if self.program().is_some_and(|g| g.no_intrusive()) {
+            req.include_intrusive = false;
+        }
+        let no_intrusive = self.program().is_some_and(|g| g.no_intrusive());
 
         let catalog = self.scan_catalog();
         let tech = self.detect_host(&host).map_err(SendError::Other)?;
@@ -1016,6 +1139,7 @@ impl Engine {
             .tactics
             .iter()
             .filter(|t| selected.iter().any(|s| s.id == t.def.id))
+            .filter(|t| !(no_intrusive && t.def.intrusiveness == scan::Intrusiveness::Intrusive))
             .filter(|t| {
                 if req.tactics.is_empty() {
                     req.include_intrusive || t.def.intrusiveness.default_on()
@@ -1110,6 +1234,7 @@ impl Engine {
         if decision != Decision::Accepted {
             return Err(SendError::OutOfScope { host, decision: decision.as_str() });
         }
+        self.check_automation("crawling")?;
 
         // The start may be a full URL, which also fixes the scheme and port;
         // otherwise they come from the host's captured traffic.
@@ -1205,6 +1330,7 @@ impl Engine {
     /// it is capped by a request budget, and every send is recorded. A person
     /// starts it; it never fires on its own.
     pub async fn run(&self, req: runs::RunRequest, initiator: &str) -> Result<runs::RunReport, SendError> {
+        self.check_automation("Bench runs")?;
         let lists = self.lists();
         let plan = runs::plan(&req, &|id| lists.values_of(id)).map_err(SendError::BadRequest)?;
         let budget = req.max_requests.unwrap_or(runs::DEFAULT_REQUEST_BUDGET).min(runs::MAX_REQUEST_BUDGET);

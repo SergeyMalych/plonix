@@ -20,6 +20,13 @@ What changed in each Plonix release. The newest release is at the top.
 - parameter-probe in the Market: probes one in-scope endpoint for undocumented query parameters. Plonix sends a bounded set of candidate names itself, through the same scope-gated, recorded path as replay, and proposes one unconfirmed finding for any that change the response. Nothing is installed and no outside program sends.
 - Program extensions now come in kinds — scan (over captured traffic), enumerate (subdomains into scope suggestions) and probe (candidate inputs through the scope choke point) — and a new `suggest-scope` capability lets one contribute scope suggestions without ever changing scope.
 
+### Programs
+- A Programs screen (⌘9) and `plonix program`: connect HackerOne, paste a program's policy, or look up a domain's security.txt, then review and follow the program.
+- With a platform connected, Plonix pulls every program you can work on, with its assets and rules, and lets you search them all by program or by asset. It tells you when a followed program's scope changes.
+- Following a program sets the project's scope from its assets: in-scope ones are accepted, listed exclusions rejected, and IP ranges work as scope rules.
+- Its rules apply to every request Plonix sends: at most the program's request rate, the headers it asks for (on browser traffic too), and no scans, crawls or Bench runs when it bans automated testing.
+- Bug bounty platforms are a new kind of Market package: declarative and signed, so more platforms can be added without a Plonix release.
+
 ## [0.1.0] - 2026-10-05
 
 The first public release of Plonix for Mac.
