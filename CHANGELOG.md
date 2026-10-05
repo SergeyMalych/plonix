@@ -4,6 +4,8 @@ What changed in each Plonix release. The newest release is at the top.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-05
+
 ### Added
 - Suggestions for your work: pick bug hunter, red teamer or security researcher on the Start screen and get a starter set from the Market, each item with one line on why. The Market shows *Recommended for you* at the top, with a switch to look at another kind of work; Settings › Market and each project's settings keep the choice. CLI: `plonix market profile`, `plonix market recommend`, `plonix market install --starter`.
 - Ask Claude shows its progress while it works: the current step, tokens read and written, elapsed time and the answer as it is written, formatted (headings, lists, tables, code blocks with Copy). A run that goes quiet says so, and is stopped with a clear message instead of hanging.
@@ -18,6 +20,7 @@ What changed in each Plonix release. The newest release is at the top.
 - js-endpoints in the Market: reads captured JavaScript and pulls out the API paths and URLs it references, so endpoints nothing has visited yet stand out in the Lens.
 - subdomain-discovery in the Market: enumerates an accepted domain's subdomains with a recon tool you install (`subfinder`, with another installed tool as a fallback) and adds the ones it finds to Scope as suggestions to review. It reads public sources, never touches the target, and never changes scope on its own.
 - parameter-probe in the Market: probes one in-scope endpoint for undocumented query parameters. Plonix sends a bounded set of candidate names itself, through the same scope-gated, recorded path as replay, and proposes one unconfirmed finding for any that change the response. Nothing is installed and no outside program sends.
+- security-headers in the Market: a small passive extension that notes HTML pages missing common security headers and cookies set without Secure or HttpOnly, and proposes one finding per host. A starting point for writing your own.
 - Program extensions now come in kinds — scan (over captured traffic), enumerate (subdomains into scope suggestions) and probe (candidate inputs through the scope choke point) — and a new `suggest-scope` capability lets one contribute scope suggestions without ever changing scope.
 
 ### Programs
@@ -74,5 +77,6 @@ The first public release of Plonix for Mac.
 - Crash reports stay on your Mac; Plonix offers to open a prefilled GitHub issue and never sends anything on its own.
 - Documentation at plonix.io/docs.
 
-[Unreleased]: https://github.com/SergeyMalych/plonix/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/SergeyMalych/plonix/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/SergeyMalych/plonix/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/SergeyMalych/plonix/releases/tag/v0.1.0
