@@ -4,8 +4,10 @@
 //! The server is another client of the engine's local API, like the CLI and
 //! the window. It signs in with the agent token (`$PLONIX_HOME/agent-token`),
 //! so the engine itself limits it to what agents may do (read-only today, see
-//! `plonix_core::access`). Every tool here only reads; there is no tool that
-//! sends requests or changes scope or findings.
+//! `plonix_core::access`). Every tool here only reads, except
+//! `propose_bench_edit`, which leaves a suggested edit for a Bench draft for
+//! the user to review (see `plonix_core::proposal`). No tool sends requests,
+//! applies an edit or changes scope or findings.
 //!
 //! Transport: JSON-RPC 2.0, one message per line on stdin and stdout.
 //! Nothing but protocol messages is written to stdout.
@@ -31,6 +33,8 @@ the user's browser while they test a web application, learns which domains belon
 These tools give you read-only access to that live project: search and read captured requests, see \
 hosts, endpoints and detected technologies, review scope and its suggestions, and read findings or export them \
 as a report. You cannot send or replay requests, change scope or record, edit or delete findings; suggest those steps to the user instead. \
+When the user asks about a request they are editing on the Bench (the question gives a draft id), you can suggest a concrete edited \
+request with `propose_bench_edit`: it only shows the user a diff they can apply or discard, and they send it themselves. \
 The user decides what you can see: by default only hosts accepted into scope, and some tools may be switched off.
 
 The user can install skills: playbooks for a job in Plonix (get to know a host, explain a request, \
@@ -285,6 +289,78 @@ By default false positives are left out; pass ids or statuses (open, confirmed, 
     },
 ];
 
+/// The route behind `propose_bench_edit`: the one tool that is not a pure
+/// read. It stores a suggestion; it cannot send, apply or change anything.
+const PROPOSE_ROUTE: &str = "/api/bench/proposals";
+
+const PROPOSE: Tool = Tool {
+    name: "propose_bench_edit",
+    route: PROPOSE_ROUTE,
+    title: "Suggest an edit to a Bench request",
+    description: "Suggest a concrete edited version of a request the user is editing on the Plonix Bench. Pass the draft_id from the user's question, \
+a short summary of what you changed and why, and the complete edited request: method, url, headers and body (unchanged parts included). \
+This sends nothing and changes nothing: Plonix shows the user a diff against their draft with Apply and Discard, and the user sends it \
+themselves if they want to. You have no signing key, so a JWT you edit keeps its original signature and is shown as not re-signed.",
+    schema: || {
+        json!({
+            "type": "object",
+            "properties": {
+                "draft_id": { "type": "string", "description": "The Bench draft id from the user's question" },
+                "summary": { "type": "string", "description": "What you changed and why, in a sentence or two" },
+                "method": { "type": "string", "description": "HTTP method, e.g. POST" },
+                "url": { "type": "string", "description": "Full URL with query string" },
+                "headers": {
+                    "type": "array",
+                    "description": "Every request header, in order",
+                    "items": {
+                        "type": "object",
+                        "properties": { "name": { "type": "string" }, "value": { "type": "string" } },
+                        "required": ["name", "value"],
+                        "additionalProperties": false
+                    }
+                },
+                "body": { "type": "string", "description": "The request body as text; empty for none" }
+            },
+            "required": ["draft_id", "method", "url"],
+            "additionalProperties": false
+        })
+    },
+    call: |c, a| {
+        let p = c.post(PROPOSE_ROUTE, proposal_body(a)?)?;
+        Ok(format!(
+            "Suggested edit #{} is waiting on the Bench for the user to review as a diff. Nothing was sent: the user decides whether to apply it, and sends it themselves.",
+            p["id"]
+        ))
+    },
+};
+
+/// The engine's proposal body from the tool's arguments. Headers may come as
+/// `{name, value}` objects or `[name, value]` pairs.
+fn proposal_body(a: &Value) -> Result<Value> {
+    let s = |k: &str| a[k].as_str().map(str::trim).unwrap_or("").to_string();
+    let draft = s("draft_id");
+    if draft.is_empty() {
+        return Err(anyhow!("`draft_id` is required: use the draft id from the user's question"));
+    }
+    let mut headers = vec![];
+    for h in a["headers"].as_array().into_iter().flatten() {
+        let pair = match h {
+            Value::Object(o) => (o.get("name").and_then(Value::as_str), o.get("value").and_then(Value::as_str)),
+            Value::Array(v) if v.len() == 2 => (v[0].as_str(), v[1].as_str()),
+            _ => (None, None),
+        };
+        match pair {
+            (Some(k), Some(v)) => headers.push(json!([k, v])),
+            _ => return Err(anyhow!("each header needs a name and a value")),
+        }
+    }
+    Ok(json!({ "draft": draft, "summary": s("summary"), "method": s("method"), "url": s("url"), "headers": headers, "body": a["body"].as_str().unwrap_or("") }))
+}
+
+fn all_tools() -> impl Iterator<Item = &'static Tool> {
+    TOOLS.iter().chain(std::iter::once(&PROPOSE))
+}
+
 /// The API path that reads a skill with its arguments filled in.
 fn skill_path(name: &str, args: &Value) -> String {
     let mut path = format!("/api/skills/{}", encode(name));
@@ -357,9 +433,9 @@ fn search(c: &Client, a: &Value) -> Result<String> {
     ))
 }
 
-/// The read-only tool names, for `plonix connect` output and tests.
+/// The tool names, for `plonix connect` output and tests.
 pub fn tool_names() -> Vec<&'static str> {
-    TOOLS.iter().map(|t| t.name).collect()
+    all_tools().map(|t| t.name).collect()
 }
 
 struct Server {
@@ -381,7 +457,7 @@ impl Server {
         let routes: Option<Vec<String>> = self.client().and_then(|c| c.get("/api/agents")).ok().map(|v| {
             v["capabilities"].as_array().into_iter().flatten().filter_map(|c| c["path"].as_str().map(String::from)).collect()
         });
-        TOOLS.iter().filter(move |t| routes.as_ref().is_none_or(|r| r.iter().any(|p| p == t.route)))
+        all_tools().filter(move |t| routes.as_ref().is_none_or(|r| r.iter().any(|p| p == t.route)))
     }
 
     fn handle(&self, msg: &Value) -> Option<Value> {
@@ -466,8 +542,8 @@ impl Server {
 
     fn call(&self, params: &Value) -> Result<Value, (i64, String)> {
         let name = params["name"].as_str().unwrap_or("");
-        let Some(tool) = TOOLS.iter().find(|t| t.name == name) else {
-            return Err((-32602, format!("unknown tool: {name}. Plonix tools are read-only: {}", tool_names().join(", "))));
+        let Some(tool) = all_tools().find(|t| t.name == name) else {
+            return Err((-32602, format!("unknown tool: {name}. Plonix tools only read (and suggest Bench edits): {}", tool_names().join(", "))));
         };
         let args = if params["arguments"].is_object() { params["arguments"].clone() } else { json!({}) };
         let out = self.client().and_then(|c| (tool.call)(&c, &args));
@@ -481,13 +557,21 @@ impl Server {
 }
 
 fn tool_json(t: &Tool) -> Value {
+    // Suggesting a Bench edit stores something, so it is not marked
+    // read-only, but it never reaches the network or changes the project.
+    let reads = t.route != PROPOSE_ROUTE;
     json!({
         "name": t.name,
         "title": t.title,
         "description": t.description,
         "inputSchema": (t.schema)(),
-        "annotations": { "title": t.title, "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
+        "annotations": { "title": t.title, "readOnlyHint": reads, "destructiveHint": false, "idempotentHint": reads, "openWorldHint": false },
     })
+}
+
+/// Answers one MCP message, as [`serve`] does for each line it reads.
+pub fn handle_message(home: &Home, msg: &Value) -> Option<Value> {
+    Server { home: home.clone(), client_name: Arc::new(Mutex::new("mcp".into())) }.handle(msg)
 }
 
 /// Serves MCP on stdin/stdout until stdin closes.
@@ -553,18 +637,50 @@ mod tests {
     }
 
     #[test]
-    fn every_tool_is_read_only() {
+    fn every_tool_reads_except_the_bench_suggestion() {
         let r = server().handle(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list"})).unwrap();
         let tools = r["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), TOOLS.len());
+        assert_eq!(tools.len(), TOOLS.len() + 1);
         for t in tools {
-            assert_eq!(t["annotations"]["readOnlyHint"], true, "{}", t["name"]);
+            let suggests = t["name"] == "propose_bench_edit";
+            assert_eq!(t["annotations"]["readOnlyHint"], !suggests, "{}", t["name"]);
+            assert_eq!(t["annotations"]["destructiveHint"], false, "{}", t["name"]);
+            assert_eq!(t["annotations"]["openWorldHint"], false, "{}", t["name"]);
             assert_eq!(t["inputSchema"]["type"], "object");
         }
         let names = tool_names();
-        for forbidden in ["send", "replay", "accept", "reject", "add_finding", "install"] {
+        for forbidden in ["send", "replay", "accept", "reject", "add_finding", "install", "apply", "run"] {
             assert!(!names.iter().any(|n| n.contains(forbidden)), "{forbidden}");
         }
+        // Every tool's route is one agents may call, and none of them sends.
+        for t in all_tools() {
+            let method = if t.route == PROPOSE_ROUTE { "POST" } else { "GET" };
+            assert!(crate::access::allowed(crate::access::AgentMode::ReadOnly, method, t.route), "{}", t.name);
+            assert!(!["/api/send", "/api/replay", "/api/run", "/api/scan", "/api/crawl"].contains(&t.route), "{}", t.name);
+        }
+    }
+
+    #[test]
+    fn proposal_arguments_become_an_engine_request() {
+        let body = proposal_body(&json!({
+            "draft_id": " d1 ", "summary": "admin role", "method": "post", "url": "https://a.test/x",
+            "headers": [{ "name": "Accept", "value": "*/*" }, ["X-A", "1"]], "body": "{}"
+        }))
+        .unwrap();
+        assert_eq!(body["draft"], "d1");
+        assert_eq!(body["headers"], json!([["Accept", "*/*"], ["X-A", "1"]]));
+        assert_eq!(body["body"], "{}");
+        assert!(proposal_body(&json!({ "method": "GET", "url": "https://a.test/" })).is_err());
+        assert!(proposal_body(&json!({ "draft_id": "d1", "headers": [{ "name": "X" }] })).is_err());
+    }
+
+    #[test]
+    fn proposing_without_an_engine_reports_an_error() {
+        let r = server()
+            .handle(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"propose_bench_edit","arguments":{"draft_id":"d1","method":"GET","url":"https://a.test/"}}}))
+            .unwrap();
+        assert_eq!(r["result"]["isError"], true);
+        assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("not running"));
     }
 
     #[test]

@@ -160,8 +160,9 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 
 ### AI agents over MCP
 - `plonix connect claude` adds Plonix to Claude Code as an MCP server. From then on Claude Code can search your captured traffic, read requests and responses, see hosts, endpoints and detected technologies, review scope suggestions, and read findings or export them as a report, on the live project.
-- Access is **read-only and enforced by the engine**: agents sign in with their own token (`~/.plonix/agent-token`), and anything but reading (sending or replaying requests, changing scope, recording, editing or deleting findings) is refused.
+- Access is **read-only and enforced by the engine**: agents sign in with their own token (`~/.plonix/agent-token`), and anything but reading (sending or replaying requests, changing scope, recording, editing or deleting findings) is refused. The one thing an agent can leave is a suggested edit to a Bench request, which only you can apply.
 - **Ask Claude Code** buttons on a request, finding, host or scope suggestion hand Claude Code just that spot's context as a prompt you review first. Plonix clips the bodies, shows what will be shared, and warns before sending more than your context limit.
+- **Suggested edits on the Bench:** ask Claude about a request you are editing and it can propose a concrete edited request. The Bench shows it as a diff against your draft (request line, headers, body, with query strings, form fields, JSON and JWTs decoded) with **Apply** and **Discard**. Nothing changes until you apply it, applying only changes the draft, and sending stays your click. An edited JWT keeps its original signature and is marked unsigned.
 - Any other MCP client can run `plonix mcp` as a stdio server. Captured data stays on your machine. See [docs/agents.md](docs/agents.md).
 
 ```sh
@@ -354,6 +355,9 @@ The API listens on port 8090 when it is free; `plonix status` shows the actual a
 | GET | `/api/agents` | What agents may do, and which agents are connected |
 | GET / PUT | `/api/agents/settings` | Read or change agent access (user only) |
 | POST | `/api/agents/ask` | Build the context for "Ask Claude Code" about a request, finding or host |
+| POST | `/api/bench/proposals` | Suggest an edit to a Bench draft (agents may call it; it only stores the suggestion) |
+| GET · DELETE | `/api/bench/proposals` · `/api/bench/proposals/{id}` | List suggestions for a draft (`?draft=`), or drop one (user only) |
+| POST | `/api/bench/proposals/{id}/diff` | Compare a suggestion with the draft you send in the body (user only) |
 | POST | `/api/shutdown` | Close this project's session |
 
 Each open project has its own API address. `$PLONIX_HOME/sessions/` lists them, and `engine.json` points to the current one. The Start screen has an API of its own (see [docs/projects.md](docs/projects.md)).
@@ -412,6 +416,7 @@ docs/             detection rules, agents and MCP, extension design
 - [x] Include and exclude filters in Traffic, with suggestions drawn from your traffic
 - [x] Spotted in the Lens: tokens to decode, personal data, leaked secrets and internal addresses in a request or response
 - [x] Ask Claude Code from a request, finding, host or scope suggestion, with scoped context you review first
+- [x] Claude's suggested edits on the Bench, shown as a diff you apply or discard
 - [x] Scanning foundation: detectors, checks and scan packs, fingerprint-driven suggestions, and active scans with benign built-in checks (`plonix scan`)
 - [x] Crawl to discover endpoints, parameters and forms (`plonix crawl`)
 - [x] The Scans screen in the window (⌘8)

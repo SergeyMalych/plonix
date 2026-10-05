@@ -119,7 +119,7 @@ fn claude(ctx: &Ctx, a: ClaudeArgs) -> Result<()> {
     }
 
     let mode = AgentMode::current();
-    println!("\nWhat the agent can do (read-only):");
+    println!("\nWhat the agent can do (read-only; a Bench edit is only suggested, for you to apply):");
     let tools = mcp::tool_names();
     println!("  {}", tools.join(" · "));
     println!("Not allowed:");

@@ -10,6 +10,42 @@ Everything the Bench sends goes through the engine's single send path, so it can
 only ever reach a host that is **accepted into scope**, exactly like a manual
 send.
 
+## Claude's suggested edits
+
+Under the request on the Send panel, **Ask about this request** (or **✦ Ask
+Claude** on selected text, or on a value the Lens spotted) asks Claude Code
+about the draft you are editing, before it is sent.
+
+Besides answering, Claude can propose a concrete edited request: say, the same
+call with a different id, an extra header, a changed JSON field or a JWT with a
+raised role. The proposal appears above the request as a card:
+
+- a one-line **summary** of what Claude changed and why;
+- a **diff against your draft as it is now**: the request line, headers that
+  were added, removed or changed, and the body line by line. Query strings and
+  form bodies are compared field by field with their values decoded, JSON
+  bodies are compared pretty-printed, and a JWT is compared as its decoded
+  header and claims;
+- **Apply to draft** and **Discard**.
+
+Nothing changes until you press **Apply to draft**, and applying only rewrites
+the draft: the request is not sent. Read it over, edit it further if you like,
+and press **Send** yourself. Right after applying, **Undo** puts your previous
+draft back. If you keep editing while a proposal is open, its diff follows
+your edits. A proposal Claude makes while you are on another screen, or from a
+Claude Code session in a terminal, shows up when you come back to the tab.
+
+JWTs follow the same rule as editing one in the Lens. Claude has no signing
+key, so a token whose header or claims it changed **keeps its original
+signature** and is marked **unsigned**: that is how you test whether the
+server checks signatures. If Claude made up a signature, Plonix puts the
+original one back and says so. A token Claude deliberately left without a
+signature, or with `alg: none`, is kept as proposed. To send a validly signed
+token, apply the edit and re-sign the token in the Lens with the key.
+
+Claude can only *propose*. It cannot apply a proposal, send it, or start a
+run; see [agents.md](agents.md#suggested-bench-edits).
+
 ## Payload runs
 
 A *run* sends a batch of requests built from one base request. You mark the

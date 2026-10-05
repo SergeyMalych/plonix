@@ -35,6 +35,7 @@ use crate::report;
 use crate::paths::Home;
 use crate::{market, registry, skill};
 use crate::project::Project;
+use crate::proposal::{self, DraftRequest, NewProposal, Proposals};
 use crate::settings::{self, Level};
 use crate::scope::Decision;
 use crate::ui::{self, LaunchCodes};
@@ -47,6 +48,8 @@ struct AppState {
     agents: Arc<AgentActivity>,
     agent_settings: Arc<SharedAgentSettings>,
     conversations: Arc<Conversations>,
+    /// Edits agents suggested for Bench drafts, waiting for the user.
+    proposals: Arc<Proposals>,
     api_addr: SocketAddr,
     launch_codes: Arc<LaunchCodes>,
     home: Home,
@@ -74,6 +77,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         agents: Arc::default(),
         agent_settings: Arc::new(SharedAgentSettings::new(&home)),
         conversations: Arc::default(),
+        proposals: Arc::default(),
         api_addr,
         launch_codes: Arc::default(),
         home,
@@ -146,6 +150,9 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/agents/launch", post(agent_launch))
         .route("/api/agents/run", post(agent_run))
         .route("/api/agents/run/{id}", get(agent_run_poll).delete(agent_run_cancel))
+        .route("/api/bench/proposals", get(list_proposals).post(add_proposal))
+        .route("/api/bench/proposals/{id}", axum::routing::delete(discard_proposal))
+        .route("/api/bench/proposals/{id}/diff", post(proposal_diff))
         .route("/api/shutdown", post(shutdown))
         .layer(middleware::from_fn_with_state(state.clone(), guard))
         .with_state(state)
@@ -1473,6 +1480,49 @@ async fn agent_run_cancel(State(s): State<AppState>, Path(id): Path<String>) -> 
         Json(json!({ "ok": true })).into_response()
     } else {
         err(StatusCode::NOT_FOUND, "not_found", "no such conversation")
+    }
+}
+
+// ---- suggested Bench edits -----------------------------------------------------
+
+/// Keeps an edit an agent suggests for a Bench draft. This is the one route
+/// agents may write to, and all it does is store the suggestion: nothing is
+/// sent and the draft is untouched until the user applies it on the Bench.
+async fn add_proposal(State(s): State<AppState>, caller: MaybeCaller, headers: HeaderMap, Json(new): Json<NewProposal>) -> Response {
+    let from = if caller.is_some_and(|c| c.0 == Caller::Agent) { initiator(&headers) } else { "you".into() };
+    match s.proposals.add(new, &from) {
+        Ok(p) => Json(p).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, "bad_request", &e),
+    }
+}
+
+#[derive(Deserialize)]
+struct ProposalQuery {
+    #[serde(default)]
+    draft: Option<String>,
+}
+
+/// Suggestions waiting on the Bench, newest first (user only).
+async fn list_proposals(State(s): State<AppState>, Query(q): Query<ProposalQuery>) -> Response {
+    Json(json!({ "proposals": s.proposals.list(q.draft.as_deref().filter(|d| !d.is_empty())) })).into_response()
+}
+
+/// A suggestion compared with the draft as the Bench holds it now (user only).
+async fn proposal_diff(State(s): State<AppState>, Path(id): Path<u64>, Json(current): Json<DraftRequest>) -> Response {
+    match s.proposals.get(id) {
+        Some(p) => {
+            let diff = proposal::diff(&current, &p.request);
+            Json(json!({ "proposal": p, "diff": diff })).into_response()
+        }
+        None => err(StatusCode::NOT_FOUND, "not_found", "that suggestion is gone"),
+    }
+}
+
+/// Drops a suggestion once the user applied or discarded it (user only).
+async fn discard_proposal(State(s): State<AppState>, Path(id): Path<u64>) -> Response {
+    match s.proposals.remove(id) {
+        Some(_) => Json(json!({ "ok": true })).into_response(),
+        None => err(StatusCode::NOT_FOUND, "not_found", "that suggestion is gone"),
     }
 }
 

@@ -74,6 +74,9 @@ pub enum Kind {
     Text,
     /// Claude used a tool (e.g. read some traffic); `text` names it.
     Tool,
+    /// Claude suggested an edit to the Bench draft; the Bench shows it for
+    /// the user to apply or discard.
+    Proposal,
     /// Something went wrong; `text` explains it.
     Error,
 }
@@ -276,7 +279,11 @@ fn on_line(run: &std::sync::Arc<Mutex<Run>>, line: &str) {
                         }
                         Some("tool_use") => {
                             let name = b.get("name").and_then(Value::as_str).unwrap_or("a tool");
-                            push(&mut r, Kind::Tool, friendly_tool(name));
+                            if name.ends_with("propose_bench_edit") {
+                                push(&mut r, Kind::Proposal, "Suggested an edit to the request".into());
+                            } else {
+                                push(&mut r, Kind::Tool, friendly_tool(name));
+                            }
                         }
                         _ => {}
                     }
@@ -400,9 +407,11 @@ mod tests {
     fn parses_assistant_text_and_tools() {
         let run = std::sync::Arc::new(Mutex::new(Run { events: Vec::new(), status: Status::Running, session_id: None, abort: None, ord: 0 }));
         on_line(&run, r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Hi"},{"type":"tool_use","name":"mcp__plonix__hosts"}]}}"#);
+        on_line(&run, r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__plonix__propose_bench_edit","input":{}}]}}"#);
         on_line(&run, r#"{"type":"result","subtype":"success","session_id":"abc123"}"#);
         let r = run.lock().unwrap();
-        assert_eq!(r.events.len(), 2);
+        assert_eq!(r.events.len(), 3);
+        assert!(matches!(r.events[2].kind, Kind::Proposal));
         assert_eq!(r.session_id.as_deref(), Some("abc123"));
     }
 }

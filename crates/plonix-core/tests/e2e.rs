@@ -795,6 +795,100 @@ async fn agent_settings_and_ask_context() {
     r.engine.shutdown.notify_waiters();
 }
 
+/// An agent suggests an edit to a Bench draft through the MCP tool. The
+/// suggestion is only stored: nothing is sent, even to a host in scope, and
+/// only the user can list it, compare it with their draft and drop it.
+#[tokio::test]
+async fn agents_suggest_bench_edits_but_never_send_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let up = serve_http().await;
+    let r = start(&home, None).await;
+    // `plonix mcp` finds the engine through this file, as it does for a session.
+    let info = plonix_core::paths::EngineInfo {
+        pid: std::process::id(),
+        api: format!("http://{}", r.api_addr),
+        proxy: r.proxy_addr.to_string(),
+        project: "test".into(),
+        started_at: 0,
+        project_id: String::new(),
+        project_dir: None,
+    };
+    std::fs::write(home.engine_file(), serde_json::to_vec(&info).unwrap()).unwrap();
+    let base = format!("http://{}", r.api_addr);
+    let (user, agent) = (format!("Bearer {}", r.token), format!("Bearer {}", r.agent_token));
+    let target = format!("http://localhost:{}/echo", up.port());
+
+    tokio::task::spawn_blocking(move || {
+        let status = |r: Result<ureq::Response, ureq::Error>| match r {
+            Ok(r) => (r.status(), r.into_json::<serde_json::Value>().unwrap_or_default()),
+            Err(ureq::Error::Status(c, r)) => (c, r.into_json::<serde_json::Value>().unwrap_or_default()),
+            Err(e) => panic!("{e}"),
+        };
+        let call = |method: &str, path: &str, auth: &str, b: serde_json::Value| {
+            let req = ureq::request(method, &format!("{base}{path}")).set("Authorization", auth);
+            status(if method == "GET" || method == "DELETE" { req.call() } else { req.send_json(b) })
+        };
+        let tool = |args: serde_json::Value| {
+            let msg = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": "propose_bench_edit", "arguments": args } });
+            plonix_core::mcp::handle_message(&home, &msg).unwrap()["result"].clone()
+        };
+        let listed = || {
+            let msg = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+            plonix_core::mcp::handle_message(&home, &msg).unwrap()["result"]["tools"].as_array().unwrap().iter().any(|t| t["name"] == "propose_bench_edit")
+        };
+
+        // The host is in scope, so a send would go through if anything tried one.
+        call("POST", "/api/scope/accept", &user, serde_json::json!({ "domain": "localhost" }));
+        assert!(listed());
+
+        let out = tool(serde_json::json!({
+            "draft_id": "d1", "summary": "Ask for the admin role", "method": "POST", "url": target,
+            "headers": [{ "name": "Content-Type", "value": "application/json" }], "body": "{\"role\":\"admin\"}"
+        }));
+        assert_eq!(out["isError"], false, "{out}");
+        assert!(out["content"][0]["text"].as_str().unwrap().contains("Nothing was sent"));
+        let bad = tool(serde_json::json!({ "draft_id": "d1", "method": "GET", "url": "file:///etc/passwd" }));
+        assert_eq!(bad["isError"], true);
+
+        // Nothing went out: no exchange was recorded.
+        assert_eq!(call("GET", "/api/status", &user, serde_json::json!(null)).1["exchanges"], 0);
+
+        // The agent can only suggest: not list, compare, drop, run or send.
+        for (method, path) in [("GET", "/api/bench/proposals"), ("POST", "/api/bench/proposals/1/diff"), ("DELETE", "/api/bench/proposals/1"), ("POST", "/api/send"), ("POST", "/api/run")] {
+            let (code, v) = call(method, path, &agent, serde_json::json!({ "method": "POST", "url": target }));
+            assert_eq!((code, v["code"].as_str()), (403, Some("agent_not_allowed")), "{method} {path}");
+        }
+
+        // The user sees it for that draft and compares it with the draft as it is now.
+        let (_, l) = call("GET", "/api/bench/proposals?draft=d1", &user, serde_json::json!(null));
+        let p = &l["proposals"][0];
+        assert_eq!((p["id"].as_u64(), p["from"].as_str(), p["summary"].as_str()), (Some(1), Some("mcp"), Some("Ask for the admin role")));
+        assert!(call("GET", "/api/bench/proposals?draft=other", &user, serde_json::json!(null)).1["proposals"].as_array().unwrap().is_empty());
+        let draft = serde_json::json!({ "method": "GET", "url": target, "headers": [["Content-Type", "application/json"]], "body": "{\"role\":\"user\"}" });
+        let (code, d) = call("POST", "/api/bench/proposals/1/diff", &user, draft.clone());
+        assert_eq!(code, 200);
+        assert_eq!((d["diff"]["method"]["old"].as_str(), d["diff"]["method"]["new"].as_str()), (Some("GET"), Some("POST")));
+        assert_eq!(d["diff"]["body"]["view"], "json");
+        assert_eq!(d["diff"]["proposed"]["body"], "{\"role\":\"admin\"}");
+        assert_eq!(call("GET", "/api/status", &user, serde_json::json!(null)).1["exchanges"], 0, "comparing sends nothing either");
+
+        // Applied or discarded, it is dropped.
+        assert_eq!(call("DELETE", "/api/bench/proposals/1", &user, serde_json::json!(null)).0, 200);
+        assert_eq!(call("POST", "/api/bench/proposals/1/diff", &user, draft).0, 404);
+
+        // Switched off in Settings › AI agents, the tool disappears and is refused.
+        call("PUT", "/api/agents/settings", &user, serde_json::json!({ "off": ["bench"] }));
+        assert!(!listed());
+        let out = tool(serde_json::json!({ "draft_id": "d1", "method": "GET", "url": target }));
+        assert_eq!(out["isError"], true);
+        assert!(call("GET", "/api/bench/proposals", &user, serde_json::json!(null)).1["proposals"].as_array().unwrap().is_empty());
+    })
+    .await
+    .unwrap();
+    r.engine.shutdown.notify_waiters();
+}
+
 #[tokio::test]
 async fn proxy_serves_ca_certificate_page() {
     let dir = tempfile::tempdir().unwrap();
