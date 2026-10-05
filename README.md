@@ -80,6 +80,16 @@ Plonix has a handful of tools, each with its own name. They are the same in the 
 - Every request and response is recorded into a per-project SQLite database, in scope or not, so nothing you browsed is lost.
 - Hosts and the endpoints seen on each host are listed for a quick map of the target.
 
+### HAR files
+- **HAR ▾** in the Traffic toolbar exports all traffic, the current filtered view, or rows you pick (⌘-click or Ctrl-click, Shift-click for a range) to a standard HAR 1.2 file: headers, cookies, bodies (base64 when binary), timings, WebSocket messages and the client certificate used. In the app, File › Import HAR… and Export Traffic as HAR… open a native file dialog.
+- Importing a HAR file (from a browser's developer tools, a teammate or another project) adds its requests to the project as traffic marked **HAR**. They go through scope suggestions and detection like captured traffic, entries the project already has are skipped, and `source:import` finds them.
+- From the command line: `plonix har export host:example.com status:5xx -o errors.har` and `plonix har import capture.har`. Files are read and written as a stream, so large ones are fine. See [docs/projects.md](docs/projects.md#har-files).
+
+### Client certificates
+- Servers that ask for a client certificate (mutual TLS) get one: add a certificate per host, or for `*.example.com`, as PEM (certificate chain and key) or a PKCS#12 `.p12` / `.pfx` file with its password. It is used by the proxy, the Bench, scans and crawls.
+- Manage them in Settings › Client certificates (one switch stops presenting them all) or with `plonix certs add api.example.com --cert client.pem --key client-key.pem`, `plonix certs list` and `plonix certs remove`. Keys stay in the project's database and are never shown again, logged, or given to agents.
+- The Lens and the Bench mark exchanges that presented a certificate, and when a server asks for one you haven't added, the error says so. See [docs/projects.md](docs/projects.md#client-certificates).
+
 ### Fast search with filters
 Field filters narrow by metadata, and anything else is full-text matched (case-insensitive) against URLs, headers and decoded bodies. Every term is an include (show only what matches) and a leading `-` makes it an exclude (hide what matches). Separate values with commas to match any of them: `status:4xx,5xx -kind:static -host:cdn.example.com`.
 
@@ -92,7 +102,7 @@ ext:js                    file extension of the path
 kind:static               images, fonts, stylesheets, scripts and media
 mime:json                 substring of the response content type
 scope:in  scope:out       in or out of the current scope
-source:proxy              captured traffic, or source:replay for sent requests
+source:proxy              captured traffic, source:replay for sent requests, source:import for HAR imports
 "set-cookie: sid"         quoted phrase
 passw -logout             plain full-text terms
 ```
@@ -132,6 +142,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - **Proxy** (per project, applies right away): listen address and port (use 0.0.0.0 to capture from phones and other devices), next-free-port fallback, HTTPS decryption on or off, hosts that are never decrypted (for apps that pin certificates), server certificate checks, an upstream HTTP or SOCKS5 proxy with login and a list of hosts to reach directly, timeouts, and how much of each body to keep.
 - **Intercept** (per project): hold in-scope hosts only or everything, an optional Traffic search to narrow what is held, whether responses are held too, and how long an unanswered item waits before it goes on unchanged.
 - **Match and replace** (per project): the rules, and one switch that turns them all off.
+- **Client certificates** (per project): certificates presented to servers that ask for one, and one switch that turns them all off.
 - **Storage** (per project): keep only in-scope traffic, with a count of what it would delete and a button to delete it now.
 - **Interface** (all projects): open projects in a Plonix window or in your web browser.
 - Settings are a registry: a feature adds a section by describing its fields, and the Settings screens draw it with validation and storage included (see [docs/projects.md](docs/projects.md#adding-a-settings-section)).

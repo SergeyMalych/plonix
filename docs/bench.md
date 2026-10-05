@@ -8,7 +8,8 @@ once. Each tab is an experiment. A tab has two panels:
 
 Everything the Bench sends goes through the engine's single send path, so it can
 only ever reach a host that is **accepted into scope**, exactly like a manual
-send.
+send. When the host has a [client certificate](projects.md#client-certificates),
+the Bench presents it and marks the response **cert · CN=…**.
 
 ## Payload runs
 

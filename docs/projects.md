@@ -73,11 +73,66 @@ Settings come in sections. A section is either **global** (one value for all pro
 | Proxy | project | listen address and port, next-free-port fallback, decrypt HTTPS, hosts never decrypted, check server certificates, upstream proxy (`http://` or `socks5://`, with optional login), hosts reached directly, connect and request timeouts, how much of each body to keep (10 MB by default; longer bodies pass through in full and are marked as cut) |
 | Intercept | project | hold in-scope hosts only or everything, a Traffic search that narrows what is held, hold responses too, forward unanswered items after (300 seconds by default). Whether Intercept is on is not saved: a project always opens with it off |
 | Match and replace | project | apply the project's match-and-replace rules (on by default). The rules themselves are kept in `traffic.db` and managed under this section, with `plonix replace` or `/api/replace` |
+| Client certificates | project | present client certificates (on by default). The certificates themselves are kept in `traffic.db` and managed under this section or with `plonix certs` (see [Client certificates](#client-certificates)) |
 | Storage | project | keep only in-scope traffic |
 | Interface | global | open projects in a Plonix window or the web browser |
 | AI agents | global | let agents read projects or not, in-scope hosts only or everything, which kinds of data, and the Ask Claude size limits. Stored in `agents.json` through a section storage hook (`Section::stored_by`) |
 
 Proxy changes apply to a running session right away: the listener moves to the new address (connections already open keep working), and the upstream client is rebuilt. An address that cannot be bound is refused and nothing is saved. `plonix start --port` and `--insecure-upstream` override the settings for one session without changing them.
+
+## HAR files
+
+HAR is the standard format browsers' developer tools use to save network traffic. Plonix reads and writes HAR 1.2.
+
+**Export.** **HAR ▾** in the Traffic toolbar offers:
+
+- **Export all traffic** — every exchange in the project;
+- **Export the filtered view** — what the current search shows;
+- **Export picked rows** — rows you pick with ⌘-click (Ctrl-click), or Shift-click for a range. Escape or **Clear picked rows** unpicks them.
+
+In the Plonix app the file is saved through a native dialog (also under File › Export Traffic as HAR…); in a web browser it downloads. Each entry carries the request and response headers, cookies, query string, form parameters, the decoded body (base64 when it is not text, with the original encoding noted), the time taken, the protocol, the server address, WebSocket messages (`_webSocketMessages`) and, when one was presented, the client certificate (`_clientCertificate`). Requests that got no response are exported with status 0 and the error in `_error`.
+
+**Import.** **Import HAR file…** (or File › Import HAR… in the app) adds the file's requests to the project:
+
+- they are marked **HAR** in Traffic and the Lens, and `source:import` finds them;
+- they go through scope suggestions and detection like captured traffic, so hosts they reveal are suggested and technologies are recognised;
+- an entry the project already has (same time, method, URL and status) is skipped, so importing the same file twice adds nothing;
+- entries that are not HTTP (such as `chrome-extension:` or `data:` URLs) are skipped and counted; bodies longer than the project's body limit are cut, as in capture.
+
+**From the command line:**
+
+```bash
+plonix har export -o all.har                              # everything
+plonix har export host:example.com status:5xx -o errors.har  # a Traffic search
+plonix har export --ids 12,14,20 -o picked.har            # chosen exchanges
+plonix har export -o - | gzip > all.har.gz                # standard output
+plonix har import capture.har
+```
+
+Files are written and read as a stream, so large files do not need to fit in memory. The API equivalents are `GET /api/har?q=…` or `?ids=…` (a streamed download) and `POST /api/har/import` with the file as the body. Both are for you only: agents cannot export or import.
+
+## Client certificates
+
+Some servers ask the client for a certificate during the TLS handshake (mutual TLS). Plonix presents one when you have added it for that host.
+
+- **For a host or a domain.** `api.example.com` matches that host only; `*.example.com` matches `example.com` and every subdomain. An exact host wins over a wildcard, and a longer wildcard over a shorter one.
+- **PEM or PKCS#12.** Add a PEM certificate (the chain, leaf first or in any order) with an unencrypted PEM key, in one file or two, or a `.p12` / `.pfx` file with its password. PKCS#12 files are opened with the `openssl` command, which must be installed (set `PLONIX_OPENSSL` to use another one).
+- **Everywhere upstream.** The certificate is used for every connection Plonix makes to that host: proxied browser traffic, the Bench, payload runs, scans and crawls. Hosts listed under Settings › Proxy › hosts never decrypted pass through untouched, so the browser's own certificate is used there instead.
+- **Visible where it matters.** The Lens, the Bench response and `plonix show` mark an exchange that presented a certificate (**cert · CN=…**). If a server asks for a certificate you haven't added, or refuses the one Plonix presented, the error says which.
+- **Kept private.** Certificates and keys are stored in the project's `traffic.db`. A key is never shown again once added, never written to logs, and never available to agents or MCP tools. Removing a certificate deletes its key.
+
+Settings › Client certificates lists the certificates (host, subject, expiry, chain length, note) and adds or removes them; its switch stops presenting any of them without deleting them. From the command line:
+
+```bash
+plonix certs add api.example.com --cert client.pem --key client-key.pem --note staging
+plonix certs add '*.example.com' --cert bundle.pem          # key in the same file
+plonix certs add api.example.com --p12 client.p12           # asks for the password
+plonix certs add api.example.com --p12 client.p12 --password-env P12_PASSWORD
+plonix certs list
+plonix certs remove 2
+```
+
+The API is `GET /api/client-certs`, `POST /api/client-certs` and `DELETE /api/client-certs/{id}`, for you only.
 
 ### Adding a settings section
 
