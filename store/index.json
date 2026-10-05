@@ -127,6 +127,21 @@
       ]
     },
     {
+      "name": "js-endpoints",
+      "kind": "extension",
+      "version": "0.1.0",
+      "description": "Reads captured JavaScript and pulls out the API paths and URLs it references, so endpoints nothing has visited yet stand out.",
+      "author": "Plonix contributors",
+      "url": "extensions/js-endpoints.plonixext",
+      "sha256": "d467f39779ee23ad7fb911af4ad040d3eed155d194d67e5b170e97a26ca0562d",
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "about": [
+        "Modern apps keep most of their API in their JavaScript. This reads the scripts you have already captured and pulls out the paths and URLs they call, so the endpoints nothing has visited yet are laid out for you.",
+        "It shows what it finds in the Lens on each script, under the extension's name. It reads captured responses only and sends nothing.",
+        "Capture the app's pages once, then look at its scripts in Traffic to see where else the app talks."
+      ]
+    },
+    {
       "name": "graphql-explorer",
       "kind": "extension",
       "version": "0.1.0",

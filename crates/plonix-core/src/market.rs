@@ -61,6 +61,7 @@ pub const SNAPSHOT: &[(&str, &str)] = &[
     ("extensions/graphql-explorer.json", include_str!("../../../store/extensions/graphql-explorer.json")),
     ("extensions/security-headers.plonixext", include_str!("../../../store/extensions/security-headers.plonixext")),
     ("extensions/secret-sweep.plonixext", include_str!("../../../store/extensions/secret-sweep.plonixext")),
+    ("extensions/js-endpoints.plonixext", include_str!("../../../store/extensions/js-endpoints.plonixext")),
 ];
 
 // ---- settings -------------------------------------------------------------------

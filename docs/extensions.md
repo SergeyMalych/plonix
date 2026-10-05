@@ -70,6 +70,8 @@ A program extension has no code of its own. Its manifest has `"runtime": "progra
 
 The Market's `secret-sweep` is one: it finds API keys, tokens and passwords for hundreds of services.
 
+A code extension can also be a passive analyzer with no program, like the Market's `js-endpoints`: it reads captured JavaScript and pulls out the API paths and URLs the code references, so endpoints nothing has visited yet stand out in the Lens. It is a WebAssembly extension in [`examples/extensions/js-endpoints`](../examples/extensions/js-endpoints), built the same way as `security-headers`.
+
 ### Package format
 
 A package is one JSON file, `<name>.plonixext`, holding the manifest and the module, so one SHA-256 pins both:
