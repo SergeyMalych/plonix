@@ -165,6 +165,13 @@ pub fn builtin() -> Vec<Box<dyn Detector>> {
             r"\b(?:10\.(?:\d{1,3}\.){2}\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})\b",
             Some(valid_ipv4),
         )),
+        Box::new(Pattern::new(
+            "stack-trace",
+            "Stack trace",
+            Category::Info,
+            r"Traceback \(most recent call last\)|\bat [\w$.<>]+\([\w$-]+\.(?:java|kt|scala):\d+\)|\bat [\w$.<>\[\] ]+ \((?:/|[A-Za-z]:\\|file:)[^()\s]+\.[cm]?[jt]s:\d+:\d+\)|\bin /[\w/.\-]+\.php on line \d+|\bat [\w.`<>]+\(.*\) in [^\s]+\.cs:line \d+",
+            None,
+        )),
     ]
 }
 
@@ -638,6 +645,21 @@ mod tests {
         // Not a Luhn-valid card, and not an email.
         assert!(!found.iter().any(|i| i.value == "1234567890123"));
         assert!(!found.iter().any(|i| i.value.contains("logo@2x")));
+    }
+
+    #[test]
+    fn spots_stack_traces() {
+        for body in [
+            "Error: boom\n    at search (/srv/app/routes/search.js:42:13)\n    at next (/srv/app/node_modules/x/index.js:1:2)",
+            "Traceback (most recent call last):\n  File \"app.py\", line 3, in <module>",
+            "java.lang.NullPointerException\n\tat com.acme.Orders.find(Orders.java:88)",
+            "<b>Warning</b>: mysqli_query() in /var/www/html/search.php on line 17",
+        ] {
+            let found = analyze(&ex("", vec![], "text/plain", body), &builtin());
+            assert!(found.iter().any(|i| i.kind == "stack-trace"), "{body}: {found:?}");
+        }
+        let calm = analyze(&ex("", vec![], "text/html", "<p>Meet us at the office (Main St.)</p>"), &builtin());
+        assert!(!calm.iter().any(|i| i.kind == "stack-trace"), "{calm:?}");
     }
 
     #[test]
