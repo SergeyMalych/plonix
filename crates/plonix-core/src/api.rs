@@ -137,6 +137,8 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/platforms/{name}/connect", post(platform_connect))
         .route("/api/platforms/{name}/disconnect", post(platform_disconnect))
         .route("/api/platforms/{name}/programs", get(platform_programs))
+        .route("/api/platforms/{name}/sync", post(platform_sync))
+        .route("/api/platforms/{name}/catalog", get(platform_catalog))
         .route("/api/platforms/{name}/programs/{handle}", get(platform_program))
         .route("/api/browser", get(browser_status))
         .route("/api/browser/open", post(open_browser))
@@ -2208,10 +2210,13 @@ async fn platform_connect(State(s): State<AppState>, Path(name): Path<String>, J
             Ok(p) => p,
             Err(e) => return platform_error(e),
         };
-        match lib.credentials().set(&name, &cred) {
-            Ok(()) => Json(json!({ "connected": true, "programs": programs.len() })).into_response(),
-            Err(e) => internal(e),
+        if let Err(e) = lib.credentials().set(&name, &cred) {
+            return internal(e);
         }
+        // A new token can see different programs: start over and pull them all.
+        lib.forget_catalog(&name);
+        let sync = crate::platform::start_sync(&home, &name).ok();
+        Json(json!({ "connected": true, "programs": programs.len(), "sync": sync })).into_response()
     })
     .await;
     out.unwrap_or_else(|e| internal(e.into()))
@@ -2219,7 +2224,13 @@ async fn platform_connect(State(s): State<AppState>, Path(name): Path<String>, J
 
 async fn platform_disconnect(State(s): State<AppState>, Path(name): Path<String>) -> Response {
     let home = s.home.clone();
-    match tokio::task::spawn_blocking(move || crate::platform::PlatformLibrary::new(&home).credentials().remove(&name)).await {
+    match tokio::task::spawn_blocking(move || {
+        let lib = crate::platform::PlatformLibrary::new(&home);
+        lib.forget_catalog(&name);
+        lib.credentials().remove(&name)
+    })
+    .await
+    {
         Ok(Ok(removed)) => Json(json!({ "removed": removed })).into_response(),
         Ok(Err(e)) => internal(e),
         Err(e) => internal(e.into()),
@@ -2231,6 +2242,25 @@ async fn platform_programs(State(s): State<AppState>, Path(name): Path<String>) 
     match with_platform(s.home.clone(), name, |c| c.programs()).await {
         Ok(list) => Json(json!({ "programs": list })).into_response(),
         Err(r) => r,
+    }
+}
+
+/// Starts pulling every program, with its assets and rules, from a platform.
+async fn platform_sync(State(s): State<AppState>, Path(name): Path<String>) -> Response {
+    let home = s.home.clone();
+    match tokio::task::spawn_blocking(move || crate::platform::start_sync(&home, &name)).await {
+        Ok(Ok(st)) => Json(json!({ "sync": st })).into_response(),
+        Ok(Err(e)) => platform_error(e),
+        Err(e) => internal(e.into()),
+    }
+}
+
+/// The programs last pulled from a platform, and how the current pull is going.
+async fn platform_catalog(State(s): State<AppState>, Path(name): Path<String>) -> Response {
+    let home = s.home.clone();
+    match tokio::task::spawn_blocking(move || (crate::platform::PlatformLibrary::new(&home).catalog(&name), crate::platform::sync_status(&home, &name))).await {
+        Ok((catalog, sync)) => Json(json!({ "catalog": catalog, "sync": sync })).into_response(),
+        Err(e) => internal(e.into()),
     }
 }
 

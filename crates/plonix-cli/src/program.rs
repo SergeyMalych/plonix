@@ -38,8 +38,17 @@ pub enum ProgramCmd {
     },
     /// Forget a platform's token
     Disconnect { platform: String },
-    /// The programs you can work on at a platform
+    /// The programs you can work on at a platform, from the last sync
     List { platform: String },
+    /// Pull every program at a platform, with its assets and rules
+    Sync { platform: String },
+    /// Every in-scope asset across a platform's programs, from the last sync
+    Assets {
+        platform: String,
+        /// Only assets (or programs) whose name contains this
+        #[arg(long)]
+        find: Option<String>,
+    },
 }
 
 pub fn program_cmd(ctx: &Ctx, cmd: ProgramCmd) -> Result<()> {
@@ -108,24 +117,94 @@ pub fn program_cmd(ctx: &Ctx, cmd: ProgramCmd) -> Result<()> {
             if ctx.json {
                 return ctx.print_json(&v);
             }
-            println!("Connected to {platform}: {} programs.", v["programs"]);
+            println!("Connected to {platform}: {} programs. Pulling their scope and rules now; see `plonix program sync {platform}`.", v["programs"]);
         }
         ProgramCmd::Disconnect { platform } => {
             c.post(&format!("/api/platforms/{}/disconnect", seg(&platform)), json!({}))?;
             println!("Forgot the {platform} token.");
         }
         ProgramCmd::List { platform } => {
-            let v = c.get(&format!("/api/platforms/{}/programs", seg(&platform)))?;
+            let cat = catalog(&c, &platform)?;
             if ctx.json {
-                return ctx.print_json(&v);
+                return ctx.print_json(&cat);
             }
-            for p in v["programs"].as_array().into_iter().flatten() {
+            for e in cat["programs"].as_array().into_iter().flatten() {
+                let p = &e["program"];
+                let in_scope = p["assets"].as_array().into_iter().flatten().filter(|a| a["in_scope"].as_bool() == Some(true)).count();
                 let bounty = if p["bounty"].as_bool() == Some(true) { "bounty" } else { "" };
-                println!("{:<32} {:<40} {bounty}", p["handle"].as_str().unwrap_or(""), p["name"].as_str().unwrap_or(""));
+                let state = e["state"].as_str().filter(|s| *s != "open").unwrap_or("");
+                println!("{:<28} {:<36} {in_scope:>4} in scope  {bounty:<6} {state}", p["id"].as_str().unwrap_or(""), p["name"].as_str().unwrap_or(""));
+            }
+        }
+        ProgramCmd::Sync { platform } => {
+            let path = format!("/api/platforms/{}/sync", seg(&platform));
+            c.post(&path, json!({}))?;
+            let mut last = (u64::MAX, u64::MAX);
+            let v = loop {
+                let v = c.get(&format!("/api/platforms/{}/catalog", seg(&platform)))?;
+                let s = &v["sync"];
+                if s["running"].as_bool() != Some(true) {
+                    break v;
+                }
+                let now = (s["done"].as_u64().unwrap_or(0), s["total"].as_u64().unwrap_or(0));
+                if now != last && !ctx.json {
+                    eprint!("\rPulling programs: {} of {}   ", now.0, now.1);
+                    last = now;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            };
+            if !ctx.json && last != (u64::MAX, u64::MAX) {
+                eprintln!();
+            }
+            if let Some(e) = v["sync"]["error"].as_str() {
+                bail!("{e}");
+            }
+            if ctx.json {
+                return ctx.print_json(&v["catalog"]);
+            }
+            let programs = v["catalog"]["programs"].as_array().cloned().unwrap_or_default();
+            let assets: usize = programs.iter().map(|e| e["program"]["assets"].as_array().into_iter().flatten().filter(|a| a["in_scope"].as_bool() == Some(true)).count()).sum();
+            println!("Synced {} programs with {assets} in-scope assets.", programs.len());
+            for f in v["catalog"]["failed"].as_array().into_iter().flatten() {
+                eprintln!("could not read {}: {}", f["name"].as_str().unwrap_or(""), f["error"].as_str().unwrap_or(""));
+            }
+        }
+        ProgramCmd::Assets { platform, find } => {
+            let cat = catalog(&c, &platform)?;
+            let find = find.unwrap_or_default().to_lowercase();
+            let mut rows = vec![];
+            for e in cat["programs"].as_array().into_iter().flatten() {
+                let p = &e["program"];
+                let name = p["name"].as_str().unwrap_or("");
+                for a in p["assets"].as_array().into_iter().flatten().filter(|a| a["in_scope"].as_bool() == Some(true)) {
+                    let id = a["identifier"].as_str().unwrap_or("");
+                    if find.is_empty() || id.to_lowercase().contains(&find) || name.to_lowercase().contains(&find) {
+                        rows.push(json!({ "asset": id, "kind": a["kind"], "program": p["id"], "program_name": name, "bounty": a["bounty"] }));
+                    }
+                }
+            }
+            if ctx.json {
+                return ctx.print_json(&json!({ "assets": rows }));
+            }
+            for r in &rows {
+                let bounty = if r["bounty"].as_bool() == Some(true) { "bounty" } else { "" };
+                println!("{:<48} {:<9} {:<28} {bounty}", r["asset"].as_str().unwrap_or(""), r["kind"].as_str().unwrap_or(""), r["program"].as_str().unwrap_or(""));
             }
         }
     }
     Ok(())
+}
+
+/// A platform's synced programs. Says how to get them when there are none yet.
+fn catalog(c: &crate::client::Client, platform: &str) -> Result<Value> {
+    let v = c.get(&format!("/api/platforms/{}/catalog", seg(platform)))?;
+    if v["catalog"].is_null() {
+        if v["sync"]["running"].as_bool() == Some(true) {
+            bail!("still pulling programs from {platform}; run `plonix program sync {platform}` to wait for it");
+        }
+        bail!("no programs pulled from {platform} yet; run `plonix program sync {platform}`");
+    }
+    Ok(v["catalog"].clone())
 }
 
 /// Percent-encodes a path segment.

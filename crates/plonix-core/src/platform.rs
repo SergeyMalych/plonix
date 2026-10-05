@@ -293,6 +293,7 @@ pub fn parse(bytes: &[u8]) -> Result<PlatformPack, String> {
 
 /// Platform packs installed in a Plonix home, plus the built-in ones.
 pub struct PlatformLibrary {
+    dir: PathBuf,
     shelf: Shelf,
     creds: Credentials,
 }
@@ -300,11 +301,11 @@ pub struct PlatformLibrary {
 impl PlatformLibrary {
     pub fn new(home: &Home) -> Self {
         let dir = home.root.join("platforms");
-        Self { shelf: Shelf::new(&dir, "platform pack", "market", MAX_INSTALLED_PACKS), creds: Credentials::new(home) }
+        Self { shelf: Shelf::new(&dir, "platform pack", "market", MAX_INSTALLED_PACKS), creds: Credentials::new(home), dir }
     }
 
     pub fn at(dir: &Path) -> Self {
-        Self { shelf: Shelf::new(dir, "platform pack", "market", MAX_INSTALLED_PACKS), creds: Credentials::file(dir) }
+        Self { shelf: Shelf::new(dir, "platform pack", "market", MAX_INSTALLED_PACKS), creds: Credentials::file(dir), dir: dir.to_path_buf() }
     }
 
     pub fn install(&self, bytes: &[u8], source: &str, expected_sha256: Option<&str>) -> Result<(PlatformPack, Option<String>)> {
@@ -322,6 +323,7 @@ impl PlatformLibrary {
             bail!("`{name}` is built in and cannot be removed");
         }
         let _ = self.creds.remove(name);
+        self.forget_catalog(name);
         self.shelf.remove(name)
     }
 
@@ -381,6 +383,120 @@ impl PlatformLibrary {
     pub fn credentials(&self) -> &Credentials {
         &self.creds
     }
+
+    fn catalog_path(&self, name: &str) -> PathBuf {
+        self.dir.join("catalog").join(format!("{name}.json"))
+    }
+
+    /// The programs last synced from a platform, if any.
+    pub fn catalog(&self, name: &str) -> Option<Catalog> {
+        check_pack_name(name).ok()?;
+        serde_json::from_slice(&std::fs::read(self.catalog_path(name)).ok()?).ok()
+    }
+
+    pub fn save_catalog(&self, c: &Catalog) -> Result<()> {
+        check_pack_name(&c.platform).map_err(|e| anyhow!(e))?;
+        let path = self.catalog_path(&c.platform);
+        std::fs::create_dir_all(path.parent().unwrap())?;
+        write_private(&path, &serde_json::to_vec(c)?)
+    }
+
+    /// Drops a platform's synced programs. Private programs are in there, so
+    /// they go when the token goes.
+    pub fn forget_catalog(&self, name: &str) {
+        if check_pack_name(name).is_ok() {
+            let _ = std::fs::remove_file(self.catalog_path(name));
+        }
+    }
+}
+
+// ---- syncing every program ---------------------------------------------------
+
+/// Programs fetched at once while syncing.
+const SYNC_WORKERS: usize = 3;
+/// Shortest gap between two requests to a platform, across all workers.
+const MIN_REQUEST_GAP: Duration = Duration::from_millis(150);
+
+/// Every program the user can work on at a platform, with its assets and
+/// rules, kept on this computer so it can be searched without asking again.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Catalog {
+    pub platform: String,
+    pub synced_at: i64,
+    pub programs: Vec<CatalogEntry>,
+    /// Programs that could not be read this time, with why.
+    #[serde(default)]
+    pub failed: Vec<SyncFailure>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogEntry {
+    /// The platform's word for whether it takes reports now, such as open or paused.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub state: String,
+    pub program: Program,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncFailure {
+    pub handle: String,
+    pub name: String,
+    pub error: String,
+}
+
+/// Where a sync is, for the Programs screen.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct SyncStatus {
+    pub running: bool,
+    pub done: usize,
+    pub total: usize,
+    pub started_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Whether the error was the platform refusing the token.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub refused: bool,
+}
+
+static SYNCS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, SyncStatus>>> = std::sync::LazyLock::new(Default::default);
+
+fn sync_key(home: &Home, name: &str) -> String {
+    format!("{}\n{name}", home.root.display())
+}
+
+pub fn sync_status(home: &Home, name: &str) -> SyncStatus {
+    SYNCS.lock().unwrap().get(&sync_key(home, name)).cloned().unwrap_or_default()
+}
+
+/// Starts syncing every program from a platform in the background, unless a
+/// sync is already running. The result lands in the platform's catalog.
+pub fn start_sync(home: &Home, name: &str) -> Result<SyncStatus, FetchError> {
+    let lib = PlatformLibrary::new(home);
+    let pack = lib.get(name).ok_or_else(|| FetchError::Other(format!("no platform `{}`; add it from the Market", clean(name, 60))))?;
+    let cred = lib.credentials().get(name).ok_or_else(|| FetchError::NotConnected(pack.doc.title.clone()))?;
+    let key = sync_key(home, name);
+    {
+        let mut all = SYNCS.lock().unwrap();
+        let st = all.entry(key.clone()).or_default();
+        if st.running {
+            return Ok(st.clone());
+        }
+        *st = SyncStatus { running: true, started_at: now_ms(), ..Default::default() };
+    }
+    let owned = home.clone();
+    std::thread::spawn(move || {
+        let set = |f: &dyn Fn(&mut SyncStatus)| f(SYNCS.lock().unwrap().entry(key.clone()).or_default());
+        let out = Client::new(&pack, cred).map_err(|e| FetchError::Other(e.to_string())).and_then(|c| c.sync(&|done, total| set(&|s| (s.done, s.total) = (done, total))));
+        let out = out.and_then(|c| PlatformLibrary::new(&owned).save_catalog(&c).map_err(|e| FetchError::Other(format!("saving the programs: {e:#}"))));
+        set(&|s| {
+            s.running = false;
+            if let Err(e) = &out {
+                s.error = Some(e.to_string());
+                s.refused = matches!(e, FetchError::Unauthorized(..));
+            }
+        });
+    });
+    Ok(sync_status(home, name))
 }
 
 // ---- credentials -----------------------------------------------------------
@@ -518,6 +634,8 @@ pub struct Client<'a> {
     doc: &'a PlatformDoc,
     cred: Credential,
     agent: ureq::Agent,
+    /// When the next request may go out.
+    next: std::sync::Mutex<std::time::Instant>,
 }
 
 impl<'a> Client<'a> {
@@ -528,7 +646,7 @@ impl<'a> Client<'a> {
         {
             b = b.proxy(ureq::Proxy::new(&p).context("invalid HTTPS_PROXY")?);
         }
-        Ok(Self { doc: &pack.doc, cred, agent: b.build() })
+        Ok(Self { doc: &pack.doc, cred, agent: b.build(), next: std::sync::Mutex::new(std::time::Instant::now()) })
     }
 
     /// Fetches one JSON answer. Refuses any address outside the pack's API origin.
@@ -537,15 +655,24 @@ impl<'a> Client<'a> {
         if !(url.starts_with(origin.as_str()) && matches!(url.as_bytes().get(origin.len()), Some(b'/') | Some(b'?'))) {
             return Err(FetchError::Other(format!("{} pointed outside its API ({}); stopped", self.doc.title, clean(url, 80))));
         }
-        let mut req = self.agent.get(url).set("Accept", "application/json");
-        req = match self.doc.auth.kind {
-            AuthKind::Basic => {
-                let raw = format!("{}:{}", self.cred.user, self.cred.secret);
-                req.set("Authorization", &format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(raw)))
-            }
-            AuthKind::Bearer => req.set("Authorization", &format!("Bearer {}", self.cred.secret)),
+        let auth = match self.doc.auth.kind {
+            AuthKind::Basic => format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", self.cred.user, self.cred.secret))),
+            AuthKind::Bearer => format!("Bearer {}", self.cred.secret),
         };
-        let resp = match req.call() {
+        let mut tries = 0;
+        let resp = loop {
+            self.pace();
+            tries += 1;
+            match self.agent.get(url).set("Accept", "application/json").set("Authorization", &auth).call() {
+                // Too many requests: wait as long as the platform asks (within reason) and try again.
+                Err(ureq::Error::Status(429, r)) if tries < 4 => {
+                    let wait = r.header("Retry-After").and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(10).clamp(1, 60);
+                    std::thread::sleep(Duration::from_secs(wait));
+                }
+                other => break other,
+            }
+        };
+        let resp = match resp {
             Ok(r) => r,
             Err(ureq::Error::Status(code @ (401 | 403), _)) => return Err(FetchError::Unauthorized(self.doc.title.clone(), code)),
             Err(ureq::Error::Status(code, _)) => return Err(FetchError::Other(format!("{} answered HTTP {code} for {}", self.doc.title, clean(&url[origin.len()..], 80)))),
@@ -557,6 +684,62 @@ impl<'a> Client<'a> {
             return Err(FetchError::Other(format!("{} sent more than {MAX_RESPONSE_BYTES} bytes; stopped", self.doc.title)));
         }
         serde_json::from_slice(&body).map_err(|_| FetchError::Other(format!("{} did not answer with JSON", self.doc.title)))
+    }
+
+    /// Keeps requests from all workers at least MIN_REQUEST_GAP apart.
+    fn pace(&self) {
+        let wait = {
+            let mut next = self.next.lock().unwrap();
+            let now = std::time::Instant::now();
+            let at = (*next).max(now);
+            *next = at + MIN_REQUEST_GAP;
+            at - now
+        };
+        if !wait.is_zero() {
+            std::thread::sleep(wait);
+        }
+    }
+
+    /// Fetches every program with its assets and rules. `progress` hears
+    /// (done, total) as programs come in. A refused token stops the sync;
+    /// other failures are noted per program and the rest carry on.
+    pub fn sync(&self, progress: &(dyn Fn(usize, usize) + Sync)) -> Result<Catalog, FetchError> {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let list = self.programs()?;
+        let total = list.len();
+        progress(0, total);
+        let next = AtomicUsize::new(0);
+        let done = AtomicUsize::new(0);
+        let stop = AtomicBool::new(false);
+        let results: std::sync::Mutex<Vec<Option<Result<Program, FetchError>>>> = std::sync::Mutex::new((0..total).map(|_| None).collect());
+        std::thread::scope(|s| {
+            for _ in 0..SYNC_WORKERS.min(total.max(1)) {
+                s.spawn(|| {
+                    loop {
+                        let i = next.fetch_add(1, Ordering::SeqCst);
+                        if i >= total || stop.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        let r = self.program(&list[i]);
+                        if matches!(r, Err(FetchError::Unauthorized(..))) {
+                            stop.store(true, Ordering::SeqCst);
+                        }
+                        results.lock().unwrap()[i] = Some(r);
+                        progress(done.fetch_add(1, Ordering::SeqCst) + 1, total);
+                    }
+                });
+            }
+        });
+        let mut catalog = Catalog { platform: self.doc.name.clone(), synced_at: now_ms(), programs: vec![], failed: vec![] };
+        for (summary, r) in list.iter().zip(results.into_inner().unwrap()) {
+            match r {
+                Some(Ok(program)) => catalog.programs.push(CatalogEntry { state: summary.state.clone(), program }),
+                Some(Err(e @ FetchError::Unauthorized(..))) => return Err(e),
+                Some(Err(e)) => catalog.failed.push(SyncFailure { handle: summary.handle.clone(), name: summary.name.clone(), error: e.to_string() }),
+                None => {}
+            }
+        }
+        Ok(catalog)
     }
 
     /// Follows a paged list, returning every item.
@@ -818,5 +1001,35 @@ mod tests {
         let pack = pack_at(&addr);
         let client = Client::new(&pack, Credential::default_for_test()).unwrap();
         assert!(matches!(client.programs(), Err(FetchError::Other(m)) if m.contains("HTTP 404")));
+    }
+
+    #[test]
+    fn syncs_every_program_and_keeps_going_past_one_that_fails() {
+        let (addr, _) = serve(|_| {
+            vec![
+                ("/v1/hackers/programs?page%5Bsize%5D=100".into(), r#"{"data":[{"attributes":{"handle":"acme","name":"Acme","offers_bounties":true,"submission_state":"open"}},{"attributes":{"handle":"gone","name":"Gone","submission_state":"paused"}}],"links":{}}"#.into()),
+                ("/v1/hackers/programs/acme/structured_scopes?page%5Bsize%5D=100".into(), r#"{"data":[{"attributes":{"asset_identifier":"app.acme.example","asset_type":"URL","eligible_for_submission":true}}],"links":{}}"#.into()),
+                ("/v1/hackers/programs/acme".into(), r#"{"attributes":{"policy":"At most 2 requests per second."}}"#.into()),
+            ]
+        });
+        let pack = pack_at(&addr);
+        let client = Client::new(&pack, Credential { user: "neo".into(), secret: "tok".into() }).unwrap();
+        let seen = std::sync::Mutex::new(vec![]);
+        let c = client.sync(&|d, t| seen.lock().unwrap().push((d, t))).unwrap();
+        assert_eq!(c.programs.len(), 1);
+        assert_eq!(c.programs[0].state, "open");
+        assert_eq!(c.programs[0].program.rules.rate_per_second, Some(2.0));
+        assert_eq!(c.failed.len(), 1);
+        assert_eq!(c.failed[0].handle, "gone");
+        assert_eq!(seen.lock().unwrap().last(), Some(&(2, 2)));
+
+        let dir = tempfile::tempdir().unwrap();
+        let lib = PlatformLibrary::at(dir.path());
+        assert!(lib.catalog("hackerone").is_none());
+        lib.save_catalog(&c).unwrap();
+        assert_eq!(lib.catalog("hackerone").unwrap().programs[0].program.name, "Acme");
+        assert!(lib.catalog("../hackerone").is_none());
+        lib.forget_catalog("hackerone");
+        assert!(lib.catalog("hackerone").is_none());
     }
 }

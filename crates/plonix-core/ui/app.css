@@ -1077,3 +1077,22 @@ button.tag.edited { cursor: pointer; }
 .proglock span { flex: 1; }
 .progconnect { display: flex; gap: 8px; align-items: center; }
 .progconnect input { flex: 1 1 0; min-width: 0; }
+.progcathead { display: flex; align-items: center; gap: 8px; padding: 10px 14px; }
+.progcathead .spacer { flex: 1; }
+.progsync { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--fg-2); min-width: 280px; flex: 0 1 420px; }
+.progcatbar { display: flex; align-items: center; gap: 10px; padding: 0 14px 10px; }
+.progcatbar input[type=search] { flex: 1; min-width: 0; border: 1px solid var(--line-2); background: var(--surface-2); color: var(--fg); border-radius: 7px; padding: 6px 10px; font-size: 12px; outline: 0; font-family: var(--mono); }
+.progcatbar input[type=search]:focus { border-color: var(--accent); }
+.progcheck { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--fg-2); white-space: nowrap; cursor: pointer; }
+.progcatrow { cursor: pointer; }
+.progcatrow:hover { background: var(--surface-2); }
+.pcmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.pcname { display: flex; align-items: center; gap: 8px; }
+.pcrules { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.pcrules .chip.k-bad::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--crit); }
+.proglist .grid { border-top: 0; }
+.proglist .pcact { text-align: right; width: 1%; }
+.progdrift { display: flex; align-items: center; gap: 10px; margin: 10px 14px 0; padding: 8px 12px; border-radius: 9px; background: var(--warn-soft); font-size: 12.5px; }
+.progdrift span { flex: 1; }
+#pg-cat .proglist { max-height: max(420px, calc(100vh - 390px)); }
+.proglist .grid td { vertical-align: middle; }

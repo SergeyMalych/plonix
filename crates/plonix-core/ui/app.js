@@ -4923,7 +4923,7 @@ const INTRU_TAG = { passive: 'in', safe: 'in', active: 'upd', intrusive: 'rej' }
 
 /** The Programs screen: bring in a bug bounty or disclosure program, review
  * what it changes, and follow its rules. */
-const PG = { platforms: [], program: null, lists: {}, source: null, draft: null, preview: null, filter: '', busy: false };
+const PG = { platforms: [], program: null, cats: {}, source: null, draft: null, preview: null, filter: '', mode: 'programs', bountyOnly: false, poll: null, busy: false };
 
 const KIND_LABEL = { web: 'Web', wildcard: 'Wildcard', ip: 'IP', cidr: 'IP range', mobile: 'Mobile app', source: 'Source code', other: 'Other' };
 
@@ -4956,7 +4956,7 @@ async function loadPrograms() {
   if (!PG.source) PG.source = (PG.platforms.find((p) => p.connected) || PG.platforms[0] || { name: 'paste' }).name;
   drawPrograms();
   const p = PG.platforms.find((x) => x.name === PG.source);
-  if (p && p.connected && !PG.lists[p.name]) loadPlatformPrograms(p.name);
+  if (p && p.connected) loadPlatformPrograms(p.name);
 }
 
 function drawPrograms() {
@@ -5001,12 +5001,29 @@ function followingCard(p) {
         h('button', { class: 'btn sm danger', text: 'Stop following', onclick: () => stopFollowing(p) }),
       ),
     ),
+    scopeDrift(p),
     h('div', { class: 'chips progrules' }, ruleChips(p.rules)),
     h('div', { class: 'progsum muted', text: `${inScope.length} in scope · ${out.length} out of scope${p.rules.not_accepted && p.rules.not_accepted.length ? ` · ${p.rules.not_accepted.length} kinds of report not accepted` : ''}` }),
     assetTable(p.assets),
     p.rules.not_accepted && p.rules.not_accepted.length
       ? h('details', { class: 'prognot' }, h('summary', { text: 'What this program does not accept' }), h('ul', null, p.rules.not_accepted.map((x) => h('li', { text: x }))))
       : null,
+  );
+}
+
+// The followed program as the last sync saw it, when its scope has changed since.
+function scopeDrift(p) {
+  const cat = PG.cats[p.platform] && PG.cats[p.platform].catalog;
+  const e = cat && cat.programs.find((x) => x.program.id === p.id);
+  if (!e || e.program.synced_at <= p.synced_at) return null;
+  const key = (list) => list.map((a) => `${a.in_scope ? '+' : '-'}${a.identifier}`).sort().join('\n');
+  if (key(e.program.assets) === key(p.assets)) return null;
+  const platform = PG.platforms.find((x) => x.name === p.platform);
+  return h(
+    'div',
+    { class: 'progdrift' },
+    h('span', { text: `${p.name} changed its scope on ${platform ? platform.title : p.platform} since you started following it.` }),
+    h('button', { class: 'btn sm', text: 'Review the changes', onclick: () => reviewDraft({ ...structuredClone(e.program), rules: structuredClone(p.rules) }) }),
   );
 }
 
@@ -5085,7 +5102,7 @@ function sourcePicker() {
               PG.source = s.key;
               drawPrograms();
               const pl = PG.platforms.find((x) => x.name === s.key);
-              if (pl && pl.connected && !PG.lists[pl.name]) loadPlatformPrograms(pl.name);
+              if (pl && pl.connected) loadPlatformPrograms(pl.name);
             },
           }),
         ),
@@ -5105,9 +5122,9 @@ function connectForm(p) {
     status.textContent = `Checking with ${p.title}…`;
     try {
       const r = await api(`/api/platforms/${encodeURIComponent(p.name)}/connect`, { method: 'POST', body: { user: user ? user.value : '', secret: secret.value } });
-      toast(`Connected to ${p.title}: ${r.programs} program${r.programs === 1 ? '' : 's'}`);
+      toast(`Connected to ${p.title}. Pulling ${plural(r.programs, 'program')} with their scope and rules…`);
       p.connected = true;
-      delete PG.lists[p.name];
+      PG.cats[p.name] = { sync: r.sync || { running: true } };
       drawPrograms();
       loadPlatformPrograms(p.name);
     } catch (e) {
@@ -5119,74 +5136,222 @@ function connectForm(p) {
   return h(
     'div',
     { class: 'progform' },
-    h('p', null, `Connect ${p.title} to see every program you can work on there. `, p.auth.help, ' ', p.auth.token_url ? h('a', { href: p.auth.token_url, target: '_blank', rel: 'noopener', text: 'Get a token' }) : null),
+    h('p', null, `Connect ${p.title} and Plonix pulls every program you can work on there, with its scope and rules. `, p.auth.help, ' ', p.auth.token_url ? h('a', { href: p.auth.token_url, target: '_blank', rel: 'noopener', text: 'Get a token' }) : null),
     h('div', { class: 'progconnect' }, user, secret, h('button', { class: 'btn primary', text: 'Connect', onclick: go })),
     h('div', { class: 'progfoot' }, status, h('span', { class: 'muted small', text: IN_APP ? 'The token is kept in your Keychain and never shown to AI agents.' : 'The token stays on this computer and is never shown to AI agents.' })),
   );
 }
 
-async function loadPlatformPrograms(name) {
-  PG.lists[name] = { loading: true };
-  drawPrograms();
+// Every program at a connected platform, pulled once with the token and kept
+// on this computer. PG.cats[name] = { catalog, sync, error }.
+async function loadPlatformPrograms(name, { start = false } = {}) {
+  const enc = encodeURIComponent(name);
   try {
-    const r = await api(`/api/platforms/${encodeURIComponent(name)}/programs`);
-    PG.lists[name] = { programs: r.programs };
+    let r = await api(`/api/platforms/${enc}/catalog`);
+    const stale = r.catalog && Date.now() - r.catalog.synced_at > 24 * 3600 * 1000;
+    if (!r.sync.running && (start || (!r.catalog && !r.sync.error) || (stale && !r.sync.error))) {
+      const s = await api(`/api/platforms/${enc}/sync`, { method: 'POST', body: {} });
+      r = { ...r, sync: s.sync };
+    }
+    PG.cats[name] = { catalog: r.catalog, sync: r.sync };
   } catch (e) {
-    PG.lists[name] = { error: e.message, code: e.code };
+    PG.cats[name] = { ...(PG.cats[name] || {}), error: e.message, code: e.code };
   }
-  drawPrograms();
+  if (S.view !== 'programs') return;
+  drawCatalog(name);
+  clearTimeout(PG.poll);
+  if (PG.cats[name].sync && PG.cats[name].sync.running) PG.poll = setTimeout(() => loadPlatformPrograms(name), 1200);
 }
 
+// Redraws just the platform tab, so the rest of the screen stays put.
+function drawCatalog(name) {
+  const box = $('#pg-cat');
+  if (!box || PG.source !== name || PG.preview) return drawPrograms();
+  const p = PG.platforms.find((x) => x.name === name);
+  if (p) box.replaceWith(platformPrograms(p));
+  const cur = $('.progcur');
+  if (cur && PG.program) cur.replaceWith(followingCard(PG.program));
+}
+
+const agoText = (ms) => {
+  const s = (Date.now() - ms) / 1000;
+  return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : fmtDate(ms);
+};
+
+const plural = (n, one, many = one + 's') => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+
 function platformPrograms(p) {
-  const l = PG.lists[p.name] || { loading: true };
-  const search = h('input', { type: 'search', id: 'pg-filter', placeholder: 'Find a program', value: PG.filter, spellcheck: 'false' });
-  search.addEventListener('input', () => {
-    PG.filter = search.value;
-    const list = $('#pg-list');
-    if (list) clear(list, programRows(p, l.programs || []));
-  });
+  const c = PG.cats[p.name] || {};
+  const cat = c.catalog;
+  const sync = c.sync || {};
   const disconnect = h('button', {
     class: 'btn sm',
     text: 'Disconnect',
     onclick: async () => {
       await api(`/api/platforms/${encodeURIComponent(p.name)}/disconnect`, { method: 'POST', body: {} }).catch((e) => toast(e.message, 'err'));
       p.connected = false;
-      delete PG.lists[p.name];
+      delete PG.cats[p.name];
       drawPrograms();
     },
   });
-  if (l.loading) return h('div', { class: 'muted progpad', text: `Loading your ${p.title} programs…` });
-  if (l.error)
+  const syncBtn = h('button', { class: 'btn sm', text: sync.running ? 'Syncing…' : 'Sync now', disabled: !!sync.running, onclick: () => loadPlatformPrograms(p.name, { start: true }) });
+
+  let state;
+  if (sync.running) {
+    const pct = sync.total ? Math.round((sync.done / sync.total) * 100) : 0;
+    state = h(
+      'div',
+      { class: 'progsync' },
+      h('span', { text: sync.total ? `Pulling programs from ${p.title}: ${sync.done.toLocaleString()} of ${sync.total.toLocaleString()}` : `Listing your ${p.title} programs…` }),
+      h('div', { class: 'pbar' + (sync.total ? '' : ' busy') }, h('div', { class: 'pbar-fill', style: { width: `${pct}%` } })),
+    );
+  } else if (cat) {
+    const inScope = cat.programs.reduce((n, e) => n + e.program.assets.filter((a) => a.in_scope).length, 0);
+    state = h('span', { class: 'muted small', text: `${plural(cat.programs.length, 'program')} · ${plural(inScope, 'in-scope asset')} · synced ${agoText(cat.synced_at)}` });
+  } else state = h('span');
+
+  const err = c.error || sync.error;
+  const head = h('div', { class: 'progcathead' }, state, h('span', { class: 'spacer' }), syncBtn, disconnect);
+  if (!cat)
     return h(
       'div',
-      { class: 'progpad' },
-      h('p', { class: 'ferr', text: l.error }),
-      h('div', { class: 'row' }, h('button', { class: 'btn sm', text: 'Try again', onclick: () => loadPlatformPrograms(p.name) }), l.code === 'platform_refused' ? disconnect : null),
+      { id: 'pg-cat' },
+      head,
+      err ? h('div', { class: 'progpad' }, h('p', { class: 'ferr', text: err })) : sync.running ? null : h('div', { class: 'muted progpad', text: `Getting ready to pull your ${p.title} programs…` }),
     );
+
+  const search = h('input', { type: 'search', id: 'pg-filter', placeholder: PG.mode === 'assets' ? 'Find an asset or program' : 'Find a program or one of its assets', value: PG.filter, spellcheck: 'false' });
+  const body = h('div', { class: 'proglist', id: 'pg-list' });
+  const fill = () => clear(body, PG.mode === 'assets' ? catalogAssets(p, cat) : catalogPrograms(p, cat));
+  search.addEventListener('input', () => {
+    PG.filter = search.value;
+    fill();
+  });
+  const modes = h(
+    'div',
+    { class: 'seg-ctl' },
+    [
+      ['programs', 'Programs'],
+      ['assets', 'Assets'],
+    ].map(([k, label]) =>
+      h('button', {
+        class: 'segbtn' + (PG.mode === k ? ' on' : ''),
+        text: label,
+        onclick: () => {
+          PG.mode = k;
+          drawCatalog(p.name);
+        },
+      }),
+    ),
+  );
+  const bountyOnly = h('label', { class: 'progcheck' }, h('input', { type: 'checkbox', checked: PG.bountyOnly, onchange: (e) => ((PG.bountyOnly = e.target.checked), fill()) }), 'Bounty only');
+  fill();
   return h(
     'div',
-    null,
-    h('div', { class: 'addrule' }, search, h('span', { class: 'muted small', text: `${l.programs.length} programs` }), h('button', { class: 'btn sm', text: 'Refresh', onclick: () => loadPlatformPrograms(p.name) }), disconnect),
-    h('div', { class: 'proglist', id: 'pg-list' }, programRows(p, l.programs)),
+    { id: 'pg-cat' },
+    head,
+    err ? h('div', { class: 'progpad' }, h('p', { class: 'ferr', text: `The last sync stopped: ${err}` })) : null,
+    h('div', { class: 'progcatbar' }, modes, search, bountyOnly),
+    body,
+    cat.failed && cat.failed.length
+      ? h('details', { class: 'prognot' }, h('summary', { text: `${plural(cat.failed.length, 'program')} could not be read this time` }), h('ul', null, cat.failed.map((f) => h('li', { text: `${f.name}: ${f.error}` }))))
+      : null,
   );
 }
 
-function programRows(p, programs) {
+// Programs taking reports first, then bounty programs, then by name.
+function catalogOrder(cat) {
+  const open = (e) => (!e.state || e.state === 'open' ? 0 : 1);
+  return cat.programs.slice().sort((a, b) => open(a) - open(b) || Number(b.program.bounty) - Number(a.program.bounty) || a.program.name.localeCompare(b.program.name));
+}
+
+function kindCounts(assets) {
+  const n = {};
+  for (const a of assets) n[a.kind] = (n[a.kind] || 0) + 1;
+  return Object.entries(n)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, c]) => `${c} ${(KIND_LABEL[k] || k).toLowerCase()}`)
+    .join(', ');
+}
+
+function shortRate(n) {
+  return n >= 1 ? `${+n.toFixed(2)} req/s` : `${+(n * 60).toFixed(1)} req/min`;
+}
+
+function catalogPrograms(p, cat) {
   const q = PG.filter.trim().toLowerCase();
-  const shown = programs.filter((x) => !q || x.name.toLowerCase().includes(q) || x.handle.toLowerCase().includes(q));
-  if (!shown.length) return h('div', { class: 'empty', text: programs.length ? 'No program matches.' : `${p.title} lists no programs for this account yet.` });
-  return shown.slice(0, 300).map((x) =>
-    h(
+  const rows = [];
+  for (const e of catalogOrder(cat)) {
+    const x = e.program;
+    if (PG.bountyOnly && !x.bounty) continue;
+    let hit = null;
+    if (q && !x.name.toLowerCase().includes(q) && !x.id.toLowerCase().includes(q)) {
+      hit = x.assets.find((a) => a.identifier.toLowerCase().includes(q));
+      if (!hit) continue;
+    }
+    rows.push([e, hit]);
+  }
+  if (!rows.length) return h('div', { class: 'empty', text: cat.programs.length ? 'Nothing matches.' : `${p.title} lists no programs for this account yet.` });
+  const shown = rows.slice(0, 200).map(([e, hit]) => {
+    const x = e.program;
+    const inScope = x.assets.filter((a) => a.in_scope);
+    const r = x.rules;
+    return h(
       'div',
-      { class: 'progrow' },
-      h('b', { text: x.name }),
-      h('span', { class: 'muted mono', text: x.handle }),
-      x.bounty ? h('span', { class: 'tag in', text: 'bounty' }) : h('span', { class: 'tag out', text: 'no bounty' }),
-      x.state && x.state !== 'open' ? h('span', { class: 'tag out', text: x.state }) : null,
-      h('span', { class: 'spacer' }),
-      h('button', { class: 'btn sm primary', text: 'Review', onclick: () => reviewFromPlatform(p.name, x) }),
+      { class: 'progrow progcatrow', onclick: () => reviewDraft(structuredClone(x)) },
+      h(
+        'div',
+        { class: 'pcmain' },
+        h('div', { class: 'pcname' }, h('b', { text: x.name }), x.bounty ? h('span', { class: 'tag in', text: 'bounty' }) : h('span', { class: 'tag out', text: 'no bounty' }), e.state && e.state !== 'open' ? h('span', { class: 'tag rej', text: e.state.replace(/_/g, ' ') }) : null),
+        h('div', { class: 'muted small', text: hit ? `Has ${hit.identifier}` : inScope.length ? `${plural(inScope.length, 'asset')} in scope: ${kindCounts(inScope)}` : 'No assets in scope listed' }),
+      ),
+      h(
+        'div',
+        { class: 'pcrules' },
+        r.rate_per_second ? h('span', { class: 'chip', title: 'Rate limit from the policy', text: shortRate(r.rate_per_second) }) : null,
+        r.headers && r.headers.length ? h('span', { class: 'chip', title: r.headers.map((x) => `${x.name}: ${x.value}`).join('\n'), text: plural(r.headers.length, 'header') }) : null,
+        r.no_automation ? h('span', { class: 'chip k-bad', title: 'The policy forbids automated testing', text: 'No automation' }) : null,
+      ),
+      h('button', { class: 'btn sm primary', text: 'Review', onclick: (ev) => (ev.stopPropagation(), reviewDraft(structuredClone(x))) }),
+    );
+  });
+  if (rows.length > 200) shown.push(h('div', { class: 'muted small progpad', text: `Showing 200 of ${rows.length.toLocaleString()}. Search to narrow it down.` }));
+  return shown;
+}
+
+function catalogAssets(p, cat) {
+  const q = PG.filter.trim().toLowerCase();
+  const rows = [];
+  for (const e of catalogOrder(cat)) {
+    if (PG.bountyOnly && !e.program.bounty) continue;
+    for (const a of e.program.assets) {
+      if (!a.in_scope || (PG.bountyOnly && !a.bounty)) continue;
+      if (q && !a.identifier.toLowerCase().includes(q) && !e.program.name.toLowerCase().includes(q)) continue;
+      rows.push([a, e]);
+    }
+  }
+  if (!rows.length) return h('div', { class: 'empty', text: 'No in-scope asset matches.' });
+  const table = h(
+    'table',
+    { class: 'grid' },
+    h('thead', null, h('tr', null, h('th', { text: 'Asset' }), h('th', { text: 'Type' }), h('th', { text: 'Program' }), h('th', { text: 'Bounty' }), h('th'))),
+    h(
+      'tbody',
+      null,
+      rows.slice(0, 500).map(([a, e]) =>
+        h(
+          'tr',
+          null,
+          h('td', { class: 'mono', text: a.identifier, title: a.instruction || '' }),
+          h('td', { text: KIND_LABEL[a.kind] || a.kind }),
+          h('td', { text: e.program.name }),
+          h('td', { class: 'muted', text: a.bounty ? (a.max_severity ? `up to ${a.max_severity}` : 'yes') : '' }),
+          h('td', { class: 'pcact' }, h('button', { class: 'btn sm', text: 'Review', onclick: () => reviewDraft(structuredClone(e.program)) })),
+        ),
+      ),
     ),
   );
+  return rows.length > 500 ? [table, h('div', { class: 'muted small progpad', text: `Showing 500 of ${rows.length.toLocaleString()}. Search to narrow it down.` })] : table;
 }
 
 function pasteForm() {
