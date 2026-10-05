@@ -143,7 +143,7 @@ Once the signing and notarization secrets are in place, the next push to `main` 
    git push origin v0.2.0
    ```
 
-4. The **Release** workflow checks that the tag matches the version, builds a universal (Apple silicon and Intel) Plonix.app, signs and notarizes it, packages it as a disk image and a zip, signs the update package, writes `latest.json` and publishes a GitHub release with all of them and the notes from `CHANGELOG.md`. It stops with an error if the tag and version differ or the changelog has no section for the version.
+4. The **Release** workflow checks that the tag matches the version, builds the `plonix` command for both architectures and joins them with `lipo` (Plonix.app carries it for Install Command Line Tool…, see [setup.md](setup.md#the-plonix-command-from-the-app)), builds a universal (Apple silicon and Intel) Plonix.app, signs and notarizes it, packages it as a disk image and a zip, signs the update package, writes `latest.json` and publishes a GitHub release with all of them and the notes from `CHANGELOG.md`. It stops with an error if the tag and version differ or the changelog has no section for the version.
 
    Without the Developer ID secrets the release is still published: the app is signed ad hoc instead of with a Developer ID, is not notarized, and the release notes explain how to open it the first time (**System Settings › Privacy & Security › Open Anyway**). Once the secrets are added, the next release is notarized with no other change.
 5. Edit the release notes on GitHub if needed, then download `Plonix-macOS.dmg` from the release and check it on a Mac:

@@ -211,6 +211,12 @@ code, .mono { font-family: var(--mono); }
 .empty .starter input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .empty .small { font-size: 12px; margin-top: 8px; }
 .mnote { margin: 0; font-size: 12px; line-height: 1.5; }
+/* Download progress in a dialog; .busy is a step with no byte count. */
+.pbar { height: 6px; border-radius: 3px; background: var(--surface-2); border: 1px solid var(--line-2); overflow: hidden; }
+.pbar[hidden] { display: none; }
+.pbar-fill { height: 100%; width: 0; background: var(--accent); transition: width .3s ease; }
+.pbar.busy .pbar-fill { width: 30% !important; animation: pbar-slide 1.1s ease-in-out infinite alternate; }
+@keyframes pbar-slide { from { margin-left: 0; } to { margin-left: 70%; } }
 .meth { font-family: var(--mono); font-weight: 700; font-size: 10.5px; }
 .m-GET { color: var(--info); } .m-POST { color: var(--ok); } .m-PUT, .m-PATCH { color: var(--warn); } .m-DELETE { color: var(--crit); } .m-OPTIONS, .m-HEAD { color: var(--fg-3); }
 .sc { font-family: var(--mono); font-weight: 650; font-size: 11px; }

@@ -26,6 +26,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use plonix_core::ca::CertAuthority;
+use plonix_core::chromium;
 use plonix_core::paths::Home;
 use serde_json::{Value, json};
 
@@ -36,6 +37,7 @@ const EXAMPLES: &str = "\
 Get started:
   plonix open example.com          start capturing, open a browser at the target and the Plonix window
   plonix ui                        open the Plonix window (Traffic, Lens, Bench, Scope, Map, Findings)
+  plonix browser install           no Chrome, Brave or Edge? get the Plonix browser (Chromium) once
   plonix launcher                  the Start screen in your browser: pick, create and open projects
   plonix start -p shop             open another project; each project runs in a session of its own
   plonix sessions                  projects open right now, with their proxy ports
@@ -208,6 +210,11 @@ enum Cmd {
     Ca {
         #[command(subcommand)]
         cmd: Option<CaCmd>,
+    },
+    /// The capture browser: which one `plonix open` uses, and the Plonix browser download
+    Browser {
+        #[command(subcommand)]
+        cmd: Option<BrowserCmd>,
     },
     /// Run the engine in the foreground (used by `plonix start`)
     #[command(hide = true)]
@@ -385,6 +392,16 @@ enum CaCmd {
     Trust,
 }
 
+#[derive(Subcommand)]
+enum BrowserCmd {
+    /// The browser `plonix open` launches (the default)
+    Show,
+    /// Download the Plonix browser (Chromium, about 150 MB) for Macs without Chrome, Brave or Edge
+    Install,
+    /// Delete the downloaded Plonix browser
+    Remove,
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match run(cli) {
@@ -505,6 +522,7 @@ fn dispatch(ctx: Ctx, command: Cmd) -> Result<ExitCode> {
         Cmd::Mcp => mcp::serve(ctx.home.clone())?,
         Cmd::Usage { cmd } => usage_cmd(&ctx, cmd.unwrap_or(UsageCmd::Show))?,
         Cmd::Ca { cmd } => ca_cmd(&ctx, cmd.unwrap_or(CaCmd::Show))?,
+        Cmd::Browser { cmd } => browser_cmd(&ctx, cmd.unwrap_or(BrowserCmd::Show))?,
         Cmd::Engine(a) => engine_ctl::run_foreground(
             ctx.home.clone(),
             &StartOptions {
@@ -891,13 +909,17 @@ fn open_cmd(ctx: &Ctx, a: OpenArgs) -> Result<()> {
     if a.no_browser {
         say("Browser", &format!("skipped; set your browser's proxy to {proxy}"));
     } else {
-        match open::detect() {
+        let mut found = open::detect(&ctx.home);
+        if found.is_none() && offer_plonix_browser(ctx)? {
+            found = open::detect(&ctx.home);
+        }
+        match found {
             Some(b) => {
                 let project_dir = c.status["project_dir"].as_str().map(PathBuf::from);
                 let profile = plonix_core::browser::profile_dir(&ctx.home, project_dir.as_deref());
                 let args = open::launch(&profile, &b, &proxy, &ca.spki_sha256(), &target.url)?;
-                needs_trust = b.kind == open::Kind::Firefox;
-                let how = if needs_trust { "isolated profile" } else { "isolated profile, trusts Plonix" };
+                needs_trust = b.kind == open::Kind::Firefox && plonix_core::trust::is_trusted(&ctx.home) != Some(true);
+                let how = if b.kind == open::Kind::Firefox { "isolated profile" } else { "isolated profile, trusts Plonix" };
                 say("Browser", &format!("{} ({how})", b.name));
                 browser_json = json!({ "name": b.name, "exe": b.exe, "args": args });
             }
@@ -905,8 +927,9 @@ fn open_cmd(ctx: &Ctx, a: OpenArgs) -> Result<()> {
                 needs_trust = true;
                 say("Browser", "none found to launch");
                 if !ctx.json {
+                    let get = if chromium::platform().is_some() { "Run `plonix browser install` to get the Plonix browser, install" } else { "Install" };
                     println!(
-                        "\n  Install Google Chrome, Brave, Edge or Firefox, or point any browser at the proxy:\n  \
+                        "\n  {get} Google Chrome, Brave, Edge or Firefox,\n  or point any browser at the proxy: \
                          HTTP and HTTPS proxy {proxy}, then visit {}",
                         target.url
                     );
@@ -1073,37 +1096,115 @@ fn ca_cmd(ctx: &Ctx, cmd: CaCmd) -> Result<()> {
             println!("Plonix CA\n  File      {}\n  SHA-256   {}\n", open::tilde(&path), ca.fingerprint());
             print!("{}", open::trust_guidance(&ctx.home));
         }
-        CaCmd::Trust => trust(&path)?,
+        CaCmd::Trust => trust(&ctx.home)?,
     }
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
-fn trust(path: &std::path::Path) -> Result<()> {
-    let keychain = std::env::var_os("HOME")
-        .map(|h| PathBuf::from(h).join("Library/Keychains/login.keychain-db"))
-        .context("HOME is not set")?;
-    println!("Adding {} to your login keychain as a trusted root. macOS will ask you to confirm.", path.display());
-    let status = std::process::Command::new("/usr/bin/security")
-        .args(["add-trusted-cert", "-r", "trustRoot", "-k"])
-        .arg(&keychain)
-        .arg(path)
-        .status()
-        .context("running /usr/bin/security")?;
-    if !status.success() {
-        bail!("macOS did not add the certificate ({status}). Nothing was changed.");
+fn trust(home: &Home) -> Result<()> {
+    if plonix_core::trust::supported() {
+        println!("Adding {} to your login keychain as a trusted root. macOS will ask you to confirm.", home.ca_cert().display());
     }
-    println!("✓ Trusted. Safari, curl and other apps now accept HTTPS through the Plonix proxy.");
+    plonix_core::trust::trust(home)?;
+    println!("✓ Trusted. Safari, Firefox, curl and other apps now accept HTTPS through the Plonix proxy.");
     Ok(())
 }
 
-#[cfg(not(target_os = "macos"))]
-fn trust(path: &std::path::Path) -> Result<()> {
-    bail!(
-        "`plonix ca trust` is macOS only. On this system add {} to your trust store by hand \
-         (e.g. Debian/Ubuntu: copy it to /usr/local/share/ca-certificates/plonix.crt and run update-ca-certificates).",
-        path.display()
-    )
+/// With no browser to launch, offers the Plonix browser download when
+/// someone is at the terminal to say yes. True when it was installed.
+fn offer_plonix_browser(ctx: &Ctx) -> Result<bool> {
+    if ctx.json || chromium::platform().is_none() || !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        return Ok(false);
+    }
+    print!("  No Chrome, Brave, Edge or Firefox found. Download the Plonix browser (Chromium, about 150 MB)? [Y/n] ");
+    std::io::stdout().flush()?;
+    let mut line = String::new();
+    std::io::stdin().lock().read_line(&mut line)?;
+    if line.trim().to_ascii_lowercase().starts_with('n') {
+        return Ok(false);
+    }
+    match install_plonix_browser(ctx) {
+        Ok(_) => Ok(true),
+        Err(e) => {
+            eprintln!("  Could not get the Plonix browser: {e:#}\n  Try again with `plonix browser install`.");
+            Ok(false)
+        }
+    }
+}
+
+/// Downloads the Plonix browser, showing progress on one line.
+fn install_plonix_browser(ctx: &Ctx) -> Result<chromium::Installed> {
+    ctx.home.ensure()?;
+    let quiet = ctx.json || !std::io::stderr().is_terminal();
+    let show = |p: &chromium::Progress| {
+        if quiet {
+            return;
+        }
+        let line = match p.stage {
+            chromium::Stage::Looking => "Finding the current Chromium build…".to_string(),
+            chromium::Stage::Downloading if p.total > 0 => {
+                format!("Downloading Chromium {}  {:>3}%  {} of {} MB", p.version, p.received * 100 / p.total, p.received >> 20, p.total >> 20)
+            }
+            chromium::Stage::Downloading => format!("Downloading Chromium {}  {} MB", p.version, p.received >> 20),
+            chromium::Stage::Unpacking => "Unpacking…".to_string(),
+            chromium::Stage::Verifying => "Checking that it starts…".to_string(),
+            chromium::Stage::Done | chromium::Stage::Failed | chromium::Stage::Idle => String::new(),
+        };
+        eprint!("\r\x1b[2K  {line}");
+        if matches!(p.stage, chromium::Stage::Done | chromium::Stage::Failed) {
+            eprint!("\r\x1b[2K");
+        }
+        let _ = std::io::stderr().flush();
+    };
+    chromium::install(&ctx.home, &show)
+}
+
+fn browser_cmd(ctx: &Ctx, cmd: BrowserCmd) -> Result<()> {
+    match cmd {
+        BrowserCmd::Show => {
+            let found = open::detect(&ctx.home);
+            let own = chromium::installed(&ctx.home);
+            if ctx.json {
+                let kind = |b: &plonix_core::browser::Browser| if b.kind == open::Kind::Firefox { "firefox" } else { "chromium" };
+                return ctx.print_json(&json!({
+                    "browser": found.as_ref().map(|b| json!({ "name": b.name, "exe": b.exe, "kind": kind(b) })),
+                    "plonix_browser": own,
+                }));
+            }
+            match &found {
+                Some(b) => println!("Capture browser   {}\n                  {}", b.name, b.exe.display()),
+                None => println!("Capture browser   none found"),
+            }
+            match &own {
+                Some(i) => println!("Plonix browser    Chromium {} in {}", i.version, open::tilde(&i.dir)),
+                None if chromium::platform().is_some() => println!("Plonix browser    not downloaded; `plonix browser install` gets it (about 150 MB)"),
+                None => {}
+            }
+            if found.as_ref().is_some_and(|b| b.kind == open::Kind::Firefox) && plonix_core::trust::is_trusted(&ctx.home) != Some(true) {
+                println!("\nFirefox needs the Plonix certificate trusted once: plonix ca trust");
+            }
+        }
+        BrowserCmd::Install => {
+            let i = install_plonix_browser(ctx)?;
+            if ctx.json {
+                return ctx.print_json(&json!(i));
+            }
+            println!("✓ Plonix browser ready: Chromium {} in {}", i.version, open::tilde(&i.dir));
+            if open::detect(&ctx.home).is_some_and(|b| b.exe == i.exe) {
+                println!("  `plonix open <target>` and Open Target in the window now use it.");
+            } else {
+                println!("  Another Chromium-based browser is installed, so Plonix keeps using that one.");
+            }
+        }
+        BrowserCmd::Remove => {
+            let removed = chromium::remove(&ctx.home)?;
+            if ctx.json {
+                return ctx.print_json(&json!({ "removed": removed }));
+            }
+            println!("{}", if removed { "✓ Removed the Plonix browser." } else { "The Plonix browser is not installed." });
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -17,6 +17,7 @@
     "active": true,
     "targets": ["app", "dmg"],
     "category": "DeveloperTool",
+    "externalBin": ["binaries/plonix-cli"],
     "shortDescription": "Web security research workbench",
     "longDescription": "Plonix captures HTTP and HTTPS traffic, learns the target's real scope as you browse, and lets you search, replay and compare requests.",
     "copyright": "Plonix contributors",

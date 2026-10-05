@@ -3,8 +3,10 @@
 //! Chromium-based browsers are launched with an isolated profile that routes
 //! through the proxy and trusts the Plonix CA by its key pin
 //! (`--ignore-certificate-errors-spki-list`), so HTTPS works without touching
-//! the system keychain. Firefox gets an isolated profile with proxy settings
-//! and needs the CA trusted once.
+//! the system keychain. Without one installed, Plonix can download its own
+//! Chromium (see [`crate::chromium`]). Firefox gets an isolated profile with
+//! proxy settings that follows the macOS keychain, so it needs the CA trusted
+//! there once (see [`crate::trust`]).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -63,8 +65,9 @@ pub struct Browser {
     pub kind: Kind,
 }
 
-/// `$PLONIX_BROWSER` if set, else the first Chromium-based browser, else Firefox.
-pub fn detect() -> Option<Browser> {
+/// `$PLONIX_BROWSER` if set, else the first Chromium-based browser, else
+/// the Plonix browser if it was downloaded, else Firefox.
+pub fn detect(home: &Home) -> Option<Browser> {
     if let Some(exe) = std::env::var_os("PLONIX_BROWSER").filter(|v| !v.is_empty()) {
         let exe = PathBuf::from(exe);
         let lower = exe.to_string_lossy().to_ascii_lowercase();
@@ -72,7 +75,10 @@ pub fn detect() -> Option<Browser> {
         let name = exe.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         return Some(Browser { name, exe, kind });
     }
-    candidates().into_iter().find_map(|(name, exe, kind)| exe.map(|exe| Browser { name: name.to_string(), exe, kind }))
+    let found: Vec<Browser> =
+        candidates().into_iter().filter_map(|(name, exe, kind)| exe.map(|exe| Browser { name: name.to_string(), exe, kind })).collect();
+    let own = || crate::chromium::installed(home).map(|i| Browser { name: crate::chromium::NAME.to_string(), exe: i.exe, kind: Kind::Chromium });
+    found.iter().find(|b| b.kind == Kind::Chromium).cloned().or_else(own).or_else(|| found.into_iter().next())
 }
 
 #[cfg(target_os = "macos")]

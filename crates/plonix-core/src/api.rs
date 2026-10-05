@@ -26,6 +26,7 @@ use crate::access::{self, AgentActivity, AgentMode, AgentSettings, Caller, Group
 use crate::ask::{self, AskError, AskRequest};
 use crate::assistant::{Conversations, StartError};
 use crate::browser;
+use crate::chromium;
 use crate::codec;
 use crate::engine::{Engine, ReplayRequest, SendError, SendRequest};
 use crate::intercept;
@@ -38,6 +39,7 @@ use crate::project::Project;
 use crate::proposal::{self, DraftRequest, NewProposal, Proposals};
 use crate::settings::{self, Level};
 use crate::scope::Decision;
+use crate::trust;
 use crate::ui::{self, LaunchCodes};
 
 #[derive(Clone)]
@@ -121,7 +123,10 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/scope/exclusions/domain", post(exclude_domain))
         .route("/api/scope/exclusions/custom", post(save_custom_group).delete(delete_custom_group))
         .route("/api/scope/exclusions/asked", post(exclusions_asked))
+        .route("/api/browser", get(browser_status))
         .route("/api/browser/open", post(open_browser))
+        .route("/api/browser/install", post(install_browser))
+        .route("/api/ca/trust", post(trust_ca))
         .route("/api/intercept", get(intercept_state).put(put_intercept))
         .route("/api/intercept/forward-all", post(intercept_forward_all))
         .route("/api/intercept/{id}/forward", post(intercept_forward))
@@ -1175,31 +1180,75 @@ async fn open_browser(State(s): State<AppState>, Json(b): Json<OpenBody>) -> Res
             Err(e) => return internal(e.into()),
         }
     }
-    let Some(found) = browser::detect() else {
-        return err(
-            StatusCode::NOT_FOUND,
-            "no_browser",
-            &format!(
-                "no browser found to launch. Install Google Chrome, Brave, Edge or Firefox, or set any browser's HTTP and HTTPS proxy to {}",
-                s.proxy_addr()
-            ),
+    let Some(found) = browser::detect(&s.home) else {
+        let can_install = chromium::platform().is_some();
+        let how = if can_install { "Get the Plonix browser (a Chromium download, once), install" } else { "Install" };
+        let msg = format!(
+            "no browser found to launch. {how} Google Chrome, Brave, Edge or Firefox, or set any browser's HTTP and HTTPS proxy to {}",
+            s.proxy_addr()
         );
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": msg, "code": "no_browser", "can_install": can_install }))).into_response();
     };
     let profile = browser::profile_dir(&s.home, s.engine.project_ref.get().map(|p| p.dir.as_path()));
     let launched = browser::launch(&profile, &found, &s.proxy_addr(), &s.engine.ca.spki_sha256(), &target.url);
-    if launched.is_ok() {
-        crate::usage::record("capture_started");
+    if let Err(e) = launched {
+        return internal(e);
     }
-    match launched {
-        Ok(_) => Json(json!({
-            "url": target.url,
-            "host": target.host,
-            "browser": found.name,
-            "needs_trust": found.kind == browser::Kind::Firefox,
-            "scope": rule,
-        }))
-        .into_response(),
-        Err(e) => internal(e),
+    crate::usage::record("capture_started");
+    // Firefox checks the keychain; the others trust the CA by its key pin.
+    let needs_trust = found.kind == browser::Kind::Firefox && {
+        let home = s.home.clone();
+        tokio::task::spawn_blocking(move || trust::is_trusted(&home)).await.ok().flatten() != Some(true)
+    };
+    Json(json!({
+        "url": target.url,
+        "host": target.host,
+        "browser": found.name,
+        "needs_trust": needs_trust,
+        "can_trust": trust::supported(),
+        "scope": rule,
+    }))
+    .into_response()
+}
+
+/// Which browser "Open target" uses, the Plonix browser and its download,
+/// and whether the system trusts the CA.
+async fn browser_status(State(s): State<AppState>) -> Response {
+    let home = s.home.clone();
+    let r = tokio::task::spawn_blocking(move || {
+        let found = browser::detect(&home);
+        let firefox = found.as_ref().is_some_and(|b| b.kind == browser::Kind::Firefox);
+        json!({
+            "browser": found.map(|b| json!({ "name": b.name, "kind": if b.kind == browser::Kind::Firefox { "firefox" } else { "chromium" } })),
+            "plonix_browser": chromium::installed(&home),
+            "can_install": chromium::platform().is_some(),
+            "install": chromium::progress(),
+            "ca_trusted": if firefox { trust::is_trusted(&home) } else { None },
+            "can_trust": trust::supported(),
+        })
+    })
+    .await;
+    match r {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => internal(e.into()),
+    }
+}
+
+/// Starts downloading the Plonix browser; `GET /api/browser` follows it.
+async fn install_browser(State(s): State<AppState>) -> Response {
+    if chromium::platform().is_none() {
+        return err(StatusCode::BAD_REQUEST, "unsupported", "the Plonix browser is available for macOS and 64-bit Linux only");
+    }
+    Json(json!({ "install": chromium::start_install(&s.home) })).into_response()
+}
+
+/// Trusts the CA in the login keychain. macOS asks the user to confirm.
+async fn trust_ca(State(s): State<AppState>) -> Response {
+    let home = s.home.clone();
+    match tokio::task::spawn_blocking(move || trust::trust(&home).map(|()| trust::is_trusted(&home))).await {
+        Ok(Ok(trusted)) => Json(json!({ "trusted": trusted.unwrap_or(true) })).into_response(),
+        Ok(Err(e)) => err(StatusCode::CONFLICT, "not_trusted", &format!("{e:#}")),
+        Err(e) => internal(e.into()),
     }
 }
 
