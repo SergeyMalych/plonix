@@ -27,6 +27,7 @@ use plonix_core::settings::InterfaceSettings;
 use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu};
 use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent, Wry};
+use tauri_plugin_dialog::DialogExt;
 
 const LAUNCHER: &str = "launcher";
 
@@ -61,6 +62,8 @@ const VIEW_ITEMS: [(&str, &str, &str, &str); 7] = [
 ];
 const OPEN_TARGET_SCRIPT: &str = "window.plonix && plonix.openTarget()";
 const TOGGLE_SIDEBAR_SCRIPT: &str = "window.plonix && plonix.toggleSidebar()";
+const IMPORT_HAR_SCRIPT: &str = "window.plonix && plonix.importHar && plonix.importHar()";
+const EXPORT_HAR_SCRIPT: &str = "window.plonix && plonix.exportHar && plonix.exportHar()";
 const PROJECT_SETTINGS_SCRIPT: &str = "window.plonix && plonix.go('settings')";
 const LAUNCHER_SETTINGS_SCRIPT: &str = "window.plonixLauncher && plonixLauncher.settings()";
 const NEW_PROJECT_SCRIPT: &str = "window.plonixLauncher && plonixLauncher.newProject()";
@@ -97,6 +100,7 @@ fn main() {
         .menu(build_menu)
         .on_menu_event(|app, event| on_menu(app, event.id().as_ref()))
         .setup(|app| {
+            plonix_core::dialogs::install(Box::new(Dialogs(app.handle().clone())));
             let handle = app.handle().clone();
             launcher_window(&handle)?;
             std::thread::Builder::new().name("plonix-start".into()).spawn(move || start(handle))?;
@@ -153,6 +157,35 @@ fn show_launcher(app: &AppHandle) {
         None => {
             let _ = launcher_window(app);
         }
+    }
+}
+
+/// The system's Open and Save dialogs, for engine routes that work with
+/// files (HAR export and import). They are asked for from engine tasks, never
+/// the main thread, so blocking until the user answers is fine.
+struct Dialogs(AppHandle);
+
+impl Dialogs {
+    fn builder(&self, title: &str, filters: &[plonix_core::dialogs::Filter<'_>]) -> tauri_plugin_dialog::FileDialogBuilder<Wry> {
+        let mut b = self.0.dialog().file().set_title(title);
+        for (name, exts) in filters {
+            b = b.add_filter(*name, exts);
+        }
+        // Over the project window the user is working in.
+        if let Some(w) = self.0.webview_windows().into_values().find(|w| w.is_focused().unwrap_or(false)) {
+            b = b.set_parent(&w);
+        }
+        b
+    }
+}
+
+impl plonix_core::dialogs::FileDialogs for Dialogs {
+    fn save(&self, title: &str, file_name: &str, filters: &[plonix_core::dialogs::Filter<'_>]) -> Option<std::path::PathBuf> {
+        self.builder(title, filters).set_file_name(file_name).blocking_save_file()?.into_path().ok()
+    }
+
+    fn open(&self, title: &str, filters: &[plonix_core::dialogs::Filter<'_>]) -> Option<std::path::PathBuf> {
+        self.builder(title, filters).blocking_pick_file()?.into_path().ok()
     }
 }
 
@@ -366,6 +399,8 @@ fn on_menu(app: &AppHandle, id: &str) {
             let script = match id {
                 "open-target" => Some(OPEN_TARGET_SCRIPT),
                 "toggle-sidebar" => Some(TOGGLE_SIDEBAR_SCRIPT),
+                "import-har" => Some(IMPORT_HAR_SCRIPT),
+                "export-har" => Some(EXPORT_HAR_SCRIPT),
                 _ => VIEW_ITEMS.iter().find(|(item, ..)| *item == id).map(|(.., script)| *script),
             };
             if let (Some(script), Some(w)) = (script, win.filter(|_| in_project)) {
@@ -399,14 +434,26 @@ fn open_in_browser(w: &WebviewWindow) {
 }
 
 /// The platform's standard menu, plus File › New Project…, Projects and
-/// Open Target…, Settings…, the update items, and the Plonix screens in View.
+/// Open Target…, Import HAR… and Export Traffic as HAR…, Settings…, the
+/// update items, and the Plonix screens in View.
 fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let menu = Menu::default(app)?;
     let new_project = MenuItem::with_id(app, "new-project", "New Project…", true, Some("CmdOrCtrl+N"))?;
     let projects = MenuItem::with_id(app, "show-projects", "Projects…", true, Some("CmdOrCtrl+Shift+P"))?;
     let open = MenuItem::with_id(app, "open-target", "Open Target…", true, Some("CmdOrCtrl+O"))?;
+    let import_har = MenuItem::with_id(app, "import-har", "Import HAR…", true, None::<&str>)?;
+    let export_har = MenuItem::with_id(app, "export-har", "Export Traffic as HAR…", true, None::<&str>)?;
     let file = find_or_add_submenu(app, &menu, "File", 1)?;
-    file.prepend_items(&[&new_project, &projects, &PredefinedMenuItem::separator(app)?, &open, &PredefinedMenuItem::separator(app)?])?;
+    file.prepend_items(&[
+        &new_project,
+        &projects,
+        &PredefinedMenuItem::separator(app)?,
+        &open,
+        &PredefinedMenuItem::separator(app)?,
+        &import_har,
+        &export_har,
+        &PredefinedMenuItem::separator(app)?,
+    ])?;
 
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
     if cfg!(target_os = "macos")
