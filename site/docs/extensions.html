@@ -1,0 +1,198 @@
+<!doctype html>
+<!-- Generated from docs/extensions.md by scripts/build-docs.mjs. Edit the Markdown, not this file. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Extensions · Plonix docs</title>
+<meta name="description" content="Plonix is meant to be maintained by its community. Extensions are how people add what the core deliberately leaves out: new detections, filters, tabs and panels, tweaks to how…">
+<meta property="og:title" content="Extensions · Plonix docs">
+<meta property="og:description" content="Plonix is meant to be maintained by its community. Extensions are how people add what the core deliberately leaves out: new detections, filters, tabs and panels, tweaks to how…">
+<meta property="og:url" content="https://plonix.io/docs/extensions">
+<meta property="og:image" content="https://plonix.io/assets/window.webp">
+<link rel="canonical" href="https://plonix.io/docs/extensions">
+<meta name="theme-color" content="#f5f5fa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0e13" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../assets/plonix-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="docs.css">
+<script>try{const t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <nav class="nav-links" aria-label="Site">
+      <a href="../#features">Features</a>
+      <a href="../#scope">Scope</a>
+      <a href="../#agents">AI</a>
+      <a href="./" aria-current="page">Docs</a>
+    </nav>
+    <button type="button" class="theme-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button>
+    <a class="btn small" href="https://github.com/SergeyMalych/plonix"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+  </div>
+</header>
+<div class="wrap docs">
+<aside class="side">
+<details class="side-menu" open>
+<summary>Documentation</summary>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="bench.html">The Bench</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li class="here"><a href="extensions.html" aria-current="page">Extensions</a><ul class="toc"><li><a href="#contents">Contents</a></li><li><a href="#threat-model">Threat model</a></li><li><a href="#the-trust-boundary">The trust boundary</a></li><li><a href="#invariants">Invariants</a></li><li><a href="#extension-kinds">Extension kinds</a></li><li><a href="#manifest">Manifest</a></li><li><a href="#capabilities">Capabilities</a></li><li><a href="#ui-contributions-tabs-panels-tweaks-and-filters">UI contributions: tabs, panels, tweaks and filters</a></li><li><a href="#sandbox-webassembly">Sandbox: WebAssembly</a></li><li><a href="#lifecycle">Lifecycle</a></li><li><a href="#store-and-distribution">Store and distribution</a></li><li><a href="#versioning">Versioning</a></li><li><a href="#roadmap">Roadmap</a></li></ul></li><li><a href="updates.html">Updates</a></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
+</details>
+</aside>
+<main class="doc">
+<article>
+<h1 id="extensions">Extensions</h1>
+<p>Plonix is meant to be maintained by its community. Extensions are how people add what the core deliberately leaves out: new detections, filters, tabs and panels, tweaks to how Plonix behaves, passive analyzers for a specific framework, helpers for a token format, finding templates. This document is the design for the extension system: what an extension is, how it's found, installed and loaded, and above all <strong>what it is never allowed to do</strong>.</p>
+<p><strong>Status.</strong> Three pieces are live today:</p>
+<ul><li><strong>Rule packs</strong> are installable from files, URLs and the store, with schema validation and SHA-256 pinning. See <a href="detection-rules.html">detection-rules.md</a>.</li><li><strong>Filter packs</strong> add named Traffic filters (<code>is:graphql</code>, <code>-is:trackers</code>) to search and to the window's <strong>+ Filter</strong> builder. See <a href="filters.html">filters.md</a>.</li><li>The <strong>Market</strong> (<code>plonix market</code>, and the Market screen) lists skills, rule packs, filter packs, bundles and extensions from a signed index and installs everything but code extensions, verifying the signature and every checksum. See <a href="market.html">market.md</a>.</li></ul>
+<p>Tabs, panels and tweaks are designed below (<a href="#ui-contributions-tabs-panels-tweaks-and-filters">UI contributions</a>) and not built yet.</p>
+<p>The <strong>extension manifest and capability model</strong> are implemented and tested (<code>crates/plonix-core/src/extension.rs</code>), so the contract is fixed before any code runs. The <strong>code runtime is not built</strong>. Store entries of kind <code>extension</code> are listed but refused at install time. That is deliberate: an unsandboxed plugin loader in a security tool would be a backdoor with a nice API, and we won't ship one.</p>
+<h2 id="contents">Contents<a class="anchor" href="#contents" aria-label="Link to this section">#</a></h2>
+<ul><li><a href="#threat-model">Threat model</a></li><li><a href="#the-trust-boundary">The trust boundary</a></li><li><a href="#invariants">Invariants</a></li><li><a href="#extension-kinds">Extension kinds</a></li><li><a href="#manifest">Manifest</a></li><li><a href="#capabilities">Capabilities</a></li><li><a href="#ui-contributions-tabs-panels-tweaks-and-filters">UI contributions: tabs, panels, tweaks and filters</a></li><li><a href="#sandbox-webassembly">Sandbox: WebAssembly</a></li><li><a href="#lifecycle">Lifecycle</a></li><li><a href="#store-and-distribution">Store and distribution</a></li><li><a href="#versioning">Versioning</a></li><li><a href="#roadmap">Roadmap</a></li></ul>
+<h2 id="threat-model">Threat model<a class="anchor" href="#threat-model" aria-label="Link to this section">#</a></h2>
+<p>Plonix sits on the most sensitive data a researcher has: authenticated traffic, session tokens, API keys, and requests to systems they're authorized to test, and only those. An extension is code or data written by someone the user has never met, installed with one command. We assume:</p>
+<ul><li><strong>An extension may be malicious</strong> from the start, or become malicious in an update (a compromised maintainer account, a typo-squatted name, a sold project).</li><li><strong>A download may be tampered with</strong> between the author and the user.</li><li><strong>An extension may be buggy</strong>: infinite loops, huge allocations, panics.</li></ul>
+<p>It must not be able to:</p>
+<ol><li><strong>Exfiltrate data</strong>: send captured traffic, tokens or findings anywhere.</li><li><strong>Attack out of scope</strong>: send requests to hosts the user has not accepted. That is the difference between authorized testing and an incident.</li><li><strong>Change scope</strong> or any other user decision.</li><li><strong>Touch the machine</strong>: read <code>~/.ssh</code>, write files, spawn processes, open sockets.</li><li><strong>Deceive the user</strong>: forge output, impersonate the engine, or pass off a proposed finding as a confirmed one.</li><li><strong>Take the engine down</strong>.</li></ol>
+<h2 id="the-trust-boundary">The trust boundary<a class="anchor" href="#the-trust-boundary" aria-label="Link to this section">#</a></h2>
+<pre><code class="language-text"> ┌──────────────────── trusted ─────────────────────┐   ┌──────── untrusted ─────────┐
+ │                                                  │   │                            │
+ │  User ── GUI / CLI / MCP ── Local API ── Engine ─┼───┼─▶ host API ─▶ extension   │
+ │                                   │              │   │  (capability-checked,      │
+ │                         scope enforcement        │   │   metered, no ambient      │
+ │                                   │              │   │   authority)               │
+ │                              Upstream ── network │   │                            │
+ └──────────────────────────────────────────────────┘   │  rule packs (data only)    │
+                                                        └────────────────────────────┘</code></pre>
+<p>Everything to the right of the line is untrusted: rule packs, store indexes, extension manifests, extension code, and anything an extension returns. The engine is the only component that touches the network, the file system or the database. Extensions get <strong>no ambient authority</strong>. They can only call the functions the engine hands them, and only the ones their granted capabilities unlock. Every such call goes through the same code path as the CLI and agents, including <strong>scope enforcement</strong>.</p>
+<h2 id="invariants">Invariants<a class="anchor" href="#invariants" aria-label="Link to this section">#</a></h2>
+<p>These hold for every extension, whatever capabilities it has. They're enforced by the engine, not by convention, and no manifest field, capability or user setting turns them off.</p>
+<ol><li><strong>Scope is absolute.</strong> An extension can never cause a request to a host that isn't accepted. Even with <code>scoped-requests</code>, every request goes through <code>Engine::send</code>, which refuses out-of-scope hosts exactly as it does for <code>plonix replay</code> and AI agents. The request is recorded with the extension as its initiator.</li><li><strong>No network.</strong> There is no socket, DNS or HTTP API. The only way out is <code>scoped-requests</code>, which is (1).</li><li><strong>No file system, no processes, no environment.</strong> Not even read-only. Configuration an extension needs is passed in by the engine.</li><li><strong>Read-only decisions.</strong> Scope rules, project settings and the user's findings can't be changed. Extensions can <em>propose</em> findings, which are stored as created by the extension and marked unconfirmed until a person confirms them.</li><li><strong>Bounded resources.</strong> Each call has a fuel (instruction) budget, a memory cap and a wall-clock timeout. An extension that exceeds them is stopped, and one that keeps doing it is disabled.</li><li><strong>Data, not markup.</strong> Everything an extension returns is plain structured data that the engine validates (lengths, character sets, no control characters) before showing it anywhere.</li><li><strong>Pinned bytes.</strong> What runs is exactly what was verified at install time (SHA-256 against the signed Market index), and it's re-verified on load.</li></ol>
+<h2 id="extension-kinds">Extension kinds<a class="anchor" href="#extension-kinds" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>Kind</th><th>Runtime</th><th>Can do</th><th>Status</th></tr></thead><tbody><tr><td>Rule pack</td><td>none (data)</td><td>Detect technologies</td><td><strong>Shipped</strong></td></tr><tr><td>Filter pack</td><td>none (data)</td><td>Add named Traffic filters, used as <code>is:&lt;id&gt;</code></td><td><strong>Shipped</strong></td></tr><tr><td>Tweak pack</td><td>none (data)</td><td>Change defaults from an allowlist: default filters, columns, shortcuts, accent colour</td><td><strong>Designed</strong></td></tr><tr><td>Declarative extension</td><td>none (data)</td><td>Bundle one or more rule packs under one name and version</td><td>Manifest implemented; install planned</td></tr><tr><td>Lens detector</td><td>none (data)</td><td>Flag a value in requests and responses: a regex, a label and a category (personal data, secret, decodable, info)</td><td>Built-in set shipped; packs planned</td></tr><tr><td>WASM extension</td><td>WebAssembly sandbox</td><td>Passive analysis, finding proposals, scoped requests, panels and tabs, per its capabilities</td><td><strong>Designed</strong> (this document)</td></tr></tbody></table></div>
+<p>The guiding rule: <strong>anything that can be data is data.</strong> Most community contributions (detecting a framework, flagging a header, recognising a token format) should be declarative, because data can be fully validated and can't misbehave. Code is for what data can't express.</p>
+<h2 id="manifest">Manifest<a class="anchor" href="#manifest" aria-label="Link to this section">#</a></h2>
+<p>An extension package is a directory (distributed as a single archive) with a <code>plonix-extension.json</code> manifest:</p>
+<pre><code class="language-json">{
+  &quot;plonix_extension&quot;: 1,
+  &quot;name&quot;: &quot;jwt-workbench&quot;,
+  &quot;version&quot;: &quot;0.3.1&quot;,
+  &quot;description&quot;: &quot;Decodes JWTs in traffic, flags alg=none and weak HMAC secrets&quot;,
+  &quot;author&quot;: &quot;Jane Researcher&quot;,
+  &quot;homepage&quot;: &quot;https://github.com/jane/plonix-jwt-workbench&quot;,
+  &quot;runtime&quot;: &quot;wasm&quot;,
+  &quot;entry&quot;: &quot;jwt_workbench.wasm&quot;,
+  &quot;rule_packs&quot;: [&quot;rules/jwt.json&quot;],
+  &quot;capabilities&quot;: [&quot;read-traffic&quot;, &quot;passive-analysis&quot;, &quot;propose-findings&quot;]
+}</code></pre>
+<p>Validation (implemented in <code>extension::parse_manifest</code>):</p>
+<ul><li>Unknown fields are rejected.</li><li><code>name</code> and <code>version</code> follow the same rules as rule packs.</li><li><code>entry</code> and <code>rule_packs</code> must be relative paths inside the package, without <code>..</code>, absolute paths or unusual characters.</li><li><code>runtime: declarative</code> may not have an <code>entry</code> and may only ask for <code>detection-rules</code>.</li><li><code>runtime: wasm</code> needs an <code>entry</code> ending in <code>.wasm</code>.</li><li>Capabilities must come from the closed list below. Duplicates and impossible combinations are rejected.</li></ul>
+<h2 id="capabilities">Capabilities<a class="anchor" href="#capabilities" aria-label="Link to this section">#</a></h2>
+<p>The capability list is <strong>closed</strong>: the manifest parser rejects anything not on it. There is deliberately no <code>network</code>, <code>filesystem</code>, <code>exec</code>, <code>modify-scope</code> or <code>send-anywhere</code> capability. A permission that doesn't exist can't be granted by mistake or by social engineering.</p>
+<div class="table"><table><thead><tr><th>Capability</th><th>Lets the extension</th><th>Granted</th></tr></thead><tbody><tr><td><code>read-traffic</code></td><td>Receive captured exchanges for <strong>in-scope</strong> hosts, delivered by the engine</td><td>at install</td></tr><tr><td><code>read-out-of-scope</code></td><td>Also receive exchanges for hosts outside scope (needs <code>read-traffic</code>)</td><td>explicit yes</td></tr><tr><td><code>read-scope</code></td><td>Read scope rules and suggestions (never change them)</td><td>at install</td></tr><tr><td><code>detection-rules</code></td><td>Contribute detection rules, validated like any rule pack</td><td>at install</td></tr><tr><td><code>named-filters</code></td><td>Contribute named Traffic filters, validated like any filter pack</td><td>at install</td></tr><tr><td><code>ui-panels</code></td><td>Show panels in existing screens (Traffic inspector, a Map host), drawn by Plonix from a view tree</td><td>at install</td></tr><tr><td><code>ui-tab</code></td><td>Add one sidebar tab of its own, drawn the same way</td><td>at install</td></tr><tr><td><code>passive-analysis</code></td><td>Return tags and notes for exchanges it was given</td><td>at install</td></tr><tr><td><code>propose-findings</code></td><td>Propose findings, stored as unconfirmed and attributed to the extension</td><td>at install</td></tr><tr><td><code>scoped-requests</code></td><td>Ask the engine to send requests. <strong>Scope-enforced, rate-limited and recorded</strong>, exactly like agent requests</td><td>explicit yes</td></tr></tbody></table></div>
+<p>At install time the user sees the capabilities in plain words (<code>Capability::describe</code>). The two <strong>sensitive</strong> ones (<code>read-out-of-scope</code>, <code>scoped-requests</code>) each need a separate, explicit yes. An update that asks for <strong>new</strong> capabilities isn't applied silently: it waits for the user to approve the difference.</p>
+<h2 id="ui-contributions-tabs-panels-tweaks-and-filters">UI contributions: tabs, panels, tweaks and filters<a class="anchor" href="#ui-contributions-tabs-panels-tweaks-and-filters" aria-label="Link to this section">#</a></h2>
+<p>People want to change the window as well as the engine: a tab for a workflow they repeat, a panel that explains a token, a filter for their target's noise, a different default layout. Each of these is a different kind of risk, so each gets the least powerful mechanism that can do the job.</p>
+<div class="table"><table><thead><tr><th>Want</th><th>Mechanism</th><th>Code?</th><th>Status</th></tr></thead><tbody><tr><td>New filters</td><td>Filter pack</td><td>No</td><td><strong>Shipped</strong></td></tr><tr><td>Tweaks to defaults</td><td>Tweak pack</td><td>No</td><td>Designed</td></tr><tr><td>A panel in an existing screen</td><td>WASM extension with <code>ui-panels</code></td><td>Yes, sandboxed</td><td>Designed</td></tr><tr><td>A new tab</td><td>WASM extension with <code>ui-tab</code></td><td>Yes, sandboxed</td><td>Designed</td></tr></tbody></table></div>
+<h3 id="filters-shipped">Filters (shipped)<a class="anchor" href="#filters-shipped" aria-label="Link to this section">#</a></h3>
+<p>A filter pack is a list of named queries in the normal search language. Each shows up as <code>is:&lt;id&gt;</code> in search and the CLI, and as a one-click chip under <strong>+ Filter</strong> in Traffic, in either <em>Show only</em> or <em>Hide</em> mode. A filter can only narrow what you already see: its query is parsed by the same search engine as anything you type, it can't refer to another named filter, and it has no way to touch scope, send requests or run code. Packs install from a file, a URL or the store and are pinned by SHA-256, like rule packs. See <a href="filters.html">filters.md</a>.</p>
+<h3 id="tweaks-designed">Tweaks (designed)<a class="anchor" href="#tweaks-designed" aria-label="Link to this section">#</a></h3>
+<p>A tweak pack is data: a list of <code>setting = value</code> pairs from an <strong>allowlist</strong> of cosmetic and workflow settings (default Traffic filters, visible columns, row density, keyboard shortcuts, accent colour, the order of sidebar tabs). Each setting has a type and range, and Plonix shows the diff before applying it. Security settings are never on the allowlist and can't be tweaked by a pack: scope, the CA, upstream certificate checks, agent access, the API token, where data is stored. A tweak pack can be removed in one step and Plonix returns to the values it replaced.</p>
+<h3 id="panels-and-tabs-designed">Panels and tabs (designed)<a class="anchor" href="#panels-and-tabs-designed" aria-label="Link to this section">#</a></h3>
+<p>Panels and tabs need logic, so they come from WASM extensions, with two extra capabilities: <code>ui-panels</code> and <code>ui-tab</code>.</p>
+<ul><li><strong>Plonix draws everything.</strong> The extension never ships HTML, CSS or JavaScript and never gets a web view. It returns a <strong>view tree</strong> made of Plonix's own components (heading, text, key/value list, table, code block, request link, badge, button, form fields) as plain data. The window renders it with the same code as built-in screens. That rules out the web's usual attacks: no scripts, no remote images or fonts that could leak data, no fake login prompts styled like Plonix, no clickjacking.</li><li><strong>Contribution points.</strong> <code>ui-panels</code> can add a panel to the Traffic inspector (for the selected exchange) and to a host in the Map. <code>ui-tab</code> adds one tab to the sidebar. Each panel and tab is labelled with the extension's name, so it can't pass itself off as part of Plonix.</li><li><strong>Data comes through capabilities.</strong> A panel for an exchange receives that exchange only if the extension also holds <code>read-traffic</code>, and only if it's in scope (unless <code>read-out-of-scope</code> was granted). A tab sees what its capabilities allow, through the same host API as everything else.</li><li><strong>Buttons call the host API, not the network.</strong> A button in a panel can only trigger an action the extension's capabilities allow: propose a finding, filter Traffic, open an exchange, or, with <code>scoped-requests</code>, send a request that is scope-enforced and recorded like any agent request.</li><li><strong>Bounded.</strong> Rendering runs under the same fuel, memory and time limits as any extension call, and view trees are capped in size and depth. A slow or broken panel shows an error in its own box and never freezes the window.</li></ul>
+<pre><code class="language-text"> extension (WASM) ──view tree (data)──▶ Plonix validates ──▶ Plonix components render it
+        ▲                                     │
+        └──── host API calls (capability-checked, scope-enforced) ◀── button clicks</code></pre>
+<h2 id="sandbox-webassembly">Sandbox: WebAssembly<a class="anchor" href="#sandbox-webassembly" aria-label="Link to this section">#</a></h2>
+<p><strong>Recommendation: run extension code as WebAssembly components in an embedded runtime (Wasmtime), with no WASI file system, network or clock imports, and a host API defined in WIT that maps one-to-one to capabilities.</strong></p>
+<p>Why WebAssembly:</p>
+<ul><li><strong>Deny by default.</strong> A WASM module can't do anything it isn't given an import for. That's what we need: capabilities become the <em>only</em> imports. Compare dynamic libraries (<code>.dylib</code>), which run with the full rights of the Plonix process, and scripting runtimes, whose standard libraries have to be stripped and audited one function at a time.</li><li><strong>Resource limits built in.</strong> Wasmtime supports fuel metering (instruction budgets), epoch interruption (wall-clock timeouts) and memory limits per instance. A runaway extension is stopped, and the engine keeps running.</li><li><strong>Any language.</strong> Authors can write in Rust, Go, AssemblyScript, C, Zig, or Python and JavaScript through componentized interpreters. The community isn't tied to one language.</li><li><strong>Portable and reproducible.</strong> One <code>.wasm</code> file runs on every macOS architecture and on Linux CI, and its SHA-256 identifies the exact code that runs.</li><li><strong>Mature in exactly this role.</strong> It's the model behind proxy-wasm in Envoy, plus Zed, Extism and Shopify Functions: untrusted third-party code inside a sensitive host.</li></ul>
+<p>Alternatives considered:</p>
+<div class="table"><table><thead><tr><th>Option</th><th>Why not (as the primary model)</th></tr></thead><tbody><tr><td>Native plugins (<code>.dylib</code>)</td><td>Full process rights: no isolation at all. Rejected.</td></tr><tr><td>Out-of-process plugins over IPC</td><td>Isolation depends on OS sandboxing (macOS <code>sandbox-exec</code> is deprecated, App Sandbox needs separate signed helpers). Heavier, and harder to make deny-by-default. A possible later option for heavyweight tools, behind the same capability API.</td></tr><tr><td>Embedded Lua or JavaScript</td><td>Workable, but the sandbox is &quot;remove dangerous globals&quot;, which is easy to get wrong, and resource limits are weaker. One language only.</td></tr><tr><td>Declarative only</td><td>Already the default for everything it can express (rule packs). Not enough for analyzers that need real logic.</td></tr></tbody></table></div>
+<h3 id="host-api-sketch-wit">Host API sketch (WIT)<a class="anchor" href="#host-api-sketch-wit" aria-label="Link to this section">#</a></h3>
+<pre><code class="language-wit">package plonix:extension@1.0.0;
+
+interface types {
+  record header { name: string, value: string }
+  record exchange {
+    id: s64, method: string, scheme: string, host: string, port: u16,
+    path: string, query: string,
+    request-headers: list&lt;header&gt;, request-body: list&lt;u8&gt;,
+    status: option&lt;u16&gt;, response-headers: list&lt;header&gt;, response-body: list&lt;u8&gt;,
+  }
+  record note { exchange-id: s64, tag: string, text: string }
+  enum severity { info, low, medium, high, critical }
+  record finding-proposal { title: string, severity: severity, description: string, exchange-ids: list&lt;s64&gt; }
+}
+
+// Functions the engine provides. Each one is linked only when the
+// matching capability was granted; otherwise the import doesn't exist.
+interface host {
+  use types.{exchange, finding-proposal};
+  log: func(message: string);                                       // always; rate-limited
+  propose-finding: func(f: finding-proposal) -&gt; result&lt;s64, string&gt;; // propose-findings
+  send: func(method: string, url: string, headers: list&lt;tuple&lt;string, string&gt;&gt;, body: list&lt;u8&gt;)
+      -&gt; result&lt;exchange, string&gt;;                                  // scoped-requests; scope-enforced
+}
+
+// Functions the extension provides.
+world analyzer {
+  use types.{exchange, note};
+  import host;
+  export analyze: func(batch: list&lt;exchange&gt;) -&gt; list&lt;note&gt;;        // read-traffic + passive-analysis
+}</code></pre>
+<p>The engine delivers traffic <strong>to</strong> the extension in batches. The extension never queries the database, so the engine decides what it sees: in-scope only unless <code>read-out-of-scope</code> was granted, and with bodies size-capped.</p>
+<h2 id="lifecycle">Lifecycle<a class="anchor" href="#lifecycle" aria-label="Link to this section">#</a></h2>
+<pre><code class="language-text"> discover ──▶ fetch ──▶ verify ──▶ validate ──▶ consent ──▶ install ──▶ load ──▶ run
+   store       https     sha256     manifest     show caps   pin bytes   re-verify   sandboxed,
+   index       size-cap  vs index   + content    sensitive   lock.json   on every    metered,
+                                                 = explicit               load        disable-able</code></pre>
+<ol><li><strong>Discover</strong>: <code>plonix store</code> reads a JSON index (see <a href="#store-and-distribution">Store and distribution</a>).</li><li><strong>Fetch</strong>: over <code>https://</code> only (or a local path), size-capped, redirects can't leave https.</li><li><strong>Verify</strong>: SHA-256 of the downloaded bytes must equal the index entry. A mismatch stops everything before any write.</li><li><strong>Validate</strong>: the manifest is parsed strictly. Bundled rule packs are validated like any other. The WASM module is compiled and its imports are checked against the granted capabilities: a module that imports anything outside the host API is rejected.</li><li><strong>Consent</strong>: the user sees what the extension can do in plain words, and sensitive capabilities need an explicit yes.</li><li><strong>Install</strong>: bytes go to <code>~/.plonix/extensions/&lt;name&gt;/</code>, with name, version, sha256, source and granted capabilities recorded in a lock file.</li><li><strong>Load</strong>: on engine start, each extension is re-verified against the lock. Anything that changed on disk is skipped and reported.</li><li><strong>Run</strong>: each call gets a fresh, metered instance (or a pooled one, reset between calls). Faults and limit violations are logged. Repeated violations disable the extension until the user re-enables it.</li></ol>
+<p><code>plonix ext list | info | disable | enable | remove</code> will manage installed extensions, mirroring <code>plonix rules</code>.</p>
+<h2 id="store-and-distribution">Store and distribution<a class="anchor" href="#store-and-distribution" aria-label="Link to this section">#</a></h2>
+<p>The store is a static JSON index, already implemented for rule packs (<code>plonix_core::registry</code>). Extensions use the same index with <code>&quot;kind&quot;: &quot;extension&quot;</code>:</p>
+<ul><li><strong>Hosted anywhere.</strong> The community index lives in this repository (<code>store/index.json</code>). Teams can host private indexes on any https server, or a folder, and point Plonix at them with <code>--index</code> or <code>$PLONIX_STORE_INDEX</code>.</li><li><strong>Reviewed by pull request.</strong> Adding or updating a community package means a PR that changes <code>store/index.json</code>, including the new SHA-256. Review approves specific bytes, and the checksum makes that approval stick.</li><li><strong>The index is the root of trust.</strong> Whoever controls an index decides which bytes are acceptable. Later hardening: signed indexes (minisign or Sigstore), so a mirror can serve the index without being trusted.</li><li><strong>No install scripts, ever.</strong> Installing copies verified bytes. Nothing in a package runs at install time.</li></ul>
+<h2 id="versioning">Versioning<a class="anchor" href="#versioning" aria-label="Link to this section">#</a></h2>
+<ul><li>Packages use <code>MAJOR.MINOR.PATCH</code>. <code>plonix store update</code> upgrades to newer versions.</li><li>The <strong>host API</strong> is versioned in its WIT package name (<code>plonix:extension@1.0.0</code>). Plonix supports the current major version and links older minor versions. An extension built for a newer API than the engine has is refused with a clear message.</li><li>File formats carry their own version (<code>plonix_pack</code>, <code>plonix_index</code>, <code>plonix_extension</code>). Readers refuse versions they don't know rather than guessing.</li><li>An update that adds capabilities needs fresh consent (see <a href="#lifecycle">Lifecycle</a>).</li></ul>
+<h2 id="roadmap">Roadmap<a class="anchor" href="#roadmap" aria-label="Link to this section">#</a></h2>
+<ol><li>✅ Rule packs: format, validation, install from file or URL, SHA-256 pinning, built-in starter packs.</li><li>✅ Store index and client for rule packs (<code>plonix store list|install|update</code>).</li><li>✅ Extension manifest and closed capability list, validated and tested.
+3a. ✅ Filter packs: named Traffic filters in search, the CLI and the window's filter builder, installable from the store.</li><li>Declarative extensions: install bundles of rule packs through the same flow.
+Lens detectors come next in the same format: today's built-in pattern detectors (<code>crates/plonix-core/src/insight.rs</code>) are already plain data, so a pack only needs a schema for them. Decoders that need code (JWT, Base64, hex) stay built in.</li><li>WASM runtime: Wasmtime with fuel, epoch and memory limits; <code>analyzer</code> world with <code>read-traffic</code> and <code>passive-analysis</code>.</li><li><code>propose-findings</code>, then <code>scoped-requests</code>, reusing the engine's scope enforcement and recording.</li><li>Signed store indexes.</li><li>GUI: an Extensions pane in the Mac app with the same consent flow.</li><li>Tweak packs: allowlisted settings, with a diff before applying and one-step undo.</li><li><code>ui-panels</code>, then <code>ui-tab</code>: view trees rendered with Plonix components.</li></ol>
+</article>
+<p class="edit">This page is <a href="https://github.com/SergeyMalych/plonix/blob/main/docs/extensions.md">docs/extensions.md</a> in the Plonix repository. Spotted something wrong? <a href="https://github.com/SergeyMalych/plonix/edit/main/docs/extensions.md">Suggest a change</a>.</p>
+</main>
+</div>
+<footer>
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <span>Open-source web security workbench for macOS. Apache-2.0.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/SergeyMalych/plonix">GitHub</a>
+      <a href="./">Docs</a>
+      <a href="https://github.com/SergeyMalych/plonix/releases">Releases</a>
+      <a href="https://github.com/SergeyMalych/plonix/issues">Issues</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(() => {
+  const root = document.documentElement, btn = document.getElementById('theme');
+  const sys = matchMedia('(prefers-color-scheme: dark)');
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+  const current = () => root.dataset.theme || (sys.matches ? 'dark' : 'light');
+  const paint = () => { const d = current() === 'dark'; btn.innerHTML = d ? SUN : MOON; btn.setAttribute('aria-label', d ? 'Switch to light mode' : 'Switch to dark mode'); };
+  paint();
+  sys.addEventListener('change', paint);
+  btn.addEventListener('click', () => {
+    const next = current() === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next; paint();
+    try { localStorage.setItem('plonix-theme', next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>

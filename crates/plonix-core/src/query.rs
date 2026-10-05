@@ -266,7 +266,8 @@ fn field_sql(field: &Field, scope_hosts: &[String], params: &mut Vec<Value>) -> 
         }
         Field::Ext(x) => {
             params.push(Value::Text(format!("%.{}", escape_like(x))));
-            "lower(e.path) LIKE ? ESCAPE '\\'".to_string()
+            // LIKE ignores ASCII case already, as lower() would.
+            "e.path LIKE ? ESCAPE '\\'".to_string()
         }
         Field::Kind(Kind::Static) => {
             let mut ors = Vec::new();
@@ -278,11 +279,12 @@ fn field_sql(field: &Field, scope_hosts: &[String], params: &mut Vec<Value>) -> 
                 params.push(Value::Text(format!("%{m}%")));
                 ors.push("e.mime LIKE ?");
             }
-            for x in STATIC_EXTS {
-                params.push(Value::Text(format!("%.{x}")));
-                ors.push("lower(e.path) LIKE ?");
-            }
-            format!("({})", ors.join(" OR "))
+            // The text after the path's last dot, looked up once in the list,
+            // costs far less on a big project than a LIKE per extension.
+            params.extend(STATIC_EXTS.iter().map(|x| Value::Text(x.to_string())));
+            let marks = vec!["?"; STATIC_EXTS.len()].join(",");
+            let ext = format!("(instr(e.path, '.') > 0 AND lower(substr(e.path, length(rtrim(e.path, replace(e.path, '.', ''))) + 1)) IN ({marks}))");
+            format!("({} OR {ext})", ors.join(" OR "))
         }
         Field::AnyOf(list) => {
             let ors: Vec<String> = list.iter().map(|f| field_sql(f, scope_hosts, params)).collect();

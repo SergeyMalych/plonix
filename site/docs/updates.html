@@ -1,0 +1,128 @@
+<!doctype html>
+<!-- Generated from docs/updates.md by scripts/build-docs.mjs. Edit the Markdown, not this file. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Updates · Plonix docs</title>
+<meta name="description" content="Plonix.app never installs anything on its own. Every step that changes the app on disk is the user's choice, and closing a dialog always means &quot;no&quot;.">
+<meta property="og:title" content="Updates · Plonix docs">
+<meta property="og:description" content="Plonix.app never installs anything on its own. Every step that changes the app on disk is the user's choice, and closing a dialog always means &quot;no&quot;.">
+<meta property="og:url" content="https://plonix.io/docs/updates">
+<meta property="og:image" content="https://plonix.io/assets/window.webp">
+<link rel="canonical" href="https://plonix.io/docs/updates">
+<meta name="theme-color" content="#f5f5fa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0e13" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../assets/plonix-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="docs.css">
+<script>try{const t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <nav class="nav-links" aria-label="Site">
+      <a href="../#features">Features</a>
+      <a href="../#scope">Scope</a>
+      <a href="../#agents">AI</a>
+      <a href="./" aria-current="page">Docs</a>
+    </nav>
+    <button type="button" class="theme-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button>
+    <a class="btn small" href="https://github.com/SergeyMalych/plonix"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+  </div>
+</header>
+<div class="wrap docs">
+<aside class="side">
+<details class="side-menu" open>
+<summary>Documentation</summary>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="bench.html">The Bench</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li class="here"><a href="updates.html" aria-current="page">Updates</a><ul class="toc"><li><a href="#what-the-user-sees">What the user sees</a></li><li><a href="#how-a-release-reaches-users">How a release reaches users</a></li></ul></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
+</details>
+</aside>
+<main class="doc">
+<article>
+<h1 id="updates">Updates</h1>
+<p>Plonix.app never installs anything on its own. Every step that changes the app
+on disk is the user's choice, and closing a dialog always means &quot;no&quot;.</p>
+<h2 id="what-the-user-sees">What the user sees<a class="anchor" href="#what-the-user-sees" aria-label="Link to this section">#</a></h2>
+<ol><li><strong>Whether to look at all.</strong> On first launch Plonix asks once: <em>Check Daily</em>
+or <em>Only When I Ask</em>. Until that is answered, nothing is checked. The choice
+can be changed any time in <strong>Plonix › Check for Updates Automatically</strong>:
+When Plonix Starts, Daily, Weekly, or Never (Only When I Ask).
+<strong>Plonix › Check for Updates…</strong> works whatever is picked.</li><li><strong>Whether to download.</strong> When a newer version is found, Plonix shows its
+version and release notes with <strong>Download…</strong>, <strong>Skip This Version</strong> and
+<strong>Not Now</strong>. An automatic check stays quiet about a skipped version; a
+manual check still shows it. Downloading only fetches the package and
+checks its signature. Nothing on disk changes.</li><li><strong>Whether to install.</strong> Once the package is downloaded and verified, Plonix
+asks again: <strong>Install and Restart</strong> or <strong>Not Now</strong>. Only then is the app
+replaced and restarted. Projects and captured traffic live in
+<code>~/.plonix</code> and are kept.</li></ol>
+<p>Automatic checks only speak up when there is something new. A manual check
+always reports its outcome, including errors.</p>
+<p>The choice is stored in <code>$PLONIX_HOME/updates.json</code> (default
+<code>~/.plonix/updates.json</code>):</p>
+<pre><code class="language-json">{ &quot;check&quot;: &quot;daily&quot;, &quot;last_check&quot;: 1791100000, &quot;skipped_version&quot;: null }</code></pre>
+<p><code>check</code> is one of <code>on-launch</code>, <code>daily</code>, <code>weekly</code>, <code>never</code>, or absent while the
+first-launch question is unanswered.</p>
+<p>The checks, downloads and installs run in the app itself, behind native
+dialogs. The pages shown in the Plonix window have no access to them.</p>
+<h2 id="how-a-release-reaches-users">How a release reaches users<a class="anchor" href="#how-a-release-reaches-users" aria-label="Link to this section">#</a></h2>
+<p>A check reads <code>latest.json</code> from the newest GitHub release:</p>
+<pre><code>https://github.com/SergeyMalych/plonix/releases/latest/download/latest.json</code></pre>
+<p>Update packages are signed. The app only installs a package whose signature
+matches the public key built into it (<code>plugins.updater.pubkey</code> in
+<code>crates/plonix-app/tauri.conf.json</code>). A build without that key can still tell
+the user about a new version, but sends them to the releases page instead of
+installing it.</p>
+<h3 id="one-time-setup">One-time setup<a class="anchor" href="#one-time-setup" aria-label="Link to this section">#</a></h3>
+<ol><li><p>Create the signing key pair on your own machine and keep the private key
+out of the repository:</p>
+<pre><code class="language-sh">cargo tauri signer generate -w ~/.plonix-release/updater.key</code></pre></li><li><p>Paste the printed <strong>public</strong> key into <code>plugins.updater.pubkey</code> in
+<code>crates/plonix-app/tauri.conf.json</code> and commit it.</p></li><li><p>In the repository settings, under Secrets and variables › Actions, add
+<code>TAURI_SIGNING_PRIVATE_KEY</code> (the contents of <code>updater.key</code>) and
+<code>TAURI_SIGNING_PRIVATE_KEY_PASSWORD</code> (its password, if you set one).</p></li></ol>
+<p>Keep a backup of the private key. Without it, installed copies can't verify
+any later release and their users have to download the next version by hand.</p>
+<h3 id="publishing-a-release">Publishing a release<a class="anchor" href="#publishing-a-release" aria-label="Link to this section">#</a></h3>
+<ol><li>Bump <code>version</code> in <code>crates/plonix-app/tauri.conf.json</code> (for example to
+<code>0.2.0</code>).</li><li>Push a matching tag: <code>git tag v0.2.0 &amp;&amp; git push origin v0.2.0</code>.</li></ol>
+<p>The Release workflow builds a universal Plonix.app, signs the update package,
+writes <code>latest.json</code> and publishes the GitHub release with all three. It stops
+with a clear error if the tag and version differ or the key is missing.</p>
+</article>
+<p class="edit">This page is <a href="https://github.com/SergeyMalych/plonix/blob/main/docs/updates.md">docs/updates.md</a> in the Plonix repository. Spotted something wrong? <a href="https://github.com/SergeyMalych/plonix/edit/main/docs/updates.md">Suggest a change</a>.</p>
+</main>
+</div>
+<footer>
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <span>Open-source web security workbench for macOS. Apache-2.0.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/SergeyMalych/plonix">GitHub</a>
+      <a href="./">Docs</a>
+      <a href="https://github.com/SergeyMalych/plonix/releases">Releases</a>
+      <a href="https://github.com/SergeyMalych/plonix/issues">Issues</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(() => {
+  const root = document.documentElement, btn = document.getElementById('theme');
+  const sys = matchMedia('(prefers-color-scheme: dark)');
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+  const current = () => root.dataset.theme || (sys.matches ? 'dark' : 'light');
+  const paint = () => { const d = current() === 'dark'; btn.innerHTML = d ? SUN : MOON; btn.setAttribute('aria-label', d ? 'Switch to light mode' : 'Switch to dark mode'); };
+  paint();
+  sys.addEventListener('change', paint);
+  btn.addEventListener('click', () => {
+    const next = current() === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next; paint();
+    try { localStorage.setItem('plonix-theme', next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>

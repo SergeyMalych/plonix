@@ -1,0 +1,185 @@
+<!doctype html>
+<!-- Generated from docs/detection-rules.md by scripts/build-docs.mjs. Edit the Markdown, not this file. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Detection rules · Plonix docs</title>
+<meta name="description" content="Plonix recognises the technologies behind every host you browse (servers, frameworks, CMSs, CDNs, WAFs, identity providers, exposed admin consoles) using declarative detection…">
+<meta property="og:title" content="Detection rules · Plonix docs">
+<meta property="og:description" content="Plonix recognises the technologies behind every host you browse (servers, frameworks, CMSs, CDNs, WAFs, identity providers, exposed admin consoles) using declarative detection…">
+<meta property="og:url" content="https://plonix.io/docs/detection-rules">
+<meta property="og:image" content="https://plonix.io/assets/window.webp">
+<link rel="canonical" href="https://plonix.io/docs/detection-rules">
+<meta name="theme-color" content="#f5f5fa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0e13" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../assets/plonix-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="docs.css">
+<script>try{const t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <nav class="nav-links" aria-label="Site">
+      <a href="../#features">Features</a>
+      <a href="../#scope">Scope</a>
+      <a href="../#agents">AI</a>
+      <a href="./" aria-current="page">Docs</a>
+    </nav>
+    <button type="button" class="theme-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button>
+    <a class="btn small" href="https://github.com/SergeyMalych/plonix"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+  </div>
+</header>
+<div class="wrap docs">
+<aside class="side">
+<details class="side-menu" open>
+<summary>Documentation</summary>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="bench.html">The Bench</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li class="here"><a href="detection-rules.html" aria-current="page">Detection rules</a><ul class="toc"><li><a href="#contents">Contents</a></li><li><a href="#how-detection-runs">How detection runs</a></li><li><a href="#trust-boundary">Trust boundary</a></li><li><a href="#writing-a-rule">Writing a rule</a></li><li><a href="#conditions">Conditions</a></li><li><a href="#rule-packs">Rule packs</a></li><li><a href="#installing-and-managing-packs">Installing and managing packs</a></li><li><a href="#the-store">The store</a></li><li><a href="#limits">Limits</a></li><li><a href="#contributing-a-pack">Contributing a pack</a></li></ul></li><li><a href="extensions.html">Extensions</a></li><li><a href="updates.html">Updates</a></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
+</details>
+</aside>
+<main class="doc">
+<article>
+<h1 id="detection-rules">Detection rules</h1>
+<p>Plonix recognises the technologies behind every host you browse (servers, frameworks, CMSs, CDNs, WAFs, identity providers, exposed admin consoles) using <strong>declarative detection rules</strong>. Rules ship in <strong>rule packs</strong> that anyone can write, share and install from a file, a URL or the <a href="#the-store">store</a>. The engine's Discovery layer runs them over captured traffic, and the results show up per host in <code>plonix tech</code>, in <code>GET /api/tech</code>, and in the Map.</p>
+<pre><code class="language-text">$ plonix tech
+shop.acme.test
+  web-server     nginx 1.25.3               100%  response header server ~ nginx/1.25.3 (#3)
+  language       PHP 8.2.12                 100%  response header x-powered-by ~ PHP/8.2.12 (#3)
+  cms            WordPress 6.4.2            100%  path ~ /wp-content/ (#5)</code></pre>
+<p>Every detection carries its evidence: the condition that matched, a sample of what it matched, and the exchange id, so <code>plonix show 3</code> takes you straight to the proof.</p>
+<h2 id="contents">Contents<a class="anchor" href="#contents" aria-label="Link to this section">#</a></h2>
+<ul><li><a href="#how-detection-runs">How detection runs</a></li><li><a href="#trust-boundary">Trust boundary</a></li><li><a href="#writing-a-rule">Writing a rule</a></li><li><a href="#conditions">Conditions</a></li><li><a href="#rule-packs">Rule packs</a></li><li><a href="#installing-and-managing-packs">Installing and managing packs</a></li><li><a href="#the-store">The store</a></li><li><a href="#limits">Limits</a></li><li><a href="#contributing-a-pack">Contributing a pack</a></li></ul>
+<h2 id="how-detection-runs">How detection runs<a class="anchor" href="#how-detection-runs" aria-label="Link to this section">#</a></h2>
+<ul><li>Detection is <strong>passive</strong>. It only reads traffic that the proxy has already captured. A rule never causes a request to be sent.</li><li>It runs on demand over each host's most recent 300 exchanges, so <strong>rules you install later apply to everything you already captured</strong>. There is nothing to re-browse.</li><li>The engine notices when packs are added or removed (<code>rules/lock.json</code> changes) and reloads them. There is no restart.</li><li>Built-in packs are always loaded. Installed packs are loaded after them.</li><li>When two rules or packs detect the same <code>id</code>, Plonix shows one entry with the higher confidence and keeps any version either of them found.</li><li><code>implies</code> adds related technologies (WordPress implies PHP), marked <code>implied by …</code> and carrying the confidence of the rule that implied them. Direct evidence always wins over an implication.</li></ul>
+<h2 id="trust-boundary">Trust boundary<a class="anchor" href="#trust-boundary" aria-label="Link to this section">#</a></h2>
+<p>Rule packs come from people you don't know. Plonix treats every pack as <strong>untrusted data</strong> and nothing more:</p>
+<div class="table"><table><thead><tr><th>Threat</th><th>What Plonix does</th></tr></thead><tbody><tr><td>A pack tries to run code</td><td>Packs are JSON data. There is no field that is executed, evaluated or passed to a shell, and unknown fields are rejected (<code>&quot;postinstall&quot;: …</code> fails validation).</td></tr><tr><td>A malicious regex hangs the engine (ReDoS)</td><td>Patterns compile with Rust's <code>regex</code> crate, which matches in linear time and has no backtracking, look-around or back-references. Compiled size is capped too, so a pattern can't eat memory.</td></tr><tr><td>A pack swaps its contents after review</td><td>Store entries pin the SHA-256 of the exact bytes. Downloads that don't match are refused before anything is written. Installed packs are pinned in <code>lock.json</code> and re-verified on every load; a pack edited on disk is skipped with a warning.</td></tr><tr><td>A downgrade or MITM on download</td><td>URLs must be <code>https://</code>. Plain <code>http://</code> is only accepted for this machine (for testing a store you're writing), and a redirect can't leave https.</td></tr><tr><td>Terminal injection through names or evidence</td><td>All pack text is length-limited and may not contain control characters, so names and descriptions can't carry ANSI escapes. Evidence samples are stripped of control characters before display.</td></tr><tr><td>Detections leak credentials into the Map or an agent's context</td><td>Evidence for <code>cookie</code>, <code>request_header</code> and <code>query_param</code> conditions names the cookie, header or parameter but never repeats its value, since those are often session tokens or API keys.</td></tr><tr><td>A pack overrides a built-in</td><td>Built-in pack names are reserved.</td></tr><tr><td>A pack exfiltrates traffic or reaches the network</td><td>Rules have no way to express either. They can only produce a detection (id, name, category, version, confidence, evidence) for traffic the engine hands them.</td></tr><tr><td>A pack changes scope</td><td>Rules have no access to scope. Scope enforcement on active requests is untouched by detection.</td></tr></tbody></table></div>
+<p>What a pack <em>can</em> do is be wrong: claim a technology that isn't there, or miss one that is. That's why every detection shows its evidence and confidence, and why the store is reviewed (see <a href="#contributing-a-pack">Contributing a pack</a>).</p>
+<h2 id="writing-a-rule">Writing a rule<a class="anchor" href="#writing-a-rule" aria-label="Link to this section">#</a></h2>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;wordpress&quot;,
+  &quot;name&quot;: &quot;WordPress&quot;,
+  &quot;category&quot;: &quot;cms&quot;,
+  &quot;website&quot;: &quot;https://wordpress.org&quot;,
+  &quot;confidence&quot;: 100,
+  &quot;match&quot;: &quot;any&quot;,
+  &quot;implies&quot;: [&quot;php&quot;],
+  &quot;conditions&quot;: [
+    { &quot;path&quot;: &quot;^/wp-(?:content|includes|admin|json)/&quot; },
+    { &quot;body&quot;: &quot;&lt;meta name=\&quot;generator\&quot; content=\&quot;WordPress ?([\\d.]+)?&quot;, &quot;version&quot;: &quot;$1&quot; },
+    { &quot;cookie&quot;: &quot;wordpress_test_cookie&quot; }
+  ]
+}</code></pre>
+<div class="table"><table><thead><tr><th>Field</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><code>id</code></td><td>yes</td><td>Stable identifier, <code>[a-z0-9._-]</code>, at most 64 characters. Shared across packs: if you detect nginx, use <code>nginx</code>.</td></tr><tr><td><code>name</code></td><td>yes</td><td>Display name, at most 64 characters.</td></tr><tr><td><code>category</code></td><td>yes</td><td>One of <code>web-server</code>, <code>language</code>, <code>framework</code>, <code>cms</code>, <code>ecommerce</code>, <code>javascript</code>, <code>cdn</code>, <code>waf</code>, <code>hosting</code>, <code>load-balancer</code>, <code>cache</code>, <code>auth</code>, <code>api</code>, <code>analytics</code>, <code>database</code>, <code>devops</code>, <code>other</code>. The list is fixed so packs from different authors group the same way.</td></tr><tr><td><code>description</code></td><td>no</td><td>At most 500 characters. Say why it matters to a researcher if it isn't obvious (&quot;management endpoints; env and heapdump can leak secrets&quot;).</td></tr><tr><td><code>website</code></td><td>no</td><td>http(s) URL of the project.</td></tr><tr><td><code>confidence</code></td><td>no</td><td>1 to 100, default 100. Lower it for weak signals, like a generic cookie name.</td></tr><tr><td><code>match</code></td><td>no</td><td><code>any</code> (default): one condition is enough. <code>all</code>: every condition must match somewhere in the host's traffic (not necessarily in the same exchange).</td></tr><tr><td><code>conditions</code></td><td>yes</td><td>1 to 32 <a href="#conditions">conditions</a>.</td></tr><tr><td><code>implies</code></td><td>no</td><td>Up to 16 ids of technologies this one implies.</td></tr></tbody></table></div>
+<h2 id="conditions">Conditions<a class="anchor" href="#conditions" aria-label="Link to this section">#</a></h2>
+<p>Each condition sets <strong>exactly one</strong> target:</p>
+<div class="table"><table><thead><tr><th>Target</th><th>Matches</th><th><code>regex</code> is applied to</th></tr></thead><tbody><tr><td><code>header</code></td><td>a response header, by name (case-insensitive)</td><td>the header's value</td></tr><tr><td><code>request_header</code></td><td>a request header, by name</td><td>the header's value</td></tr><tr><td><code>cookie</code></td><td>a cookie, by name, from <code>Set-Cookie</code> or <code>Cookie</code>. <code>name*</code> matches every cookie whose name starts with <code>name</code>.</td><td>the cookie's value</td></tr><tr><td><code>query_param</code></td><td>a query string parameter, by name</td><td>its value</td></tr><tr><td><code>path</code></td><td>the request path (pattern)</td><td>—</td></tr><tr><td><code>host</code></td><td>the host name (pattern)</td><td>—</td></tr><tr><td><code>body</code></td><td>the decoded response body, first 512 KiB of text responses (pattern)</td><td>—</td></tr></tbody></table></div>
+<p>For the named targets (<code>header</code>, <code>request_header</code>, <code>cookie</code>, <code>query_param</code>), the target's presence alone is a match unless you add <code>regex</code>. For <code>path</code>, <code>host</code> and <code>body</code>, the value <em>is</em> the pattern, and <code>regex</code> isn't allowed.</p>
+<p>Patterns use <a href="https://docs.rs/regex/latest/regex/#syntax" rel="noopener">Rust regex syntax</a> and are <strong>case-insensitive</strong>. Remember to escape backslashes in JSON (<code>&quot;\\d&quot;</code>).</p>
+<p><strong>Versions.</strong> Add <code>&quot;version&quot;: &quot;$1&quot;</code> to pull a version out of a capture group. Templates may only contain <code>$1</code> to <code>$9</code> and the characters <code>[A-Za-z0-9._-]</code>, and they must refer to a group the pattern actually has. If one exchange shows <code>Server: nginx</code> and a later one shows <code>Server: nginx/1.25.3</code>, Plonix reports <code>1.25.3</code>.</p>
+<pre><code class="language-json">{ &quot;header&quot;: &quot;Server&quot;, &quot;regex&quot;: &quot;^nginx(?:/([\\d.]+))?&quot;, &quot;version&quot;: &quot;$1&quot; }
+{ &quot;cookie&quot;: &quot;incap_ses_*&quot; }
+{ &quot;query_param&quot;: &quot;response_type&quot;, &quot;regex&quot;: &quot;id_token&quot; }
+{ &quot;request_header&quot;: &quot;Authorization&quot;, &quot;regex&quot;: &quot;^Bearer eyJ[A-Za-z0-9_-]+\\.eyJ&quot; }</code></pre>
+<h2 id="rule-packs">Rule packs<a class="anchor" href="#rule-packs" aria-label="Link to this section">#</a></h2>
+<p>A pack is one JSON file:</p>
+<pre><code class="language-json">{
+  &quot;plonix_pack&quot;: 1,
+  &quot;name&quot;: &quot;acme-internal&quot;,
+  &quot;version&quot;: &quot;1.0.0&quot;,
+  &quot;description&quot;: &quot;Acme's in-house gateway and auth service&quot;,
+  &quot;author&quot;: &quot;Acme red team&quot;,
+  &quot;license&quot;: &quot;Apache-2.0&quot;,
+  &quot;homepage&quot;: &quot;https://example.com/plonix-rules&quot;,
+  &quot;rules&quot;: [ … ]
+}</code></pre>
+<div class="table"><table><thead><tr><th>Field</th><th>Required</th><th>Meaning</th></tr></thead><tbody><tr><td><code>plonix_pack</code></td><td>yes</td><td>Format version. Currently <code>1</code>.</td></tr><tr><td><code>name</code></td><td>yes</td><td><code>[a-z0-9-]</code>, at most 64 characters. Also the install name.</td></tr><tr><td><code>version</code></td><td>yes</td><td><code>MAJOR.MINOR.PATCH</code>, optionally <code>-pre</code>. Used by <code>plonix store update</code>.</td></tr><tr><td><code>description</code>, <code>author</code></td><td>yes</td><td>Shown in listings.</td></tr><tr><td><code>license</code>, <code>homepage</code></td><td>no</td><td></td></tr><tr><td><code>rules</code></td><td>yes</td><td>1 to 2000 rules, with unique ids within the pack.</td></tr></tbody></table></div>
+<p>A pack's checksum is the SHA-256 of the file's exact bytes. It lives outside the pack (in the store index, or on the command line with <code>--sha256</code>), because a file can't vouch for itself.</p>
+<p>Validation reports <strong>every</strong> problem at once, with its location:</p>
+<pre><code class="language-text">$ plonix rules check bad.json
+error: invalid rule pack:
+  - rules[0] (acme-gateway): category: `rootkit` is not one of web-server, language, …</code></pre>
+<h2 id="installing-and-managing-packs">Installing and managing packs<a class="anchor" href="#installing-and-managing-packs" aria-label="Link to this section">#</a></h2>
+<pre><code class="language-sh">plonix rules                                   # packs in effect: built-in and installed
+plonix rules check ./my-pack.json              # validate without installing; prints the sha256
+plonix rules add ./my-pack.json                # install from a file
+plonix rules add https://example.com/pack.json --sha256 &lt;hex&gt;   # from a URL, pinned
+plonix rules remove my-pack
+plonix tech                                    # what the rules found, per host
+plonix tech shop.example.com</code></pre>
+<p><code>rules add</code> without <code>--sha256</code> pins whatever it downloaded and prints the checksum, so later tampering is still detected. Pass <code>--sha256</code> to make sure you get the exact build you reviewed.</p>
+<p>Installed packs live in <code>~/.plonix/rules/</code> (or <code>$PLONIX_HOME/rules/</code>):</p>
+<pre><code class="language-text">rules/
+├── lock.json          name → version, sha256, source, installed_at
+└── packs/&lt;name&gt;.json  the exact bytes that were verified</code></pre>
+<p>Plonix ships six packs, five built in and one in the store:</p>
+<div class="table"><table><thead><tr><th>Pack</th><th>Covers</th></tr></thead><tbody><tr><td><code>web-servers</code> (built in)</td><td>nginx, OpenResty, Apache, IIS, LiteSpeed, Caddy, Envoy, Traefik, HAProxy, Gunicorn, Uvicorn, Werkzeug, Jetty, Tomcat, Kestrel…</td></tr><tr><td><code>frameworks</code> (built in)</td><td>PHP, ASP.NET, Express, Next.js, Nuxt, React, Vue, Angular, jQuery, Django, Flask, FastAPI, Rails, Laravel, Symfony, Spring…</td></tr><tr><td><code>cms</code> (built in)</td><td>WordPress, Drupal, Joomla, Ghost, Magento, Shopify, WooCommerce, PrestaShop, Contentful, Strapi</td></tr><tr><td><code>edge</code> (built in)</td><td>Cloudflare, Fastly, Akamai, CloudFront, AWS ELB/S3/WAF, Google Cloud, Azure, Vercel, Netlify, Heroku, Varnish, Imperva, Sucuri</td></tr><tr><td><code>api-surface</code> (built in)</td><td>GraphQL, OpenAPI/Swagger docs, gRPC-Web, JSON-RPC, SOAP, Spring Boot Actuator, OIDC, OAuth 2.0, Keycloak, Auth0, Okta, JWTs, Sentry</td></tr><tr><td><code>admin-panels</code> (store)</td><td>Jenkins, GitLab, Grafana, Kibana, Elasticsearch, Prometheus, Argo CD, SonarQube, Jira, Confluence, phpMyAdmin, Kubernetes Dashboard, MinIO</td></tr></tbody></table></div>
+<h2 id="the-store">The store<a class="anchor" href="#the-store" aria-label="Link to this section">#</a></h2>
+<p>The store is a <strong>static JSON index</strong> that can be hosted anywhere: the Plonix repository (the default), a fork, an internal web server, or a folder on disk. There is no server to run and no account.</p>
+<pre><code class="language-json">{
+  &quot;plonix_index&quot;: 1,
+  &quot;name&quot;: &quot;Plonix community store&quot;,
+  &quot;packages&quot;: [
+    {
+      &quot;name&quot;: &quot;admin-panels&quot;,
+      &quot;kind&quot;: &quot;rules&quot;,
+      &quot;version&quot;: &quot;1.0.0&quot;,
+      &quot;description&quot;: &quot;DevOps tools and admin consoles that are often exposed by mistake.&quot;,
+      &quot;author&quot;: &quot;Plonix contributors&quot;,
+      &quot;url&quot;: &quot;packs/admin-panels.json&quot;,
+      &quot;sha256&quot;: &quot;…64 hex characters…&quot;
+    }
+  ]
+}</code></pre>
+<ul><li>A relative <code>url</code> resolves against the index's own location and may not contain <code>..</code>. An absolute <code>url</code> must be <code>https://</code>.</li><li><code>kind</code> is <code>rules</code> today. <code>extension</code> entries are listed (marked <em>needs runtime</em>) but can't be installed until the extension sandbox ships; see <a href="extensions.html">extensions.md</a>.</li><li>Installing downloads the pack, checks its SHA-256 against the index, checks that its name and version match the entry, validates it, and only then writes it to disk.</li></ul>
+<pre><code class="language-sh">plonix store                         # list the community store
+plonix store list graphql            # filter by name or description
+plonix store install admin-panels
+plonix store update                  # upgrade installed packs that have a newer version
+plonix store --index https://intranet.example.com/plonix/index.json   # or $PLONIX_STORE_INDEX
+plonix store --index ./my-store/index.json                            # a local store</code></pre>
+<p>The index is the root of trust: whoever controls it decides which bytes are acceptable. Use the default community index, one you host yourself, or one from a team you trust. Teams can run a private store by putting an <code>index.json</code> and their packs on any internal https host.</p>
+<h2 id="limits">Limits<a class="anchor" href="#limits" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>Limit</th><th>Value</th></tr></thead><tbody><tr><td>Pack file size</td><td>1 MiB</td></tr><tr><td>Rules per pack</td><td>2000</td></tr><tr><td>Conditions per rule</td><td>32</td></tr><tr><td><code>implies</code> per rule</td><td>16</td></tr><tr><td>Pattern length</td><td>1000 characters</td></tr><tr><td>Compiled pattern size</td><td>256 KiB</td></tr><tr><td>Body scanned per response</td><td>512 KiB of decoded text</td></tr><tr><td>Exchanges examined per host</td><td>300 most recent</td></tr><tr><td>Installed packs</td><td>200</td></tr><tr><td>Store index size</td><td>4 MiB, 5000 packages</td></tr></tbody></table></div>
+<h2 id="contributing-a-pack">Contributing a pack<a class="anchor" href="#contributing-a-pack" aria-label="Link to this section">#</a></h2>
+<ol><li>Write your pack and run <code>plonix rules check your-pack.json</code> until it's clean. Test it against real traffic with <code>plonix rules add</code> and <code>plonix tech</code>.</li><li>Prefer specific signals (a distinctive header, a framework-specific cookie) over generic ones, and lower <code>confidence</code> for anything that could be a coincidence.</li><li>Reuse existing ids for existing technologies so detections merge instead of duplicating.</li><li>Open a pull request that adds <code>store/packs/&lt;name&gt;.json</code> and an entry in <code>store/index.json</code> with the <code>sha256</code> printed by <code>plonix rules check</code>. <code>cargo test</code> (and CI) checks that every index entry matches its file.</li></ol>
+<p>Reviewers check that patterns are specific, categories are right, and nothing in the pack is surprising. The checksum in the index is what makes that review stick: once merged, users install exactly the bytes that were reviewed.</p>
+</article>
+<p class="edit">This page is <a href="https://github.com/SergeyMalych/plonix/blob/main/docs/detection-rules.md">docs/detection-rules.md</a> in the Plonix repository. Spotted something wrong? <a href="https://github.com/SergeyMalych/plonix/edit/main/docs/detection-rules.md">Suggest a change</a>.</p>
+</main>
+</div>
+<footer>
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <span>Open-source web security workbench for macOS. Apache-2.0.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/SergeyMalych/plonix">GitHub</a>
+      <a href="./">Docs</a>
+      <a href="https://github.com/SergeyMalych/plonix/releases">Releases</a>
+      <a href="https://github.com/SergeyMalych/plonix/issues">Issues</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(() => {
+  const root = document.documentElement, btn = document.getElementById('theme');
+  const sys = matchMedia('(prefers-color-scheme: dark)');
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+  const current = () => root.dataset.theme || (sys.matches ? 'dark' : 'light');
+  const paint = () => { const d = current() === 'dark'; btn.innerHTML = d ? SUN : MOON; btn.setAttribute('aria-label', d ? 'Switch to light mode' : 'Switch to dark mode'); };
+  paint();
+  sys.addEventListener('change', paint);
+  btn.addEventListener('click', () => {
+    const next = current() === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next; paint();
+    try { localStorage.setItem('plonix-theme', next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>

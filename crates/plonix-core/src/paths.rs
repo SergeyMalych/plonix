@@ -12,6 +12,7 @@
 //! ├── projects.json          projects Plonix knows about, and where they are
 //! ├── settings.json          settings shared by all projects
 //! ├── logs/engine.log
+//! ├── crashes/               crash reports, never sent (see crate::crash)
 //! └── projects/              default place for new projects (see below)
 //! ```
 //!
@@ -72,6 +73,10 @@ impl Home {
     }
     pub fn log_file(&self) -> PathBuf {
         self.root.join("logs").join("engine.log")
+    }
+    /// Crash reports, see [`crate::crash`].
+    pub fn crashes_dir(&self) -> PathBuf {
+        self.root.join("crashes")
     }
     pub fn browser_profile(&self) -> PathBuf {
         self.root.join("browser")

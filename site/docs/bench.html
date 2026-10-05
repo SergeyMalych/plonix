@@ -1,0 +1,158 @@
+<!doctype html>
+<!-- Generated from docs/bench.md by scripts/build-docs.mjs. Edit the Markdown, not this file. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The Bench · Plonix docs</title>
+<meta name="description" content="The Bench is where you work on one request at a time and where you run many at once. Each tab is an experiment. A tab has two panels:">
+<meta property="og:title" content="The Bench · Plonix docs">
+<meta property="og:description" content="The Bench is where you work on one request at a time and where you run many at once. Each tab is an experiment. A tab has two panels:">
+<meta property="og:url" content="https://plonix.io/docs/bench">
+<meta property="og:image" content="https://plonix.io/assets/window.webp">
+<link rel="canonical" href="https://plonix.io/docs/bench">
+<meta name="theme-color" content="#f5f5fa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0e13" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../assets/plonix-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="docs.css">
+<script>try{const t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <nav class="nav-links" aria-label="Site">
+      <a href="../#features">Features</a>
+      <a href="../#scope">Scope</a>
+      <a href="../#agents">AI</a>
+      <a href="./" aria-current="page">Docs</a>
+    </nav>
+    <button type="button" class="theme-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button>
+    <a class="btn small" href="https://github.com/SergeyMalych/plonix"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+  </div>
+</header>
+<div class="wrap docs">
+<aside class="side">
+<details class="side-menu" open>
+<summary>Documentation</summary>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li class="here"><a href="bench.html" aria-current="page">The Bench</a><ul class="toc"><li><a href="#payload-runs">Payload runs</a></li><li><a href="#list-packs">List packs</a></li></ul></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li><a href="updates.html">Updates</a></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
+</details>
+</aside>
+<main class="doc">
+<article>
+<h1 id="the-bench">The Bench</h1>
+<p>The Bench is where you work on one request at a time and where you run many at
+once. Each tab is an experiment. A tab has two panels:</p>
+<ul><li><strong>Send</strong> — edit a request, send it, branch it, and compare responses.</li><li><strong>Run</strong> — mark positions in the request and feed lists of values through them.</li></ul>
+<p>Everything the Bench sends goes through the engine's single send path, so it can
+only ever reach a host that is <strong>accepted into scope</strong>, exactly like a manual
+send.</p>
+<h2 id="payload-runs">Payload runs<a class="anchor" href="#payload-runs" aria-label="Link to this section">#</a></h2>
+<p>A <em>run</em> sends a batch of requests built from one base request. You mark the
+spots that should change (the <em>positions</em>) and point one or more <em>lists</em> of
+values at them.</p>
+<h3 id="marking-positions">Marking positions<a class="anchor" href="#marking-positions" aria-label="Link to this section">#</a></h3>
+<p>Select the part of the URL or the request you want to vary and press <strong>•</strong> (in
+the URL) or <strong>+ Mark position</strong> (in the request body/headers). The selection is
+wrapped in <code>•…•</code>. You can mark several positions. From the command line, type
+the markers yourself:</p>
+<pre><code>plonix bench run 'https://host/api?id=•1•' --list range:1-100</code></pre>
+<p>The Run panel shows the request with each marked position highlighted, so it is
+always clear where the values go. Below it, each position gets a card naming
+what it is (a number, an identifier, a path segment, a username, a JWT, and so
+on) and where it sits, with its own list picker when a mode needs one.</p>
+<h3 id="modes">Modes<a class="anchor" href="#modes" aria-label="Link to this section">#</a></h3>
+<ul><li><strong>One at a time</strong> (single-position) — one position changes per request while
+the others keep their base value. One list is reused for every position. Good
+for walking a single parameter through a list.</li><li><strong>Lockstep</strong> (multi-position) — every position changes together, each stepping
+through its own list by index. The run stops at the shortest list. Good for
+paired values, like a username and its matching token.</li><li><strong>All combinations</strong> (multi-position) — every combination of values across the
+positions. Each position gets its own list.</li></ul>
+<h3 id="lists">Lists<a class="anchor" href="#lists" aria-label="Link to this section">#</a></h3>
+<p>For each position, pick a list, a <strong>number range</strong>, or <strong>type your own</strong> values.
+Every picker shows a live preview of the first values and how many there are, so
+you can see what a list holds before you run it. Plonix also <strong>suggests</strong> lists
+that suit each position — identifier formats for a numeric id, path lists for a
+path segment, usernames for a sign-in field — as one-click chips.</p>
+<p>The built-in lists ship with Plonix:</p>
+<pre><code>plonix bench lists</code></pre>
+<p>More lists can be installed from the Market.</p>
+<h3 id="running">Running<a class="anchor" href="#running" aria-label="Link to this section">#</a></h3>
+<p>Every request is a scope-gated send, recorded in Traffic like any other (search
+<code>source:replay</code>). A run is bounded by a <strong>request budget</strong> (default 1000, with a
+hard ceiling) and paced by a small <strong>delay</strong> between requests. Tick <strong>Send
+original first</strong> to include an unmodified baseline to compare against. In the
+results table, sort by status, length or time to spot the response that stands
+out, open a row to read its response, and turn any row into a finding.</p>
+<p>Runs never start on their own, and AI agents cannot start one — the run route is
+in no agent mode's capabilities.</p>
+<h3 id="from-the-command-line">From the command line<a class="anchor" href="#from-the-command-line" aria-label="Link to this section">#</a></h3>
+<pre><code># single-position sweep over a range, with a baseline
+plonix bench run 'https://host/item?id=•1•' --list range:1-5 --base
+
+# all combinations of two lists, with a header position and a body
+plonix bench run 'https://host/q?a=•x•' -X POST \
+  -H 'X-Mode: •m•' --body 'q=test' \
+  --mode matrix --list values:1,2 --list builtin:http-methods</code></pre>
+<p>Lists are given as <code>builtin:&lt;id&gt;</code>, <code>range:A-B[:step]</code>, <code>values:a,b,c</code>, <code>@file</code>
+(one value per line) or <code>-</code> for stdin. <code>builtin:&lt;id&gt;</code> names any list in the
+library — built-in or installed from the Market.</p>
+<h2 id="list-packs">List packs<a class="anchor" href="#list-packs" aria-label="Link to this section">#</a></h2>
+<p>Payload lists are shared through the <a href="market.html">Market</a> as <em>list packs</em>, the
+same signed-and-checked path as rule packs and filter packs. A list pack is a
+JSON file:</p>
+<pre><code class="language-json">{
+  &quot;plonix_lists&quot;: 1,
+  &quot;name&quot;: &quot;extra-wordlists&quot;,
+  &quot;version&quot;: &quot;1.0.0&quot;,
+  &quot;description&quot;: &quot;More starting-point lists for the Bench.&quot;,
+  &quot;author&quot;: &quot;you&quot;,
+  &quot;lists&quot;: [
+    { &quot;id&quot;: &quot;id-formats&quot;, &quot;title&quot;: &quot;Identifier formats&quot;, &quot;values&quot;: [&quot;0&quot;, &quot;-1&quot;, &quot;00000000-0000-0000-0000-000000000000&quot;] }
+  ]
+}</code></pre>
+<p>Each list has a lowercase <code>id</code> (how the Bench and <code>--list builtin:&lt;id&gt;</code> name it),
+a <code>title</code>, an optional <code>description</code>, and its <code>values</code>. A pack is data only — it
+supplies values you then choose to send through the scope-gated send path; it
+cannot run code, send anything, or change scope. Install one with
+<code>plonix market install &lt;name&gt;</code>, or in the Market screen, and its lists appear in
+the Bench list picker alongside the built-in ones. The lists that ship with
+Plonix are the built-in <code>starter-lists</code> pack.</p>
+</article>
+<p class="edit">This page is <a href="https://github.com/SergeyMalych/plonix/blob/main/docs/bench.md">docs/bench.md</a> in the Plonix repository. Spotted something wrong? <a href="https://github.com/SergeyMalych/plonix/edit/main/docs/bench.md">Suggest a change</a>.</p>
+</main>
+</div>
+<footer>
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <span>Open-source web security workbench for macOS. Apache-2.0.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/SergeyMalych/plonix">GitHub</a>
+      <a href="./">Docs</a>
+      <a href="https://github.com/SergeyMalych/plonix/releases">Releases</a>
+      <a href="https://github.com/SergeyMalych/plonix/issues">Issues</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(() => {
+  const root = document.documentElement, btn = document.getElementById('theme');
+  const sys = matchMedia('(prefers-color-scheme: dark)');
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+  const current = () => root.dataset.theme || (sys.matches ? 'dark' : 'light');
+  const paint = () => { const d = current() === 'dark'; btn.innerHTML = d ? SUN : MOON; btn.setAttribute('aria-label', d ? 'Switch to light mode' : 'Switch to dark mode'); };
+  paint();
+  sys.addEventListener('change', paint);
+  btn.addEventListener('click', () => {
+    const next = current() === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next; paint();
+    try { localStorage.setItem('plonix-theme', next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>

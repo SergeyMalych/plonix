@@ -1,0 +1,117 @@
+<!doctype html>
+<!-- Generated from docs/filters.md by scripts/build-docs.mjs. Edit the Markdown, not this file. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Named filters and filter packs · Plonix docs</title>
+<meta name="description" content="Named filters are shortcuts for searches you'd otherwise type over and over: &quot;auth flows&quot;, &quot;API docs&quot;, &quot;hide analytics and trackers&quot;. Anyone can write them, share them as a…">
+<meta property="og:title" content="Named filters and filter packs · Plonix docs">
+<meta property="og:description" content="Named filters are shortcuts for searches you'd otherwise type over and over: &quot;auth flows&quot;, &quot;API docs&quot;, &quot;hide analytics and trackers&quot;. Anyone can write them, share them as a…">
+<meta property="og:url" content="https://plonix.io/docs/filters">
+<meta property="og:image" content="https://plonix.io/assets/window.webp">
+<link rel="canonical" href="https://plonix.io/docs/filters">
+<meta name="theme-color" content="#f5f5fa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0e13" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../assets/plonix-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="docs.css">
+<script>try{const t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <nav class="nav-links" aria-label="Site">
+      <a href="../#features">Features</a>
+      <a href="../#scope">Scope</a>
+      <a href="../#agents">AI</a>
+      <a href="./" aria-current="page">Docs</a>
+    </nav>
+    <button type="button" class="theme-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button>
+    <a class="btn small" href="https://github.com/SergeyMalych/plonix"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+  </div>
+</header>
+<div class="wrap docs">
+<aside class="side">
+<details class="side-menu" open>
+<summary>Documentation</summary>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="bench.html">The Bench</a></li><li class="here"><a href="filters.html" aria-current="page">Named filters and filter packs</a><ul class="toc"><li><a href="#using-them">Using them</a></li><li><a href="#built-in-and-store-filters">Built-in and store filters</a></li><li><a href="#writing-a-filter-pack">Writing a filter pack</a></li><li><a href="#safety">Safety</a></li></ul></li><li><a href="scanning.html">Scanning</a></li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li><a href="updates.html">Updates</a></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
+</details>
+</aside>
+<main class="doc">
+<article>
+<h1 id="named-filters-and-filter-packs">Named filters and filter packs</h1>
+<p>Named filters are shortcuts for searches you'd otherwise type over and over: &quot;auth flows&quot;, &quot;API docs&quot;, &quot;hide analytics and trackers&quot;. Anyone can write them, share them as a <strong>filter pack</strong>, and install them from a file, a URL or the <a href="detection-rules.html#the-store">store</a>.</p>
+<pre><code class="language-text">$ plonix search is:auth -is:trackers
+    19  GET     200  out      11 B  text/html        http://ci.acme.test:8001/login
+    17  GET     200  out       2 B  application/json http://api.acme.test:8001/oauth/token
+    12  GET     200  out      11 B  text/html        http://shop.acme.test:8001/wp-login.php</code></pre>
+<p>In the window, every named filter appears under <strong>+ Filter</strong> in Traffic. Pick <em>Show only</em> or <em>Hide</em>, then click a filter. It becomes a chip like any other filter and is saved with the project.</p>
+<h2 id="using-them">Using them<a class="anchor" href="#using-them" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>Query</th><th>Means</th></tr></thead><tbody><tr><td><code>is:graphql</code></td><td>show only what the <code>graphql</code> filter matches</td></tr><tr><td><code>-is:trackers</code></td><td>hide what the <code>trackers</code> filter matches</td></tr><tr><td><code>is:graphql,api-docs</code></td><td>show what either filter matches</td></tr><tr><td><code>is:auth status:4xx</code></td><td>combine with any other search term</td></tr></tbody></table></div>
+<p><code>plonix filters</code> lists every filter in effect, with the pack it came from and the query behind it.</p>
+<h2 id="built-in-and-store-filters">Built-in and store filters<a class="anchor" href="#built-in-and-store-filters" aria-label="Link to this section">#</a></h2>
+<p>The <code>common</code> pack is built in: <code>is:api</code>, <code>is:graphql</code>, <code>is:auth</code>, <code>is:admin</code>, <code>is:writes</code>, <code>is:uploads</code>, <code>is:redirects</code>, <code>is:failures</code>, <code>is:denied</code>, <code>is:api-docs</code>, <code>is:files</code> and <code>is:trackers</code>.</p>
+<p>The store has <code>leaks</code> too: AWS keys, private keys, JWTs, stack traces, SQL errors, debug pages, source maps and internal IPs. Install it with <code>plonix store install leaks</code>.</p>
+<h2 id="writing-a-filter-pack">Writing a filter pack<a class="anchor" href="#writing-a-filter-pack" aria-label="Link to this section">#</a></h2>
+<pre><code class="language-json">{
+  &quot;plonix_filters&quot;: 1,
+  &quot;name&quot;: &quot;acme-filters&quot;,
+  &quot;version&quot;: &quot;1.0.0&quot;,
+  &quot;description&quot;: &quot;Filters for the Acme engagement&quot;,
+  &quot;author&quot;: &quot;Acme red team&quot;,
+  &quot;filters&quot;: [
+    {
+      &quot;id&quot;: &quot;acme-console&quot;,
+      &quot;label&quot;: &quot;Acme console&quot;,
+      &quot;description&quot;: &quot;The internal admin console&quot;,
+      &quot;query&quot;: &quot;host:admin.acme.test path:/console&quot;
+    }
+  ]
+}</code></pre>
+<div class="table"><table><thead><tr><th>Field</th><th>Rules</th></tr></thead><tbody><tr><td><code>id</code></td><td><code>[a-z0-9-]</code>, at most 40 characters. Used as <code>is:&lt;id&gt;</code>.</td></tr><tr><td><code>label</code></td><td>What the chip shows, at most 40 characters.</td></tr><tr><td><code>description</code></td><td>Optional, at most 300 characters. Shown as the tooltip.</td></tr><tr><td><code>query</code></td><td>Any search (see <code>plonix search --help</code>), at most 500 characters. It may not use <code>is:</code>, so filters can't nest or loop.</td></tr></tbody></table></div>
+<pre><code class="language-sh">plonix filters check acme-filters.json    # validate and print the sha256
+plonix filters add acme-filters.json      # or an https:// URL, optionally --sha256 &lt;hex&gt;
+plonix filters remove acme-filters</code></pre>
+<p>New packs take effect right away, even while the engine runs. If two packs define the same id, the first one wins (built-in packs, then installed packs by name), and <code>plonix filters</code> warns about the one that was ignored.</p>
+<h2 id="safety">Safety<a class="anchor" href="#safety" aria-label="Link to this section">#</a></h2>
+<p>Filter packs are untrusted data, handled like <a href="detection-rules.html#trust-boundary">rule packs</a>. They're strictly validated (unknown fields are rejected, text can't contain control characters), pinned by SHA-256 on install and checked again every time they load. A filter can only narrow the traffic list. It can't change scope, send anything, or run code.</p>
+<p>To publish a pack in the community store, add it under <code>store/filterpacks/</code> and list it in <code>store/index.json</code> with <code>&quot;kind&quot;: &quot;filters&quot;</code> and the sha256 from <code>plonix filters check</code>.</p>
+</article>
+<p class="edit">This page is <a href="https://github.com/SergeyMalych/plonix/blob/main/docs/filters.md">docs/filters.md</a> in the Plonix repository. Spotted something wrong? <a href="https://github.com/SergeyMalych/plonix/edit/main/docs/filters.md">Suggest a change</a>.</p>
+</main>
+</div>
+<footer>
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <span>Open-source web security workbench for macOS. Apache-2.0.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/SergeyMalych/plonix">GitHub</a>
+      <a href="./">Docs</a>
+      <a href="https://github.com/SergeyMalych/plonix/releases">Releases</a>
+      <a href="https://github.com/SergeyMalych/plonix/issues">Issues</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(() => {
+  const root = document.documentElement, btn = document.getElementById('theme');
+  const sys = matchMedia('(prefers-color-scheme: dark)');
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+  const current = () => root.dataset.theme || (sys.matches ? 'dark' : 'light');
+  const paint = () => { const d = current() === 'dark'; btn.innerHTML = d ? SUN : MOON; btn.setAttribute('aria-label', d ? 'Switch to light mode' : 'Switch to dark mode'); };
+  paint();
+  sys.addEventListener('change', paint);
+  btn.addEventListener('click', () => {
+    const next = current() === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next; paint();
+    try { localStorage.setItem('plonix-theme', next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>

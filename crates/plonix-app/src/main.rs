@@ -15,6 +15,7 @@
 
 #[cfg(unix)]
 mod cli_tool;
+mod crashes;
 mod updates;
 
 use std::collections::HashMap;
@@ -70,6 +71,12 @@ const NEW_PROJECT_SCRIPT: &str = "window.plonixLauncher && plonixLauncher.newPro
 const TOGGLE_SIDEBAR_KEY: &str = if cfg!(target_os = "macos") { "Ctrl+Cmd+S" } else { "Ctrl+Shift+S" };
 
 fn main() {
+    // A crash, in the window or in any engine thread, writes a scrubbed
+    // report to $PLONIX_HOME/crashes; the next launch asks what to do with it.
+    if let Ok(home) = Home::resolve(None) {
+        plonix_core::crash::install(&home, "app", crashes::saved);
+    }
+
     // Headless entry points, before any window is created. The in-app "Ask
     // Claude" panel wires Claude Code to this same binary run as `<app> mcp`
     // (current_exe), so it must serve the read-only MCP server over stdio and
@@ -102,7 +109,14 @@ fn main() {
             let handle = app.handle().clone();
             launcher_window(&handle)?;
             std::thread::Builder::new().name("plonix-start".into()).spawn(move || start(handle))?;
-            updates::start(app.handle());
+            // A report from last time is asked about first, then updates.
+            let handle = app.handle().clone();
+            std::thread::Builder::new().name("plonix-crashes".into()).spawn(move || {
+                if let Ok(home) = Home::resolve(None) {
+                    crashes::ask(&handle, &home);
+                }
+                updates::start(&handle);
+            })?;
             Ok(())
         })
         .build(tauri::generate_context!())

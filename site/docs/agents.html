@@ -1,0 +1,134 @@
+<!doctype html>
+<!-- Generated from docs/agents.md by scripts/build-docs.mjs. Edit the Markdown, not this file. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Agents and MCP · Plonix docs</title>
+<meta name="description" content="Plonix lets an AI agent work with your live project: the traffic you captured, the map of the target, detected technologies, scope and findings. It does this through MCP, the…">
+<meta property="og:title" content="Agents and MCP · Plonix docs">
+<meta property="og:description" content="Plonix lets an AI agent work with your live project: the traffic you captured, the map of the target, detected technologies, scope and findings. It does this through MCP, the…">
+<meta property="og:url" content="https://plonix.io/docs/agents">
+<meta property="og:image" content="https://plonix.io/assets/window.webp">
+<link rel="canonical" href="https://plonix.io/docs/agents">
+<meta name="theme-color" content="#f5f5fa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0e13" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../assets/plonix-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="docs.css">
+<script>try{const t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <nav class="nav-links" aria-label="Site">
+      <a href="../#features">Features</a>
+      <a href="../#scope">Scope</a>
+      <a href="../#agents">AI</a>
+      <a href="./" aria-current="page">Docs</a>
+    </nav>
+    <button type="button" class="theme-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button>
+    <a class="btn small" href="https://github.com/SergeyMalych/plonix"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+  </div>
+</header>
+<div class="wrap docs">
+<aside class="side">
+<details class="side-menu" open>
+<summary>Documentation</summary>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="bench.html">The Bench</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scanning.html">Scanning</a></li><li class="here"><a href="agents.html" aria-current="page">Agents and MCP</a><ul class="toc"><li><a href="#connect-claude-code">Connect Claude Code</a></li><li><a href="#other-mcp-clients">Other MCP clients</a></li><li><a href="#tools">Tools</a></li><li><a href="#ask-claude-code-from-the-app">Ask Claude Code from the app</a></li><li><a href="#settings">Settings</a></li><li><a href="#how-access-is-enforced">How access is enforced</a></li><li><a href="#later-an-opt-in-active-mode">Later: an opt-in active mode</a></li><li><a href="#skills">Skills</a></li></ul></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li><a href="updates.html">Updates</a></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
+</details>
+</aside>
+<main class="doc">
+<article>
+<h1 id="agents-and-mcp">Agents and MCP</h1>
+<p>Plonix lets an AI agent work with your live project: the traffic you captured, the map of the target, detected technologies, scope and findings. It does this through MCP, the protocol coding agents such as Claude Code use for tools.</p>
+<p>Agents get <strong>read-only</strong> access. They can look at everything the project holds and cannot send requests, change scope or record, edit or delete findings. The engine enforces this, not the agent.</p>
+<h2 id="connect-claude-code">Connect Claude Code<a class="anchor" href="#connect-claude-code" aria-label="Link to this section">#</a></h2>
+<pre><code class="language-sh">cargo install --path crates/plonix-cli   # once, if you don't have the `plonix` command yet
+plonix connect claude</code></pre>
+<pre><code class="language-text">Plonix · connect Claude Code
+
+  ✓ Agent token  ~/.plonix/agent-token  (read-only)
+  ✓ Claude Code  added MCP server &quot;plonix&quot; for all your projects: /Users/you/.cargo/bin/plonix mcp
+
+What the agent can do (read-only):
+  status · search_traffic · get_request · get_insights · get_messages · list_hosts · list_endpoints · detected_tech · get_scope · list_findings · findings_report
+Not allowed:
+  ✗ Send or replay requests
+  ✗ Accept, reject or remove scope rules
+  ✗ Record, edit or delete findings
+  ✗ Open browsers, sign in to the window or stop the engine</code></pre>
+<p><code>plonix connect claude</code> runs <code>claude mcp add-json</code> for you. Options:</p>
+<ul><li><code>--scope user</code> (default) makes Plonix available in every project, <code>--scope local</code> only in the current directory, <code>--scope project</code> writes a shared <code>.mcp.json</code> in the current directory.</li><li><code>--print</code> changes nothing and prints the command and the <code>.mcp.json</code> entry to add yourself. This is also what you get when the <code>claude</code> command isn't installed.</li></ul>
+<p>Running it again replaces the earlier entry, so it is safe after moving or upgrading Plonix.</p>
+<p>Then start capturing (<code>plonix open &lt;target&gt;</code>, or open Plonix.app) and ask Claude Code, for example:</p>
+<blockquote><p>Use Plonix to find in-scope API endpoints that returned errors, then read the most interesting request and tell me what stands out.</p></blockquote>
+<blockquote><p>Using Plonix, list every endpoint on the target that takes an id parameter and group them by host.</p></blockquote>
+<blockquote><p>Look at Plonix scope suggestions and explain which ones really belong to the target and why.</p></blockquote>
+<p>The <strong>Agents</strong> screen in the Plonix window (⌘6) shows which agents are connected, what each one has asked for, and what they are allowed to do.</p>
+<h2 id="other-mcp-clients">Other MCP clients<a class="anchor" href="#other-mcp-clients" aria-label="Link to this section">#</a></h2>
+<p>Any MCP client can run Plonix as a stdio server:</p>
+<pre><code class="language-json">{
+  &quot;mcpServers&quot;: {
+    &quot;plonix&quot;: { &quot;type&quot;: &quot;stdio&quot;, &quot;command&quot;: &quot;plonix&quot;, &quot;args&quot;: [&quot;mcp&quot;] }
+  }
+}</code></pre>
+<p>Set <code>PLONIX_HOME</code> in the server's environment if your data is not in <code>~/.plonix</code>.</p>
+<h2 id="tools">Tools<a class="anchor" href="#tools" aria-label="Link to this section">#</a></h2>
+<div class="table"><table><thead><tr><th>Tool</th><th>What it returns</th></tr></thead><tbody><tr><td><code>status</code></td><td>Project, capture counts, scope rules, pending suggestions, proxy address</td></tr><tr><td><code>search_traffic</code></td><td>Captured requests matching a query (the same search language as the window and <code>plonix search</code>), newest first, with paging</td></tr><tr><td><code>get_request</code></td><td>One request and its response in full, with decoded bodies (clipped to <code>max_body_chars</code>)</td></tr><tr><td><code>get_insights</code></td><td>What stands out in a request: decodable tokens such as JWTs, personal data, secrets</td></tr><tr><td><code>get_messages</code></td><td>The WebSocket messages sent over the connection a handshake opened, oldest first</td></tr><tr><td><code>list_hosts</code></td><td>Every host seen, with request counts and scope decision</td></tr><tr><td><code>list_endpoints</code></td><td>Methods, paths, statuses and parameter names seen on a host</td></tr><tr><td><code>detected_tech</code></td><td>Technologies detected per host, with confidence and evidence</td></tr><tr><td><code>get_scope</code></td><td>Scope rules and suggested domains with their evidence</td></tr><tr><td><code>list_findings</code></td><td>Findings with severity, status, description and evidence request ids</td></tr><tr><td><code>findings_report</code></td><td>The findings as a Markdown report with their evidence requests and responses (bodies clipped); false positives left out unless asked for. Evidence on hosts outside scope is left out when agents see in-scope traffic only</td></tr></tbody></table></div>
+<p>Every tool is marked read-only in its MCP annotations.</p>
+<h2 id="ask-claude-code-from-the-app">Ask Claude Code from the app<a class="anchor" href="#ask-claude-code-from-the-app" aria-label="Link to this section">#</a></h2>
+<p>The Plonix window has an <strong>Ask Claude</strong> button on a request (the Lens), a finding, a host (the Map) and a scope suggestion. It opens a sheet that:</p>
+<ul><li>writes a question suited to that spot, which you can edit;</li><li>shows exactly what will be shared, split into named parts (request, response, what Plonix spotted, technologies, endpoints, scope evidence), each with its size, and lets you untick any part;</li><li>clips each request and response body, and estimates the total size against your limit;</li><li>warns, and makes you confirm, when the context is larger than your limit, so a huge payload is never sent silently.</li></ul>
+<p><strong>Copy prompt</strong> puts the prompt on your clipboard. <strong>Open in Claude Code</strong> writes the prompt to a private file under <code>$PLONIX_HOME/claude/</code> and opens Claude Code in a new Terminal window reading that file, so captured text never goes on a command line. If the Plonix MCP server is connected in that session, Claude Code can follow up with the read-only tools.</p>
+<h2 id="settings">Settings<a class="anchor" href="#settings" aria-label="Link to this section">#</a></h2>
+<p><strong>Settings › AI agents</strong> holds these choices, for all projects (stored in <code>$PLONIX_HOME/agents.json</code>, so a change made in one window reaches every open project). The Agents screen shows a summary and a link there:</p>
+<ul><li><strong>On/off.</strong> Turn agent access off and every agent request is refused (<code>agents_disabled</code>).</li><li><strong>What agents can see.</strong> <em>In-scope hosts only</em> (the default) limits traffic, hosts, endpoints and technologies to hosts you accepted into scope; <em>Everything captured</em> includes out-of-scope and third-party traffic.</li><li><strong>Tools agents get.</strong> Switch off groups of capabilities (captured requests, insights, the map, scope, findings). A switched-off capability is refused (<code>capability_off</code>) and its MCP tools disappear from <code>tools/list</code>.</li><li><strong>Ask Claude.</strong> The context-size limit that triggers the warning, and how far each body is clipped.</li></ul>
+<p>Agents can read this policy (to explain a refusal) but can never change it: the settings route is in no mode's capability list.</p>
+<h2 id="how-access-is-enforced">How access is enforced<a class="anchor" href="#how-access-is-enforced" aria-label="Link to this section">#</a></h2>
+<ul><li><code>plonix mcp</code> signs in to the engine's local API with its own token, <code>~/.plonix/agent-token</code> (mode <code>0600</code>). It never reads the full API token.</li><li>The engine checks every request made with the agent token against a fixed list of allowed routes (<code>crates/plonix-core/src/access.rs</code>). Today that list contains only reads. Anything else (<code>/api/send</code>, <code>/api/replay</code>, <code>/api/scope/*</code>, <code>POST /api/findings</code>, <code>/api/ui/launch</code>, <code>/api/browser/open</code>, <code>/api/shutdown</code>, every <code>/api/intercept</code> and <code>/api/replace</code> route) is refused with <code>403 agent_not_allowed</code>, and the refusal is shown on the Agents screen.</li><li>The API stays loopback-only. Plonix never sends captured traffic anywhere; the agent reads it on your machine.</li><li>The data-scope and capability settings are applied in the same middleware, so an agent sees only what you allow whatever it asks for.</li></ul>
+<p>Captured traffic can include passwords, session cookies and API keys. Whatever the agent reads becomes part of its conversation, so connect only agents you trust with that data.</p>
+<h2 id="later-an-opt-in-active-mode">Later: an opt-in active mode<a class="anchor" href="#later-an-opt-in-active-mode" aria-label="Link to this section">#</a></h2>
+<p>The access model is built to grow one step, without loosening anything that exists today:</p>
+<ol><li>A new <code>AgentMode::Active</code>, switched on by you in Settings › AI agents or the CLI, stored per project. An agent can never switch it on itself.</li><li>In that mode only, <code>POST /api/send</code> and <code>POST /api/replay</code> join the allowed routes. Both already go through scope enforcement, so an agent could only reach hosts you accepted into scope.</li><li>Matching MCP tools appear only when the engine reports that mode.</li></ol>
+<p>Changing scope, recording findings and controlling the engine stay with you in every mode. Active mode is not built yet.</p>
+<h2 id="skills">Skills<a class="anchor" href="#skills" aria-label="Link to this section">#</a></h2>
+<p>Skills are playbooks for one job in Plonix (get to know a host, explain a request, draft a finding). <code>plonix mcp</code> offers them as MCP prompts, so Claude Code lists them as <code>/mcp__plonix__&lt;name&gt;</code> commands, and as the <code>list_skills</code> and <code>get_skill</code> tools. A skill can only use what these settings allow: when a capability it reads is switched off, agents are not offered it. More skills come from the Market. See <a href="market.html#skills">market.md</a>.</p>
+</article>
+<p class="edit">This page is <a href="https://github.com/SergeyMalych/plonix/blob/main/docs/agents.md">docs/agents.md</a> in the Plonix repository. Spotted something wrong? <a href="https://github.com/SergeyMalych/plonix/edit/main/docs/agents.md">Suggest a change</a>.</p>
+</main>
+</div>
+<footer>
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <span>Open-source web security workbench for macOS. Apache-2.0.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/SergeyMalych/plonix">GitHub</a>
+      <a href="./">Docs</a>
+      <a href="https://github.com/SergeyMalych/plonix/releases">Releases</a>
+      <a href="https://github.com/SergeyMalych/plonix/issues">Issues</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(() => {
+  const root = document.documentElement, btn = document.getElementById('theme');
+  const sys = matchMedia('(prefers-color-scheme: dark)');
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+  const current = () => root.dataset.theme || (sys.matches ? 'dark' : 'light');
+  const paint = () => { const d = current() === 'dark'; btn.innerHTML = d ? SUN : MOON; btn.setAttribute('aria-label', d ? 'Switch to light mode' : 'Switch to dark mode'); };
+  paint();
+  sys.addEventListener('change', paint);
+  btn.addEventListener('click', () => {
+    const next = current() === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next; paint();
+    try { localStorage.setItem('plonix-theme', next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>

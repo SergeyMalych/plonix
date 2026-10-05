@@ -18,6 +18,16 @@ use crate::scope::{Decision, Evidence, EvidenceKind, NewEvidence, Rule, ScopeRul
 /// not part of the schema and cannot run inside a transaction.
 const PRAGMAS: &str = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;";
 
+/// Indexes that only make queries faster. They are not part of the schema
+/// version: any build reads a database with or without them, so they are
+/// brought up to date every time a database is opened.
+///
+/// `exchanges_list` holds the columns Traffic filters and sorts on and the
+/// Map's host list reads, so those queries never touch the rows themselves,
+/// whose bodies make them large. It starts with `host`, so it replaces the
+/// index on `host` alone.
+const INDEXES: &str = "CREATE INDEX IF NOT EXISTS exchanges_list ON exchanges(host, ts, method, status, mime, source, path, resp_len, duration_ms); DROP INDEX IF EXISTS exchanges_host;";
+
 /// One step of the database schema, moving it from `version - 1` to
 /// `version`. A step runs in a transaction together with the version bump,
 /// so it either completes or leaves the database as it was. Steps must be
@@ -253,6 +263,7 @@ impl Store {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch(PRAGMAS)?;
         migrate(&mut conn, MIGRATIONS)?;
+        conn.execute_batch(INDEXES)?;
         Ok(Self { conn: Mutex::new(conn) })
     }
 
@@ -264,65 +275,21 @@ impl Store {
     // ---- traffic ---------------------------------------------------------
 
     pub fn insert_exchange(&self, ex: &Exchange) -> Result<i64> {
-        let req_text = format!(
-            "{} {}{}\n{}\n{}",
-            ex.method,
-            ex.path,
-            if ex.query.is_empty() { String::new() } else { format!("?{}", ex.query) },
-            codec::headers_text(&ex.req_headers),
-            codec::body_text(&ex.req_headers, &ex.req_body).unwrap_or_default()
-        );
-        let resp_text = format!(
-            "{}\n{}\n{}",
-            ex.status.map(|s| s.to_string()).unwrap_or_default(),
-            codec::headers_text(&ex.resp_headers),
-            codec::body_text(&ex.resp_headers, &ex.resp_body).unwrap_or_default()
-        );
+        Ok(self.insert_exchanges(std::slice::from_ref(ex))?[0])
+    }
+
+    /// Stores several exchanges in one transaction and returns their ids, in
+    /// order. The search index is much faster to fill in batches than one
+    /// exchange per transaction, so the recorder drains its queue this way.
+    pub fn insert_exchanges(&self, exchanges: &[Exchange]) -> Result<Vec<i64>> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
-        tx.execute(
-            "INSERT INTO exchanges (ts, scheme, host, port, method, path, query, req_headers, req_body, status,
-                resp_headers, resp_body, resp_len, mime, duration_ms, error, tls_sans, source, initiator,
-                req_truncated, req_size, resp_truncated, resp_size, http_version, edited, original_request, original_response, replaced)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
-            params![
-                ex.ts,
-                ex.scheme,
-                ex.host.to_ascii_lowercase(),
-                ex.port,
-                ex.method,
-                ex.path,
-                ex.query,
-                serde_json::to_string(&ex.req_headers)?,
-                ex.req_body,
-                ex.status,
-                serde_json::to_string(&ex.resp_headers)?,
-                ex.resp_body,
-                ex.resp_len(),
-                ex.mime(),
-                ex.duration_ms,
-                ex.error,
-                serde_json::to_string(&ex.tls_sans)?,
-                ex.source.unwrap_or(Source::Proxy).as_str(),
-                ex.initiator,
-                ex.req_truncated,
-                ex.req_size,
-                ex.resp_truncated,
-                ex.resp_size,
-                ex.http_version,
-                ex.edited,
-                ex.original_request,
-                ex.original_response,
-                if ex.replaced.is_empty() { None } else { Some(serde_json::to_string(&ex.replaced)?) },
-            ],
-        )?;
-        let id = tx.last_insert_rowid();
-        tx.execute(
-            "INSERT INTO exchanges_fts (rowid, url, req, resp) VALUES (?1, ?2, ?3, ?4)",
-            params![id, ex.url(), req_text, resp_text],
-        )?;
+        let mut ids = Vec::with_capacity(exchanges.len());
+        for ex in exchanges {
+            ids.push(insert_one(&tx, ex)?);
+        }
         tx.commit()?;
-        Ok(id)
+        Ok(ids)
     }
 
     pub fn get_exchange(&self, id: i64) -> Result<Option<Exchange>> {
@@ -657,11 +624,7 @@ impl Store {
     }
 
     pub fn add_tokens(&self, hashes: &[String], host: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        for h in hashes {
-            conn.execute("INSERT OR IGNORE INTO session_tokens (hash, host) VALUES (?1, ?2)", params![h, host])?;
-        }
-        Ok(())
+        put_tokens(&self.conn.lock().unwrap(), hashes, host)
     }
 
     pub fn token_owner(&self, hash: &str) -> Option<String> {
@@ -670,12 +633,21 @@ impl Store {
     }
 
     pub fn add_evidence(&self, ev: &NewEvidence, exchange_id: i64, ts: i64) -> Result<()> {
-        self.conn.lock().unwrap().execute(
-            "INSERT INTO evidence (domain, kind, via, detail, exchange_id, count, first_seen, last_seen)
-             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6)
-             ON CONFLICT(domain, kind, via) DO UPDATE SET count = count + 1, last_seen = max(last_seen, ?6)",
-            params![ev.domain, ev.kind.as_str(), ev.via, ev.detail, exchange_id, ts],
-        )?;
+        put_evidence(&self.conn.lock().unwrap(), ev, exchange_id, ts)
+    }
+
+    /// Writes what scope analysis learned from many exchanges in one
+    /// transaction: one write each would cost more than the analysis.
+    pub fn add_analysis(&self, learned: &[Learned]) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        for l in learned {
+            put_tokens(&tx, &l.tokens, &l.host)?;
+            for ev in &l.evidence {
+                put_evidence(&tx, ev, l.exchange_id, l.ts)?;
+            }
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -701,10 +673,18 @@ impl Store {
     pub fn count_for_hosts(&self, hosts: &[String], keep: &BTreeSet<i64>) -> Result<i64> {
         let conn = self.conn.lock().unwrap();
         let mut n = 0;
+        let mut per_host = conn.prepare_cached("SELECT count(*) FROM exchanges WHERE host = ?1")?;
         for h in hosts {
-            n += conn.query_row("SELECT count(*) FROM exchanges WHERE host = ?1", [h], |r| r.get::<_, i64>(0))?;
-            for id in keep {
-                n -= conn.query_row("SELECT count(*) FROM exchanges WHERE host = ?1 AND id = ?2", params![h, id], |r| r.get::<_, i64>(0))?;
+            n += per_host.query_row([h], |r| r.get::<_, i64>(0))?;
+        }
+        // One lookup per kept exchange, not one per kept exchange and host.
+        let doomed: BTreeSet<&str> = hosts.iter().map(String::as_str).collect();
+        let mut host_of = conn.prepare_cached("SELECT host FROM exchanges WHERE id = ?1")?;
+        for id in keep {
+            if let Some(h) = host_of.query_row([id], |r| r.get::<_, String>(0)).optional()?
+                && doomed.contains(h.as_str())
+            {
+                n -= 1;
             }
         }
         Ok(n)
@@ -981,6 +961,95 @@ fn ranked(map: BTreeMap<String, i64>) -> Vec<Count> {
     let mut v: Vec<Count> = map.into_iter().map(|(value, count)| Count { value, count }).collect();
     v.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.value.cmp(&b.value)));
     v
+}
+
+/// What scope analysis learned from one exchange: session tokens its host
+/// owns and evidence about other domains. See [`Store::add_analysis`].
+#[derive(Debug, Default)]
+pub struct Learned {
+    pub exchange_id: i64,
+    pub ts: i64,
+    /// The exchange's host, which owns `tokens`.
+    pub host: String,
+    pub tokens: Vec<String>,
+    pub evidence: Vec<NewEvidence>,
+}
+
+/// Remembers session tokens as `host`'s; the first host to show a token keeps it.
+fn put_tokens(conn: &Connection, hashes: &[String], host: &str) -> Result<()> {
+    let mut stmt = conn.prepare_cached("INSERT OR IGNORE INTO session_tokens (hash, host) VALUES (?1, ?2)")?;
+    for h in hashes {
+        stmt.execute(params![h, host])?;
+    }
+    Ok(())
+}
+
+fn put_evidence(conn: &Connection, ev: &NewEvidence, exchange_id: i64, ts: i64) -> Result<()> {
+    conn.prepare_cached(
+        "INSERT INTO evidence (domain, kind, via, detail, exchange_id, count, first_seen, last_seen)
+         VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6)
+         ON CONFLICT(domain, kind, via) DO UPDATE SET count = count + 1, last_seen = max(last_seen, ?6)",
+    )?
+    .execute(params![ev.domain, ev.kind.as_str(), ev.via, ev.detail, exchange_id, ts])?;
+    Ok(())
+}
+
+/// Inserts one exchange and its search index entry inside `tx`.
+fn insert_one(tx: &rusqlite::Transaction, ex: &Exchange) -> Result<i64> {
+    let req_text = format!(
+        "{} {}{}\n{}\n{}",
+        ex.method,
+        ex.path,
+        if ex.query.is_empty() { String::new() } else { format!("?{}", ex.query) },
+        codec::headers_text(&ex.req_headers),
+        codec::body_text(&ex.req_headers, &ex.req_body).unwrap_or_default()
+    );
+    let resp_text = format!(
+        "{}\n{}\n{}",
+        ex.status.map(|s| s.to_string()).unwrap_or_default(),
+        codec::headers_text(&ex.resp_headers),
+        codec::body_text(&ex.resp_headers, &ex.resp_body).unwrap_or_default()
+    );
+    tx.prepare_cached(
+        "INSERT INTO exchanges (ts, scheme, host, port, method, path, query, req_headers, req_body, status,
+            resp_headers, resp_body, resp_len, mime, duration_ms, error, tls_sans, source, initiator,
+            req_truncated, req_size, resp_truncated, resp_size, http_version, edited, original_request, original_response, replaced)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
+    )?
+    .execute(params![
+        ex.ts,
+        ex.scheme,
+        ex.host.to_ascii_lowercase(),
+        ex.port,
+        ex.method,
+        ex.path,
+        ex.query,
+        serde_json::to_string(&ex.req_headers)?,
+        ex.req_body,
+        ex.status,
+        serde_json::to_string(&ex.resp_headers)?,
+        ex.resp_body,
+        ex.resp_len(),
+        ex.mime(),
+        ex.duration_ms,
+        ex.error,
+        serde_json::to_string(&ex.tls_sans)?,
+        ex.source.unwrap_or(Source::Proxy).as_str(),
+        ex.initiator,
+        ex.req_truncated,
+        ex.req_size,
+        ex.resp_truncated,
+        ex.resp_size,
+        ex.http_version,
+        ex.edited,
+        ex.original_request,
+        ex.original_response,
+        if ex.replaced.is_empty() { None } else { Some(serde_json::to_string(&ex.replaced)?) },
+    ])?;
+    let id = tx.last_insert_rowid();
+    tx.prepare_cached("INSERT INTO exchanges_fts (rowid, url, req, resp) VALUES (?1, ?2, ?3, ?4)")?
+        .execute(params![id, ex.url(), req_text, resp_text])?;
+    Ok(id)
 }
 
 /// A response content type, as one of the kinds `mime:` filters are useful for.

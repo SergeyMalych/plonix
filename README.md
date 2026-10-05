@@ -10,6 +10,8 @@ Plonix captures everything your browser does, learns the real shape of the targe
 
 > **Status: early development.** The core engine (proxy, traffic store, search, adaptive scope, local API), the `plonix` CLI, the Plonix app, crawl and scope-gated active scans, and read-only MCP access for AI agents work today and are covered by tests. See [Roadmap](#roadmap).
 
+**Documentation:** [plonix.io/docs](https://plonix.io/docs/) (the same pages as [docs/](docs/)).
+
 ---
 
 ## Why Plonix
@@ -148,6 +150,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - `plonix` commands in a terminal talk to the same sessions while the app is open (`-p` picks the project), and projects started from a terminal show up on the Start screen. Quitting the app closes the projects it opened.
 - The same window also runs in any browser with `plonix ui`, served by the engine itself.
 - **Updates are your call.** Plonix asks once whether to check for new versions (daily, weekly, at launch or only when you ask) and never installs anything by itself: downloading and installing each need a click, and closing a dialog means no. See [docs/updates.md](docs/updates.md).
+- **Crash reports stay on your Mac.** If Plonix crashes, it saves a report in `~/.plonix/crashes/` with addresses, headers, tokens and your user name removed, and sends nothing. The next launch asks whether to view it, open a pre-filled GitHub issue for you to review and submit, or dismiss it; `plonix` prints where the report is. See [docs/crash-reports.md](docs/crash-reports.md).
 
 ### The Plonix window
 - **Sidebar:** navigation, Open target, the scope suggestions waiting on you (accept or reject in one click) and the hosts in scope with their request counts (click one to filter Traffic). Collapse it to icons with ⌃⌘S, or `\` in a browser.
@@ -400,7 +403,8 @@ crates/
 ├── plonix-cli    the `plonix` command: engine control, onboarding, search, scope, replay, rules, Market, skills, MCP server
 └── plonix-app    Plonix.app: the window as a desktop app, with the engine built in
 store/            the Market: signed index.json, skills, rule packs, filter packs, extension manifests
-docs/             detection rules, agents and MCP, extension design
+docs/             the documentation, published at plonix.io/docs
+site/             the plonix.io website; site/docs is generated from docs/ by scripts/build-docs.mjs
 ```
 
 ## Roadmap

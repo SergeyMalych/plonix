@@ -24,6 +24,17 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
+  # The 100,000-exchange scale tests (crates/plonix-core/tests/scale.rs), in
+  # release mode. A 10,000-exchange version runs with the tests above.
+  scale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Scale tests
+        run: cargo test --release --locked -p plonix-core --test scale -- --ignored --nocapture
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -40,6 +51,18 @@ jobs:
       # warnings for now.
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D clippy::correctness -D clippy::suspicious
+
+  # plonix.io/docs is generated from docs/ and committed (site/ has no build
+  # step); this fails when a doc changed without regenerating the pages.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: site/docs is up to date
+        run: node scripts/build-docs.mjs --check
 
   deny:
     runs-on: ubuntu-latest
