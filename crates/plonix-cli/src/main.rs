@@ -368,6 +368,17 @@ enum CaCmd {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    // A crash writes a scrubbed report to $PLONIX_HOME/crashes; nothing is sent.
+    if let Ok(home) = Home::resolve(cli.home.as_deref()) {
+        plonix_core::crash::install(&home, "cli", |path| {
+            eprintln!(
+                "\nPlonix crashed. A report was saved to {}\n\
+                 Nothing was sent. To report the problem, read the report and paste it into a new issue at {}",
+                path.display(),
+                plonix_core::crash::NEW_ISSUE_URL
+            );
+        });
+    }
     match run(cli) {
         Ok(code) => code,
         Err(e) => {

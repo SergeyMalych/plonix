@@ -16,6 +16,7 @@ pub mod ca;
 pub mod client;
 pub mod crawl;
 pub mod codec;
+pub mod crash;
 pub mod demo;
 pub mod detect;
 pub mod engine;
