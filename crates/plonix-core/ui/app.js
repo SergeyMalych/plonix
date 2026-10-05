@@ -564,6 +564,8 @@ function go(view, force) {
   const main = $('#main');
   clear(main);
   VIEWS[view].render(main);
+  // Counted for anonymous usage statistics, when they are on: the screen's name only.
+  api('/api/usage', { method: 'POST', body: { event: 'screen_' + view } }).catch(() => {});
 }
 
 /** Moves to another screen from inside one, remembering where to go back to. */

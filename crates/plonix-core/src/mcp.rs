@@ -492,6 +492,9 @@ fn tool_json(t: &Tool) -> Value {
 
 /// Serves MCP on stdin/stdout until stdin closes.
 pub fn serve(home: Home) -> Result<()> {
+    crate::usage::init(&home, false);
+    crate::usage::record("mcp_session");
+    crate::usage::flush();
     let server = Server { home, client_name: Arc::new(Mutex::new("mcp".into())) };
 
     // Keep the Agents screen's "connected" status fresh while the agent is idle.

@@ -16,8 +16,10 @@ struct Plonix {
 }
 
 impl Plonix {
+    /// A fresh home. Tests accept the terms per run, the way scripts and CI
+    /// do, so nothing is recorded and no usage statistics are kept.
     fn new() -> Self {
-        Self { home: tempfile::tempdir().unwrap(), env: vec![] }
+        Self { home: tempfile::tempdir().unwrap(), env: vec![("PLONIX_ACCEPT_TERMS".into(), "1".into())] }
     }
 
     fn cmd(&self, args: &[&str]) -> Command {
@@ -173,6 +175,24 @@ fn commands_explain_when_the_engine_is_not_running() {
     let r = p.run(&["stop"]);
     r.ok();
     assert!(r.stdout().contains("not running"));
+}
+
+#[test]
+fn the_terms_are_accepted_once_or_per_run() {
+    let mut p = Plonix::new();
+    p.env.clear();
+    let mut cmd = p.cmd(&["projects"]);
+    let r = Run(cmd.env_remove("PLONIX_ACCEPT_TERMS").stdin(Stdio::null()).output().unwrap());
+    assert_eq!(r.code(), 1);
+    assert!(r.stderr().contains("--accept-terms"), "{}", r.stderr());
+    p.run(&["projects", "--accept-terms"]).ok();
+    p.env.push(("PLONIX_ACCEPT_TERMS".into(), "1".into()));
+    p.run(&["projects"]).ok();
+    assert!(!p.home.path().join("terms.json").exists(), "accepting for one run records nothing");
+    let r = p.run(&["usage"]);
+    r.ok();
+    assert!(r.stdout().contains("statistics: off"), "{}", r.stdout());
+    assert!(!p.home.path().join("usage.json").exists());
 }
 
 #[test]

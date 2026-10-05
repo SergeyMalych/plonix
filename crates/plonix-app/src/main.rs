@@ -166,6 +166,7 @@ fn start(app: AppHandle) {
             .build()
             .context("starting the engine runtime")?;
         let hub = runtime.block_on(hub::start(&home, None)).context("starting the Start screen")?;
+        plonix_core::usage::record("app_launched");
         hub.announce()?;
         let url = hub.launch_url()?;
         let events = hub.events.subscribe();

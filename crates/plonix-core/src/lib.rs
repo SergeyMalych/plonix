@@ -46,8 +46,10 @@ pub mod skill;
 pub mod session;
 pub mod settings;
 pub mod store;
+pub mod terms;
 pub mod ui;
 pub mod upstream;
+pub mod usage;
 pub mod websocket;
 
 
