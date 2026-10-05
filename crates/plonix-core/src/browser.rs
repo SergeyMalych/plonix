@@ -121,6 +121,41 @@ fn which(bin: &str) -> Option<PathBuf> {
 
 /// Command-line flags for a Chromium-based browser.
 pub fn chromium_args(profile: &Path, proxy: &str, spki: &str, url: &str) -> Vec<String> {
+    let mut args = proxied_chromium(profile, proxy, spki);
+    args.extend(["--new-window".into(), url.into()]);
+    args
+}
+
+/// Flags for the browser crawl: a headless Chromium on its own throwaway
+/// profile, routed through the proxy, with a DevTools endpoint on a free
+/// loopback port (written to `DevToolsActivePort` in the profile) and no
+/// popups.
+pub fn headless_args(profile: &Path, proxy: &str, spki: &str) -> Vec<String> {
+    let mut args = proxied_chromium(profile, proxy, spki);
+    args.extend(
+        ["--headless=new", "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0", "--block-new-web-contents", "--mute-audio", "--hide-scrollbars"]
+            .map(String::from),
+    );
+    // Chromium refuses to start its sandbox as root (containers, CI).
+    if running_as_root() {
+        args.push("--no-sandbox".into());
+    }
+    args.push("about:blank".into());
+    args
+}
+
+#[cfg(target_os = "linux")]
+fn running_as_root() -> bool {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata("/proc/self").is_ok_and(|m| m.uid() == 0)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn running_as_root() -> bool {
+    false
+}
+
+fn proxied_chromium(profile: &Path, proxy: &str, spki: &str) -> Vec<String> {
     vec![
         format!("--user-data-dir={}", profile.display()),
         format!("--proxy-server=http://{proxy}"),
@@ -137,8 +172,6 @@ pub fn chromium_args(profile: &Path, proxy: &str, spki: &str, url: &str) -> Vec<
         "--disable-domain-reliability".into(),
         "--disable-client-side-phishing-detection".into(),
         "--disable-features=OptimizationHints,MediaRouter,Translate".into(),
-        "--new-window".into(),
-        url.into(),
     ]
 }
 
@@ -244,6 +277,17 @@ mod tests {
         assert!(args.contains(&"--proxy-bypass-list=<-loopback>".to_string()));
         assert!(args.contains(&"--ignore-certificate-errors-spki-list=AbC=".to_string()));
         assert_eq!(args.last().unwrap(), "https://example.com/");
+    }
+
+    #[test]
+    fn headless_crawl_browser_is_proxied_and_debuggable_on_loopback() {
+        let args = headless_args(Path::new("/tmp/c"), "127.0.0.1:8080", "AbC=");
+        assert!(args.contains(&"--proxy-server=http://127.0.0.1:8080".to_string()));
+        assert!(args.contains(&"--ignore-certificate-errors-spki-list=AbC=".to_string()));
+        assert!(args.contains(&"--headless=new".to_string()));
+        assert!(args.contains(&"--remote-debugging-address=127.0.0.1".to_string()));
+        assert!(args.contains(&"--remote-debugging-port=0".to_string()));
+        assert_eq!(args.last().unwrap(), "about:blank");
     }
 
     #[test]

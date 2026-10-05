@@ -4390,7 +4390,7 @@ function findingForm(f, ids = [], title = '') {
  * of Plonix, so nothing ever leaves the hosts you accepted. Any issue a scan
  * records is a normal finding, editable on the Findings screen.
  */
-const SC = { host: null, hosts: [], suggest: null, suggestErr: null, picks: null, intrusive: false, running: false, report: null, crawl: null, crawling: false, crawlStart: '/', crawlBrowser: false };
+const SC = { host: null, hosts: [], suggest: null, suggestErr: null, picks: null, intrusive: false, running: false, report: null, crawl: null, crawling: false, crawlStart: '/', crawlBrowser: false, crawlClick: false };
 
 const INTRU_LABEL = { passive: 'Passive', safe: 'Safe', active: 'Active', intrusive: 'Intrusive' };
 const INTRU_TAG = { passive: 'in', safe: 'in', active: 'upd', intrusive: 'rej' };
@@ -4656,14 +4656,25 @@ function scanReportCard() {
 
 function scanCrawlSection() {
   const start = h('input', { value: SC.crawlStart, spellcheck: 'false', placeholder: '/', oninput: (e) => (SC.crawlStart = e.target.value) });
-  const browser = h('input', { type: 'checkbox', checked: SC.crawlBrowser, onchange: (e) => (SC.crawlBrowser = e.target.checked) });
+  const browser = h('input', { type: 'checkbox', checked: SC.crawlBrowser, disabled: SC.crawling, onchange: (e) => ((SC.crawlBrowser = e.target.checked), drawScans()) });
+  const click = h('input', { type: 'checkbox', checked: SC.crawlClick, disabled: SC.crawling, onchange: (e) => (SC.crawlClick = e.target.checked) });
   const run = h('button', { class: 'btn', disabled: SC.crawling, text: SC.crawling ? 'Crawling…' : 'Crawl', onclick: () => runCrawl() });
   return h(
     'div',
     { class: 'card' },
     h('div', { class: 'sechead' }, h('h3', { text: 'Crawl' }), h('span', { class: 'muted', text: 'Walk the in-scope site to discover endpoints and forms. Bounded and read-only.' })),
-    h('div', { class: 'scanrow' }, h('label', { class: 'muted', text: 'Start path' }), start, h('label', { class: 'cbrowser' }, browser, ' with browser'), run),
-    h('p', { class: 'muted cbnote', text: 'Browser crawl (JS-rendered pages) is coming; until then a plain crawl runs and the report says so.' }),
+    h(
+      'div',
+      { class: 'scanrow' },
+      h('label', { class: 'muted', text: 'Start path' }),
+      start,
+      h('label', { class: 'cbrowser' }, browser, 'Use a browser (for JavaScript apps)'),
+      SC.crawlBrowser ? h('label', { class: 'cbrowser', title: 'Buttons inside forms, and anything labelled like log out, delete, remove or pay, are never clicked' }, click, 'Click buttons too') : null,
+      run,
+    ),
+    SC.crawlBrowser
+      ? h('p', { class: 'muted cbnote', text: 'Pages render in a headless Chrome-family browser routed through Plonix, so every request lands in Traffic. Requests to hosts outside scope are blocked, and forms are never submitted. Takes up to 3 minutes.' })
+      : null,
     SC.crawl ? crawlReportCard() : null,
   );
 }
@@ -4674,7 +4685,8 @@ async function runCrawl() {
   SC.crawl = null;
   drawScans();
   try {
-    SC.crawl = await api('/api/crawl', { method: 'POST', body: { host: SC.host, start: SC.crawlStart || '/', browser: !!SC.crawlBrowser } });
+    const browser = !!SC.crawlBrowser;
+    SC.crawl = await api('/api/crawl', { method: 'POST', body: { host: SC.host, start: SC.crawlStart || '/', browser, click: browser && !!SC.crawlClick } });
   } catch (e) {
     SC.crawling = false;
     drawScans();
@@ -4688,10 +4700,18 @@ async function runCrawl() {
 
 function crawlReportCard() {
   const r = SC.crawl;
+  const n = (k, word) => `${k} ${word}${k === 1 ? '' : 's'}`;
+  const counts = [n(r.pages_fetched, 'page'), n(r.urls_found, 'URL'), n(r.forms.length, 'form')];
+  if (r.clicks) counts.push(n(r.clicks, 'click'));
+  if (r.browser) counts.push('rendered in ' + r.browser);
+  const blocked = r.blocked_hosts || [];
   return h(
     'div',
     { class: 'crawlreport' },
-    h('div', { class: 'sechead' }, h('h4', { text: 'Crawl result' }), h('span', { class: 'muted', text: `${r.pages_fetched} page${r.pages_fetched === 1 ? '' : 's'} · ${r.urls_found} URL${r.urls_found === 1 ? '' : 's'} · ${r.forms.length} form${r.forms.length === 1 ? '' : 's'}` })),
+    h('div', { class: 'sechead' }, h('h4', { text: 'Crawl result' }), h('span', { class: 'muted', text: counts.join(' · ') }), h('span', { class: 'shacts' }, h('button', { class: 'btn sm', text: 'View on Map', onclick: () => go('map') }))),
+    blocked.length
+      ? h('p', { class: 'muted crawlblocked' }, 'Blocked, not in scope: ', blocked.map((b) => h('code', { text: b })))
+      : null,
     r.forms.length
       ? h(
           'table',

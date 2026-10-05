@@ -70,7 +70,7 @@ pub fn settings_section() -> Section {
     Section::new(SETTINGS_SECTION, "Intercept", Level::Project)
         .describe(
             "What Intercept holds while it is on. Turn it on with the Intercept button in Traffic; it is off whenever the project opens. \
-             WebSocket messages, hosts that are never decrypted and Plonix's own requests (Bench, scans, crawls) are never held.",
+             WebSocket messages, hosts that are never decrypted and Plonix's own requests (Bench, scans, crawls without a browser) are never held.",
         )
         .order(15)
         .field(

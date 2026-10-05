@@ -1,0 +1,4 @@
+#!/bin/sh
+# plonix-cli placeholder: this build of Plonix does not include the command line tool.
+echo 'This build of Plonix does not include the plonix command. Install it with: cargo install --path crates/plonix-cli' >&2
+exit 1

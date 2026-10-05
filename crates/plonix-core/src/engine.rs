@@ -917,7 +917,8 @@ impl Engine {
 
     /// Crawls an accepted host: fetches in-scope pages through `send`, follows
     /// the same-host links it finds, and records what it sees. GET only; it
-    /// never submits a form and never leaves accepted scope.
+    /// never submits a form and never leaves accepted scope. With `browser`,
+    /// the walk runs in a headless browser instead (see [`crate::browser_crawl`]).
     pub async fn crawl(&self, req: crawl::CrawlRequest, initiator: &str) -> Result<crawl::CrawlReport, SendError> {
         let host = scope::normalize_host(&req.host);
         let decision = self.rules().decide(&host);
@@ -925,21 +926,36 @@ impl Engine {
             return Err(SendError::OutOfScope { host, decision: decision.as_str() });
         }
 
-        let exchanges = self.store.exchanges_for_host(&host, 50).map_err(SendError::Other)?;
-        let (scheme, port) = exchanges.first().map(|e| (e.scheme.clone(), e.port)).unwrap_or_else(|| ("https".into(), 443));
-        let default_port = (scheme == "https" && port == 443) || (scheme == "http" && port == 80);
-        let authority = if default_port { host.clone() } else { format!("{host}:{port}") };
+        // The start may be a full URL, which also fixes the scheme and port;
+        // otherwise they come from the host's captured traffic.
+        let start = req.start.as_deref().map(str::trim).filter(|s| !s.is_empty()).unwrap_or("/");
+        let (scheme, authority, start) = match crawl::split_url(start) {
+            Some((s, auth, path)) => {
+                if scope::normalize_host(auth) != host {
+                    return Err(SendError::BadRequest(format!("the start URL {start} is not on {host}")));
+                }
+                (s.to_ascii_lowercase(), auth.to_string(), path.to_string())
+            }
+            None if start.contains("://") => return Err(SendError::BadRequest(format!("the start URL {start} must use http or https"))),
+            None => {
+                let exchanges = self.store.exchanges_for_host(&host, 50).map_err(SendError::Other)?;
+                let (scheme, port) = exchanges.first().map(|e| (e.scheme.clone(), e.port)).unwrap_or_else(|| ("https".into(), 443));
+                let default_port = (scheme == "https" && port == 443) || (scheme == "http" && port == 80);
+                let authority = if default_port { host.clone() } else { format!("{host}:{port}") };
+                (scheme, authority, if start.starts_with('/') { start.to_string() } else { format!("/{start}") })
+            }
+        };
+
+        if req.browser {
+            return crate::browser_crawl::run(self, &host, format!("{scheme}://{authority}{start}"), &req).await;
+        }
 
         let max_pages = req.max_pages.unwrap_or(crawl::DEFAULT_MAX_PAGES).min(crawl::MAX_PAGES_CEIL);
         let max_depth = req.max_depth.unwrap_or(crawl::DEFAULT_MAX_DEPTH);
 
-        let mut report = crawl::CrawlReport { host: host.clone(), pages_fetched: 0, urls_found: 0, forms: vec![], notes: vec![] };
-        if req.browser {
-            report.notes.push("the browser crawl mode is not available yet; ran a plain crawl".into());
-        }
+        let mut report = crawl::CrawlReport::new(&host);
 
         // Seed with the start path and any already-discovered endpoints.
-        let start = req.start.as_deref().unwrap_or("/");
         let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         let mut queue: std::collections::VecDeque<(String, usize)> = std::collections::VecDeque::new();
         let enqueue = |url: String, depth: usize, seen: &mut std::collections::BTreeSet<String>, queue: &mut std::collections::VecDeque<(String, usize)>| {
@@ -948,7 +964,7 @@ impl Engine {
                 queue.push_back((url, depth));
             }
         };
-        enqueue(format!("{scheme}://{authority}{}", if start.starts_with('/') { start.to_string() } else { format!("/{start}") }), 0, &mut seen, &mut queue);
+        enqueue(format!("{scheme}://{authority}{start}"), 0, &mut seen, &mut queue);
         for e in self.store.endpoints(&host).map_err(SendError::Other)?.into_iter().filter(|e| e.method.eq_ignore_ascii_case("GET")) {
             enqueue(format!("{scheme}://{authority}{}", e.path), 0, &mut seen, &mut queue);
         }
@@ -981,9 +997,7 @@ impl Engine {
                     crawl::resolve_same_host(&scheme, &authority, &ex.path, &form.action).unwrap_or(form.action.clone())
                 };
                 let resolved = crawl::Form { action, ..form };
-                if !report.forms.contains(&resolved) {
-                    report.forms.push(resolved);
-                }
+                report.add_form(resolved);
             }
             if depth < max_depth {
                 for raw in crawl::extract_links(&body) {
