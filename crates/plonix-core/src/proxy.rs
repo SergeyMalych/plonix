@@ -186,6 +186,7 @@ async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<ProxyResponse, Infal
         Ok(up) => {
             pending.ex.tls_sans = up.tls_sans;
             pending.ex.http_version = up.version;
+            pending.ex.client_cert = up.client_cert;
             respond(&ctx.engine, up.status, up.headers, up.body, pending).await
         }
         Err(e) => unreachable(e, pending),
@@ -553,6 +554,7 @@ async fn websocket(mut req: Request<Incoming>, ctx: Ctx, outbound: OutboundReque
         Err(e) => return unreachable(e, pending),
     };
     pending.ex.tls_sans = up.tls_sans;
+    pending.ex.client_cert = up.client_cert;
     pending.ex.http_version = "HTTP/1.1".into();
     let server = match up.outcome {
         Upgrade::Refused(body) => return deliver(up.status, up.headers, RespBody::Stream(body), pending),

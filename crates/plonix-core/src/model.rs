@@ -27,6 +27,8 @@ pub enum Source {
     Proxy,
     /// Sent actively by the engine on behalf of a user or agent.
     Replay,
+    /// Loaded from a HAR file (see [`crate::har`]).
+    Import,
 }
 
 impl Source {
@@ -34,10 +36,15 @@ impl Source {
         match self {
             Source::Proxy => "proxy",
             Source::Replay => "replay",
+            Source::Import => "import",
         }
     }
     pub fn parse(s: &str) -> Self {
-        if s == "replay" { Source::Replay } else { Source::Proxy }
+        match s {
+            "replay" => Source::Replay,
+            "import" => Source::Import,
+            _ => Source::Proxy,
+        }
     }
 }
 
@@ -100,6 +107,10 @@ pub struct Exchange {
     /// (`#3 request header: ...`); the fields above are what was sent.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub replaced: Vec<String>,
+    /// The client certificate Plonix presented to the server when it asked
+    /// for one (`CN=alice for *.example.com`), see [`crate::clientcert`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_cert: Option<String>,
 }
 
 impl Exchange {
