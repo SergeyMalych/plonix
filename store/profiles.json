@@ -1,0 +1,106 @@
+{
+  "plonix_profiles": 1,
+  "tags": {
+    "recon": "Finding hosts, paths and what is exposed",
+    "fingerprint": "What the app is built on",
+    "scope": "Deciding what is in bounds",
+    "exposure": "Things left open by mistake",
+    "api": "APIs and their operations",
+    "auth": "Sign-in and sessions",
+    "access": "Who can reach what",
+    "secrets": "Keys and tokens in traffic",
+    "payloads": "Lists and values for the Bench",
+    "scanning": "Sends test requests by itself",
+    "deep-dive": "Taking one request or feature apart",
+    "decoding": "Reading encoded data",
+    "reporting": "Writing findings up",
+    "analysis": "Finding patterns across many requests",
+    "cloud": "Cloud storage, functions and identity"
+  },
+  "profiles": [
+    {
+      "id": "bug-hunter",
+      "title": "Bug hunter",
+      "line": "You test public programs for rewards, across many targets, under each program's rules.",
+      "weights": { "access": 4, "secrets": 4, "reporting": 4, "api": 3, "auth": 2, "scope": 2, "exposure": 2, "payloads": 2, "recon": 1 },
+      "max_noise": "light",
+      "reasons": {
+        "access": "Access bugs are the most common paid finding.",
+        "secrets": "Leaked secrets are quick, well-paid findings.",
+        "reporting": "A clear write-up gets triaged faster.",
+        "api": "Most paid bugs today live in APIs.",
+        "auth": "Sign-in flows hide paid bugs.",
+        "scope": "Keeps you inside the program's rules.",
+        "exposure": "Things left open by mistake are easy wins.",
+        "payloads": "Ready lists for the Bench.",
+        "recon": "Finds more of the target to test."
+      }
+    },
+    {
+      "id": "red-teamer",
+      "title": "Red teamer",
+      "line": "You work an engagement against one organization: wide surface, quiet by default.",
+      "weights": { "recon": 5, "exposure": 5, "auth": 4, "secrets": 4, "cloud": 4, "fingerprint": 3, "scope": 3, "access": 2 },
+      "max_noise": "passive",
+      "reasons": {
+        "recon": "Maps the whole surface before you touch it.",
+        "exposure": "Things left open are the fastest way in.",
+        "auth": "Every identity you gain widens what you reach.",
+        "secrets": "Credentials in traffic are the way further in.",
+        "cloud": "Cloud services are where the data lives.",
+        "fingerprint": "Knowing the stack tells you where to look.",
+        "scope": "Keeps the engagement inside what was signed off.",
+        "access": "Shows what each identity can reach."
+      }
+    },
+    {
+      "id": "researcher",
+      "title": "Security researcher",
+      "line": "You take one app, its cloud setup or a protocol apart, look for patterns across traffic, and want results others can reproduce.",
+      "weights": { "analysis": 5, "cloud": 5, "deep-dive": 4, "decoding": 3, "api": 2, "exposure": 2, "scanning": 2, "reporting": 2 },
+      "max_noise": "active",
+      "reasons": {
+        "analysis": "Finds patterns no single request shows.",
+        "cloud": "Most apps now keep their data in cloud services.",
+        "deep-dive": "Takes one request or feature apart in detail.",
+        "decoding": "Reads encoded and nested data for you.",
+        "api": "Shows every operation and its inputs.",
+        "exposure": "Shows what is open by mistake.",
+        "scanning": "Tests a hunch across many inputs.",
+        "reporting": "Turns what you found into a reproducible write-up."
+      }
+    }
+  ],
+  "items": {
+    "triage-host": { "tags": ["recon", "fingerprint"] },
+    "explain-request": { "tags": ["deep-dive", "decoding"] },
+    "review-sign-in": { "tags": ["auth"] },
+    "check-scope": { "tags": ["scope", "recon"], "why": { "red-teamer": "Sorts new domains into in or out, with the evidence." } },
+    "draft-finding": { "tags": ["reporting"] },
+    "api-inventory": { "tags": ["api", "recon"], "why": { "red-teamer": "Lists every API seen and how each one signs users in." } },
+    "api-kit": { "tags": ["api", "secrets", "recon"], "why": { "bug-hunter": "API inventory, leak filters and admin-panel rules in one install.", "researcher": "Lists every API operation and flags leaks while you work." } },
+    "graphql-explorer": { "tags": ["api", "deep-dive"], "why": { "researcher": "Every GraphQL operation, grouped, with its variables." } },
+    "web-servers": { "tags": ["fingerprint"] },
+    "frameworks": { "tags": ["fingerprint"] },
+    "cms": { "tags": ["fingerprint"] },
+    "edge": { "tags": ["fingerprint"] },
+    "api-surface": { "tags": ["api", "fingerprint"], "why": { "researcher": "Spots API styles and the documentation endpoints behind them." } },
+    "admin-panels": { "tags": ["exposure", "recon", "fingerprint"], "why": { "red-teamer": "Exposed consoles are the fastest way in on a wide target." } },
+    "common": { "tags": [] },
+    "leaks": { "tags": ["secrets", "exposure"], "why": { "red-teamer": "Narrows Traffic to stack traces, debug output and leaked keys." } },
+    "starter-lists": { "tags": ["payloads"] },
+    "extra-wordlists": { "tags": ["payloads", "api"], "why": { "bug-hunter": "ID formats and API paths to vary in the Bench.", "researcher": "ID formats, ports and API paths to vary in the Bench." } },
+    "security-headers": { "tags": ["exposure", "fingerprint"] },
+    "secret-sweep": { "tags": ["secrets", "exposure"], "why": { "bug-hunter": "Leaked keys pay well and are quick to prove.", "red-teamer": "Keys found in traffic are often the way further in." } },
+    "js-endpoints": { "tags": ["recon", "api", "analysis"], "why": { "bug-hunter": "Finds API paths in the app's scripts that you haven't visited yet.", "researcher": "Lists the API paths and addresses buried in the app's scripts.", "red-teamer": "Finds paths in the target's scripts without sending a single request." } },
+    "subdomain-discovery": { "tags": ["recon", "scope"], "noise": "light", "why": { "red-teamer": "Finds more of the organization's hosts and suggests them for scope." } },
+    "parameter-probe": { "tags": ["recon", "api", "payloads"], "noise": "active" },
+    "saved-users": { "tags": ["auth", "access"], "why": { "bug-hunter": "Keep two accounts side by side to test who sees what.", "red-teamer": "Keep every identity you gain and switch between them in the Bench." } },
+    "access-check": { "tags": ["access", "auth"], "noise": "light", "why": { "bug-hunter": "Access bugs are the most common paid finding." } },
+    "cloud-identity": { "tags": ["cloud", "auth", "analysis"], "why": { "researcher": "Explains how the app gets cloud credentials and what those credentials can reach.", "red-teamer": "Shows what the cloud credentials handed to the browser can reach." } },
+    "value-trace": { "tags": ["analysis", "deep-dive"], "why": { "researcher": "Pick any id, token or email and see where it was issued and everywhere it travels." } },
+    "token-randomness": { "tags": ["analysis", "decoding"], "noise": "light", "why": { "researcher": "Measures how guessable session ids, reset codes and other tokens are." } },
+    "cloud-map": { "tags": ["cloud", "exposure"], "why": { "researcher": "Groups storage buckets, functions and signed links the app uses, and flags open ones.", "red-teamer": "Every bucket, function and signed link the target uses, with open ones flagged." } },
+    "script-insights": { "tags": ["analysis", "deep-dive", "recon"], "why": { "researcher": "Reads the app's scripts for feature flags, hidden routes and client-side checks, and rebuilds source files from source maps." } }
+  }
+}

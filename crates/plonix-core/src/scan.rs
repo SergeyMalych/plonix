@@ -41,6 +41,12 @@ pub const MAX_PAYLOAD_LEN: usize = 512;
 const MAX_PATTERN: usize = 1000;
 const REGEX_SIZE_LIMIT: usize = 256 * 1024;
 
+/// Most test proposals a single tactic may contribute to one plan, so a broad
+/// tactic over many endpoints cannot flood the review list.
+pub const MAX_PROPOSALS_PER_TACTIC: usize = 25;
+/// Overall ceiling on proposals in one plan, so the review list stays readable.
+pub const MAX_PLAN_PROPOSALS: usize = 300;
+
 const METHODS: &[&str] = &["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
 /// Scan packs shipped with Plonix, so detectors and a few benign checks work
@@ -192,6 +198,14 @@ pub struct TacticDef {
     pub check: CheckDef,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub remediation: String,
+    /// OWASP categories this check maps to, e.g. `A05`, `API8`. Drives the
+    /// coverage map and lets the Scans UI group proposals by category.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub owasp: Vec<String>,
+    /// Web Security Testing Guide ids, e.g. `WSTG-CONF-04`, for finer-grained
+    /// coverage accounting.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wstg: Vec<String>,
 }
 
 /// The pack document: `plonix_scanpack: 1`, alongside detection rule packs.
@@ -258,6 +272,10 @@ pub struct SelectedTactic {
     pub pack: String,
     /// The gating signals (all active) that selected this tactic.
     pub requires: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub owasp: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wstg: Vec<String>,
 }
 
 /// A fingerprint-driven suggestion for scanning one target.
@@ -271,6 +289,119 @@ pub struct ScanSuggestion {
     pub optional: Vec<SelectedTactic>,
     /// How many tactics were skipped because their signals were not active.
     pub skipped: usize,
+}
+
+/// Where a proposed check would act, derived from captured traffic. A plan is
+/// built without sending anything, so an insertion point only ever names an
+/// endpoint Plonix has already seen (or a fixed path a tactic probes).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct InsertionPoint {
+    pub method: String,
+    pub path: String,
+    /// The parameter the check would vary, when it injects into one; empty for
+    /// a fixed-path probe or a whole-request check.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub param: String,
+    /// Where the input goes, mirroring the tactic's inject location.
+    pub location: InjectLocation,
+}
+
+/// One concrete, self-describing test the analysis proposes. Produced purely
+/// from already-captured data — nothing is sent to build it — so the user can
+/// review every item, with its reason and evidence, and pick what runs.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TestProposal {
+    /// Stable id within a plan (tactic + insertion point), so a `ScanRequest`
+    /// and the UI can refer to exactly this item.
+    pub id: String,
+    /// The tactic that executes if this proposal is approved.
+    pub tactic: String,
+    pub title: String,
+    pub severity: Severity,
+    pub intrusiveness: Intrusiveness,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub variant: String,
+    pub pack: String,
+    /// OWASP categories this check targets, e.g. `A05`, `API8`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub owasp: Vec<String>,
+    /// WSTG ids, finer-grained coverage.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wstg: Vec<String>,
+    /// Where the check would act.
+    pub insertion: InsertionPoint,
+    /// Plain-English reason this was proposed, from the evidence.
+    pub rationale: String,
+    /// The gating signals (all active) behind it.
+    pub requires: Vec<String>,
+    /// Exchange ids this proposal was derived from, so the user can inspect.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<i64>,
+    /// Recommended on by default (non-intrusive). Intrusive proposals are off.
+    pub recommended: bool,
+}
+
+/// A group of proposals that share an OWASP category, for the review list.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProposalGroup {
+    /// OWASP category id (`A01`…`A10`, `API1`…`API10`), or `other` when a
+    /// check carries no tag yet.
+    pub category: String,
+    pub proposals: Vec<TestProposal>,
+}
+
+/// The analysis step's output for one target: the active signals, the proposed
+/// tests grouped by OWASP category, and coverage counts. This is produced
+/// without sending a single request; the user reviews it before anything runs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanPlan {
+    pub host: String,
+    pub signals: Vec<ActiveSignal>,
+    /// Proposals grouped by OWASP category, recommended first within a group.
+    pub groups: Vec<ProposalGroup>,
+    /// How many proposals are recommended on by default.
+    pub recommended: usize,
+    /// Total proposals across all groups.
+    pub total: usize,
+    /// Tactics whose gating signals were not active, so nothing was proposed.
+    pub skipped: usize,
+    /// Set when the per-plan proposal ceiling was reached and some endpoints
+    /// were not expanded into proposals.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
+}
+
+/// A discovered endpoint the planner reasons over: a method, a path, the
+/// parameters seen on it, and one sample exchange id for evidence.
+#[derive(Debug, Clone)]
+pub struct PlanEndpoint {
+    pub method: String,
+    pub path: String,
+    pub params: Vec<String>,
+    pub sample_id: i64,
+}
+
+/// Canonical sort rank for an OWASP category id, so groups read in a familiar
+/// order (web Top 10, then API Top 10, then anything untagged).
+fn owasp_rank(cat: &str) -> (u8, u32) {
+    if let Some(n) = cat.strip_prefix("API") {
+        (1, n.parse().unwrap_or(99))
+    } else if let Some(n) = cat.strip_prefix('A') {
+        (0, n.parse().unwrap_or(99))
+    } else {
+        (2, 0)
+    }
+}
+
+/// Sort rank for a severity, high to low within a group.
+fn sev_rank(s: Severity) -> u8 {
+    match s {
+        Severity::Info => 0,
+        Severity::Low => 1,
+        Severity::Medium => 2,
+        Severity::High => 3,
+        Severity::Critical => 4,
+    }
 }
 
 /// What a user asks for when starting an active scan. The host must already
@@ -346,6 +477,10 @@ pub struct TacticInfo {
     #[serde(skip_serializing_if = "String::is_empty")]
     pub variant: String,
     pub pack: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub owasp: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wstg: Vec<String>,
 }
 
 /// The whole catalog, described for a client (the Scans UI, an advising agent).
@@ -376,6 +511,8 @@ impl Catalog {
                     intrusiveness: t.def.intrusiveness,
                     variant: t.def.variant.clone(),
                     pack: t.pack.clone(),
+                    owasp: t.def.owasp.clone(),
+                    wstg: t.def.wstg.clone(),
                 })
                 .collect(),
         }
@@ -410,6 +547,8 @@ impl Catalog {
                 variant: t.def.variant.clone(),
                 pack: t.pack.clone(),
                 requires: t.def.requires.clone(),
+                owasp: t.def.owasp.clone(),
+                wstg: t.def.wstg.clone(),
             })
             .collect()
     }
@@ -425,6 +564,121 @@ impl Catalog {
         let skipped = self.tactics.iter().filter(|t| !selected_ids.contains(t.def.id.as_str())).count();
         let (recommended, optional): (Vec<_>, Vec<_>) = selected.into_iter().partition(|t| t.intrusiveness.default_on());
         ScanSuggestion { signals, recommended, optional, skipped }
+    }
+
+    /// The analysis step: turn the gated tactics for a target into concrete,
+    /// justified `TestProposal`s over its discovered insertion points, grouped
+    /// by OWASP category. Pure — reads only captured data and sends nothing,
+    /// so the user can review every proposed test before any of it runs.
+    pub fn plan(&self, host: &str, tech: &[Detection], exchanges: &[Exchange], endpoints: &[PlanEndpoint]) -> ScanPlan {
+        let signals = self.signals(tech, exchanges);
+        let active: BTreeSet<String> = signals.iter().map(|s| s.signal.clone()).collect();
+        let selected = self.select(&active);
+        let selected_ids: BTreeSet<&str> = selected.iter().map(|s| s.id.as_str()).collect();
+        let skipped = self.tactics.iter().filter(|t| !selected_ids.contains(t.def.id.as_str())).count();
+
+        // Evidence for a fixed-path probe: the exchanges that lit its gating
+        // signals, so the user sees why the tactic applies to this target.
+        let signal_evidence = |requires: &[String]| -> Vec<i64> {
+            signals.iter().filter(|s| requires.iter().any(|r| r == &s.signal)).filter_map(|s| s.exchange_id).collect()
+        };
+
+        let mut proposals: Vec<TestProposal> = Vec::new();
+        let mut truncated = false;
+        for t in &self.tactics {
+            if !selected_ids.contains(t.def.id.as_str()) {
+                continue;
+            }
+            let recommended = t.def.intrusiveness.default_on();
+            let mut n = 0usize;
+            let mut mk = |insertion: InsertionPoint, rationale: String, evidence: Vec<i64>| {
+                let p = TestProposal {
+                    id: format!("{}#{n}", t.def.id),
+                    tactic: t.def.id.clone(),
+                    title: t.def.title.clone(),
+                    severity: t.def.severity,
+                    intrusiveness: t.def.intrusiveness,
+                    variant: t.def.variant.clone(),
+                    pack: t.pack.clone(),
+                    owasp: t.def.owasp.clone(),
+                    wstg: t.def.wstg.clone(),
+                    insertion,
+                    rationale,
+                    requires: t.def.requires.clone(),
+                    evidence,
+                    recommended,
+                };
+                n += 1;
+                p
+            };
+
+            let before = proposals.len();
+            if let Some(path) = &t.def.check.path {
+                let insertion = InsertionPoint { method: t.def.check.method.to_ascii_uppercase(), path: path.clone(), param: String::new(), location: InjectLocation::None };
+                let why = format!("Probes {path} on {host}; applicable because signal(s) {} are active.", t.def.requires.join(", "));
+                let ev = signal_evidence(&t.def.requires);
+                proposals.push(mk(insertion, why, ev));
+            } else {
+                let loc = t.def.check.inject.location;
+                for e in endpoints {
+                    if proposals.len() - before >= MAX_PROPOSALS_PER_TACTIC {
+                        truncated = true;
+                        break;
+                    }
+                    match loc {
+                        InjectLocation::Query => {
+                            // A query tactic carries its own probe parameter name
+                            // (compile_tactic requires one), added to each endpoint.
+                            let name = t.def.check.inject.name.clone().unwrap_or_default();
+                            let insertion = InsertionPoint { method: e.method.clone(), path: e.path.clone(), param: name.clone(), location: loc };
+                            let why = format!("{} {} would carry a `{name}` query parameter to probe.", e.method, e.path);
+                            proposals.push(mk(insertion, why, vec![e.sample_id]));
+                        }
+                        InjectLocation::PathSuffix => {
+                            let insertion = InsertionPoint { method: e.method.clone(), path: e.path.clone(), param: String::new(), location: loc };
+                            let why = format!("{} {} is a discovered endpoint; {} would append to its path.", e.method, e.path, t.def.title);
+                            proposals.push(mk(insertion, why, vec![e.sample_id]));
+                        }
+                        InjectLocation::Header => {
+                            let name = t.def.check.inject.name.clone().unwrap_or_default();
+                            let insertion = InsertionPoint { method: e.method.clone(), path: e.path.clone(), param: name.clone(), location: loc };
+                            let why = format!("{} {} would be sent with a crafted `{name}` header.", e.method, e.path);
+                            proposals.push(mk(insertion, why, vec![e.sample_id]));
+                        }
+                        InjectLocation::None => {
+                            let insertion = InsertionPoint { method: e.method.clone(), path: e.path.clone(), param: String::new(), location: loc };
+                            let why = format!("{} {} is a discovered endpoint {} would re-request.", e.method, e.path, t.def.title);
+                            proposals.push(mk(insertion, why, vec![e.sample_id]));
+                        }
+                    }
+                }
+            }
+            if proposals.len() >= MAX_PLAN_PROPOSALS {
+                proposals.truncate(MAX_PLAN_PROPOSALS);
+                truncated = true;
+                break;
+            }
+        }
+
+        let recommended = proposals.iter().filter(|p| p.recommended).count();
+        let total = proposals.len();
+
+        // Group by first OWASP tag (or "other"); recommended first, then
+        // severity high-to-low within a group; groups in canonical order.
+        let mut groups: Vec<ProposalGroup> = Vec::new();
+        for p in proposals {
+            let cat = p.owasp.first().cloned().unwrap_or_else(|| "other".into());
+            match groups.iter_mut().find(|g| g.category == cat) {
+                Some(g) => g.proposals.push(p),
+                None => groups.push(ProposalGroup { category: cat, proposals: vec![p] }),
+            }
+        }
+        for g in &mut groups {
+            g.proposals.sort_by(|a, b| b.recommended.cmp(&a.recommended).then_with(|| sev_rank(b.severity).cmp(&sev_rank(a.severity))));
+        }
+        groups.sort_by(|a, b| owasp_rank(&a.category).cmp(&owasp_rank(&b.category)));
+
+        ScanPlan { host: host.to_string(), signals, groups, recommended, total, skipped, truncated }
     }
 
     /// Signals that some tactic requires but no detector emits. A diagnostic
@@ -826,6 +1080,8 @@ mod tests {
                 variant: String::new(),
                 check: CheckDef { method: "GET".into(), path: None, inject: InjectDef::default(), payloads: vec![], expect: ExpectDef { status: vec![200], ..Default::default() } },
                 remediation: String::new(),
+                owasp: vec![],
+                wstg: vec![],
             },
             "baseline",
         )
@@ -921,6 +1177,8 @@ mod tests {
                 expect: ExpectDef { reflects_payload: true, ..Default::default() },
             },
             remediation: String::new(),
+            owasp: vec![],
+            wstg: vec![],
         };
         assert!(compile_tactic(def.clone(), "p").is_err(), "query injection without a name must fail");
         def.check.inject.name = Some("q".into());
@@ -941,6 +1199,8 @@ mod tests {
             variant: String::new(),
             check: CheckDef { method: "GET".into(), path: None, inject: InjectDef::default(), payloads: vec![], expect: ExpectDef::default() },
             remediation: String::new(),
+            owasp: vec![],
+            wstg: vec![],
         };
         assert!(compile_tactic(def, "p").is_err());
     }
@@ -988,6 +1248,8 @@ mod tests {
                 variant: String::new(),
                 check,
                 remediation: String::new(),
+                owasp: vec![],
+                wstg: vec![],
             },
             "p",
         )
@@ -1052,6 +1314,8 @@ mod tests {
                 expect: ExpectDef { status: vec![200], ..Default::default() },
             },
             remediation: String::new(),
+            owasp: vec![],
+            wstg: vec![],
         };
         assert!(compile_tactic(def, "p").is_err());
     }
@@ -1095,5 +1359,130 @@ mod tests {
     fn unmet_requirements_are_reported() {
         let cat = Catalog { detectors: vec![jwt_detector()], tactics: vec![tactic("x", &["jwt-present", "graphql"], Intrusiveness::Safe)] };
         assert_eq!(cat.unmet_requirements(), vec!["graphql".to_string()]);
+    }
+
+    // ---- analysis (plan) -------------------------------------------------
+
+    /// A tactic with explicit check + OWASP tags, for plan tests.
+    fn tagged_tactic(id: &str, requires: &[&str], intr: Intrusiveness, check: CheckDef, owasp: &[&str]) -> Tactic {
+        compile_tactic(
+            TacticDef {
+                id: id.into(),
+                title: id.into(),
+                description: String::new(),
+                requires: requires.iter().map(|s| s.to_string()).collect(),
+                severity: Severity::Medium,
+                intrusiveness: intr,
+                variant: String::new(),
+                check,
+                remediation: String::new(),
+                owasp: owasp.iter().map(|s| s.to_string()).collect(),
+                wstg: vec![],
+            },
+            "baseline",
+        )
+        .unwrap()
+    }
+
+    fn fixed_path_check(path: &str) -> CheckDef {
+        CheckDef { method: "GET".into(), path: Some(path.into()), inject: InjectDef::default(), payloads: vec![], expect: ExpectDef { status: vec![200], ..Default::default() } }
+    }
+
+    fn query_check(name: Option<&str>) -> CheckDef {
+        CheckDef {
+            method: "GET".into(),
+            path: None,
+            inject: InjectDef { location: InjectLocation::Query, name: name.map(|s| s.to_string()) },
+            payloads: vec!["m".into()],
+            expect: ExpectDef { reflects_payload: true, ..Default::default() },
+        }
+    }
+
+    fn endpoint(method: &str, path: &str, params: &[&str], id: i64) -> PlanEndpoint {
+        PlanEndpoint { method: method.into(), path: path.into(), params: params.iter().map(|s| s.to_string()).collect(), sample_id: id }
+    }
+
+    #[test]
+    fn plan_fixed_path_tactic_makes_one_proposal_with_signal_evidence() {
+        let cat = Catalog {
+            detectors: vec![tech_detector("web", "web", &["nginx"])],
+            tactics: vec![tagged_tactic("exposed", &["web"], Intrusiveness::Safe, fixed_path_check("/.git/config"), &["A05"])],
+        };
+        let plan = cat.plan("h", &tech(&["nginx"]), &[], &[]);
+        assert_eq!(plan.total, 1);
+        assert_eq!(plan.recommended, 1);
+        assert_eq!(plan.groups.len(), 1);
+        assert_eq!(plan.groups[0].category, "A05");
+        let p = &plan.groups[0].proposals[0];
+        assert_eq!(p.tactic, "exposed");
+        assert_eq!(p.insertion.path, "/.git/config");
+        assert_eq!(p.insertion.location, InjectLocation::None);
+        assert!(p.recommended);
+    }
+
+    #[test]
+    fn plan_query_tactic_makes_one_per_endpoint_with_evidence() {
+        // A query tactic carries its own probe parameter name; it proposes one
+        // test per discovered endpoint and cites that endpoint's sample.
+        let ex = ex("h", &[("authorization", "bearer x")]);
+        let cat = Catalog {
+            detectors: vec![jwt_detector()],
+            tactics: vec![tagged_tactic("reflect", &["jwt-present"], Intrusiveness::Active, query_check(Some("plxprobe")), &["A03"])],
+        };
+        let endpoints = vec![endpoint("GET", "/a", &["x", "y"], 1), endpoint("GET", "/b", &[], 2)];
+        let plan = cat.plan("h", &[], &[ex], &endpoints);
+        assert_eq!(plan.total, 2);
+        assert!(plan.groups[0].proposals.iter().all(|p| p.insertion.param == "plxprobe"));
+        assert_eq!(plan.groups[0].proposals[0].evidence, vec![1]);
+        assert_eq!(plan.groups[0].proposals[1].evidence, vec![2]);
+    }
+
+    #[test]
+    fn plan_groups_by_owasp_and_counts_recommended() {
+        let ex = ex("h", &[("authorization", "bearer x")]);
+        let cat = Catalog {
+            detectors: vec![jwt_detector(), tech_detector("web", "web", &["nginx"])],
+            tactics: vec![
+                tagged_tactic("conf", &["web"], Intrusiveness::Safe, fixed_path_check("/server-status"), &["A05"]),
+                tagged_tactic("intrude", &["jwt-present"], Intrusiveness::Intrusive, fixed_path_check("/admin"), &["A01"]),
+            ],
+        };
+        let plan = cat.plan("h", &tech(&["nginx"]), &[ex], &[]);
+        assert_eq!(plan.total, 2);
+        assert_eq!(plan.recommended, 1); // the intrusive one is off by default
+        // A01 sorts before A05.
+        assert_eq!(plan.groups[0].category, "A01");
+        assert_eq!(plan.groups[1].category, "A05");
+        assert!(!plan.groups[0].proposals[0].recommended);
+    }
+
+    #[test]
+    fn plan_skips_tactics_whose_signals_are_inactive() {
+        let cat = Catalog {
+            detectors: vec![jwt_detector()],
+            tactics: vec![tagged_tactic("needs-graphql", &["graphql"], Intrusiveness::Safe, fixed_path_check("/graphql"), &["API9"])],
+        };
+        let plan = cat.plan("h", &[], &[], &[]);
+        assert_eq!(plan.total, 0);
+        assert_eq!(plan.skipped, 1);
+        assert!(plan.groups.is_empty());
+    }
+
+    #[test]
+    fn plan_untagged_tactic_lands_in_other_group() {
+        let cat = Catalog {
+            detectors: vec![tech_detector("web", "web", &["nginx"])],
+            tactics: vec![tagged_tactic("bare", &["web"], Intrusiveness::Safe, fixed_path_check("/x"), &[])],
+        };
+        let plan = cat.plan("h", &tech(&["nginx"]), &[], &[]);
+        assert_eq!(plan.groups[0].category, "other");
+    }
+
+    #[test]
+    fn builtin_probes_carry_owasp_tags() {
+        let cat = builtin_catalog();
+        let git = cat.tactics.iter().find(|t| t.def.id == "exposed-git-config").unwrap();
+        assert_eq!(git.def.owasp, vec!["A05".to_string()]);
+        assert_eq!(git.def.wstg, vec!["WSTG-CONF-04".to_string()]);
     }
 }

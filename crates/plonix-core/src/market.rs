@@ -37,6 +37,7 @@ use crate::registry::{self, Index, Kind, Location, OFFICIAL_PUBLISHER, Package, 
 use crate::rulepack::{self, Library, MAX_PACK_BYTES, newer, sha256_hex};
 use crate::settings::{self, Field, Level, Section};
 use crate::skill::{self, SkillLibrary};
+use crate::tool::{self, ToolLibrary};
 
 /// The Plonix Market index and every file it points to, as shipped with
 /// this build.
@@ -54,6 +55,8 @@ pub const SNAPSHOT: &[(&str, &str)] = &[
     ("lists/starter-lists.json", include_str!("../../../store/lists/starter-lists.json")),
     ("lists/extra-wordlists.json", include_str!("../../../store/lists/extra-wordlists.json")),
     ("platforms/hackerone.json", include_str!("../../../store/platforms/hackerone.json")),
+    ("tools/saved-users.json", include_str!("../../../store/tools/saved-users.json")),
+    ("tools/access-check.json", include_str!("../../../store/tools/access-check.json")),
     ("skills/triage-host.md", include_str!("../../../store/skills/triage-host.md")),
     ("skills/explain-request.md", include_str!("../../../store/skills/explain-request.md")),
     ("skills/review-sign-in.md", include_str!("../../../store/skills/review-sign-in.md")),
@@ -68,6 +71,68 @@ pub const SNAPSHOT: &[(&str, &str)] = &[
     ("extensions/parameter-probe.plonixext", include_str!("../../../store/extensions/parameter-probe.plonixext")),
 ];
 
+/// The tools built into Plonix, each with the paragraphs the Market shows on
+/// its page. They are served from [`SNAPSHOT`] and injected into the catalog
+/// Plonix itself publishes (below), so switching a built-in capability on is
+/// an ordinary Market install and does not need the catalog to carry them.
+const BUILTIN_TOOLS: &[(&str, &[&str])] = &[
+    (
+        "tools/saved-users.json",
+        &[
+            "Adds a user switcher to the Bench. You keep a short list of the people an application knows — each with its own cookies or token — and choose which one a request is sent as.",
+            "Nothing is sent on its own and scope still applies: switching user only changes the auth headers on a request you send yourself, through the same scope-gated path as everything else.",
+            "Install it when you want to see how an application answers the same request for different users.",
+        ],
+    ),
+    (
+        "tools/access-check.json",
+        &[
+            "Adds an Access check screen. Pick some endpoints in Traffic or a branch of the Map, and it replays each request as every saved user, and once signed out, then lines the responses up side by side.",
+            "It draws no conclusions on its own. It shows each response's status and size and points out where responses match or where a signed-out request still succeeded, so you can judge what belongs to whom.",
+            "It replays only requests you already captured, through the scope-gated send path. Works best with the Saved users tool, so it has identities to replay as.",
+        ],
+    ),
+];
+
+/// The built-in tool packages, parsed from the snapshot. Each is a real
+/// package the Market can install and remove.
+fn builtin_tool_packages() -> Vec<Package> {
+    BUILTIN_TOOLS
+        .iter()
+        .filter_map(|(url, about)| {
+            let bytes = SNAPSHOT.iter().find(|(p, _)| p == url)?.1.as_bytes();
+            let t = tool::parse(bytes).ok()?;
+            Some(Package {
+                name: t.doc.name,
+                kind: Kind::Tool,
+                version: t.doc.version,
+                description: t.doc.description,
+                author: t.doc.author,
+                url: url.to_string(),
+                sha256: sha256_hex(bytes),
+                homepage: t.doc.homepage,
+                about: about.iter().map(|s| s.to_string()).collect(),
+                requires: vec![],
+            })
+        })
+        .collect()
+}
+
+/// Adds the built-in tools to a catalog Plonix itself vouches for. Only a
+/// catalog signed by the official key gets them, so a third-party Market is
+/// never made to look as if it offers Plonix's own tools.
+fn inject_builtin_tools(index: &mut Index, trust: &Trust) {
+    let official = matches!(trust, Trust::Verified { key, .. } if key == registry::OFFICIAL_KEY);
+    if !official {
+        return;
+    }
+    for p in builtin_tool_packages() {
+        if !index.packages.iter().any(|x| x.name == p.name) {
+            index.packages.push(p);
+        }
+    }
+}
+
 // ---- settings -------------------------------------------------------------------
 
 pub const SETTINGS: &str = "market";
@@ -76,6 +141,7 @@ pub fn settings_section() -> Section {
     Section::new(SETTINGS, "Market", Level::Global)
         .describe("Where Plonix finds skills, rules, filters, bundles and extensions. Applies to all projects.")
         .order(40)
+        .field(crate::profile::global_field())
         .field(
             Field::text("index", "Market address", "")
                 .placeholder(registry::DEFAULT_INDEX)
@@ -213,6 +279,7 @@ pub fn describe(kind: Kind, bytes: &[u8]) -> Result<(String, String), String> {
         Kind::Rules => rulepack::parse(bytes).map(|x| (x.doc.name, x.doc.version)).map_err(|e| e.to_string()),
         Kind::Filters => filterpack::parse(bytes).map(|x| (x.doc.name, x.doc.version)),
         Kind::List => listpack::parse(bytes).map(|x| (x.doc.name, x.doc.version)),
+        Kind::Tool => tool::parse(bytes).map(|x| (x.doc.name, x.doc.version)),
         Kind::Skill => skill::parse(bytes).map(|x| (x.name, x.version)),
         Kind::Platform => platform::parse(bytes).map(|x| (x.doc.name, x.doc.version)),
         // A package with code, or a bare manifest: an extension listed before its code is published.
@@ -288,7 +355,7 @@ pub fn open(home: &Home, opts: &OpenOptions) -> Result<Catalog> {
 
 fn open_at(loc: &Location, trusted: &[TrustedKey], allow_unsigned: bool) -> Result<Catalog> {
     let bytes = registry::fetch(loc, registry::MAX_INDEX_BYTES).with_context(|| format!("fetching the Market index {loc}"))?;
-    let index = registry::parse(&bytes).map_err(|e| anyhow!("Market index {loc}: {e}"))?;
+    let mut index = registry::parse(&bytes).map_err(|e| anyhow!("Market index {loc}: {e}"))?;
     let sig = registry::fetch(&registry::signature_location(loc), registry::MAX_SIGNATURE_BYTES);
     let trust = match sig {
         Ok(sig) => {
@@ -301,23 +368,25 @@ fn open_at(loc: &Location, trusted: &[TrustedKey], allow_unsigned: bool) -> Resu
              Market authors can test an unsigned index with --allow-unsigned."
         ),
     };
-    Ok(with_builtin_platforms(Catalog { origin: Origin::Remote(loc.clone()), index, trust, offline_reason: None }))
+    inject_builtin_tools(&mut index, &trust);
+    inject_builtin_platforms(&mut index, &trust);
+    Ok(Catalog { origin: Origin::Remote(loc.clone()), index, trust, offline_reason: None })
 }
 
 /// Lists the platform packs built into Plonix in the official Market. They
 /// ship inside Plonix, so they are not in the signed index, and adding one
 /// needs no new signature. Other catalogs never get them.
-fn with_builtin_platforms(mut c: Catalog) -> Catalog {
-    if !matches!(&c.trust, Trust::Verified { key, .. } if key == registry::OFFICIAL_KEY) {
-        return c;
+fn inject_builtin_platforms(index: &mut Index, trust: &Trust) {
+    if !matches!(trust, Trust::Verified { key, .. } if key == registry::OFFICIAL_KEY) {
+        return;
     }
     for (name, text) in platform::BUILTIN {
-        if c.index.get(name).is_some() {
+        if index.get(name).is_some() {
             continue;
         }
         let Ok(pack) = platform::parse(text.as_bytes()) else { continue };
         let d = pack.doc;
-        c.index.packages.push(Package {
+        index.packages.push(Package {
             name: d.name,
             kind: Kind::Platform,
             version: d.version,
@@ -330,16 +399,18 @@ fn with_builtin_platforms(mut c: Catalog) -> Catalog {
             requires: vec![],
         });
     }
-    c
 }
 
 /// The copy of the Plonix Market built into this Plonix.
 pub fn bundled(trusted: &[TrustedKey]) -> Result<Catalog> {
     let file = |name: &str| SNAPSHOT.iter().find(|(p, _)| *p == name).map(|(_, t)| t.as_bytes()).unwrap_or_default();
     let bytes = file("index.json");
-    let index = registry::parse(bytes).map_err(|e| anyhow!("built-in Market index: {e}"))?;
+    let mut index = registry::parse(bytes).map_err(|e| anyhow!("built-in Market index: {e}"))?;
     let key = registry::verify(bytes, file("index.json.sig"), trusted).map_err(|e| anyhow!("built-in Market index: {e}"))?;
-    Ok(with_builtin_platforms(Catalog { origin: Origin::Bundled, index, trust: Trust::Verified { key: key.key, publisher: key.publisher }, offline_reason: None }))
+    let trust = Trust::Verified { key: key.key, publisher: key.publisher };
+    inject_builtin_tools(&mut index, &trust);
+    inject_builtin_platforms(&mut index, &trust);
+    Ok(Catalog { origin: Origin::Bundled, index, trust, offline_reason: None })
 }
 
 /// Recently opened catalogs, so the window does not refetch on every click.
@@ -524,6 +595,7 @@ pub struct Market {
     pub rules: Library,
     pub filters: FilterLibrary,
     pub lists: ListLibrary,
+    pub tools: ToolLibrary,
     pub skills: SkillLibrary,
     pub extensions: ExtensionLibrary,
     pub platforms: PlatformLibrary,
@@ -536,6 +608,7 @@ impl Market {
             rules: Library::new(home),
             filters: FilterLibrary::new(home),
             lists: ListLibrary::new(home),
+            tools: ToolLibrary::new(home),
             skills: SkillLibrary::new(home),
             extensions: ExtensionLibrary::new(home),
             platforms: PlatformLibrary::new(home),
@@ -595,6 +668,7 @@ impl Market {
         v.extend(self.rules.installed().into_iter().map(|i| (Kind::Rules, i)));
         v.extend(self.filters.installed().into_iter().map(|i| (Kind::Filters, i)));
         v.extend(self.lists.installed().into_iter().map(|i| (Kind::List, i)));
+        v.extend(self.tools.installed().into_iter().map(|i| (Kind::Tool, i)));
         v.extend(self.skills.installed().into_iter().map(|i| (Kind::Skill, i)));
         v.extend(self.extensions.installed().into_iter().map(|i| (Kind::Extension, i)));
         v.extend(self.platforms.installed().into_iter().map(|i| (Kind::Platform, i)));
@@ -697,6 +771,8 @@ pub fn detect_kind(bytes: &[u8]) -> Result<Kind, String> {
         Ok(Kind::List)
     } else if v.get("plonix_platform").is_some() {
         Ok(Kind::Platform)
+    } else if v.get("plonix_tool").is_some() {
+        Ok(Kind::Tool)
     } else if v.get("plonix_extension_package").is_some() {
         Ok(Kind::Extension)
     } else if v.get("plonix_extension").is_some() {
@@ -764,6 +840,11 @@ impl Market {
                     ],
                 )
             }
+            Kind::Tool => {
+                let p = tool::parse(&bytes)?;
+                let on = tool::feature(&p.doc.feature).map(|f| f.title).unwrap_or("a built-in tool");
+                (p.doc.description.clone(), p.doc.author.clone(), vec![format!("Switches on {on} in Plonix. No code; it only turns a built-in capability on.")])
+            }
             Kind::Extension => {
                 let p = extension::parse_package(&bytes)?;
                 capabilities = capability_infos(&p.manifest.capabilities);
@@ -789,6 +870,7 @@ impl Market {
             Kind::Rules => self.rules.install(&ext.bytes, src, Some(&ext.sha256))?.1,
             Kind::Filters => self.filters.install(&ext.bytes, src, Some(&ext.sha256))?.1,
             Kind::List => self.lists.install(&ext.bytes, src, Some(&ext.sha256))?.1,
+            Kind::Tool => self.tools.install(&ext.bytes, src, Some(&ext.sha256))?.1,
             Kind::Skill => self.skills.install(&ext.bytes, src, Some(&ext.sha256))?.1,
             Kind::Platform => self.platforms.install(&ext.bytes, src, Some(&ext.sha256))?.1,
             Kind::Extension => self.extensions.install(&ext.bytes, src, Some(&ext.sha256), &Consent { approve_new: true, ..consent.clone() })?.1,
@@ -827,6 +909,7 @@ impl Market {
                 Kind::Skill => skills.get(&item.name).map(|(s, ..)| (s.description.clone(), s.author.clone())),
                 Kind::Extension => extensions.iter().find(|e| e.name == item.name && e.intact).map(|e| (e.description.clone(), e.author.clone())),
                 Kind::Platform => platforms.iter().find(|(p, ..)| p.doc.name == item.name).map(|(p, ..)| (p.doc.description.clone(), p.doc.author.clone())),
+                Kind::Tool => tool::feature(&item.name).map(|f| (f.summary.to_string(), "Plonix contributors".to_string())),
                 _ => None,
             }
             .unwrap_or_else(|| ("Not loaded: the file changed since it was installed.".into(), "unknown".into()));
@@ -859,7 +942,7 @@ impl Market {
             Kind::List => listpack::BUILTIN,
             Kind::Skill => skill::BUILTIN,
             Kind::Platform => platform::BUILTIN,
-            Kind::Bundle | Kind::Extension => return false,
+            Kind::Bundle | Kind::Extension | Kind::Tool => return false,
         };
         list.iter().any(|(n, _)| *n == name)
     }
@@ -869,6 +952,7 @@ impl Market {
             Kind::Rules => self.rules.installed_version(name),
             Kind::Filters => self.filters.installed_version(name),
             Kind::List => self.lists.installed_version(name),
+            Kind::Tool => self.tools.installed_version(name),
             Kind::Skill => self.skills.installed_version(name),
             Kind::Bundle => self.read_bundles().bundles.get(name).map(|b| b.version.clone()),
             Kind::Extension => self.extensions.installed_version(name),
@@ -966,6 +1050,7 @@ impl Market {
                 (Kind::Rules, Some(b)) => drop(self.rules.install(&b, &source(p), Some(&p.sha256))?),
                 (Kind::Filters, Some(b)) => drop(self.filters.install(&b, &source(p), Some(&p.sha256))?),
                 (Kind::List, Some(b)) => drop(self.lists.install(&b, &source(p), Some(&p.sha256))?),
+                (Kind::Tool, Some(b)) => drop(self.tools.install(&b, &source(p), Some(&p.sha256))?),
                 (Kind::Skill, Some(b)) => drop(self.skills.install(&b, &source(p), Some(&p.sha256))?),
                 (Kind::Extension, Some(b)) => drop(self.extensions.install(&b, &source(p), Some(&p.sha256), consent)?),
                 (Kind::Platform, Some(b)) => drop(self.platforms.install(&b, &source(p), Some(&p.sha256))?),
@@ -1024,7 +1109,7 @@ impl Market {
         }
         let changes = self.remove_one(name)?;
         if changes.is_empty() {
-            for kind in [Kind::Rules, Kind::Filters, Kind::List, Kind::Skill, Kind::Extension, Kind::Platform] {
+            for kind in [Kind::Rules, Kind::Filters, Kind::List, Kind::Tool, Kind::Skill, Kind::Extension, Kind::Platform] {
                 if Self::builtin(kind, name) {
                     bail!("`{name}` is a built-in {} and cannot be removed", kind.noun());
                 }
@@ -1042,7 +1127,7 @@ impl Market {
 
     fn remove_one(&self, name: &str) -> Result<Vec<Change>> {
         let mut changes = vec![];
-        for kind in [Kind::Rules, Kind::Filters, Kind::List, Kind::Skill, Kind::Extension, Kind::Platform] {
+        for kind in [Kind::Rules, Kind::Filters, Kind::List, Kind::Tool, Kind::Skill, Kind::Extension, Kind::Platform] {
             let Some(version) = self.installed_version(kind, name) else { continue };
             match kind {
                 Kind::Rules => self.rules.remove(name)?,
@@ -1050,6 +1135,7 @@ impl Market {
                 Kind::List => self.lists.remove(name)?,
                 Kind::Extension => self.extensions.remove(name)?,
                 Kind::Platform => self.platforms.remove(name)?,
+                Kind::Tool => self.tools.remove(name)?,
                 _ => self.skills.remove(name)?,
             };
             changes.push(Change { name: name.into(), kind, version, action: Action::Removed, from: None });
@@ -1083,7 +1169,8 @@ mod tests {
         let mut other = official();
         other.index.packages.retain(|p| p.kind != Kind::Platform);
         other.trust = Trust::Verified { key: "ed25519:someone-else".into(), publisher: "Someone".into() };
-        assert!(with_builtin_platforms(other).index.get("hackerone").is_none());
+        inject_builtin_platforms(&mut other.index, &other.trust);
+        assert!(other.index.get("hackerone").is_none());
     }
 
     #[test]
@@ -1100,6 +1187,32 @@ mod tests {
         for kind in Kind::ALL {
             assert!(cat.index.packages.iter().any(|p| p.kind == *kind), "the Market lists no {kind:?}");
         }
+    }
+
+    #[test]
+    fn built_in_tools_install_from_the_official_catalog_and_switch_features_on() {
+        let (_d, home) = home();
+        let market = Market::new(&home);
+        let cat = official();
+        // The official catalog carries the built-in tools.
+        for name in ["saved-users", "access-check"] {
+            let p = cat.index.get(name).unwrap_or_else(|| panic!("{name} missing from the official catalog"));
+            assert_eq!(p.kind, Kind::Tool);
+            assert!(matches!(market.status(p), Status::Available));
+        }
+        // Installing one switches its feature on; removing it switches it off.
+        market.install(&cat, "access-check").unwrap();
+        assert!(crate::tool::ToolLibrary::new(&home).enabled_features().contains("access-check"));
+        assert!(matches!(market.status(cat.index.get("access-check").unwrap()), Status::Installed { .. }));
+        market.remove("access-check").unwrap();
+        assert!(crate::tool::ToolLibrary::new(&home).enabled_features().is_empty());
+
+        // A third-party (unofficial) catalog is not given Plonix's own tools.
+        let mut other = cat.clone();
+        other.trust = Trust::Verified { key: "ed25519:AAAA".into(), publisher: "someone".into() };
+        let mut idx = registry::parse(SNAPSHOT.iter().find(|(p, _)| *p == "index.json").unwrap().1.as_bytes()).unwrap();
+        inject_builtin_tools(&mut idx, &other.trust);
+        assert!(!idx.packages.iter().any(|p| p.kind == Kind::Tool), "third-party catalogs must not get the built-in tools");
     }
 
     #[test]

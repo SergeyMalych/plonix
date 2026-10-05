@@ -130,6 +130,7 @@ const READ_ONLY: &[Capability] = &[
     cap("/api/findings/export", "Findings as a report with their evidence requests", Group::Findings),
     cap("/api/scan/catalog", "Available scan detectors and tactics", Group::Scan),
     cap("/api/scan/suggest/{host}", "Suggested scan profile for a host (read-only advice)", Group::Scan),
+    cap("/api/scan/plan/{host}", "Reviewable scan plan for a host: proposed tests with rationale (read-only)", Group::Scan),
     cap("/api/agents", "This access policy", Group::Basics),
     cap("/api/skills", "Skills: playbooks for jobs in Plonix", Group::Basics),
     cap("/api/skills/{name}", "Skills: playbooks for jobs in Plonix", Group::Basics),
@@ -474,6 +475,7 @@ mod tests {
             ("GET", "/api/findings/export"),
             ("GET", "/api/scan/catalog"),
             ("GET", "/api/scan/suggest/example.com"),
+            ("GET", "/api/scan/plan/example.com"),
             ("GET", "/api/agents"),
             ("POST", "/api/bench/proposals"),
         ] {

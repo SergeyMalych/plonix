@@ -365,6 +365,7 @@ const VIEWS = {
   bench: { label: 'Bench', ico: '⎇', render: renderBench },
   scope: { label: 'Scope', ico: '◉', render: renderScope },
   map: { label: 'Map', ico: '⊞', render: renderMap },
+  access: { label: 'Access', ico: '⚿', render: renderAccess, tool: 'access-check' },
   findings: { label: 'Findings', ico: '⚑', render: renderFindings },
   agents: { label: 'Agents', ico: '✦', render: renderAgents },
   market: { label: 'Market', ico: '⬢', render: renderMarket },
@@ -375,10 +376,14 @@ const VIEWS = {
 
 const IN_APP = !!window.__PLONIX_APP__;
 
+/** Whether a built-in tool has been switched on from the Market. */
+const toolOn = (id) => !!(S.status && S.status.tools && S.status.tools.includes(id));
+
 function renderShell() {
   const nav = h('div', { class: 'nav' });
   Object.entries(VIEWS).forEach(([key, v], i) => {
     if (v.footer) return;
+    if (v.tool && !toolOn(v.tool)) return;
     nav.append(
       h(
         'button',
@@ -686,6 +691,7 @@ function trustCertificate(browser, canTrust) {
 
 function go(view, force) {
   if (!VIEWS[view]) return;
+  if (VIEWS[view].tool && !toolOn(VIEWS[view].tool)) return go('traffic', force);
   if (S.view === view && !force) return;
   // Going somewhere from the sidebar forgets the way back; leaveTo keeps it.
   if (!S.keepBack) S.back = null;
@@ -1923,6 +1929,7 @@ function harMenu(anchor) {
     item('Export all traffic…', () => exportHar({ q: '' })),
     q ? item(`Export the filtered view (${T.total})…`, () => exportHar({ q }), q) : null,
     T.picked.size ? item(`Export ${T.picked.size} picked row${T.picked.size === 1 ? '' : 's'}…`, () => exportHar({ ids: [...T.picked] })) : null,
+    T.picked.size && toolOn('access-check') ? item(`Check access on ${T.picked.size} picked`, () => startAccessCheck({ targets: [...T.picked], sourceLabel: 'picked in Traffic' })) : null,
     T.picked.size ? item('Clear picked rows', clearPicked) : null,
     h('div', { class: 'msep' }),
     item('Import HAR file…', importHar),
@@ -2730,6 +2737,7 @@ function hostOf(url) {
 
 function renderBench(main) {
   if (S.view !== 'bench') return;
+  if (toolOn('saved-users') && S.users == null) loadUsers().then(() => S.view === 'bench' && renderBench(main));
   const tab = R.tabs[R.active];
   const tabs = h(
     'div',
@@ -2821,6 +2829,7 @@ function renderBench(main) {
     const { headers, body, bad } = parseRaw(tab.raw);
     if (bad.length) return toast('Not a header line: ' + bad[0] + ' (use "Name: value", then a blank line before the body)', 'err');
     const req = { method: tab.method, url: tab.url, headers };
+    if (tab.asUser && toolOn('saved-users')) req.as_user = tab.asUser;
     if (tab.bodyB64 && !body) req.body_base64 = tab.bodyB64;
     else if (body) req.body = body;
     sendBtn.disabled = true;
@@ -2932,7 +2941,7 @@ function renderBench(main) {
       'div',
       { class: 'rbody' },
       h('datalist', { id: 'methods' }, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map((m) => h('option', { value: m }))),
-      h('div', { class: 'reqbar' }, panelToggle, method, h('div', { class: 'urlwrap' }, url), urlMarkBtn, runMode ? null : sendBtn),
+      h('div', { class: 'reqbar' }, panelToggle, method, h('div', { class: 'urlwrap' }, url), urlMarkBtn, !runMode && toolOn('saved-users') ? userSwitcher(tab, main) : null, runMode ? null : sendBtn),
       h('div', { id: 'scopehint' }),
       runMode ? null : h('div', { id: 'propslot' }),
       runMode
@@ -5040,6 +5049,9 @@ async function drawHostDetail() {
       h('span', { class: 'hint' }),
       d !== 'accepted' ? h('button', { class: 'btn sm', text: 'Accept into scope', onclick: async () => (await decideDomain('accept', host)) && (await loadMap()) }) : null,
       h('button', { class: 'btn sm', text: 'Show traffic', onclick: () => setQuery('host:' + host) }),
+      toolOn('access-check') && d === 'accepted'
+        ? h('button', { class: 'btn sm', text: 'Check access', title: 'Replay this host\'s endpoints as each saved user, and once signed out', onclick: () => startAccessCheck({ host, prefix: '/', sourceLabel: host }) })
+        : null,
       askButton({ kind: 'host', host }),
     ),
     h('div', { class: 'lbl', style: { padding: '12px 12px 0' }, text: `Technologies (${tech.tech.length})` }),
@@ -5152,6 +5164,274 @@ function specToBench(spec, e) {
   R.active = R.tabs.length - 1;
   saveBench();
   leaveTo('bench');
+}
+
+/* ======================================================================
+   Saved users (the cookie jar) and the Access check
+   Two Market tools. Saved users keep each person's cookies and tokens so the
+   Bench can send a request as any of them; the Access check replays chosen
+   requests as every user, and once signed out, and lines the responses up.
+   ====================================================================== */
+
+/** Loads the saved users for this project, cached on S. */
+async function loadUsers(force) {
+  if (S.users && !force) return S.users;
+  try {
+    const r = await api('/api/users');
+    S.users = r.users || [];
+  } catch (_) {
+    S.users = [];
+  }
+  return S.users;
+}
+
+/** Parses a "Name: value" per line block into header pairs. */
+function parseHeaderLines(text) {
+  const headers = [];
+  for (const line of (text || '').split('\n')) {
+    if (!line.trim()) continue;
+    const c = line.indexOf(':');
+    if (c > 0) headers.push([line.slice(0, c).trim(), line.slice(c + 1).trim()]);
+  }
+  return headers;
+}
+
+const headerLines = (headers) => (headers || []).map(([k, v]) => `${k}: ${v}`).join('\n');
+
+/** The manage-users sheet: add, edit and remove the saved users. */
+async function manageUsers(afterSave) {
+  const users = (await loadUsers(true)).map((u) => ({ ...u, headers: (u.headers || []).map((h) => [...h]) }));
+  const list = h('div', { class: 'userlist' });
+  const draw = () => {
+    clear(
+      list,
+      users.length ? null : h('div', { class: 'muted', text: 'No users yet. Add one and paste its Cookie or Authorization header below.' }),
+      users.map((u, i) =>
+        h(
+          'div',
+          { class: 'usercard' },
+          h(
+            'div',
+            { class: 'urow' },
+            h('input', { class: 'uname', placeholder: 'Name, e.g. Alice (admin)', value: u.name || '', oninput: (e) => (u.name = e.target.value) }),
+            h('button', { class: 'btn sm danger', text: 'Remove', onclick: () => (users.splice(i, 1), draw()) }),
+          ),
+          h('input', { class: 'unote', placeholder: 'Optional note', value: u.note || '', oninput: (e) => (u.note = e.target.value) }),
+          h('label', { class: 'ulbl', text: 'Headers sent as this user (one per line)' }),
+          h('textarea', {
+            class: 'uhead',
+            spellcheck: 'false',
+            rows: '3',
+            placeholder: 'Cookie: session=…\nAuthorization: Bearer …',
+            value: headerLines(u.headers),
+            oninput: (e) => (u._raw = e.target.value),
+          }),
+        ),
+      ),
+      h('button', { class: 'btn sm', text: '+ Add user', onclick: () => (users.push({ id: '', name: '', note: '', headers: [] }), draw()) }),
+    );
+  };
+  draw();
+  const save = async () => {
+    const payload = users
+      .map((u) => ({ id: u.id || '', name: (u.name || '').trim(), note: (u.note || '').trim(), headers: u._raw != null ? parseHeaderLines(u._raw) : u.headers }))
+      .filter((u) => u.name);
+    try {
+      const r = await api('/api/users', { method: 'PUT', body: { users: payload } });
+      S.users = r.users || [];
+      closeModal();
+      toast('Saved users updated', 'ok');
+      if (afterSave) afterSave();
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  };
+  modal('Saved users', h('div', { class: 'usersheet' }, h('p', { class: 'hint', text: 'Each user is a set of headers — usually a Cookie or a token — applied to a request before it is sent. Values stay in this project.' }), list), [
+    h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }),
+    h('button', { class: 'btn primary', text: 'Save', onclick: save }),
+  ]);
+}
+
+/** The Bench control that picks which saved user a request is sent as. */
+function userSwitcher(tab, main) {
+  const sel = h('select', {
+    class: 'assel',
+    title: 'Send this request as a saved user',
+    onchange: () => {
+      if (sel.value === '__manage') {
+        sel.value = tab.asUser || '';
+        return manageUsers(() => renderBench(main));
+      }
+      tab.asUser = sel.value || null;
+      saveBench();
+      renderBench(main);
+    },
+  });
+  const opts = [h('option', { value: '', text: 'As written' })];
+  for (const u of S.users || []) opts.push(h('option', { value: u.id, text: 'As ' + u.name }));
+  opts.push(h('option', { value: '__manage', text: 'Manage users…' }));
+  append(sel, opts);
+  sel.value = (S.users || []).some((u) => u.id === tab.asUser) ? tab.asUser : '';
+  if (sel.value !== (tab.asUser || '')) {
+    tab.asUser = sel.value || null; // the saved user is gone; fall back
+  }
+  return h('span', { class: 'asbox' }, h('span', { class: 'aslbl', text: '⚿' }), sel);
+}
+
+/* ---- the Access check screen ---- */
+
+const AC = { host: null, prefix: '/', targets: [], sourceLabel: '', anon: true, picks: null, running: false, report: null, err: null };
+
+/** Opens the Access check on a selection from Traffic or the Map. */
+function startAccessCheck({ targets = [], host = null, prefix = '/', sourceLabel = '' } = {}) {
+  AC.targets = targets;
+  AC.host = host;
+  AC.prefix = prefix || '/';
+  AC.sourceLabel = sourceLabel;
+  AC.report = null;
+  AC.err = null;
+  AC.picks = null; // default: every saved user
+  leaveTo('access');
+}
+
+async function renderAccess(main) {
+  const view = h(
+    'div',
+    { class: 'view' },
+    h(
+      'div',
+      { class: 'toolbar' },
+      backButton(),
+      h('h2', { text: 'Access check' }),
+      h('span', { class: 'hint', text: 'Replays the chosen requests as each saved user, and once signed out, so you can see where access differs.' }),
+    ),
+  );
+  clear(main, view);
+  await loadUsers();
+  if (AC.picks === null) AC.picks = new Set((S.users || []).map((u) => u.id));
+  const body = h('div', { class: 'pane acpane' });
+  view.append(body);
+  drawAccess(body, main);
+}
+
+function drawAccess(body, main) {
+  const hosts = ((S.facets && S.facets.hosts) || []).map((x) => x.value);
+  const sourceCard = h('div', { class: 'accard' });
+  if (AC.targets.length) {
+    clear(
+      sourceCard,
+      h('div', { class: 'aclbl', text: 'Requests to check' }),
+      h('div', { class: 'acsource' }, h('b', { text: AC.targets.length + (AC.targets.length === 1 ? ' request' : ' requests') }), AC.sourceLabel ? h('span', { class: 'muted', text: ' · ' + AC.sourceLabel }) : null, h('button', { class: 'link', text: 'choose a host instead', onclick: () => ((AC.targets = []), (AC.sourceLabel = ''), drawAccess(body, main)) })),
+    );
+  } else {
+    const hostSel = h('select', { class: 'achost' }, h('option', { value: '', text: hosts.length ? 'Pick a host…' : 'No hosts captured yet' }), hosts.map((hn) => h('option', { value: hn, text: hn, selected: hn === AC.host })));
+    hostSel.onchange = () => (AC.host = hostSel.value || null);
+    const prefix = h('input', { class: 'acprefix mono', value: AC.prefix, spellcheck: 'false', title: 'Only endpoints whose path starts with this are checked', oninput: () => (AC.prefix = prefix.value || '/') });
+    clear(
+      sourceCard,
+      h('div', { class: 'aclbl', text: 'A branch of an application' }),
+      h('div', { class: 'acsource' }, hostSel, h('span', { class: 'muted', text: 'path starts with' }), prefix),
+      h('div', { class: 'mnote', text: 'One captured request is checked for each endpoint on that branch. Or pick rows in Traffic, or a host in the Map, and choose "Check access".' }),
+    );
+  }
+
+  // Identities to replay as.
+  const idCard = h('div', { class: 'accard' });
+  const userRows = (S.users || []).map((u) =>
+    h('label', { class: 'acid' }, h('input', { type: 'checkbox', checked: AC.picks.has(u.id), onchange: (e) => (e.target.checked ? AC.picks.add(u.id) : AC.picks.delete(u.id)) }), h('span', { class: 'acname', text: u.name }), u.headers && u.headers.length ? h('span', { class: 'achdr', text: u.headers.map((h) => h[0]).join(', ') }) : null),
+  );
+  clear(
+    idCard,
+    h('div', { class: 'aclbl' }, 'Replay as', h('button', { class: 'link', style: { marginLeft: 'auto' }, text: (S.users || []).length ? 'Manage users' : 'Add users', onclick: () => manageUsers(() => renderAccess($('#main'))) })),
+    (S.users || []).length ? h('div', { class: 'acids' }, userRows) : h('div', { class: 'muted', text: 'No saved users yet. Add some, or run the signed-out check on its own.' }),
+    h('label', { class: 'acid anon' }, h('input', { type: 'checkbox', checked: AC.anon, onchange: (e) => (AC.anon = e.target.checked) }), h('span', { class: 'acname', text: 'Signed out' }), h('span', { class: 'achdr', text: 'auth headers removed' })),
+  );
+
+  const run = h('button', { class: 'btn primary', text: AC.running ? 'Checking…' : 'Check access', disabled: AC.running, onclick: () => runAccessCheck(body, main) });
+  const results = h('div', { class: 'acresults', id: 'acresults' });
+  clear(body, sourceCard, idCard, h('div', { class: 'acrun' }, run, AC.err ? h('span', { class: 'rerr', text: AC.err }) : null), results);
+  drawAccessReport(results);
+}
+
+async function runAccessCheck(body, main) {
+  const picks = [...AC.picks];
+  if (!AC.anon && !picks.length) {
+    AC.err = 'Pick at least one saved user, or keep the signed-out check on.';
+    return drawAccess(body, main);
+  }
+  if (!AC.targets.length && !AC.host) {
+    AC.err = 'Pick a host, or choose requests in Traffic or the Map.';
+    return drawAccess(body, main);
+  }
+  AC.err = null;
+  AC.running = true;
+  AC.report = null;
+  drawAccess(body, main);
+  const req = { include_anon: AC.anon, user_ids: picks };
+  if (AC.targets.length) req.targets = AC.targets;
+  else {
+    req.host = AC.host;
+    req.prefix = AC.prefix;
+  }
+  try {
+    AC.report = await api('/api/access-check', { method: 'POST', body: req });
+  } catch (e) {
+    AC.err = e.message;
+  }
+  AC.running = false;
+  drawAccess(body, main);
+}
+
+const okStatus = (s) => s != null && s >= 200 && s < 300;
+
+function drawAccessReport(box) {
+  const r = AC.report;
+  if (!r) return clear(box);
+  if (!r.rows.length) return clear(box, h('div', { class: 'empty', text: 'Nothing was checked. Pick some requests and run again.' }));
+  const flagged = r.rows.filter((row) => row.notes && row.notes.length).length;
+  const head = h(
+    'div',
+    { class: 'aclead' },
+    `Checked ${r.rows.length} request${r.rows.length === 1 ? '' : 's'} as ${r.identities.length} identit${r.identities.length === 1 ? 'y' : 'ies'}` + (r.truncated ? ` (stopped at the ${r.sent}-request limit)` : '') + '.',
+    flagged ? h('b', { class: 'acflag', text: ` ${flagged} to look at.` }) : h('span', { class: 'muted', text: ' Nothing stood out.' }),
+  );
+  const headCells = [h('th', { class: 'actarget', text: 'Request' })];
+  for (const id of r.identities) headCells.push(h('th', { class: 'acidcol' + (id.anon ? ' anon' : ''), text: id.label }));
+  const rows = [];
+  for (const row of r.rows) {
+    const byId = {};
+    for (const c of row.cells) byId[c.identity] = c;
+    const tds = [h('td', { class: 'actarget' }, h('span', { class: 'meth m-' + row.method, text: row.method }), h('span', { class: 'mono acpath', text: row.path, title: row.host + row.path }))];
+    for (const id of r.identities) {
+      const c = byId[id.id];
+      tds.push(
+        h(
+          'td',
+          { class: 'accell' },
+          c
+            ? h(
+                'button',
+                { class: 'acbtn' + (c.error ? ' err' : okStatus(c.status) ? ' ok' : ''), title: (c.error || 'open this response') + ' · ' + fmtSize(c.len), onclick: () => c.exchange_id && showExchange(c.exchange_id) },
+                h('span', { class: statusClass(c.status), text: c.status == null ? '—' : c.status }),
+                h('span', { class: 'aclen', text: c.error ? 'error' : fmtSize(c.len) }),
+              )
+            : h('span', { class: 'muted', text: '—' }),
+        ),
+      );
+    }
+    rows.push(h('tr', { class: row.notes && row.notes.length ? 'acnote' : '' }, tds));
+    if (row.notes && row.notes.length) {
+      rows.push(
+        h(
+          'tr',
+          { class: 'acnoterow' },
+          h('td', { colspan: String(r.identities.length + 1) }, h('div', { class: 'acnotes' }, row.notes.map((n) => h('span', { class: 'acnotechip' }, h('span', { class: 'acnoteico', text: '⚑' }), h('span', { text: n }))))),
+        ),
+      );
+    }
+  }
+  const cols = h('colgroup', null, [h('col', { class: 'acreqcol' }), ...r.identities.map(() => h('col', { class: 'acidc' }))]);
+  clear(box, head, h('table', { class: 'actable' }, cols, h('thead', null, h('tr', null, headCells)), h('tbody', null, rows)));
 }
 
 /* ======================================================================
@@ -6613,7 +6893,7 @@ const KIND_INFO = {
 const GROUP_LABELS = { traffic: 'Traffic', insights: 'Insights', map: 'Map', scope: 'Scope', findings: 'Findings', scan: 'Scans' };
 const groupLabel = (g) => GROUP_LABELS[g] || g;
 
-const MK = { data: null, kind: 'all', q: '', sel: null, busy: null, ext: {} };
+const MK = { data: null, kind: 'all', q: '', sel: null, busy: null, ext: {}, rec: null, peek: '' };
 
 function renderMarket(main) {
   const q = h('input', {
@@ -6644,7 +6924,7 @@ function renderMarket(main) {
       ),
       h('div', { class: 'mtrust', id: 'mtrust' }),
       h('div', { class: 'filterchips mkinds', id: 'mkinds' }),
-      h('div', { class: 'mbody', id: 'mbody' }, h('div', { class: 'pane' }, h('div', { class: 'mgrid', id: 'mgrid' }, h('div', { class: 'muted', text: 'Loading the Market…' }))), h('div', { id: 'mdetail' })),
+      h('div', { class: 'mbody', id: 'mbody' }, h('div', { class: 'pane' }, h('div', { class: 'mrec', id: 'mrec', hidden: true }), h('div', { class: 'mgrid', id: 'mgrid' }, h('div', { class: 'muted', text: 'Loading the Market…' }))), h('div', { id: 'mdetail' })),
     ),
   );
   loadMarket(false);
@@ -6655,6 +6935,7 @@ async function loadMarket(refresh) {
     MK.data = await api('/api/market' + (refresh ? '?refresh=true' : ''));
     const ex = await api('/api/extensions').catch(() => ({ extensions: [] }));
     MK.ext = Object.fromEntries((ex.extensions || []).map((x) => [x.name, x]));
+    MK.rec = await api('/api/market/recommended' + (MK.peek ? '?profile=' + encodeURIComponent(MK.peek) : '')).catch(() => null);
   } catch (e) {
     const grid = $('#mgrid');
     if (grid) clear(grid, h('div', { class: 'empty' }, h('h3', { text: 'The Market is not available' }), h('p', { text: e.message })));
@@ -6711,6 +6992,7 @@ function drawMarket() {
       h('button', { class: 'chip' + (MK.kind === key ? ' on' : ''), onclick: () => ((MK.kind = key), drawMarket()) }, h('span', { text: label }), h('span', { class: 'n', text: counts[key] || 0 }));
     clear(kinds, chip('all', 'All'), Object.entries(KIND_INFO).map(([k, v]) => chip(k, v.label)), h('span', { class: 'fsep' }), chip('installed', 'Installed'), counts.unverified ? chip('unverified', 'Not verified') : null);
   }
+  drawRecommended();
   const updates = d.packages.filter((p) => p.status.state === 'update');
   const ub = $('#mupdate');
   if (ub) {
@@ -6745,6 +7027,80 @@ function drawMarket() {
         ),
       );
     }),
+  );
+}
+
+/** "Recommended for you": Market items that suit the user's kind of work, with why. */
+function drawRecommended() {
+  const box = $('#mrec');
+  const r = MK.rec;
+  if (!box) return;
+  box.hidden = !r || MK.kind !== 'all' || !!MK.q.trim();
+  if (box.hidden) return;
+  const pick = (id) => {
+    MK.peek = '';
+    api('/api/market/profile', { method: 'POST', body: { profile: id } })
+      .then(() => loadMarket(false))
+      .catch((e) => toast(e.message, 'err'));
+  };
+  if (!r.shown) {
+    return clear(
+      box,
+      h('div', { class: 'mrech' }, h('b', { text: 'Get suggestions for your work' }), h('span', { class: 'muted', text: 'Plonix picks Market items that suit it, and says why.' })),
+      h('div', { class: 'mrecprofiles' }, r.profiles.map((p) => h('button', { class: 'chip', title: p.line, text: p.title, onclick: () => pick(p.id) }))),
+    );
+  }
+  const select = h(
+    'select',
+    {
+      id: 'mrecprofile',
+      class: 'mrecsel',
+      title: 'Your work',
+      onchange: (e) => {
+        if (e.target.value === r.profile) MK.peek = '';
+        else MK.peek = e.target.value;
+        loadMarket(false);
+      },
+    },
+    r.profiles.map((p) => h('option', { value: p.id, text: p.title + (p.id === r.profile ? ' (yours)' : ''), selected: p.id === r.shown.id })),
+  );
+  const rec = r.recommendation || { starter: [], included: [], also: [] };
+  const byName = Object.fromEntries((MK.data ? MK.data.packages : []).map((p) => [p.name, p]));
+  const card = (k) => {
+    const p = byName[k.name];
+    if (!p) return null;
+    const st = marketStatus(p);
+    const ki = KIND_INFO[p.kind] || { one: p.kind, ico: '•' };
+    return h(
+      'div',
+      { class: 'mpkg mrecpkg', tabindex: 0, onclick: () => showPackage(p.name), onkeydown: (e) => e.key === 'Enter' && showPackage(p.name) },
+      h('div', { class: 'mph' }, h('span', { class: 'mico k-' + p.kind, text: ki.ico }), h('div', { class: 'mpn' }, h('b', { text: p.name }), h('span', { class: 'muted', text: ki.one })), h('span', { class: st.cls, text: st.text })),
+      h('div', { class: 'mpd', text: k.why }),
+      h('div', { class: 'mpf' }, k.noise !== 'passive' ? h('span', { class: 'muted small', text: k.noise === 'active' ? 'Sends many requests' : 'Sends a few requests' }) : h('span'), st.action ? marketButton(p, st.action, true) : null),
+    );
+  };
+  const peeking = r.shown.id !== r.profile;
+  clear(
+    box,
+    h(
+      'div',
+      { class: 'mrech' },
+      h('b', { text: 'Recommended for you' }),
+      select,
+      peeking ? h('button', { class: 'btn sm ghost', text: 'Make this my work', onclick: () => pick(r.shown.id) }) : null,
+      h('span', { class: 'muted mrecline', text: r.shown.line }),
+    ),
+    rec.starter.length
+      ? h('div', { class: 'mgrid mrecgrid' }, rec.starter.map(card))
+      : h('div', { class: 'muted mrecdone', text: 'You have everything picked for this work. More shows up here as the Market grows.' }),
+    rec.included.length || rec.also.length
+      ? h(
+          'div',
+          { class: 'mrecmore muted' },
+          rec.included.length ? h('span', null, 'You already have ', rec.included.map((k, i) => [i ? ', ' : '', h('a', { href: '#', text: k.name, onclick: (e) => (e.preventDefault(), showPackage(k.name)) })]), '. ') : null,
+          rec.also.length ? h('span', null, 'Also for you: ', rec.also.map((k, i) => [i ? ', ' : '', h('a', { href: '#', text: k.name, title: k.why, onclick: (e) => (e.preventDefault(), showPackage(k.name)) })]), '.') : null,
+        )
+      : null,
   );
 }
 

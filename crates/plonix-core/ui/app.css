@@ -618,6 +618,15 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .welcome .starter input { flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--surface-2); border-radius: 8px; padding: 7px 11px; outline: 0; font-size: 13px; }
 .welcome .starter input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .welcome .small { font-size: 12px; color: var(--fg-3); }
+.work { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.workpick { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; }
+.workpick .worklabel { font-size: 12.5px; color: var(--fg-2); margin-right: 4px; }
+.workpick .chip { cursor: pointer; font-size: 12.5px; padding: 4px 12px; font-family: inherit; }
+.workpick .chip:disabled { cursor: default; opacity: .7; }
+.workpick .chip.ghost { background: transparent; border-color: transparent; }
+.workpick.skipped .chip { display: none; }
+.work .worknote { margin: 8px auto 0; max-width: 460px; min-height: 1em; }
+.work .worknote:empty { display: none; }
 .demohint { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 12.5px; }
 .pbadge { font-size: 10.5px; font-weight: 650; letter-spacing: .02em; color: var(--accent); background: var(--accent-soft); border-radius: 6px; padding: 1px 7px; margin-left: 6px; vertical-align: 2px; }
 .demobar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 7px 14px; background: var(--accent-soft); color: var(--fg); font-size: 12.5px; border-bottom: 1px solid var(--line); }
@@ -798,6 +807,18 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .mshield.bad { background: var(--crit-soft); color: var(--crit); }
 .mkinds { padding: 8px 14px 10px; border-bottom: 1px solid var(--line); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .mkinds .fsep { width: 1px; height: 16px; background: var(--line); margin: 0 4px; }
+.mrec { margin: 14px 14px 0; border: 1px solid var(--line-2); background: var(--surface-2); border-radius: 12px; padding: 12px 0 2px; }
+.mrech { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 0 14px; font-size: 13px; }
+.mrech b { font-size: 14px; }
+.mrecline { flex-basis: 100%; font-size: 12px; }
+.mrecsel { border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 999px; padding: 3px 10px; font-size: 12.5px; font-weight: 600; }
+.mrecprofiles { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 14px 12px; }
+.mrecgrid { padding: 12px 14px; }
+.mrecpkg { min-height: 0; }
+.mrecdone { padding: 10px 14px 12px; font-size: 12.5px; }
+.mrecmore { padding: 0 14px 12px; font-size: 12px; }
+.mrecmore a { color: var(--accent); text-decoration: none; }
+.mrecmore a:hover { text-decoration: underline; }
 .mgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; padding: 14px; }
 .mpkg { border: 1px solid var(--line-2); background: var(--surface); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; cursor: pointer; outline: 0; min-height: 136px; }
 .mpkg:hover { border-color: var(--line); box-shadow: 0 1px 2px rgba(17, 22, 36, .06); }
@@ -1060,6 +1081,55 @@ button.tag.edited { cursor: pointer; }
 .tfoot .err { color: var(--crit); font-size: 12px; margin-right: auto; }
 .tfoot .btn { padding: 6px 18px; }
 
+/* ---- Saved users (Bench switcher) and the Access check ---- */
+.asbox { display: inline-flex; align-items: center; gap: 4px; }
+.asbox .aslbl { color: var(--fg-3); font-size: 13px; }
+.assel { height: 28px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 0 6px; max-width: 170px; }
+
+.acpane { display: flex; flex-direction: column; gap: 12px; padding: 12px; overflow: auto; }
+.accard { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 12px 14px; }
+.aclbl { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--fg-2); margin-bottom: 8px; }
+.acsource { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.achost { height: 30px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 0 8px; min-width: 200px; }
+.acprefix { height: 30px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 0 8px; width: 160px; }
+.acids { display: flex; flex-wrap: wrap; gap: 8px; }
+.acid { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px 5px 9px; background: var(--surface-2); }
+.acid.anon { margin-top: 8px; }
+.acid .acname { font-weight: 500; }
+.acid .achdr { color: var(--fg-3); font-size: 11px; }
+.acrun { display: flex; align-items: center; gap: 12px; }
+
+.aclead { margin: 4px 0 10px; color: var(--fg-2); }
+.aclead .acflag { color: var(--warn); }
+.actable { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.actable col.acreqcol { width: 36%; }
+.actable col.acidc { width: auto; }
+.actable th, .actable td { border-bottom: 1px solid var(--line-2); padding: 6px 10px; text-align: left; vertical-align: middle; }
+.actable th.acidcol { text-align: center; white-space: nowrap; }
+.actable th.acidcol.anon { color: var(--fg-3); font-style: italic; }
+.actable td.actarget { display: flex; align-items: center; gap: 8px; overflow: hidden; }
+.actable .acpath { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.actable td.accell { text-align: center; }
+.acbtn { display: inline-flex; align-items: baseline; justify-content: center; gap: 6px; min-width: 66px; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 3px 9px; line-height: 1.25; cursor: pointer; }
+.acbtn:hover { border-color: var(--accent); }
+.acbtn.ok { background: var(--ok-soft); border-color: transparent; }
+.acbtn.err { background: var(--crit-soft); border-color: transparent; }
+.acbtn .aclen { color: var(--fg-3); font-size: 11px; }
+tr.acnote > td { border-bottom: none; }
+.acnoterow > td { padding: 0; }
+.acnotes { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 6px 10px 8px; background: var(--warn-soft); border-bottom: 1px solid var(--line-2); }
+.acnotechip { display: inline-flex; align-items: center; gap: 5px; color: var(--warn); font-size: 12px; }
+.acnotechip .acnoteico { font-size: 11px; opacity: 0.9; }
+
+/* manage-users sheet */
+.usersheet { width: min(560px, 86vw); display: flex; flex-direction: column; gap: 10px; }
+.userlist { display: flex; flex-direction: column; gap: 10px; max-height: 52vh; overflow: auto; }
+.usercard { border: 1px solid var(--line); border-radius: 9px; padding: 10px; background: var(--surface-2); display: flex; flex-direction: column; gap: 6px; }
+.usercard .urow { display: flex; gap: 8px; align-items: center; }
+.usercard .uname { flex: 1; height: 30px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 0 8px; font-weight: 600; }
+.usercard .unote { height: 28px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 0 8px; }
+.usercard .ulbl { color: var(--fg-3); font-size: 11px; }
+.usercard .uhead { border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 6px 8px; font-family: var(--mono); font-size: 12px; resize: vertical; }
 /* Suggested next steps under the Lens header, and Claude-written findings */
 .lenssugg { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 14px; border-bottom: 1px solid var(--line-2); }
 .lenssugg[hidden] { display: none; }

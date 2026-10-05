@@ -402,6 +402,7 @@ function welcome() {
     h('p', { text: 'Give it a name, usually the target you are testing. You can change everything later.' }),
     h('div', { class: 'starter' }, name, h('button', { class: 'btn primary', text: 'Create and Open', onclick: go })),
     h('p', { class: 'small', text: 'It is saved in ' + tilde(L.about.projects_dir || '~/Plonix') + '. Choose another folder with New Project.' }),
+    workPicker(),
     h(
       'div',
       { class: 'demohint' },
@@ -409,6 +410,54 @@ function welcome() {
       h('button', { class: 'btn', text: 'Try the Demo', onclick: () => openDemo() }),
     ),
   );
+}
+
+/** "What kind of work do you do?": one tap installs a starter set from the Market. */
+function workPicker() {
+  const row = h('div', { class: 'workpick' });
+  const note = h('p', { class: 'small worknote', 'aria-live': 'polite' });
+  const draw = (profiles, picked, busy) =>
+    row.replaceChildren(
+      ...[
+      h('span', { class: 'worklabel', text: 'What kind of work do you do?' }),
+      profiles.map((p) =>
+        h('button', {
+          class: 'chip' + (p.id === picked ? ' on' : ''),
+          title: p.line,
+          disabled: !!busy,
+          text: p.title,
+          onclick: () => choose(profiles, p),
+        }),
+      ),
+      picked ? null : h('button', { class: 'chip ghost', text: 'Skip', disabled: !!busy, onclick: () => ((note.textContent = 'Skipped. You can pick later in Settings › Market.'), row.classList.add('skipped')) }),
+      ]
+        .flat()
+        .filter(Boolean),
+    );
+  const choose = async (profiles, p) => {
+    draw(profiles, p.id, true);
+    note.textContent = 'Setting up a starter set for ' + p.title.toLowerCase() + 's…';
+    try {
+      const r = await api('/api/starter', { method: 'POST', body: { profile: p.id } });
+      const got = (r.result.changes || []).filter((c) => c.action !== 'unchanged' && c.kind !== 'bundle').map((c) => c.name);
+      const waiting = (r.result.waiting || []).map((w) => w.name);
+      const parts = [];
+      if (got.length) parts.push('Installed ' + got.join(', ') + '.');
+      if (waiting.length) parts.push((waiting.length === 1 ? 'One extension is' : waiting.length + ' extensions are') + ' waiting for you under Recommended in the Market.');
+      if (!parts.length) parts.push('You already have the starter set. More suggestions show up in the Market.');
+      note.textContent = parts.join(' ');
+    } catch (e) {
+      note.textContent = e.message;
+    }
+    draw(profiles, p.id, false);
+  };
+  api('/api/starter')
+    .then((d) => {
+      draw(d.profiles, d.profile, false);
+      if (d.profile) note.textContent = 'Market suggestions follow this. Change it any time in Settings › Market.';
+    })
+    .catch(() => row.remove());
+  return h('div', { class: 'work' }, row, note);
 }
 
 function demoBadge(p) {

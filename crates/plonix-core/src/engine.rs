@@ -14,6 +14,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
+use crate::authcheck;
 use crate::ca::CertAuthority;
 use crate::clientcert::{CertInfo, ClientCerts, StoredCert};
 use crate::har;
@@ -28,7 +29,7 @@ use crate::listpack::{ListLibrary, ListSet};
 use crate::intercept::{InterceptOptions, Interceptor};
 use crate::project::PruneReport;
 use crate::replace::RuleSet;
-use crate::rulepack::{Library, PackInfo};
+use crate::rulepack::{Library, PackInfo, sha256_hex};
 use crate::crawl;
 use crate::exclude::{self, ExcludedDomain, Exclusions, Group, GroupStatus};
 use crate::bounty;
@@ -202,6 +203,11 @@ pub struct SendRequest {
     pub body: Option<String>,
     #[serde(default)]
     pub body_base64: Option<String>,
+    /// Send this request as a saved user: its headers replace the auth
+    /// headers on the request before it goes out. The values stay in the
+    /// project database and never reach the client. See [`crate::users`].
+    #[serde(default)]
+    pub as_user: Option<String>,
 }
 
 fn get() -> String {
@@ -943,6 +949,17 @@ impl Engine {
 
     /// Sends an active request. Refused unless the target host is accepted.
     pub async fn send(&self, mut req: SendRequest, initiator: &str) -> Result<Exchange, SendError> {
+        // Sending as a saved user: its headers replace the auth headers the
+        // draft carried. The values come from the project database, so they
+        // are never round-tripped through the client.
+        if let Some(uid) = req.as_user.take().filter(|u| !u.is_empty()) {
+            let users = self.store.saved_users().map_err(SendError::Other)?;
+            let Some(user) = users.into_iter().find(|u| u.id == uid) else {
+                return Err(SendError::BadRequest(format!("there is no saved user '{uid}'")));
+            };
+            req.headers.retain(|(k, _)| !crate::users::is_auth_header(k));
+            req.headers.extend(user.headers);
+        }
         let url = req.url.trim();
         let (scheme, rest) = url
             .split_once("://")
@@ -1050,7 +1067,7 @@ impl Engine {
             None => (None, Some(base64::engine::general_purpose::STANDARD.encode(&orig.req_body))),
         };
         self.send(
-            SendRequest { method: req.method.clone().unwrap_or(orig.method.clone()), url, headers, body, body_base64 },
+            SendRequest { method: req.method.clone().unwrap_or(orig.method.clone()), url, headers, body, body_base64, as_user: None },
             initiator,
         )
         .await
@@ -1070,6 +1087,24 @@ impl Engine {
         let tech = self.detect_host(&host)?;
         let exchanges = self.store.exchanges_for_host(&host, detect::HOST_SAMPLE)?;
         Ok(self.scan_catalog().suggest(&tech, &exchanges))
+    }
+
+    /// Analyzes a host and returns a reviewable scan plan: the active signals
+    /// and the gated tactics turned into concrete, justified `TestProposal`s
+    /// over the host's discovered endpoints, grouped by OWASP category.
+    /// Read-only — sends nothing — so it works for any host and is safe to
+    /// expose to an advising agent, exactly like `scan_suggest`.
+    pub fn scan_plan(&self, host: &str) -> Result<scan::ScanPlan> {
+        let host = scope::normalize_host(host);
+        let tech = self.detect_host(&host)?;
+        let exchanges = self.store.exchanges_for_host(&host, detect::HOST_SAMPLE)?;
+        let endpoints: Vec<scan::PlanEndpoint> = self
+            .store
+            .endpoints(&host)?
+            .into_iter()
+            .map(|e| scan::PlanEndpoint { method: e.method, path: e.path, params: e.params, sample_id: e.sample_id })
+            .collect();
+        Ok(self.scan_catalog().plan(&host, &tech, &exchanges, &endpoints))
     }
 
     /// Runs an active scan against one accepted host. Every request goes through
@@ -1144,7 +1179,7 @@ impl Engine {
                     report.requests_sent += 1;
                     let sent = self
                         .send(
-                            SendRequest { method: planned.method.clone(), url: planned.url.clone(), headers: planned.headers.clone(), body: None, body_base64: None },
+                            SendRequest { method: planned.method.clone(), url: planned.url.clone(), headers: planned.headers.clone(), body: None, body_base64: None, as_user: None },
                             initiator,
                         )
                         .await;
@@ -1339,6 +1374,7 @@ impl Engine {
                 headers,
                 body: if body.is_empty() { None } else { Some(body) },
                 body_base64: None,
+                as_user: None,
             };
             let n = report.rows.len() + 1;
             match self.send(send, initiator).await {
@@ -1374,6 +1410,103 @@ impl Engine {
         report.requests_sent = report.rows.len();
         if report.truncated {
             report.notes.push(format!("request budget of {budget} reached; {} of {} requests were sent", report.requests_sent, report.planned));
+        }
+        Ok(report)
+    }
+
+    /// Replays each target request as every chosen identity and lines the
+    /// responses up (see [`crate::authcheck`]). Every replay goes through the
+    /// scope-gated send path, so a target outside accepted scope is refused,
+    /// never sent.
+    pub async fn access_check(&self, req: authcheck::AuthCheckRequest, initiator: &str) -> Result<authcheck::AuthCheckReport, SendError> {
+        use crate::users::AUTH_HEADERS;
+
+        let mut identities: Vec<authcheck::Identity> =
+            req.users.iter().map(|u| authcheck::Identity { id: u.id.clone(), label: u.name.clone(), anon: false }).collect();
+        if req.include_anon {
+            identities.push(authcheck::Identity { id: "signed-out".into(), label: "Signed out".into(), anon: true });
+        }
+        if identities.is_empty() {
+            return Err(SendError::BadRequest("choose at least one saved user, or keep the signed-out check on".into()));
+        }
+        let targets: Vec<i64> = req.targets.iter().take(authcheck::MAX_TARGETS).copied().collect();
+        if targets.is_empty() {
+            return Err(SendError::BadRequest("no requests were selected to check".into()));
+        }
+
+        let remove_auth: Vec<String> = AUTH_HEADERS.iter().map(|h| h.to_string()).collect();
+        let delay = std::time::Duration::from_millis(req.delay_ms.unwrap_or(authcheck::DEFAULT_DELAY_MS).min(authcheck::MAX_DELAY_MS));
+        let mut report = authcheck::AuthCheckReport { identities: identities.clone(), planned: targets.len() * identities.len(), ..Default::default() };
+
+        let mut attempts = 0usize;
+        let mut first = true;
+        'targets: for tid in targets {
+            let Some(orig) = self.store.get_exchange(tid).map_err(SendError::Other)? else { continue };
+            let mut cells = Vec::with_capacity(identities.len());
+            for ident in &identities {
+                if attempts >= authcheck::MAX_REQUESTS {
+                    report.truncated = true;
+                    break 'targets;
+                }
+                attempts += 1;
+                if !first && !delay.is_zero() {
+                    tokio::time::sleep(delay).await;
+                }
+                first = false;
+
+                // As a saved user: drop the known auth headers the capture
+                // carried, then set this user's own. Signed out: drop them and
+                // set nothing.
+                let set_headers = if ident.anon {
+                    Vec::new()
+                } else {
+                    req.users.iter().find(|u| u.id == ident.id).map(|u| u.headers.clone()).unwrap_or_default()
+                };
+                let replay = ReplayRequest {
+                    id: tid,
+                    method: None,
+                    target: None,
+                    set_headers,
+                    remove_headers: remove_auth.clone(),
+                    body: None,
+                };
+                let cell = match self.replay(replay, initiator).await {
+                    Ok(ex) => {
+                        report.sent += 1;
+                        authcheck::Cell {
+                            identity: ident.id.clone(),
+                            status: ex.status,
+                            len: ex.resp_size.unwrap_or(ex.resp_body.len() as i64),
+                            ms: ex.duration_ms,
+                            exchange_id: ex.id,
+                            error: ex.error,
+                            sig: sha256_hex(&ex.resp_body),
+                        }
+                    }
+                    // Out of scope stops the whole check: every target shares a
+                    // host family, so the first refusal means none can be sent.
+                    Err(e @ SendError::OutOfScope { .. }) if report.sent == 0 => return Err(e),
+                    Err(e) => authcheck::Cell {
+                        identity: ident.id.clone(),
+                        status: None,
+                        len: 0,
+                        ms: 0,
+                        exchange_id: tid,
+                        error: Some(e.to_string()),
+                        sig: String::new(),
+                    },
+                };
+                cells.push(cell);
+            }
+            let notes = authcheck::notes_for(&cells, &identities);
+            report.rows.push(authcheck::TargetRow {
+                target_id: tid,
+                method: orig.method,
+                host: orig.host,
+                path: orig.path,
+                cells,
+                notes,
+            });
         }
         Ok(report)
     }
@@ -1447,7 +1580,7 @@ fn probe_request(url: &str, param: Option<&str>, marker: &str) -> SendRequest {
         Some(p) => format!("{url}{}{p}={marker}", if url.contains('?') { '&' } else { '?' }),
         None => url.to_string(),
     };
-    SendRequest { method: "GET".into(), url, headers: vec![], body: None, body_base64: None }
+    SendRequest { method: "GET".into(), url, headers: vec![], body: None, body_base64: None, as_user: None }
 }
 
 impl Engine {

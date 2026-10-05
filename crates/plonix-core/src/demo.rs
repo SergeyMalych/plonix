@@ -23,6 +23,7 @@ use crate::paths::Home;
 use crate::project::{self, PROJECT_FILE, Project};
 use crate::scope::{Decision, Rule};
 use crate::store::Store;
+use crate::users::SavedUser;
 use crate::upstream::{InboundResponse, OutboundRequest};
 
 pub const NAME: &str = "Demo: Brightcart shop";
@@ -101,6 +102,10 @@ pub fn create(dir: &Path) -> Result<Project> {
 
 const WWW: &str = "www.brightcart.example";
 const API: &str = "api.brightcart.example";
+/// The two demo shoppers' session cookies, so the Access check can replay a
+/// request as each of them. Session A is the one in the captured traffic.
+const SESSION_A: &str = "s%3Ah7Qd2kXvR9wLm4ZpT8yB1cN6.Jf0aWq3Ue5rYt7Io9Pl2Kj4Hg6Fd8Sa";
+const SESSION_B: &str = "s%3A2bV9nK4xQ7wE1rT6yU3iO8pA.Lm5Zj0Hg7Fd2Sa9Wq4Ue1rYt6Io3Pl0K";
 const UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15";
 
 fn b64(s: &str) -> String {
@@ -184,14 +189,45 @@ fn route(method: &str, host: &str, path: &str, headers: &Headers) -> (u16, &'sta
             }
         }
         if path == "/v1/me" {
-            return (200, json, json!({ "id": "usr_8f2c41", "email": "maya.lopez@mail.example", "name": "Maya Lopez", "role": "customer" }).to_string());
+            // Who you are is read from the session cookie, so the Access check
+            // shows this endpoint answering each saved user as themselves and
+            // refusing a signed-out request — access working as it should.
+            let cookie = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("cookie")).map(|(_, v)| v.as_str()).unwrap_or("");
+            let sess = cookie.split(';').find_map(|c| c.trim().strip_prefix("bc_session=")).unwrap_or("");
+            return if sess == SESSION_A {
+                (200, json, json!({ "id": "usr_8f2c41", "email": "maya.lopez@mail.example", "name": "Maya Lopez", "role": "customer" }).to_string())
+            } else if sess == SESSION_B {
+                (200, json, json!({ "id": "usr_3b91de", "email": "dana.quinn@mail.example", "name": "Dana Quinn", "role": "customer" }).to_string())
+            } else {
+                (401, json, json!({ "error": "unauthorized", "message": "sign in to continue" }).to_string())
+            };
         }
         if method == "GET" {
-            return (200, json, json!({ "ok": true, "path": path }).to_string());
+            // The catalog is public; everything else wants a session. So the
+            // Access check shows signed-out turned away from the account
+            // endpoints but still let in where the demo's flaw lets it be.
+            let public = path.starts_with("/v1/products") || path.starts_with("/v1/config") || path.starts_with("/v1/search");
+            return if public || has_session(headers) {
+                (200, json, json!({ "ok": true, "path": path }).to_string())
+            } else {
+                (401, json, json!({ "error": "unauthorized", "message": "sign in to continue" }).to_string())
+            };
         }
     }
 
     (404, json, json!({ "error": "not_found", "path": path }).to_string())
+}
+
+/// Whether a request carries one of the demo's sessions: a known session
+/// cookie or a signed bearer token (an `alg: none` token does not count).
+fn has_session(headers: &Headers) -> bool {
+    let cookie = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("cookie")).map(|(_, v)| v.as_str()).unwrap_or("");
+    let sess = cookie.split(';').find_map(|c| c.trim().strip_prefix("bc_session=")).unwrap_or("");
+    if sess == SESSION_A || sess == SESSION_B {
+        return true;
+    }
+    let auth = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("authorization")).map(|(_, v)| v.as_str()).unwrap_or("");
+    !auth.is_empty() && !is_none_alg(auth)
 }
 
 /// The order the demo API returns for `id`, or `None` outside the demo range.
@@ -376,7 +412,7 @@ pub fn seed(store: &Store, now: i64) -> Result<()> {
     let mut s = Seeder { store, ts: now - 55 * 60 * 1000, sizes: Default::default() };
     let token = jwt(now);
     let bearer = format!("Bearer {token}");
-    let session = "s%3Ah7Qd2kXvR9wLm4ZpT8yB1cN6.Jf0aWq3Ue5rYt7Io9Pl2Kj4Hg6Fd8Sa";
+    let session = SESSION_A;
     let cart_state = b64(r#"{"cart":"c_51d0","items":2,"currency":"EUR","admin":false}"#);
     let cookies = format!("bc_session={session}; cart_state={cart_state}; consent=analytics%3D1");
     let page = |path: &'static str| format!("https://{WWW}{path}");
@@ -813,6 +849,16 @@ export async function api(path, opts = {{}}) {{
         "run": { "mode": "sweep", "lists": [{ "kind": "range", "from": 1032, "to": 1052, "step": 1 }], "base": true, "max": "", "delay": "40" }
     });
     store.set_view_state("bench", &json!({ "tabs": [order_run, lookup, none_tab], "active": 0 }))?;
+
+    // Two saved users for the Access check: the shopper from the capture and a
+    // second one, each with their own session cookie. Install the Saved users
+    // and Access check tools from the Market to replay requests as them.
+    let jar = |sess: &str| format!("bc_session={sess}; cart_state={cart_state}; consent=analytics%3D1");
+    store.set_saved_users(&[
+        SavedUser { id: "maya".into(), name: "Maya (customer)".into(), note: "The signed-in shopper from the captured traffic.".into(), headers: vec![("Cookie".into(), jar(SESSION_A))] },
+        SavedUser { id: "dana".into(), name: "Dana (another customer)".into(), note: "A second shopper, to compare what each may see.".into(), headers: vec![("Cookie".into(), jar(SESSION_B))] },
+    ])?;
+
     seed_filters(store)?;
     Ok(())
 }
