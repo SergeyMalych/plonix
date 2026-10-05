@@ -5,9 +5,10 @@
 //! The catalog is a [`registry::Index`]. It is only used when its signature
 //! verifies against a trusted key ([`registry::verify`]), and every package
 //! is checked against the SHA-256 the index lists before it is installed.
-//! Nothing installed from the Market is ever executed: skills are text,
-//! packs are data, and extensions with code are listed but cannot be
-//! installed until the sandboxed runtime exists.
+//! Skills are text and packs are data. Extensions with code are WebAssembly
+//! analyzers that only ever run in the sandbox ([`crate::sandbox`]), with the
+//! capabilities the user granted; an extension this version cannot run yet
+//! is listed but not installable.
 //!
 //! A copy of the Plonix Market index and its packages is compiled into
 //! Plonix ([`SNAPSHOT`]). When the online index cannot be reached, the
@@ -27,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::detect::clean;
+use crate::extension::{self, Capability, Consent, ExtensionLibrary};
 use crate::filterpack::{self, FilterLibrary};
 use crate::listpack::{self, ListLibrary};
 use crate::paths::{Home, write_private};
@@ -57,6 +59,7 @@ pub const SNAPSHOT: &[(&str, &str)] = &[
     ("skills/draft-finding.md", include_str!("../../../store/skills/draft-finding.md")),
     ("skills/api-inventory.md", include_str!("../../../store/skills/api-inventory.md")),
     ("extensions/graphql-explorer.json", include_str!("../../../store/extensions/graphql-explorer.json")),
+    ("extensions/security-headers.plonixext", include_str!("../../../store/extensions/security-headers.plonixext")),
 ];
 
 // ---- settings -------------------------------------------------------------------
@@ -173,7 +176,7 @@ impl Catalog {
                 .ok_or_else(|| anyhow!("{}: not in the copy built into Plonix", p.name))?,
             Origin::Remote(base) => {
                 let src = registry::resolve(base, &p.url).map_err(|e| anyhow!("{}: {e}", p.name))?;
-                registry::fetch(&src, MAX_PACK_BYTES.max(skill::MAX_SKILL_BYTES)).with_context(|| format!("downloading {}", p.name))?
+                registry::fetch(&src, max_bytes(p.kind)).with_context(|| format!("downloading {}", p.name))?
             }
         };
         let actual = sha256_hex(&bytes);
@@ -188,6 +191,14 @@ impl Catalog {
     }
 }
 
+/// The largest file of a kind the Market downloads.
+pub fn max_bytes(kind: Kind) -> usize {
+    match kind {
+        Kind::Extension => extension::MAX_PACKAGE_BYTES,
+        _ => MAX_PACK_BYTES.max(skill::MAX_SKILL_BYTES),
+    }
+}
+
 /// The name and version inside a package file, after full validation.
 pub fn describe(kind: Kind, bytes: &[u8]) -> Result<(String, String), String> {
     match kind {
@@ -195,9 +206,35 @@ pub fn describe(kind: Kind, bytes: &[u8]) -> Result<(String, String), String> {
         Kind::Filters => filterpack::parse(bytes).map(|x| (x.doc.name, x.doc.version)),
         Kind::List => listpack::parse(bytes).map(|x| (x.doc.name, x.doc.version)),
         Kind::Skill => skill::parse(bytes).map(|x| (x.name, x.version)),
-        Kind::Extension => crate::extension::parse_manifest(bytes).map(|m| (m.name, m.version)),
+        // A package with code, or a bare manifest: an extension listed before its code is published.
+        Kind::Extension => match extension::parse_package(bytes) {
+            Ok(p) => Ok((p.manifest.name, p.manifest.version)),
+            Err(e) if is_package(bytes) => Err(e),
+            Err(_) => extension::parse_manifest(bytes).map(|m| (m.name, m.version)),
+        },
         Kind::Bundle => Err("a bundle has no file".into()),
     }
+}
+
+fn is_package(bytes: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(bytes).ok().is_some_and(|v| v.get("plonix_extension_package").is_some())
+}
+
+/// What an extension in the Market asks for, read from its file: the
+/// manifest of a package or of a listing.
+pub fn extension_manifest(bytes: &[u8]) -> Result<extension::Manifest, String> {
+    if is_package(bytes) { extension::parse_package(bytes).map(|p| p.manifest) } else { extension::parse_manifest(bytes) }
+}
+
+/// Whether an extension in the Market can be installed by this Plonix, and
+/// why not in plain words.
+pub fn extension_runnable(bytes: &[u8]) -> Result<(), String> {
+    if is_package(bytes) {
+        return extension::parse_package(bytes).map(|_| ());
+    }
+    let m = extension::parse_manifest(bytes)?;
+    extension::installable(&m)?;
+    Err(format!("the Market lists {} so you can see what is coming; its code is not published yet", m.name))
 }
 
 #[derive(Debug, Clone, Default)]
@@ -297,7 +334,8 @@ pub enum Status {
     Available,
     Installed { version: String },
     Update { installed: String },
-    /// An extension with code: listed, not installable yet.
+    /// An extension listed before its code is published, or one this
+    /// version cannot run: listed, not installable.
     NeedsRuntime,
 }
 
@@ -352,12 +390,17 @@ impl Verification {
         }
     }
 
-    fn by_hand(source: &str) -> Self {
+    fn by_hand(kind: Kind, source: &str) -> Self {
+        let still = if kind == Kind::Extension {
+            "It is still checked, and its code only runs in the sandbox with the capabilities you granted."
+        } else {
+            "It is still validated and cannot run code."
+        };
         Self {
             level: TrustLevel::Unverified,
             label: "Not verified".into(),
             detail: format!(
-                "You added this yourself ({}), not through a signed Market, so nobody has vouched for it. It is still validated and cannot run code.",
+                "You added this yourself ({}), not through a signed Market, so nobody has vouched for it. {still}",
                 crate::detect::clean(source, 120)
             ),
         }
@@ -444,11 +487,19 @@ pub struct Market {
     pub filters: FilterLibrary,
     pub lists: ListLibrary,
     pub skills: SkillLibrary,
+    pub extensions: ExtensionLibrary,
 }
 
 impl Market {
     pub fn new(home: &Home) -> Self {
-        Self { home: home.clone(), rules: Library::new(home), filters: FilterLibrary::new(home), lists: ListLibrary::new(home), skills: SkillLibrary::new(home) }
+        Self {
+            home: home.clone(),
+            rules: Library::new(home),
+            filters: FilterLibrary::new(home),
+            lists: ListLibrary::new(home),
+            skills: SkillLibrary::new(home),
+            extensions: ExtensionLibrary::new(home),
+        }
     }
 
     fn bundles_path(&self) -> std::path::PathBuf {
@@ -505,6 +556,7 @@ impl Market {
         v.extend(self.filters.installed().into_iter().map(|i| (Kind::Filters, i)));
         v.extend(self.lists.installed().into_iter().map(|i| (Kind::List, i)));
         v.extend(self.skills.installed().into_iter().map(|i| (Kind::Skill, i)));
+        v.extend(self.extensions.installed().into_iter().map(|i| (Kind::Extension, i)));
         v
     }
 
@@ -528,7 +580,7 @@ impl Market {
         match self.read_provenance().packages.get(&format!("{}:{name}", kind.as_str())) {
             Some(Provenance { publisher: Some(p), sha256, .. }) if *sha256 == item.entry.sha256 => Verification::signed(p, true),
             Some(Provenance { publisher: None, sha256, .. }) if *sha256 == item.entry.sha256 => Verification::unsigned_catalog(),
-            _ => Verification::by_hand(&item.entry.source),
+            _ => Verification::by_hand(kind, &item.entry.source),
         }
     }
 
@@ -554,11 +606,31 @@ pub struct External {
     pub source: String,
     /// What installing it will do, in plain words.
     pub effects: Vec<String>,
+    /// For an extension: what it asks to be allowed to do.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<CapabilityInfo>,
     /// Installed already (so adding replaces it), with its version.
     pub replaces: Option<String>,
     #[serde(skip)]
     bytes: Vec<u8>,
 }
+
+/// A capability as people see it before they grant it.
+#[derive(Debug, Clone, Serialize)]
+pub struct CapabilityInfo {
+    pub id: Capability,
+    pub what: &'static str,
+    /// Needs a separate, explicit yes.
+    pub sensitive: bool,
+}
+
+pub fn capability_infos(caps: &[Capability]) -> Vec<CapabilityInfo> {
+    caps.iter().map(|c| CapabilityInfo { id: *c, what: c.describe(), sensitive: c.sensitive() }).collect()
+}
+
+/// What an extension's code can and cannot do, for the consent screen.
+pub const SANDBOX_NOTE: &str = "Its code runs in the Plonix sandbox: no network, files, processes or clock, limited CPU time and memory. \
+     It is stopped and switched off if it misbehaves.";
 
 /// Which kind of package a file is, from its contents.
 pub fn detect_kind(bytes: &[u8]) -> Result<Kind, String> {
@@ -574,8 +646,10 @@ pub fn detect_kind(bytes: &[u8]) -> Result<Kind, String> {
         Ok(Kind::Filters)
     } else if v.get("plonix_lists").is_some() {
         Ok(Kind::List)
+    } else if v.get("plonix_extension_package").is_some() {
+        Ok(Kind::Extension)
     } else if v.get("plonix_extension").is_some() {
-        Err("that is an extension. Extensions that run code cannot be installed until the sandboxed runtime exists".into())
+        Err("that is an extension's manifest. Add its folder with `plonix extensions add <folder>`, or pack it with `plonix extensions pack`".into())
     } else if v.get("plonix_index").is_some() {
         Err("that is a Market list, not a package. Add it as the Market address in Settings › Market".into())
     } else {
@@ -586,11 +660,15 @@ pub fn detect_kind(bytes: &[u8]) -> Result<Kind, String> {
 impl Market {
     /// Reads and fully validates a file from outside the Market. Nothing is installed.
     pub fn inspect_external(&self, bytes: Vec<u8>, source: &str) -> Result<External, String> {
-        if bytes.len() > rulepack::MAX_PACK_BYTES.max(skill::MAX_SKILL_BYTES) {
+        if bytes.len() > max_bytes(Kind::Extension) {
             return Err("that file is too large".into());
         }
         let kind = detect_kind(&bytes)?;
+        if bytes.len() > max_bytes(kind) {
+            return Err("that file is too large".into());
+        }
         let (name, version) = describe(kind, &bytes)?;
+        let mut capabilities = vec![];
         let (description, author, effects) = match kind {
             Kind::Skill => {
                 let sk = skill::parse(&bytes)?;
@@ -624,24 +702,34 @@ impl Market {
                     vec![format!("Adds {} payload lists for the Bench. Data only; you choose when to send them.", p.doc.lists.len())],
                 )
             }
+            Kind::Extension => {
+                let p = extension::parse_package(&bytes)?;
+                capabilities = capability_infos(&p.manifest.capabilities);
+                let mut effects: Vec<String> = p.manifest.capabilities.iter().map(|c| format!("Can {}.", c.describe())).collect();
+                effects.push(SANDBOX_NOTE.into());
+                (p.manifest.description, p.manifest.author, effects)
+            }
             _ => unreachable!(),
         };
         if Self::builtin(kind, &name) {
             return Err(format!("`{name}` is the name of a built-in {}; give it a different name", kind.noun()));
         }
         let replaces = self.installed_version(kind, &name);
-        Ok(External { kind, name, version, description, author, sha256: sha256_hex(&bytes), source: source.to_string(), effects, replaces, bytes })
+        Ok(External { kind, name, version, description, author, sha256: sha256_hex(&bytes), source: source.to_string(), effects, capabilities, replaces, bytes })
     }
 
-    /// Installs a file from outside the Market. It is recorded as not verified.
-    pub fn add_external(&self, ext: &External) -> Result<Change> {
+    /// Installs a file from outside the Market. It is recorded as not
+    /// verified. The caller has shown what it does, so adding it approves
+    /// what an extension asks for; sensitive capabilities still need `consent`.
+    pub fn add_external(&self, ext: &External, consent: &Consent) -> Result<Change> {
         let src = ext.source.as_str();
         let previous = match ext.kind {
             Kind::Rules => self.rules.install(&ext.bytes, src, Some(&ext.sha256))?.1,
             Kind::Filters => self.filters.install(&ext.bytes, src, Some(&ext.sha256))?.1,
             Kind::List => self.lists.install(&ext.bytes, src, Some(&ext.sha256))?.1,
             Kind::Skill => self.skills.install(&ext.bytes, src, Some(&ext.sha256))?.1,
-            _ => bail!("only skills, rule packs, filter packs and list packs can be added"),
+            Kind::Extension => self.extensions.install(&ext.bytes, src, Some(&ext.sha256), &Consent { approve_new: true, ..consent.clone() })?.1,
+            Kind::Bundle => bail!("a bundle cannot be added from a file"),
         };
         // Whatever the Market vouched for under this name no longer applies.
         let mut lock = self.read_provenance();
@@ -662,6 +750,7 @@ impl Market {
         let filters = self.filters.load();
         let lists = self.lists.load();
         let skills = self.skills.load();
+        let extensions = self.extensions.list();
         let mut out = vec![];
         for (kind, item) in self.installed_all() {
             if cat.index.get(&item.name).is_some() {
@@ -672,6 +761,7 @@ impl Market {
                 Kind::Filters => filters.packs.iter().find(|i| i.name == item.name).map(|i| (i.description.clone(), i.author.clone())),
                 Kind::List => lists.packs.iter().find(|i| i.name == item.name).map(|i| (i.description.clone(), i.author.clone())),
                 Kind::Skill => skills.get(&item.name).map(|(s, ..)| (s.description.clone(), s.author.clone())),
+                Kind::Extension => extensions.iter().find(|e| e.name == item.name && e.intact).map(|e| (e.description.clone(), e.author.clone())),
                 _ => None,
             }
             .unwrap_or_else(|| ("Not loaded: the file changed since it was installed.".into(), "unknown".into()));
@@ -715,12 +805,14 @@ impl Market {
             Kind::List => self.lists.installed_version(name),
             Kind::Skill => self.skills.installed_version(name),
             Kind::Bundle => self.read_bundles().bundles.get(name).map(|b| b.version.clone()),
-            Kind::Extension => None,
+            Kind::Extension => self.extensions.installed_version(name),
         }
     }
 
     pub fn status(&self, p: &Package) -> Status {
-        if p.kind == Kind::Extension {
+        // Code is published as a package file; anything else is a listing
+        // of what is coming.
+        if p.kind == Kind::Extension && !p.url.ends_with(extension::PACKAGE_SUFFIX) && self.installed_version(p.kind, &p.name).is_none() {
             return Status::NeedsRuntime;
         }
         if Self::builtin(p.kind, &p.name) {
@@ -758,19 +850,25 @@ impl Market {
         rows
     }
 
-    /// Installs a package and everything it requires. Every file is
-    /// downloaded and verified before anything is installed.
+    /// Installs a package and everything it requires, with no sensitive
+    /// capabilities granted (see [`Market::install_with`]).
     pub fn install(&self, cat: &Catalog, name: &str) -> Result<Vec<Change>> {
+        self.install_with(cat, name, &Consent::default())
+    }
+
+    /// Installs a package and everything it requires. Every file is
+    /// downloaded and verified before anything is installed. `consent` is
+    /// what the user agreed to for extensions.
+    pub fn install_with(&self, cat: &Catalog, name: &str, consent: &Consent) -> Result<Vec<Change>> {
         let Some(top) = cat.index.get(name) else {
             bail!("`{}` is not in the Market (see `plonix market list`)", clean(name, 64));
         };
         let order = registry::install_order(&cat.index, name).map_err(|e| anyhow!(e))?;
         let packages: Vec<&Package> = order.iter().filter_map(|n| cat.index.get(n)).collect();
-        if let Some(ext) = packages.iter().find(|p| p.kind == Kind::Extension) {
+        if let Some(ext) = packages.iter().find(|p| self.status(p) == Status::NeedsRuntime) {
             let why = if ext.name == name { String::new() } else { format!(" ({} requires it)", top.name) };
             bail!(
-                "{} is an extension{why}. Extensions need the sandboxed extension runtime, which this version of Plonix \
-                 does not have yet (see docs/extensions.md).",
+                "{} is an extension{why} that is listed so you can see what is coming. Its code is not published for this version of Plonix yet.",
                 ext.name
             );
         }
@@ -802,8 +900,9 @@ impl Market {
                 (Kind::Filters, Some(b)) => drop(self.filters.install(&b, &source(p), Some(&p.sha256))?),
                 (Kind::List, Some(b)) => drop(self.lists.install(&b, &source(p), Some(&p.sha256))?),
                 (Kind::Skill, Some(b)) => drop(self.skills.install(&b, &source(p), Some(&p.sha256))?),
+                (Kind::Extension, Some(b)) => drop(self.extensions.install(&b, &source(p), Some(&p.sha256), consent)?),
                 (Kind::Bundle, _) => {}
-                _ => unreachable!("extensions are refused above and files are fetched for every other kind"),
+                _ => unreachable!("files are fetched for every kind but bundles"),
             }
             let action = if from.is_some() { Action::Updated } else { Action::Installed };
             changes.push(Change { name: p.name.clone(), kind: p.kind, version: p.version.clone(), action, from });
@@ -857,7 +956,7 @@ impl Market {
         }
         let changes = self.remove_one(name)?;
         if changes.is_empty() {
-            for kind in [Kind::Rules, Kind::Filters, Kind::List, Kind::Skill] {
+            for kind in [Kind::Rules, Kind::Filters, Kind::List, Kind::Skill, Kind::Extension] {
                 if Self::builtin(kind, name) {
                     bail!("`{name}` is a built-in {} and cannot be removed", kind.noun());
                 }
@@ -875,12 +974,13 @@ impl Market {
 
     fn remove_one(&self, name: &str) -> Result<Vec<Change>> {
         let mut changes = vec![];
-        for kind in [Kind::Rules, Kind::Filters, Kind::List, Kind::Skill] {
+        for kind in [Kind::Rules, Kind::Filters, Kind::List, Kind::Skill, Kind::Extension] {
             let Some(version) = self.installed_version(kind, name) else { continue };
             match kind {
                 Kind::Rules => self.rules.remove(name)?,
                 Kind::Filters => self.filters.remove(name)?,
                 Kind::List => self.lists.remove(name)?,
+                Kind::Extension => self.extensions.remove(name)?,
                 _ => self.skills.remove(name)?,
             };
             changes.push(Change { name: name.into(), kind, version, action: Action::Removed, from: None });
@@ -950,14 +1050,66 @@ mod tests {
         assert!(market.remove("nothing-here").is_err());
     }
 
+    /// The official catalog with the example extension listed, as the Market will list it.
+    fn with_example(cat: &Catalog) -> Catalog {
+        let mut cat = cat.clone();
+        let path = "extensions/security-headers.plonixext";
+        let bytes = SNAPSHOT.iter().find(|(p, _)| *p == path).unwrap().1.as_bytes();
+        let pkg = extension::parse_package(bytes).unwrap();
+        if cat.index.get("security-headers").is_none() {
+            cat.index.packages.push(Package {
+                name: "security-headers".into(),
+                kind: Kind::Extension,
+                version: pkg.manifest.version.clone(),
+                description: pkg.manifest.description.clone(),
+                author: pkg.manifest.author.clone(),
+                url: path.into(),
+                sha256: pkg.sha256.clone(),
+                homepage: String::new(),
+                about: vec![],
+                requires: vec![],
+            });
+        }
+        cat
+    }
+
+    #[test]
+    fn installs_extensions_from_the_signed_market() {
+        let (_d, home) = home();
+        let market = Market::new(&home);
+        let cat = with_example(&official());
+        let p = cat.index.get("security-headers").unwrap().clone();
+        assert_eq!(market.status(&p), Status::Available);
+        let changes = market.install(&cat, &p.name).unwrap();
+        assert_eq!(changes[0].action, Action::Installed);
+        assert!(matches!(market.status(&p), Status::Installed { .. }));
+        assert_eq!(market.verification(Kind::Extension, &p.name).level, TrustLevel::Verified);
+        let info = market.extensions.info(&p.name).unwrap();
+        assert!(info.state.enabled && info.state.granted.contains(&Capability::ProposeFindings), "{info:?}");
+        assert_eq!(market.extensions.load().extensions.len(), 1);
+
+        // A changed file on disk is not loaded.
+        std::fs::write(home.root.join("extensions/packs/security-headers.json"), "{}").unwrap();
+        assert_eq!(market.verification(Kind::Extension, &p.name).level, TrustLevel::Changed);
+        assert!(market.extensions.load().extensions.is_empty());
+
+        assert_eq!(market.remove(&p.name).unwrap()[0].action, Action::Removed);
+        assert_eq!(market.status(&p), Status::Available);
+
+        // A Market listing different bytes than it ships is refused.
+        let mut bad = cat.clone();
+        bad.index.packages.iter_mut().find(|x| x.name == p.name).unwrap().sha256 = "0".repeat(64);
+        assert!(market.install(&bad, &p.name).unwrap_err().to_string().contains("checksum mismatch"));
+    }
+
     #[test]
     fn refuses_extensions_and_tampered_packages() {
         let (_d, home) = home();
         let market = Market::new(&home);
         let cat = official();
-        let ext = cat.index.packages.iter().find(|p| p.kind == Kind::Extension).unwrap();
+        let ext = cat.index.packages.iter().find(|p| p.name == "graphql-explorer").unwrap();
         assert_eq!(market.status(ext), Status::NeedsRuntime);
-        assert!(market.install(&cat, &ext.name).unwrap_err().to_string().contains("runtime"));
+        assert!(market.install(&cat, &ext.name).unwrap_err().to_string().contains("not published"));
 
         let mut bad = cat.clone();
         let p = bad.index.packages.iter_mut().find(|p| p.kind == Kind::Skill && !Market::builtin(p.kind, &p.name)).unwrap();

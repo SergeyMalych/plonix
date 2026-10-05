@@ -44,6 +44,7 @@ pub mod registry;
 pub mod replace;
 pub mod rulepack;
 pub mod runs;
+pub mod sandbox;
 pub mod scan;
 pub mod scope;
 pub mod shelf;

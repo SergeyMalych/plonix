@@ -16,6 +16,9 @@ use tokio::task::JoinHandle;
 
 use crate::ca::CertAuthority;
 use crate::detect::{self, Detection, Detector, HostTech};
+use crate::extension::{self, Capability, ExtensionLibrary, Loaded, LoadedSet};
+use crate::insight::{Category as InsightCategory, Insight, Side as InsightSide};
+use crate::sandbox;
 use crate::model::{Exchange, Headers, Source, now_ms};
 use crate::paths::{EngineInfo, Home};
 use crate::filterpack::{FilterLibrary, FilterSet};
@@ -69,6 +72,11 @@ pub struct Engine {
     /// Match-and-replace rules in effect (see [`crate::replace`]); empty while switched off.
     replace: RwLock<Arc<RuleSet>>,
     replace_on: AtomicBool,
+    /// Installed extensions in effect (see [`crate::extension`]).
+    extensions: Mutex<ExtensionState>,
+    /// Newly recorded exchanges, on their way to the extensions' worker.
+    extension_feed: Mutex<Option<std::sync::mpsc::Sender<i64>>>,
+    extension_limits: RwLock<sandbox::Limits>,
 }
 
 /// A stand-in for the network: given an outbound request it may return a
@@ -223,6 +231,9 @@ impl Engine {
             intercept: Interceptor::default(),
             replace: RwLock::new(replace),
             replace_on: AtomicBool::new(true),
+            extensions: Mutex::default(),
+            extension_feed: Mutex::new(None),
+            extension_limits: RwLock::new(sandbox::Limits::default()),
         }))
     }
 
@@ -574,6 +585,9 @@ impl Engine {
     pub fn record_all(&self, exchanges: Vec<Exchange>) -> Result<Vec<i64>> {
         let ids = self.store.insert_exchanges(&exchanges)?;
         analyze_into(&self.store, exchanges.iter().zip(ids.iter().copied()), &self.rules())?;
+        for &id in &ids {
+            self.queue_for_extensions(id);
+        }
         Ok(ids)
     }
 
@@ -1131,6 +1145,235 @@ fn severity_str(s: scan::Severity) -> &'static str {
     }
 }
 
+// ---- extensions -------------------------------------------------------------------
+
+/// Extensions in effect, reloaded when they are installed, removed, enabled
+/// or disabled.
+#[derive(Default)]
+struct ExtensionState {
+    library: Option<ExtensionLibrary>,
+    loaded_stamp: Option<extension::Stamp>,
+    set: Arc<LoadedSet>,
+}
+
+/// Exchanges handed to an extension in one call.
+const EXTENSION_BATCH: usize = 10;
+
+/// What running an extension over captured traffic did.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ExtensionRun {
+    pub extension: String,
+    /// Exchanges it was given.
+    pub exchanges: usize,
+    pub notes: usize,
+    /// Findings it proposed that were not already there.
+    pub proposed: usize,
+    /// Lines it logged, capped.
+    pub logs: Vec<String>,
+    /// Set when it was stopped and switched off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stopped: Option<String>,
+}
+
+impl Engine {
+    /// Uses this library for extensions and starts feeding newly captured
+    /// traffic to the enabled ones.
+    pub fn set_extension_library(self: &Arc<Self>, library: ExtensionLibrary) {
+        {
+            let mut e = self.extensions.lock().unwrap();
+            e.library = Some(library);
+            e.loaded_stamp = None;
+        }
+        let mut feed = self.extension_feed.lock().unwrap();
+        if feed.is_some() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel::<i64>();
+        let engine = Arc::downgrade(self);
+        let started = std::thread::Builder::new().name("plonix-extensions".into()).spawn(move || {
+            while let Ok(first) = rx.recv() {
+                let mut ids = vec![first];
+                while ids.len() < EXTENSION_BATCH * 5
+                    && let Ok(id) = rx.try_recv()
+                {
+                    ids.push(id);
+                }
+                let Some(engine) = engine.upgrade() else { break };
+                engine.feed_extensions(&ids);
+            }
+        });
+        if started.is_ok() {
+            *feed = Some(tx);
+        }
+    }
+
+    /// The enabled extensions, reloading them if anything changed.
+    pub fn extensions(&self) -> Arc<LoadedSet> {
+        let mut e = self.extensions.lock().unwrap();
+        let Some(stamp) = e.library.as_ref().map(ExtensionLibrary::stamp) else { return e.set.clone() };
+        if e.loaded_stamp != Some(stamp) {
+            let set = e.library.as_ref().map(ExtensionLibrary::load).unwrap_or_default();
+            for p in &set.problems {
+                tracing::warn!("extensions: {p}");
+            }
+            e.set = Arc::new(set);
+            e.loaded_stamp = Some(stamp);
+        }
+        e.set.clone()
+    }
+
+    /// Runs one extension over exchanges it may see: in-scope ones, and the
+    /// rest only with `read-out-of-scope`. A fault switches it off with the
+    /// reason, and never reaches further than this call.
+    fn run_extension(&self, ext: &Loaded, exchanges: &[Exchange]) -> Result<(sandbox::Output, usize), sandbox::Fault> {
+        let rules = self.rules();
+        let out_of_scope = ext.granted.contains(&Capability::ReadOutOfScope);
+        let visible: Vec<(&Exchange, bool)> =
+            exchanges.iter().map(|ex| (ex, rules.in_scope(&ex.host))).filter(|(_, in_scope)| *in_scope || out_of_scope).collect();
+        if visible.is_empty() || !ext.granted.contains(&Capability::ReadTraffic) {
+            return Ok((sandbox::Output::default(), 0));
+        }
+        let ids: Vec<i64> = visible.iter().map(|(ex, _)| ex.id).collect();
+        let batch = sandbox::batch_json(&visible);
+        match sandbox::analyze(&ext.compiled, &ext.granted, &batch, &ids, *self.extension_limits.read().unwrap()) {
+            Ok(out) => {
+                for line in &out.logs {
+                    tracing::info!("extension {}: {line}", ext.name);
+                }
+                Ok((out, visible.len()))
+            }
+            Err(fault) => {
+                let reason = format!("Plonix stopped it and switched it off: {fault}. Turn it back on once it is fixed.");
+                tracing::warn!("extension {} {}: {reason}", ext.name, ext.version);
+                let mut e = self.extensions.lock().unwrap();
+                if let Some(lib) = &e.library
+                    && let Err(err) = lib.disable(&ext.name, &reason)
+                {
+                    tracing::error!("extension {}: could not record that it is switched off: {err:#}", ext.name);
+                }
+                // Drop it now, whatever the file system's clock says.
+                let rest = e.set.extensions.iter().filter(|x| x.name != ext.name).cloned().collect();
+                e.set = Arc::new(LoadedSet { extensions: rest, problems: e.set.problems.clone() });
+                Err(fault)
+            }
+        }
+    }
+
+    /// Stores what an extension proposed as open findings attributed to it,
+    /// skipping ones it already proposed. Returns how many are new.
+    fn store_proposals(&self, ext: &Loaded, proposals: &[sandbox::Proposal]) -> Result<usize> {
+        if proposals.is_empty() {
+            return Ok(0);
+        }
+        let by = extension_author(&ext.name);
+        let existing: BTreeSet<String> = self.store.findings()?.into_iter().filter(|f| f.created_by == by).map(|f| f.title).collect();
+        let mut added = 0;
+        for p in proposals.iter().filter(|p| !existing.contains(&p.title)) {
+            let note = format!("Proposed by the extension {} {}. Not confirmed: check it before you rely on it.", ext.name, ext.version);
+            let description = if p.description.is_empty() { note } else { format!("{}\n\n{note}", p.description) };
+            let f = crate::model::NewFinding { title: p.title.clone(), severity: p.severity.clone(), description, exchange_ids: p.exchange_ids.clone() };
+            self.store.add_finding(&f, &by)?;
+            added += 1;
+        }
+        Ok(added)
+    }
+
+    /// Hands newly recorded exchanges to every enabled extension.
+    fn feed_extensions(&self, ids: &[i64]) {
+        let set = self.extensions();
+        if set.extensions.is_empty() {
+            return;
+        }
+        let exchanges: Vec<Exchange> = ids.iter().filter_map(|id| self.store.get_exchange(*id).ok().flatten()).collect();
+        for ext in &set.extensions {
+            for chunk in exchanges.chunks(EXTENSION_BATCH) {
+                match self.run_extension(ext, chunk) {
+                    Ok((out, _)) => {
+                        if let Err(e) = self.store_proposals(ext, &out.proposals) {
+                            tracing::error!("extension {}: storing its findings: {e:#}", ext.name);
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
+    }
+
+    /// Queues a recorded exchange for the enabled extensions.
+    fn queue_for_extensions(&self, id: i64) {
+        if let Some(tx) = self.extension_feed.lock().unwrap().as_ref() {
+            let _ = tx.send(id);
+        }
+    }
+
+    /// Runs one extension over everything captured so far (it may only see
+    /// what its capabilities allow), storing the findings it proposes.
+    pub fn run_extension_on_traffic(&self, name: &str) -> Result<ExtensionRun> {
+        let set = self.extensions();
+        let Some(ext) = set.extensions.iter().find(|e| e.name == name) else {
+            anyhow::bail!("no enabled extension named `{}` (see `plonix extensions`)", crate::detect::clean(name, 64));
+        };
+        let mut run = ExtensionRun { extension: ext.name.clone(), ..Default::default() };
+        let mut last = 0;
+        loop {
+            let batch = self.store.exchanges_after(last, EXTENSION_BATCH)?;
+            let Some(tail) = batch.last() else { break };
+            last = tail.id;
+            match self.run_extension(ext, &batch) {
+                Ok((out, seen)) => {
+                    run.exchanges += seen;
+                    run.notes += out.notes.len();
+                    run.proposed += self.store_proposals(ext, &out.proposals)?;
+                    run.logs.extend(out.logs.into_iter().take(50usize.saturating_sub(run.logs.len())));
+                }
+                Err(fault) => {
+                    run.stopped = Some(format!("Stopped and switched off: {fault}."));
+                    break;
+                }
+            }
+        }
+        Ok(run)
+    }
+
+    /// Notes from the enabled extensions on one exchange, shown in the Lens
+    /// next to what Plonix spotted and labelled with the extension's name.
+    /// Findings they would propose are shown, not stored.
+    pub fn extension_insights(&self, ex: &Exchange) -> Vec<Insight> {
+        let set = self.extensions();
+        let mut out = vec![];
+        for ext in &set.extensions {
+            let Ok((result, _)) = self.run_extension(ext, std::slice::from_ref(ex)) else { continue };
+            let from = format!("From the extension {} {}, not from Plonix", ext.name, ext.version);
+            let notes = result.notes.into_iter().map(|n| (n.tag, n.text));
+            let proposals = result.proposals.into_iter().map(|p| (format!("proposes: {}", p.severity), p.title));
+            for (tag, text) in notes.chain(proposals).take(20) {
+                out.push(Insight {
+                    kind: format!("extension:{}", ext.name),
+                    category: InsightCategory::Extension,
+                    label: tag,
+                    side: InsightSide::Response,
+                    location: format!("extension {}", ext.name),
+                    value: text,
+                    decoded: None,
+                    notes: vec![from.clone()],
+                    count: 1,
+                });
+            }
+        }
+        out
+    }
+
+    /// The limits each extension call runs under.
+    pub fn set_extension_limits(&self, limits: sandbox::Limits) {
+        *self.extension_limits.write().unwrap() = limits;
+    }
+}
+
+/// How findings an extension proposed are attributed.
+pub fn extension_author(name: &str) -> String {
+    format!("extension:{name}")
+}
+
 /// Configuration for running an engine process.
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
@@ -1212,6 +1455,7 @@ pub async fn start(config: &EngineConfig) -> Result<Running> {
     engine.set_rule_library(Library::new(&config.home));
     engine.set_filter_library(FilterLibrary::new(&config.home));
     engine.set_list_library(ListLibrary::new(&config.home));
+    engine.set_extension_library(ExtensionLibrary::new(&config.home));
     if project.file.demo {
         engine.set_responder(crate::demo::responder());
     }

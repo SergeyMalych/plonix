@@ -114,6 +114,9 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/market/update", post(market_update))
         .route("/api/market/add", post(market_add))
         .route("/api/market/{name}", get(market_detail))
+        .route("/api/extensions", get(extensions_list))
+        .route("/api/extensions/{name}/enabled", put(extension_enabled))
+        .route("/api/extensions/{name}/run", post(extension_run))
         .route("/api/scope", get(scope))
         .route("/api/scope/accept", post(accept))
         .route("/api/scope/reject", post(reject))
@@ -647,7 +650,13 @@ async fn insights(State(s): State<AppState>, caller: MaybeCaller, Path(id): Path
     }
     let engine = s.engine.clone();
     let found = tokio::task::spawn_blocking(move || {
-        engine.store.get_exchange(id).map(|ex| ex.map(|ex| crate::insight::analyze(&ex, crate::insight::detectors())))
+        engine.store.get_exchange(id).map(|ex| {
+            ex.map(|ex| {
+                let mut list = crate::insight::analyze(&ex, crate::insight::detectors());
+                list.extend(engine.extension_insights(&ex));
+                list
+            })
+        })
     })
     .await;
     match found {
@@ -917,6 +926,11 @@ async fn market_detail(State(s): State<AppState>, Path(name): Path<String>) -> R
         let m = market::Market::new(&home);
         let Some(l) = m.listing(&cat).into_iter().find(|l| l.package.name == name) else { return Ok(None) };
         let mut detail = json!({});
+        if l.package.kind == registry::Kind::Extension && l.local {
+            let info = m.extensions.info(&name);
+            let caps = info.as_ref().map(|i| market::capability_infos(&i.requested)).unwrap_or_default();
+            detail = json!({ "extension": { "runtime": "wasm", "capabilities": caps, "installable": true, "sandbox": market::SANDBOX_NOTE, "installed": info } });
+        }
         if l.package.kind != registry::Kind::Bundle && !l.local {
             let bytes = cat.fetch(&l.package)?;
             detail = match l.package.kind {
@@ -925,9 +939,16 @@ async fn market_detail(State(s): State<AppState>, Path(name): Path<String>) -> R
                     json!({ "skill": skill::info(&sk, false, "", &settings, true) })
                 }
                 registry::Kind::Extension => {
-                    let mf = crate::extension::parse_manifest(&bytes).map_err(|e| anyhow::anyhow!(e))?;
-                    let caps: Vec<_> = mf.capabilities.iter().map(|c| json!({ "id": c, "what": c.describe(), "sensitive": c.sensitive() })).collect();
-                    json!({ "extension": { "runtime": mf.runtime, "capabilities": caps } })
+                    let mf = market::extension_manifest(&bytes).map_err(|e| anyhow::anyhow!(e))?;
+                    let runnable = market::extension_runnable(&bytes);
+                    json!({ "extension": {
+                        "runtime": mf.runtime,
+                        "capabilities": market::capability_infos(&mf.capabilities),
+                        "installable": runnable.is_ok(),
+                        "why_not": runnable.err(),
+                        "sandbox": market::SANDBOX_NOTE,
+                        "installed": m.extensions.info(&name),
+                    } })
                 }
                 registry::Kind::Rules => {
                     let pack = crate::rulepack::parse(&bytes).map_err(|e| anyhow::anyhow!(e.to_string()))?;
@@ -963,19 +984,33 @@ async fn market_detail(State(s): State<AppState>, Path(name): Path<String>) -> R
 #[derive(Deserialize)]
 struct MarketBody {
     name: String,
+    /// Sensitive extension capabilities the user said yes to.
+    #[serde(default)]
+    grant: Vec<String>,
+    /// The user saw what an extension asks for and agreed, including what an update adds.
+    #[serde(default)]
+    approve: bool,
 }
 
-async fn market_change(s: AppState, name: Option<String>, what: &'static str) -> Response {
+fn consent(grant: &[String], approve: bool) -> Result<crate::extension::Consent, String> {
+    let grant = grant.iter().map(|c| crate::extension::Capability::parse(c)).collect::<Result<Vec<_>, _>>()?;
+    Ok(crate::extension::Consent { grant, approve_new: approve })
+}
+
+async fn market_change(s: AppState, body: Option<MarketBody>, what: &'static str) -> Response {
     let home = s.home.clone();
     let out = tokio::task::spawn_blocking(move || -> Result<Vec<market::Change>, (StatusCode, anyhow::Error)> {
         let m = market::Market::new(&home);
         let bad = |e: anyhow::Error| (StatusCode::BAD_REQUEST, e);
-        match (what, name) {
-            ("remove", Some(n)) => m.remove(&n).map_err(bad),
-            (_, n) => {
+        match (what, body) {
+            ("remove", Some(b)) => m.remove(&b.name).map_err(bad),
+            (_, b) => {
                 let cat = market::open_cached(&home, false).map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
-                match n {
-                    Some(n) => m.install(&cat, &n).map_err(bad),
+                match b {
+                    Some(b) => {
+                        let c = consent(&b.grant, b.approve).map_err(|e| bad(anyhow::anyhow!(e)))?;
+                        m.install_with(&cat, &b.name, &c).map_err(bad)
+                    }
                     None => m.update(&cat).map_err(bad),
                 }
             }
@@ -996,6 +1031,9 @@ struct MarketAddBody {
     /// False looks at the file and says what adding it would do; true adds it.
     #[serde(default)]
     confirm: bool,
+    /// Sensitive extension capabilities the user said yes to.
+    #[serde(default)]
+    grant: Vec<String>,
 }
 
 /// Adds a skill, rule pack or filter pack from outside the Market. It is
@@ -1006,7 +1044,11 @@ async fn market_add(State(s): State<AppState>, Json(b): Json<MarketAddBody>) -> 
     let out = tokio::task::spawn_blocking(move || -> Result<Value, (StatusCode, String)> {
         let bad = |e: String| (StatusCode::BAD_REQUEST, e);
         let loc = registry::location(&b.source).map_err(&bad)?;
-        let bytes = registry::fetch(&loc, crate::rulepack::MAX_PACK_BYTES).map_err(|e| bad(format!("{e:#}")))?;
+        let bytes = match &loc {
+            registry::Location::File(p) => crate::extension::read_source(p),
+            registry::Location::Url(_) => registry::fetch(&loc, market::max_bytes(registry::Kind::Extension)),
+        }
+        .map_err(|e| bad(format!("{e:#}")))?;
         let label = match &loc {
             registry::Location::File(p) => std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()).display().to_string(),
             registry::Location::Url(u) => u.clone(),
@@ -1016,7 +1058,8 @@ async fn market_add(State(s): State<AppState>, Json(b): Json<MarketAddBody>) -> 
         if !b.confirm {
             return Ok(json!({ "added": false, "file": ext }));
         }
-        let change = m.add_external(&ext).map_err(|e| bad(format!("{e:#}")))?;
+        let c = consent(&b.grant, true).map_err(&bad)?;
+        let change = m.add_external(&ext, &c).map_err(|e| bad(format!("{e:#}")))?;
         Ok(json!({ "added": true, "file": ext, "change": change }))
     })
     .await;
@@ -1029,11 +1072,47 @@ async fn market_add(State(s): State<AppState>, Json(b): Json<MarketAddBody>) -> 
 
 async fn market_install(State(s): State<AppState>, Json(b): Json<MarketBody>) -> Response {
     crate::usage::record("market_install");
-    market_change(s, Some(b.name), "install").await
+    market_change(s, Some(b), "install").await
 }
 
 async fn market_remove(State(s): State<AppState>, Json(b): Json<MarketBody>) -> Response {
-    market_change(s, Some(b.name), "remove").await
+    market_change(s, Some(b), "remove").await
+}
+
+// ---- extensions -------------------------------------------------------------
+
+/// Installed extensions, with whether each is on and why Plonix switched one off.
+async fn extensions_list(State(s): State<AppState>) -> Response {
+    let home = s.home.clone();
+    match tokio::task::spawn_blocking(move || crate::extension::ExtensionLibrary::new(&home).list()).await {
+        Ok(list) => Json(json!({ "extensions": list })).into_response(),
+        Err(e) => internal(e.into()),
+    }
+}
+
+#[derive(Deserialize)]
+struct EnabledBody {
+    enabled: bool,
+}
+
+/// Turns an extension on or off. Turning it on clears why it was switched off.
+async fn extension_enabled(State(s): State<AppState>, Path(name): Path<String>, Json(b): Json<EnabledBody>) -> Response {
+    let home = s.home.clone();
+    match tokio::task::spawn_blocking(move || crate::extension::ExtensionLibrary::new(&home).set_enabled(&name, b.enabled)).await {
+        Ok(Ok(state)) => Json(json!({ "state": state })).into_response(),
+        Ok(Err(e)) => err(StatusCode::NOT_FOUND, "not_found", &format!("{e:#}")),
+        Err(e) => internal(e.into()),
+    }
+}
+
+/// Runs an extension over the traffic captured so far.
+async fn extension_run(State(s): State<AppState>, Path(name): Path<String>) -> Response {
+    let engine = s.engine.clone();
+    match tokio::task::spawn_blocking(move || engine.run_extension_on_traffic(&name)).await {
+        Ok(Ok(run)) => Json(run).into_response(),
+        Ok(Err(e)) => err(StatusCode::BAD_REQUEST, "cannot_run", &format!("{e:#}")),
+        Err(e) => internal(e.into()),
+    }
 }
 
 async fn market_update(State(s): State<AppState>) -> Response {

@@ -680,14 +680,14 @@ fn store_installs_only_verified_packs() {
 
     let out = p.run(&["store", "--index", &url, "--allow-unsigned"]).ok().stdout();
     assert!(out.contains("Test store"), "{out}");
-    for (name, status) in [("acme-internal", "available"), ("web-servers", "built-in"), ("jwt-workbench", "needs runtime")] {
+    for (name, status) in [("acme-internal", "available"), ("web-servers", "built-in"), ("jwt-workbench", "coming soon")] {
         let line = out.lines().find(|l| l.starts_with(name)).unwrap_or_else(|| panic!("{name} missing:\n{out}"));
         assert!(line.contains(status), "{line}");
     }
 
     let r = p.run(&["store", "install", "jwt-workbench", "--index", &url, "--allow-unsigned"]);
     assert_eq!(r.code(), 1);
-    assert!(r.stderr().contains("sandboxed extension runtime"), "{}", r.stderr());
+    assert!(r.stderr().contains("not published"), "{}", r.stderr());
 
     // A tampered download is refused and nothing is installed.
     *pack_bytes.lock().unwrap() = ACME_PACK.replace("Acme Gateway", "Evil Gateway").into_bytes();
@@ -1037,7 +1037,7 @@ fn market_installs_bundles_and_skills_from_a_signed_index() {
     let line = |out: &str, name: &str| out.lines().find(|l| l.starts_with(name)).unwrap_or_else(|| panic!("{name} missing:\n{out}")).to_string();
     assert!(line(&out, "triage-host").contains("built-in"));
     assert!(line(&out, "api-kit").contains("bundle") && line(&out, "api-kit").contains("available"));
-    assert!(line(&out, "graphql-explorer").contains("needs runtime"));
+    assert!(line(&out, "graphql-explorer").contains("coming soon"));
     let skills_only = p.run(&["market", "--index", index, "--kind", "skill"]).ok().stdout();
     assert!(!skills_only.contains("web-servers") && skills_only.contains("api-inventory"), "{skills_only}");
 
@@ -1240,4 +1240,24 @@ fn replace_rules_change_traffic_through_the_proxy() {
     assert!(!via_proxy(&proxy, &echo, &[]).contains("plonix-test"));
     p.run(&["replace", "rm", &first]).ok();
     assert_eq!(p.run(&["replace", "rm", &first]).code(), 5, "not found");
+}
+
+#[test]
+fn extensions_install_switch_off_and_remove() {
+    let p = Plonix::new();
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/security-headers");
+    let dir = dir.to_str().unwrap();
+    let r = p.run(&["extensions", "add", dir]);
+    assert_eq!(r.code(), 1, "asks before installing");
+    assert!(r.stdout().contains("propose findings") && r.stdout().contains("sandbox"), "{}", r.stdout());
+    p.run(&["extensions", "add", dir, "--yes"]).ok();
+    let out = p.run(&["extensions"]).ok().stdout();
+    assert!(out.lines().any(|l| l.starts_with("security-headers") && l.contains(" on ")), "{out}");
+    p.run(&["extensions", "disable", "security-headers"]).ok();
+    let out = p.run(&["ext", "list"]).ok().stdout();
+    assert!(out.lines().any(|l| l.starts_with("security-headers") && l.contains(" off ")), "{out}");
+    let packed = p.run(&["extensions", "check", dir]).ok().stdout();
+    assert!(packed.contains("is valid"), "{packed}");
+    p.run(&["extensions", "remove", "security-headers"]).ok();
+    assert!(p.run(&["extensions"]).ok().stdout().contains("No extensions installed"));
 }

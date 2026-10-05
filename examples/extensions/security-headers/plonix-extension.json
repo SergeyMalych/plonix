@@ -1,0 +1,11 @@
+{
+  "plonix_extension": 1,
+  "name": "security-headers",
+  "version": "0.1.0",
+  "description": "Notes HTML pages that miss common security headers or set cookies without Secure or HttpOnly, and proposes one finding per host.",
+  "author": "Plonix contributors",
+  "homepage": "https://github.com/SergeyMalych/plonix/tree/main/examples/extensions/security-headers",
+  "runtime": "wasm",
+  "entry": "security_headers.wasm",
+  "capabilities": ["read-traffic", "passive-analysis", "propose-findings"]
+}

@@ -45,6 +45,8 @@ pub enum Category {
     Secret,
     /// Infrastructure detail, such as internal addresses.
     Info,
+    /// A note from an installed extension, not from Plonix itself.
+    Extension,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -536,6 +538,7 @@ fn merge(found: Vec<Insight>) -> Vec<Insight> {
         Category::Decode => 1,
         Category::Pii => 2,
         Category::Info => 3,
+        Category::Extension => 4,
     };
     out.sort_by_key(|i| (i.side == Side::Response, rank(i.category)));
     out

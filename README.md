@@ -51,6 +51,7 @@ Plonix has a handful of tools, each with its own name. They are the same in the 
 | **Findings** | What you found, with the requests that prove it attached as evidence. Edit, confirm, close and export them as a report | `plonix findings` |
 | **Agents** | Which AI agents are connected to the project, what they may do, and how to connect one | `plonix connect claude`, `plonix mcp` |
 | **Market** | One signed catalog of skills, rule packs, filter packs, bundles and extensions | `plonix market`, ⌘7 |
+| **Extensions** | Sandboxed analyzers that add notes to the Lens and propose findings for you to confirm | `plonix extensions` |
 | **Skills** | Playbooks AI agents follow for a job in Plonix, offered over MCP | `plonix skills` |
 | **Rules** | Community rule packs that teach Plonix to recognise technologies | `plonix rules` |
 
@@ -123,6 +124,11 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - Detection is driven by declarative **rule packs** that anyone can write and share. Install them from a file, a URL or the **Market**. New rules apply to traffic you already captured.
 - Packs are untrusted data: strictly validated, linear-time patterns only, pinned by SHA-256 and re-verified on load. They can't run code, reach the network or touch scope. See [docs/detection-rules.md](docs/detection-rules.md) and the extension design in [docs/extensions.md](docs/extensions.md).
 - **Filter packs** add named filters such as `is:auth`, `is:graphql` or `-is:trackers` to search, the CLI and the **+ Filter** builder in Traffic. Plonix ships a `common` pack, and the Market has more. See [docs/filters.md](docs/filters.md).
+
+### Sandboxed extensions
+- **Extensions** are small WebAssembly analyzers the community writes. One reads the traffic Plonix hands it (in-scope hosts only, unless you allow more), adds notes that show in the Lens under its own name, and proposes findings that stay open until you confirm them.
+- They run in a sandbox with no network, files, processes or clock, and a CPU, memory and time budget. One that crashes or runs away is stopped and switched off with a message; Plonix carries on.
+- Install from a file, a folder or the signed Market, after seeing what each one may do. Switch them on and off, run one over traffic you already captured, remove it. See [docs/extensions.md](docs/extensions.md) and the example in [examples/extensions/security-headers](examples/extensions/security-headers).
 
 ### Projects, side by side
 - **A project is a folder you choose.** It holds the project's traffic, scope and findings (`traffic.db`), its settings (`plonix-project.json`) and its own capture-browser profile. Move or copy the folder and open it again; it just works. New projects go in `~/Plonix` unless you pick another folder.
@@ -292,6 +298,7 @@ plonix filters                             # named filters: is:auth, is:graphql,
 plonix market                              # skills, rules, filters, bundles, extensions
 plonix market install api-kit              # a bundle: verified against the signed index
 plonix skills                              # playbooks your agent can follow
+plonix extensions add ./my-extension       # a sandboxed analyzer; shows what it may do first
 plonix stop                                # captured traffic is kept
 
 plonix start -p shop                       # open another project; it gets its own proxy
@@ -402,7 +409,8 @@ crates/
 │   └── ui/       the Plonix window and Start screen: plain HTML, CSS and JavaScript embedded in the binary
 ├── plonix-cli    the `plonix` command: engine control, onboarding, search, scope, replay, rules, Market, skills, MCP server
 └── plonix-app    Plonix.app: the window as a desktop app, with the engine built in
-store/            the Market: signed index.json, skills, rule packs, filter packs, extension manifests
+store/            the Market: signed index.json, skills, rule packs, filter packs, extensions
+examples/         an example extension, with its source
 docs/             the documentation, published at plonix.io/docs
 site/             the plonix.io website; site/docs is generated from docs/ by scripts/build-docs.mjs
 ```
@@ -424,6 +432,7 @@ site/             the plonix.io website; site/docs is generated from docs/ by sc
 - [x] Technology detection from community rule packs (`plonix tech`, `plonix rules`)
 - [x] The Market: a signed catalog of skills, rule packs, filter packs, bundles and extensions (`plonix market`)
 - [x] Agent skills, offered to MCP clients as prompts (`plonix skills`)
+- [x] Sandboxed WebAssembly extensions, first slice: passive analyzers that annotate traffic and propose findings, with a closed capability list and CPU, memory and time limits (`plonix extensions`)
 - [x] The Plonix window (`plonix ui`): live traffic, the Bench with branch and compare, adaptive scope review, map with technologies, findings
 - [x] Plonix.app for macOS: the window as a desktop app with the engine built in, Open target from the app, native menu bar
 - [x] Read-only MCP server (`plonix mcp`), `plonix connect claude` and the Agents screen
@@ -442,7 +451,7 @@ site/             the plonix.io website; site/docs is generated from docs/ by sc
 **Coming**
 - [ ] Opt-in active mode for agents: replay and send within accepted scope, switched on by you ([design](docs/agents.md#later-an-opt-in-active-mode))
 - [ ] Notarized app downloads (releases are signed ad hoc for now; the pipeline is ready, see [docs/releasing.md](docs/releasing.md))
-- [ ] Sandboxed WebAssembly extensions with a closed capability list that can never bypass scope ([design](docs/extensions.md))
+- [ ] Extensions that add panels and tabs, or send scope-enforced requests ([design](docs/extensions.md))
 
 Deliberately out of scope: token-randomness analysis, and scans that run unattended or reach beyond accepted scope. Scanning in Plonix is something you start, against a host you accepted, with checks chosen from what it runs. Plonix stays small on purpose.
 
