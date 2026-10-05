@@ -1,0 +1,8 @@
+{
+  "plonix_tool": 1,
+  "name": "access-check",
+  "version": "1.0.0",
+  "description": "Replay selected requests as each saved user, and once signed out, to see where access differs.",
+  "author": "Plonix contributors",
+  "feature": "access-check"
+}

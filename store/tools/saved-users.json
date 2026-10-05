@@ -1,0 +1,8 @@
+{
+  "plonix_tool": 1,
+  "name": "saved-users",
+  "version": "1.0.0",
+  "description": "Keep each user's cookies and tokens, and switch which one the Bench sends as.",
+  "author": "Plonix contributors",
+  "feature": "saved-users"
+}

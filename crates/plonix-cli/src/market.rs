@@ -131,6 +131,7 @@ fn kind_label(k: Kind) -> &'static str {
         Kind::List => "list",
         Kind::Bundle => "bundle",
         Kind::Extension => "ext",
+        Kind::Tool => "tool",
     }
 }
 

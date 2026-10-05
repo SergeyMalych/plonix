@@ -1060,6 +1060,55 @@ button.tag.edited { cursor: pointer; }
 .tfoot .err { color: var(--crit); font-size: 12px; margin-right: auto; }
 .tfoot .btn { padding: 6px 18px; }
 
+/* ---- Saved users (Bench switcher) and the Access check ---- */
+.asbox { display: inline-flex; align-items: center; gap: 4px; }
+.asbox .aslbl { color: var(--fg-3); font-size: 13px; }
+.assel { height: 28px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 0 6px; max-width: 170px; }
+
+.acpane { display: flex; flex-direction: column; gap: 12px; padding: 12px; overflow: auto; }
+.accard { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 12px 14px; }
+.aclbl { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--fg-2); margin-bottom: 8px; }
+.acsource { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.achost { height: 30px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 0 8px; min-width: 200px; }
+.acprefix { height: 30px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 0 8px; width: 160px; }
+.acids { display: flex; flex-wrap: wrap; gap: 8px; }
+.acid { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px 5px 9px; background: var(--surface-2); }
+.acid.anon { margin-top: 8px; }
+.acid .acname { font-weight: 500; }
+.acid .achdr { color: var(--fg-3); font-size: 11px; }
+.acrun { display: flex; align-items: center; gap: 12px; }
+
+.aclead { margin: 4px 0 10px; color: var(--fg-2); }
+.aclead .acflag { color: var(--warn); }
+.actable { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.actable col.acreqcol { width: 36%; }
+.actable col.acidc { width: auto; }
+.actable th, .actable td { border-bottom: 1px solid var(--line-2); padding: 6px 10px; text-align: left; vertical-align: middle; }
+.actable th.acidcol { text-align: center; white-space: nowrap; }
+.actable th.acidcol.anon { color: var(--fg-3); font-style: italic; }
+.actable td.actarget { display: flex; align-items: center; gap: 8px; overflow: hidden; }
+.actable .acpath { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.actable td.accell { text-align: center; }
+.acbtn { display: inline-flex; align-items: baseline; justify-content: center; gap: 6px; min-width: 66px; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 3px 9px; line-height: 1.25; cursor: pointer; }
+.acbtn:hover { border-color: var(--accent); }
+.acbtn.ok { background: var(--ok-soft); border-color: transparent; }
+.acbtn.err { background: var(--crit-soft); border-color: transparent; }
+.acbtn .aclen { color: var(--fg-3); font-size: 11px; }
+tr.acnote > td { border-bottom: none; }
+.acnoterow > td { padding: 0; }
+.acnotes { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 6px 10px 8px; background: var(--warn-soft); border-bottom: 1px solid var(--line-2); }
+.acnotechip { display: inline-flex; align-items: center; gap: 5px; color: var(--warn); font-size: 12px; }
+.acnotechip .acnoteico { font-size: 11px; opacity: 0.9; }
+
+/* manage-users sheet */
+.usersheet { width: min(560px, 86vw); display: flex; flex-direction: column; gap: 10px; }
+.userlist { display: flex; flex-direction: column; gap: 10px; max-height: 52vh; overflow: auto; }
+.usercard { border: 1px solid var(--line); border-radius: 9px; padding: 10px; background: var(--surface-2); display: flex; flex-direction: column; gap: 6px; }
+.usercard .urow { display: flex; gap: 8px; align-items: center; }
+.usercard .uname { flex: 1; height: 30px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 0 8px; font-weight: 600; }
+.usercard .unote { height: 28px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 0 8px; }
+.usercard .ulbl { color: var(--fg-3); font-size: 11px; }
+.usercard .uhead { border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 6px 8px; font-family: var(--mono); font-size: 12px; resize: vertical; }
 /* Suggested next steps under the Lens header, and Claude-written findings */
 .lenssugg { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 14px; border-bottom: 1px solid var(--line-2); }
 .lenssugg[hidden] { display: none; }
