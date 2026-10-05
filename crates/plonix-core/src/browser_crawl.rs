@@ -63,7 +63,9 @@ type Shared = Arc<Mutex<Net>>;
 
 /// Crawls from `start` (an in-scope URL on `host`) in a headless browser.
 pub async fn run(engine: &Engine, host: &str, start: String, req: &CrawlRequest) -> Result<CrawlReport, SendError> {
-    let found = browser::detect().filter(|b| b.kind == Kind::Chromium).ok_or_else(|| SendError::BadRequest(NO_CHROMIUM.into()))?;
+    // The Plonix home holds the downloaded Plonix browser, if there is one.
+    let home = crate::paths::Home::resolve(None).map_err(|e| SendError::BadRequest(format!("{e:#}")))?;
+    let found = browser::detect(&home).filter(|b| b.kind == Kind::Chromium).ok_or_else(|| SendError::BadRequest(NO_CHROMIUM.into()))?;
     let proxy = engine.proxy_addr().ok_or_else(|| SendError::BadRequest("the proxy is not running, so a browser crawl has nothing to route through".into()))?;
     // The proxy may listen on every interface; the browser reaches it on loopback.
     let proxy = if proxy.ip().is_unspecified() { SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), proxy.port()) } else { proxy };

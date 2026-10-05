@@ -38,7 +38,7 @@
 <aside class="side">
 <details class="side-menu" open>
 <summary>Documentation</summary>
-<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="bench.html">The Bench</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li class="here"><a href="updates.html" aria-current="page">Updates</a><ul class="toc"><li><a href="#what-the-user-sees">What the user sees</a></li><li><a href="#how-a-release-reaches-users">How a release reaches users</a></li></ul></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="bench.html">The Bench</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li class="here"><a href="updates.html" aria-current="page">Updates</a><ul class="toc"><li><a href="#what-the-user-sees">What the user sees</a></li><li><a href="#how-a-release-reaches-users">How a release reaches users</a></li></ul></li><li><a href="privacy.html">Privacy and usage statistics</a></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="releasing.html">Releasing Plonix</a></li><li><a href="setup.html">Setting up capture on any Mac</a></li></ul></nav>
 </details>
 </aside>
 <main class="doc">
@@ -77,6 +77,10 @@ matches the public key built into it (<code>plugins.updater.pubkey</code> in
 the user about a new version, but sends them to the releases page instead of
 installing it.</p>
 <h3 id="one-time-setup">One-time setup<a class="anchor" href="#one-time-setup" aria-label="Link to this section">#</a></h3>
+<p>The key pair exists: its public key is in <code>tauri.conf.json</code>, and the
+maintainers keep the private key outside the repository. To set it up again
+(for example after a leak, which also means installed copies must download the
+next version by hand):</p>
 <ol><li><p>Create the signing key pair on your own machine and keep the private key
 out of the repository:</p>
 <pre><code class="language-sh">cargo tauri signer generate -w ~/.plonix-release/updater.key</code></pre></li><li><p>Paste the printed <strong>public</strong> key into <code>plugins.updater.pubkey</code> in
@@ -87,10 +91,13 @@ out of the repository:</p>
 any later release and their users have to download the next version by hand.</p>
 <h3 id="publishing-a-release">Publishing a release<a class="anchor" href="#publishing-a-release" aria-label="Link to this section">#</a></h3>
 <ol><li>Bump <code>version</code> in <code>crates/plonix-app/tauri.conf.json</code> (for example to
-<code>0.2.0</code>).</li><li>Push a matching tag: <code>git tag v0.2.0 &amp;&amp; git push origin v0.2.0</code>.</li></ol>
+<code>0.2.0</code>) and add a section for it to <code>CHANGELOG.md</code>.</li><li>Push a matching tag: <code>git tag v0.2.0 &amp;&amp; git push origin v0.2.0</code>.</li></ol>
 <p>The Release workflow builds a universal Plonix.app, signs the update package,
-writes <code>latest.json</code> and publishes the GitHub release with all three. It stops
-with a clear error if the tag and version differ or the key is missing.</p>
+writes <code>latest.json</code> and publishes the GitHub release with them. It stops with
+a clear error if the tag and version differ. Without the
+<code>TAURI_SIGNING_PRIVATE_KEY</code> secret it still publishes the app but leaves out
+the update package and <code>latest.json</code>, with a warning, so installed copies don't
+see that release.</p>
 </article>
 <p class="edit">This page is <a href="https://github.com/SergeyMalych/plonix/blob/main/docs/updates.md">docs/updates.md</a> in the Plonix repository. Spotted something wrong? <a href="https://github.com/SergeyMalych/plonix/edit/main/docs/updates.md">Suggest a change</a>.</p>
 </main>

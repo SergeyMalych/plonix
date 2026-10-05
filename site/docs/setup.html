@@ -1,0 +1,167 @@
+<!doctype html>
+<!-- Generated from docs/setup.md by scripts/build-docs.mjs. Edit the Markdown, not this file. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Setting up capture on any Mac · Plonix docs</title>
+<meta name="description" content="Plonix aims to take you from download to captured traffic in under a minute, whatever is installed on your Mac. This page covers the three things that can stand in the way and…">
+<meta property="og:title" content="Setting up capture on any Mac · Plonix docs">
+<meta property="og:description" content="Plonix aims to take you from download to captured traffic in under a minute, whatever is installed on your Mac. This page covers the three things that can stand in the way and…">
+<meta property="og:url" content="https://plonix.io/docs/setup">
+<meta property="og:image" content="https://plonix.io/assets/window.webp">
+<link rel="canonical" href="https://plonix.io/docs/setup">
+<meta name="theme-color" content="#f5f5fa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0e13" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../assets/plonix-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="docs.css">
+<script>try{const t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <nav class="nav-links" aria-label="Site">
+      <a href="../#features">Features</a>
+      <a href="../#scope">Scope</a>
+      <a href="../#agents">AI</a>
+      <a href="./" aria-current="page">Docs</a>
+    </nav>
+    <button type="button" class="theme-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button>
+    <a class="btn small" href="https://github.com/SergeyMalych/plonix"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+  </div>
+</header>
+<div class="wrap docs">
+<aside class="side">
+<details class="side-menu" open>
+<summary>Documentation</summary>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="bench.html">The Bench</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li><a href="updates.html">Updates</a></li><li><a href="privacy.html">Privacy and usage statistics</a></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="releasing.html">Releasing Plonix</a></li><li class="here"><a href="setup.html" aria-current="page">Setting up capture on any Mac</a><ul class="toc"><li><a href="#which-browser-plonix-opens">Which browser Plonix opens</a></li><li><a href="#the-plonix-browser-for-macs-with-only-safari">The Plonix browser: for Macs with only Safari</a></li><li><a href="#firefox-and-the-plonix-certificate">Firefox and the Plonix certificate</a></li><li><a href="#the-plonix-command-from-the-app">The plonix command from the app</a></li></ul></li></ul></nav>
+</details>
+</aside>
+<main class="doc">
+<article>
+<h1 id="setting-up-capture-on-any-mac">Setting up capture on any Mac</h1>
+<p>Plonix aims to take you from download to captured traffic in under a minute,
+whatever is installed on your Mac. This page covers the three things that can
+stand in the way and what Plonix does about each: which browser it opens, the
+certificate HTTPS needs, and the <code>plonix</code> command for the terminal.</p>
+<h2 id="which-browser-plonix-opens">Which browser Plonix opens<a class="anchor" href="#which-browser-plonix-opens" aria-label="Link to this section">#</a></h2>
+<p><strong>Open target</strong> (⌘O in the app) and <code>plonix open &lt;target&gt;</code> open the site in
+the <em>capture browser</em>: a separate browser window with a profile of its own,
+routed through the Plonix proxy. Your everyday browser, its cookies and its
+settings are never touched. Plonix picks, in order:</p>
+<ol><li><code>$PLONIX_BROWSER</code>, if you set it to a browser's executable.</li><li>The first Chromium-based browser it finds: Google Chrome, Chromium, Brave,
+Microsoft Edge, Chrome Canary (in <code>/Applications</code> or <code>~/Applications</code>).</li><li>The <strong>Plonix browser</strong>, if you downloaded it (below).</li><li>Firefox.</li></ol>
+<p>Chromium-based browsers trust the Plonix certificate on their own (Plonix
+passes its key pin when it launches them), so HTTPS works with nothing to set
+up. <code>plonix browser</code> shows which browser Plonix will use.</p>
+<h2 id="the-plonix-browser-for-macs-with-only-safari">The Plonix browser: for Macs with only Safari<a class="anchor" href="#the-plonix-browser-for-macs-with-only-safari" aria-label="Link to this section">#</a></h2>
+<p>Safari cannot be launched with an isolated profile and its own proxy, so a
+Mac with only Safari has nothing for Plonix to open. In that case Open target
+shows <strong>Get the Plonix browser</strong>:</p>
+<ul><li>One click downloads Chromium: Google's official <em>Chrome for Testing</em> stable
+build for your Mac (Apple silicon or Intel), about 150 MB. Plonix looks up
+the current version in Google's published list
+(<code>googlechromelabs.github.io/chrome-for-testing</code>) and downloads it over
+HTTPS from Google's servers.</li><li>A progress bar shows the download. Plonix then unpacks it, checks that it
+is complete and starts on your Mac, and only then puts it in place. If
+anything fails, you see why and can <strong>Try again</strong>; nothing half-finished is
+left behind.</li><li>When it is ready, the target opens in it right away, and every later Open
+target uses it too. It behaves like any other capture browser: its own
+profile per project, the proxy, the Plonix certificate trusted.</li></ul>
+<p>It is kept in <code>~/.plonix/chromium</code> (or <code>$PLONIX_HOME/chromium</code>), separate from
+the app, which is why Plonix.app itself stays small. If you install Chrome,
+Brave or Edge later, Plonix uses that instead.</p>
+<p>From the terminal:</p>
+<pre><code class="language-sh">plonix browser            # which browser Plonix uses, and the Plonix browser if downloaded
+plonix browser install    # download (or update to) the current Plonix browser
+plonix browser remove     # delete it; your capture profiles are kept</code></pre>
+<p><code>plonix open</code> offers the download itself when it finds no browser and you are
+at a terminal. On Linux (64-bit x86) the same download works with the Linux
+build; it needs <code>unzip</code>.</p>
+<h2 id="firefox-and-the-plonix-certificate">Firefox and the Plonix certificate<a class="anchor" href="#firefox-and-the-plonix-certificate" aria-label="Link to this section">#</a></h2>
+<p>When Firefox is the capture browser, Plonix gives it an isolated profile that
+uses the proxy and follows the certificates your Mac trusts
+(<code>security.enterprise_roots.enabled</code>). Firefox therefore needs the Plonix
+certificate trusted once in your login keychain.</p>
+<p>Right after Open target launches Firefox, the window shows <strong>Trust the Plonix
+certificate</strong>, but only while the certificate is not trusted yet. Clicking
+<strong>Trust certificate</strong> adds it to your login keychain; macOS asks for your
+password or Touch ID. Reload the page in Firefox and HTTPS goes through
+Plonix. The same thing from a terminal is <code>plonix ca trust</code>.</p>
+<p>The certificate was generated on your Mac the first time Plonix ran, and its
+private key never leaves <code>~/.plonix</code>. Trusting it also lets Safari, curl and
+other apps accept HTTPS through the Plonix proxy. To undo it, open Keychain
+Access and delete &quot;Plonix CA&quot;.</p>
+<p>On Linux, Firefox keeps its own certificate list: import <code>~/.plonix/ca.pem</code> in
+Firefox › Settings › Privacy &amp; Security › Certificates (<code>plonix ca</code> shows the
+path).</p>
+<h2 id="the-plonix-command-from-the-app">The plonix command from the app<a class="anchor" href="#the-plonix-command-from-the-app" aria-label="Link to this section">#</a></h2>
+<p>Plonix.app carries the <code>plonix</code> command line tool inside it. To use it in a
+terminal, choose <strong>Plonix › Install Command Line Tool…</strong>:</p>
+<ul><li>Plonix links <code>/usr/local/bin/plonix</code> to the tool inside the app, so the
+command always matches the app, updates included. <code>/usr/local/bin</code> is on
+the PATH of every macOS shell.</li><li>If that folder does not exist yet or cannot be written as you (the usual
+case on a new Apple silicon Mac), macOS shows its standard administrator
+prompt. Otherwise nothing is asked.</li><li>A dialog confirms it worked, or says why it did not. Open a new Terminal
+window and run <code>plonix --help</code>.</li><li>Run Plonix from Applications first: a command linked to the app on the
+disk image would stop working once the image is ejected, so Plonix asks
+you to move it.</li><li>If <code>/usr/local/bin/plonix</code> already exists and did not come from Plonix,
+Plonix asks before replacing it.</li></ul>
+<p><strong>Plonix › Uninstall Command Line Tool…</strong> removes the link (only if Plonix
+made it).</p>
+<p>The command talks to the same projects as the app: projects open in the app
+are reachable with <code>plonix -p &lt;project&gt; …</code>, and projects you start from the
+terminal show up on the Start screen.</p>
+<h3 id="building-the-app-with-the-command-inside">Building the app with the command inside<a class="anchor" href="#building-the-app-with-the-command-inside" aria-label="Link to this section">#</a></h3>
+<p>The tool is bundled as a Tauri sidecar named after the target it was built
+for: <code>crates/plonix-app/binaries/plonix-cli-&lt;target&gt;</code>. The CI and release
+workflows build it before the app (for releases, one binary per architecture
+joined with <code>lipo</code> into <code>plonix-cli-universal-apple-darwin</code>). A local
+<code>cargo build</code> or <code>cargo run -p plonix-app</code> without it gets a stand-in script,
+and the menu item then explains that this build has no command line tool.
+To bundle it in a local build:</p>
+<pre><code class="language-sh">cargo build --release -p plonix
+mkdir -p crates/plonix-app/binaries
+cp target/release/plonix crates/plonix-app/binaries/plonix-cli-$(rustc -vV | sed -n 's/^host: //p')
+cd crates/plonix-app &amp;&amp; cargo tauri build --bundles app</code></pre>
+<p>Replace an earlier stand-in the same way: the build picks up the real binary
+as soon as it is there.</p>
+</article>
+<p class="edit">This page is <a href="https://github.com/SergeyMalych/plonix/blob/main/docs/setup.md">docs/setup.md</a> in the Plonix repository. Spotted something wrong? <a href="https://github.com/SergeyMalych/plonix/edit/main/docs/setup.md">Suggest a change</a>.</p>
+</main>
+</div>
+<footer>
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <span>Open-source web security workbench for macOS. Apache-2.0.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/SergeyMalych/plonix">GitHub</a>
+      <a href="./">Docs</a>
+      <a href="https://github.com/SergeyMalych/plonix/releases">Releases</a>
+      <a href="https://github.com/SergeyMalych/plonix/issues">Issues</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(() => {
+  const root = document.documentElement, btn = document.getElementById('theme');
+  const sys = matchMedia('(prefers-color-scheme: dark)');
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+  const current = () => root.dataset.theme || (sys.matches ? 'dark' : 'light');
+  const paint = () => { const d = current() === 'dark'; btn.innerHTML = d ? SUN : MOON; btn.setAttribute('aria-label', d ? 'Switch to light mode' : 'Switch to dark mode'); };
+  paint();
+  sys.addEventListener('change', paint);
+  btn.addEventListener('click', () => {
+    const next = current() === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next; paint();
+    try { localStorage.setItem('plonix-theme', next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>

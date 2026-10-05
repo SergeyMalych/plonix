@@ -1,0 +1,104 @@
+<!doctype html>
+<!-- Generated from docs/privacy.md by scripts/build-docs.mjs. Edit the Markdown, not this file. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Privacy and usage statistics · Plonix docs</title>
+<meta name="description" content="Plonix keeps your work on your computer. Captured traffic, projects, findings, scope and settings are stored only in folders on your disk (~/.plonix and your project folders).…">
+<meta property="og:title" content="Privacy and usage statistics · Plonix docs">
+<meta property="og:description" content="Plonix keeps your work on your computer. Captured traffic, projects, findings, scope and settings are stored only in folders on your disk (~/.plonix and your project folders).…">
+<meta property="og:url" content="https://plonix.io/docs/privacy">
+<meta property="og:image" content="https://plonix.io/assets/window.webp">
+<link rel="canonical" href="https://plonix.io/docs/privacy">
+<meta name="theme-color" content="#f5f5fa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0e13" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../assets/plonix-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="docs.css">
+<script>try{const t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <nav class="nav-links" aria-label="Site">
+      <a href="../#features">Features</a>
+      <a href="../#scope">Scope</a>
+      <a href="../#agents">AI</a>
+      <a href="./" aria-current="page">Docs</a>
+    </nav>
+    <button type="button" class="theme-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button>
+    <a class="btn small" href="https://github.com/SergeyMalych/plonix"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+  </div>
+</header>
+<div class="wrap docs">
+<aside class="side">
+<details class="side-menu" open>
+<summary>Documentation</summary>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="bench.html">The Bench</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li><a href="updates.html">Updates</a></li><li class="here"><a href="privacy.html" aria-current="page">Privacy and usage statistics</a><ul class="toc"><li><a href="#your-choice">Your choice</a></li><li><a href="#what-a-report-holds">What a report holds</a></li><li><a href="#what-is-never-sent">What is never sent</a></li><li><a href="#on-the-server">On the server</a></li></ul></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="releasing.html">Releasing Plonix</a></li><li><a href="setup.html">Setting up capture on any Mac</a></li></ul></nav>
+</details>
+</aside>
+<main class="doc">
+<article>
+<h1 id="privacy-and-usage-statistics">Privacy and usage statistics</h1>
+<p>Plonix keeps your work on your computer. Captured traffic, projects, findings, scope and settings are stored only in folders on your disk (<code>~/.plonix</code> and your project folders). Plonix never uploads them.</p>
+<p>The one thing Plonix can send on its own is a small, anonymous usage report, if you allow it. This page lists exactly what that report holds.</p>
+<h2 id="your-choice">Your choice<a class="anchor" href="#your-choice" aria-label="Link to this section">#</a></h2>
+<ul><li>On first launch, Plonix shows its license and <a href="https://github.com/SergeyMalych/plonix/blob/main/TERMS.md" rel="noopener">terms of use</a> with two checkboxes: <strong>I accept the license and terms</strong> (required) and <strong>Share anonymous usage statistics</strong> (ticked, and yours to untick before you continue). The CLI asks the same two questions the first time it runs in a terminal.</li><li>Change it any time: <strong>Settings › Usage statistics</strong> in the app, or <code>plonix usage on</code> / <code>plonix usage off</code>.</li><li>Setting <code>PLONIX_NO_ANALYTICS=1</code> or <code>DO_NOT_TRACK=1</code> in the environment turns it off whatever the setting says.</li><li>Turning it off deletes the counts and the install id kept so far (<code>~/.plonix/usage.json</code>).</li><li><code>plonix usage</code> prints the next report exactly as it would be sent.</li></ul>
+<p>Accepting the terms for a single run (<code>--accept-terms</code> or <code>PLONIX_ACCEPT_TERMS=1</code>, meant for scripts and CI) records nothing, so a Plonix home used only that way never counts anything. Nothing is sent from CI (<code>CI</code> is set) or from development builds.</p>
+<h2 id="what-a-report-holds">What a report holds<a class="anchor" href="#what-a-report-holds" aria-label="Link to this section">#</a></h2>
+<p>At most one report a day, sent by HTTPS POST to <code>https://plonix.io/api/usage</code>:</p>
+<pre><code class="language-json">{
+  &quot;schema&quot;: 1,
+  &quot;install_id&quot;: &quot;3f9c2a6e0b7d4e1f8a5c6b2d9e0f1a7c&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;os&quot;: &quot;macos&quot;,
+  &quot;os_version&quot;: &quot;15.1&quot;,
+  &quot;arch&quot;: &quot;aarch64&quot;,
+  &quot;counts&quot;: { &quot;app_launched&quot;: 4, &quot;project_opened&quot;: 3, &quot;screen_bench&quot;: 9, &quot;bench_send&quot;: 27, &quot;scan_run&quot;: 1 }
+}</code></pre>
+<div class="table"><table><thead><tr><th>Field</th><th>What it is</th></tr></thead><tbody><tr><td><code>schema</code></td><td>The version of this report's shape.</td></tr><tr><td><code>install_id</code></td><td>32 random hex characters made the first time a count is saved. Not derived from your hardware, account or anything else. Deleted when you turn statistics off.</td></tr><tr><td><code>version</code></td><td>The Plonix version.</td></tr><tr><td><code>os</code>, <code>os_version</code></td><td>The operating system and its release number, such as <code>macos</code> and <code>15.1</code>.</td></tr><tr><td><code>arch</code></td><td>The CPU type, such as <code>aarch64</code> or <code>x86_64</code>.</td></tr><tr><td><code>counts</code></td><td>How many times each feature below was used since the last report.</td></tr></tbody></table></div>
+<p>The counted features are a fixed list:</p>
+<div class="table"><table><thead><tr><th>Name</th><th>Counted when</th></tr></thead><tbody><tr><td><code>app_launched</code></td><td>Plonix.app starts</td></tr><tr><td><code>web_launcher_opened</code></td><td><code>plonix launcher</code> opens the Start screen in a browser</td></tr><tr><td><code>cli_used</code></td><td>A <code>plonix</code> command runs</td></tr><tr><td><code>project_opened</code>, <code>demo_opened</code></td><td>A project, or the demo project, opens</td></tr><tr><td><code>capture_started</code></td><td>The capture browser opens</td></tr><tr><td><code>intercept_used</code></td><td>Intercept is turned on</td></tr><tr><td><code>bench_send</code></td><td>The Bench (or <code>plonix replay</code>) sends a request</td></tr><tr><td><code>bench_run</code></td><td>The Bench runs payloads through marked positions</td></tr><tr><td><code>scan_run</code>, <code>crawl_run</code></td><td>A scan or a crawl runs</td></tr><tr><td><code>finding_added</code>, <code>report_exported</code></td><td>A finding is added, findings are exported</td></tr><tr><td><code>market_install</code></td><td>Something is installed from the Market</td></tr><tr><td><code>ask_claude</code>, <code>agent_launch</code></td><td>Ask Claude is used, Claude Code is opened from Plonix</td></tr><tr><td><code>mcp_session</code></td><td>An AI agent starts the Plonix MCP server</td></tr><tr><td><code>screen_traffic</code>, <code>screen_bench</code>, <code>screen_scope</code>, <code>screen_map</code>, <code>screen_findings</code>, <code>screen_agents</code>, <code>screen_market</code>, <code>screen_scans</code>, <code>screen_settings</code></td><td>A screen of the project window is opened</td></tr></tbody></table></div>
+<h2 id="what-is-never-sent">What is never sent<a class="anchor" href="#what-is-never-sent" aria-label="Link to this section">#</a></h2>
+<ul><li>URLs, hosts, domains, paths or IP addresses from captured traffic</li><li>Requests, responses, headers, bodies or any other traffic</li><li>Project names, folder or file paths, scope, findings, rules or settings</li><li>Anything you type: searches, payloads, prompts, notes</li><li>Your name, email, user name, computer name or hardware identifiers</li></ul>
+<h2 id="on-the-server">On the server<a class="anchor" href="#on-the-server" aria-label="Link to this section">#</a></h2>
+<p>The endpoint is a small function on the Plonix website (<code>functions/api/usage.js</code> in this repository). It accepts only the fields above, drops any feature name not in the list, and stores one row per install per day: the date, the fields above, and nothing else. It does not store your IP address or request headers. A failed send is silent: Plonix never waits on it or retries more than once a day.</p>
+</article>
+<p class="edit">This page is <a href="https://github.com/SergeyMalych/plonix/blob/main/docs/privacy.md">docs/privacy.md</a> in the Plonix repository. Spotted something wrong? <a href="https://github.com/SergeyMalych/plonix/edit/main/docs/privacy.md">Suggest a change</a>.</p>
+</main>
+</div>
+<footer>
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <span>Open-source web security workbench for macOS. Apache-2.0.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/SergeyMalych/plonix">GitHub</a>
+      <a href="./">Docs</a>
+      <a href="https://github.com/SergeyMalych/plonix/releases">Releases</a>
+      <a href="https://github.com/SergeyMalych/plonix/issues">Issues</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(() => {
+  const root = document.documentElement, btn = document.getElementById('theme');
+  const sys = matchMedia('(prefers-color-scheme: dark)');
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+  const current = () => root.dataset.theme || (sys.matches ? 'dark' : 'light');
+  const paint = () => { const d = current() === 'dark'; btn.innerHTML = d ? SUN : MOON; btn.setAttribute('aria-label', d ? 'Switch to light mode' : 'Switch to dark mode'); };
+  paint();
+  sys.addEventListener('change', paint);
+  btn.addEventListener('click', () => {
+    const next = current() === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next; paint();
+    try { localStorage.setItem('plonix-theme', next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>

@@ -38,7 +38,7 @@
 <aside class="side">
 <details class="side-menu" open>
 <summary>Documentation</summary>
-<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li class="here"><a href="bench.html" aria-current="page">The Bench</a><ul class="toc"><li><a href="#payload-runs">Payload runs</a></li><li><a href="#list-packs">List packs</a></li></ul></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li><a href="updates.html">Updates</a></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li class="here"><a href="bench.html" aria-current="page">The Bench</a><ul class="toc"><li><a href="#claudes-suggested-edits">Claude's suggested edits</a></li><li><a href="#payload-runs">Payload runs</a></li><li><a href="#list-packs">List packs</a></li></ul></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li><a href="updates.html">Updates</a></li><li><a href="privacy.html">Privacy and usage statistics</a></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="releasing.html">Releasing Plonix</a></li><li><a href="setup.html">Setting up capture on any Mac</a></li></ul></nav>
 </details>
 </aside>
 <main class="doc">
@@ -49,7 +49,35 @@ once. Each tab is an experiment. A tab has two panels:</p>
 <ul><li><strong>Send</strong> — edit a request, send it, branch it, and compare responses.</li><li><strong>Run</strong> — mark positions in the request and feed lists of values through them.</li></ul>
 <p>Everything the Bench sends goes through the engine's single send path, so it can
 only ever reach a host that is <strong>accepted into scope</strong>, exactly like a manual
-send.</p>
+send. When the host has a <a href="projects.html#client-certificates">client certificate</a>,
+the Bench presents it and marks the response <strong>cert · CN=…</strong>.</p>
+<h2 id="claudes-suggested-edits">Claude's suggested edits<a class="anchor" href="#claudes-suggested-edits" aria-label="Link to this section">#</a></h2>
+<p>Under the request on the Send panel, <strong>Ask about this request</strong> (or <strong>✦ Ask
+Claude</strong> on selected text, or on a value the Lens spotted) asks Claude Code
+about the draft you are editing, before it is sent.</p>
+<p>Besides answering, Claude can propose a concrete edited request: say, the same
+call with a different id, an extra header, a changed JSON field or a JWT with a
+raised role. The proposal appears above the request as a card:</p>
+<ul><li>a one-line <strong>summary</strong> of what Claude changed and why;</li><li>a <strong>diff against your draft as it is now</strong>: the request line, headers that
+were added, removed or changed, and the body line by line. Query strings and
+form bodies are compared field by field with their values decoded, JSON
+bodies are compared pretty-printed, and a JWT is compared as its decoded
+header and claims;</li><li><strong>Apply to draft</strong> and <strong>Discard</strong>.</li></ul>
+<p>Nothing changes until you press <strong>Apply to draft</strong>, and applying only rewrites
+the draft: the request is not sent. Read it over, edit it further if you like,
+and press <strong>Send</strong> yourself. Right after applying, <strong>Undo</strong> puts your previous
+draft back. If you keep editing while a proposal is open, its diff follows
+your edits. A proposal Claude makes while you are on another screen, or from a
+Claude Code session in a terminal, shows up when you come back to the tab.</p>
+<p>JWTs follow the same rule as editing one in the Lens. Claude has no signing
+key, so a token whose header or claims it changed <strong>keeps its original
+signature</strong> and is marked <strong>unsigned</strong>: that is how you test whether the
+server checks signatures. If Claude made up a signature, Plonix puts the
+original one back and says so. A token Claude deliberately left without a
+signature, or with <code>alg: none</code>, is kept as proposed. To send a validly signed
+token, apply the edit and re-sign the token in the Lens with the key.</p>
+<p>Claude can only <em>propose</em>. It cannot apply a proposal, send it, or start a
+run; see <a href="agents.html#suggested-bench-edits">agents.md</a>.</p>
 <h2 id="payload-runs">Payload runs<a class="anchor" href="#payload-runs" aria-label="Link to this section">#</a></h2>
 <p>A <em>run</em> sends a batch of requests built from one base request. You mark the
 spots that should change (the <em>positions</em>) and point one or more <em>lists</em> of

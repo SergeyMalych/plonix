@@ -85,7 +85,8 @@ async fn start(home: &Home) -> engine::Running {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn browser_crawl_renders_follows_routes_and_stays_in_scope() {
-    let Some(found) = browser::detect().filter(|b| b.kind == Kind::Chromium) else {
+    let home = plonix_core::paths::Home::resolve(None).unwrap();
+    let Some(found) = browser::detect(&home).filter(|b| b.kind == Kind::Chromium) else {
         eprintln!("skipped: no Chromium-based browser found (set PLONIX_BROWSER to run this test)");
         return;
     };

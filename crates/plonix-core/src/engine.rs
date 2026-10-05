@@ -649,7 +649,8 @@ impl Engine {
                 return Ok(());
             }
             let id = self.store.insert_exchange(&ex)?;
-            self.analyze(&ex, id, &rules)?;
+            analyze_into(&self.store, std::iter::once((&ex, id)), &rules)?;
+            self.queue_for_extensions(id);
             if !messages.is_empty() {
                 let messages: Vec<WsMessage> = messages.into_iter().map(|m| WsMessage { exchange_id: id, ..m }).collect();
                 self.store.insert_ws_messages(&messages)?;

@@ -38,7 +38,7 @@
 <aside class="side">
 <details class="side-menu" open>
 <summary>Documentation</summary>
-<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="bench.html">The Bench</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li class="here"><a href="scanning.html" aria-current="page">Scanning</a><ul class="toc"><li><a href="#detectors-and-tactics">Detectors and tactics</a></li><li><a href="#scan-types">Scan types</a></li><li><a href="#signature-packages">Signature packages</a></li><li><a href="#smart-suggestions">Smart suggestions</a></li><li><a href="#ai-guided-optional">AI-guided (optional)</a></li><li><a href="#ux-the-scans-area">UX: the Scans area</a></li><li><a href="#guardrails">Guardrails</a></li><li><a href="#build-order">Build order</a></li><li><a href="#what-is-built">What is built</a></li></ul></li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li><a href="updates.html">Updates</a></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="bench.html">The Bench</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li class="here"><a href="scanning.html" aria-current="page">Scanning</a><ul class="toc"><li><a href="#detectors-and-tactics">Detectors and tactics</a></li><li><a href="#scan-types">Scan types</a></li><li><a href="#signature-packages">Signature packages</a></li><li><a href="#smart-suggestions">Smart suggestions</a></li><li><a href="#ai-guided-optional">AI-guided (optional)</a></li><li><a href="#ux-the-scans-area">UX: the Scans area</a></li><li><a href="#guardrails">Guardrails</a></li><li><a href="#build-order">Build order</a></li><li><a href="#what-is-built">What is built</a></li></ul></li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li><a href="updates.html">Updates</a></li><li><a href="privacy.html">Privacy and usage statistics</a></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="releasing.html">Releasing Plonix</a></li><li><a href="setup.html">Setting up capture on any Mac</a></li></ul></nav>
 </details>
 </aside>
 <main class="doc">
@@ -98,11 +98,31 @@ normalized endpoint signature (path with parameter names, values stripped).</li>
 detectors. Crawl is non-destructive — it only issues the requests a browser
 following links would, bounded.</p>
 <h3 id="crawl-with-browser">Crawl with browser<a class="anchor" href="#crawl-with-browser" aria-label="Link to this section">#</a></h3>
-<p>The same, but driven through the existing headless browser (<code>browser.rs</code>) so
-JavaScript-rendered links, SPA routes and XHR/fetch endpoints are reached.
-Discovered requests still flow through the proxy and scope enforcement. This is
-the slower, more complete discovery mode; the user chooses it when an app is
-JS-heavy.</p>
+<p>For apps that build their pages with JavaScript, a plain crawl sees an almost
+empty page. A browser crawl renders each page first:</p>
+<ul><li>It uses a Chromium-based browser already on your computer (Google Chrome,
+Chromium, Brave or Microsoft Edge; set <code>PLONIX_BROWSER</code> to pick one). It
+runs headless, on a throwaway profile that is deleted afterwards, so your
+own browser's cookies and history are never touched.</li><li>Every request the browser makes goes through the Plonix proxy, so pages,
+scripts and the API calls they make all land in <strong>Traffic</strong> and on the
+<strong>Map</strong>, like anything you browse yourself.</li><li>It starts at the URL you give (on a host accepted into scope) and visits
+pages breadth-first, waiting on each until its network goes quiet. Links
+come from the rendered page: anchors, frames, router links, and the routes
+the app pushes onto the browser history.</li><li><strong>Scope is enforced inside the browser.</strong> Before any request leaves, its
+host is checked; requests to a host that is not accepted are blocked, so
+redirects, scripts and links cannot take the crawl elsewhere. The report
+lists the blocked hosts: if the app needs one (a CDN, say), accept it in
+Scope and crawl again.</li><li><strong>It only reads.</strong> Forms are listed, never submitted (even ones a script
+tries to submit), popups do not open, and confirmation dialogs are
+answered &quot;no&quot;. With <strong>Click buttons too</strong>, it also clicks buttons and
+script links outside forms, skipping anything whose label looks like
+logging out, deleting, removing, paying, sending or the like.</li><li>It stops at the page budget (100), the depth budget (4) or the time limit
+(3 minutes), whichever comes first.</li></ul>
+<p>If no Chromium-based browser is found, the crawl says so and runs nothing;
+install one (or point <code>PLONIX_BROWSER</code> at it) and try again.</p>
+<pre><code>plonix crawl --browser https://app.example.com/
+plonix crawl --browser --click --max-seconds 300 app.example.com/dashboard</code></pre>
+<p>In the app: <strong>Scans → Crawl → Use a browser (for JavaScript apps)</strong>.</p>
 <h3 id="active-scan">Active scan<a class="anchor" href="#active-scan" aria-label="Link to this section">#</a></h3>
 <p>Runs tactics against discovered targets. For each target:</p>
 <ol><li>run detectors over the fingerprint + captured data → active signals;</li><li>select tactics whose gating signals are all present (intersected with the
@@ -198,10 +218,13 @@ read-only, so the advising agent layer may call them), and <code>POST /api/scan<
 and a start path, fetches in-scope pages through <code>engine::send</code>, extracts
 links and forms, follows same-host links within a page/depth budget, and
 never leaves accepted scope or submits a form. API <code>POST /api/crawl</code>
-(user-only); CLI <code>plonix crawl</code>.</p></li></ul>
-<p>Still to come: crawl-with-browser (needs a headless browser driver; the plain
-crawl runs meanwhile and the report says so), the Scans UI area, and installed
-scan-pack pinning in the store.</p>
+(user-only); CLI <code>plonix crawl</code>.</p></li><li><p>Crawl with browser: <code>browser_crawl.rs</code> launches the detected Chromium-based
+browser headless (<code>browser::headless_args</code>) through the proxy and drives it
+over the DevTools protocol (<code>cdp.rs</code>, a small WebSocket client). Every
+request is paused and checked against scope (<code>crawl::blocked_host</code>) before
+it goes out; links are followed only with <code>crawl::follow</code> (same host,
+accepted). Same API and CLI with <code>browser: true</code> / <code>--browser</code>.</p></li></ul>
+<p>Still to come: installed scan-pack pinning in the store.</p>
 </article>
 <p class="edit">This page is <a href="https://github.com/SergeyMalych/plonix/blob/main/docs/scanning.md">docs/scanning.md</a> in the Plonix repository. Spotted something wrong? <a href="https://github.com/SergeyMalych/plonix/edit/main/docs/scanning.md">Suggest a change</a>.</p>
 </main>

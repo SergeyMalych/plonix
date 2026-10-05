@@ -13,6 +13,8 @@ The first public release of Plonix for Mac.
 - One step from nothing to captured traffic: open a target and Plonix starts the proxy, sets the scope and opens a browser with its own profile that trusts Plonix.
 - HTTP/2 on both sides, WebSocket messages, and bodies that stream through as the server sends them.
 - Intercept: hold requests and responses in flight to edit, forward or drop them. Match and replace rules change traffic as it passes.
+- Works on every Mac: with no supported browser installed, Plonix offers to download its own, and trusting the certificate for Firefox is one click.
+- Client certificates per host for servers that ask for one, and HAR files in and out of a project.
 
 ### Investigate
 - Traffic with a search language (`host:api.example.com method:POST status:5xx`), include and exclude filters, filter packs and suggestions drawn from your traffic.
@@ -24,6 +26,7 @@ The first public release of Plonix for Mac.
 - The Bench: edit a request, send it, branch it and compare responses side by side. Edit decoded values in place.
 - Bench runs send a request many times with values from payload lists, including lists from the Market.
 - Crawl a host to find endpoints, parameters and forms, and run scope-gated active scans from the Scans screen.
+- Crawl JavaScript apps in a headless browser that stays within accepted scope.
 
 ### Validate
 - Findings with the requests that prove them, which you can edit, confirm, close and export as Markdown, HTML or JSON.
@@ -31,13 +34,22 @@ The first public release of Plonix for Mac.
 ### AI and automation
 - A read-only MCP server so Claude Code can see traffic, the map, scope and findings, and Ask Claude from any request, finding or host.
 - Skills: playbooks agents follow for a job in Plonix.
+- Claude can suggest an edited request on the Bench, shown as a diff you apply or discard. Nothing is sent until you click Send.
 - The `plonix` command and a token-protected local API for everything the window does.
+- Install Command Line Tool… in the app puts the `plonix` command on your PATH.
 
 ### Projects and Market
 - Several projects open at once, each in a folder you choose, with a Start screen and Settings.
 - The Market: a signed catalog of skills, rule packs, filter packs, payload lists and bundles.
+- Sandboxed WebAssembly extensions that analyze traffic and propose findings, without network, file or process access.
 - Updates you approve: Plonix asks before it downloads or installs anything.
 - A demo project to try every tool without a target.
+
+### Trust and privacy
+- You accept the license and terms once, on first launch.
+- Anonymous usage statistics (counts of features used, never traffic, hosts or anything you type), which you can turn off on first launch, in Settings, or with `PLONIX_NO_ANALYTICS=1`. See docs/privacy.md.
+- Crash reports stay on your Mac; Plonix offers to open a prefilled GitHub issue and never sends anything on its own.
+- Documentation at plonix.io/docs.
 
 [Unreleased]: https://github.com/SergeyMalych/plonix/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/SergeyMalych/plonix/releases/tag/v0.1.0
