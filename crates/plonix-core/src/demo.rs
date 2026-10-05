@@ -783,7 +783,7 @@ export async function api(path, opts = {{}}) {{
         "cur": null,
         "picks": [],
         "panel": "run",
-        "run": { "mode": "sweep", "lists": [{ "kind": "range", "from": 1038, "to": 1046, "step": 1 }], "base": true, "max": "", "delay": "40" }
+        "run": { "mode": "sweep", "lists": [{ "kind": "range", "from": 1032, "to": 1052, "step": 1 }], "base": true, "max": "", "delay": "40" }
     });
     store.set_view_state("bench", &json!({ "tabs": [order_run, lookup, none_tab], "active": 0 }))?;
     seed_filters(store)?;
