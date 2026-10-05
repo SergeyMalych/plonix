@@ -3,3 +3,4 @@ target/
 macos/.build/
 macos/*.xcodeproj/xcuserdata/
 *.key
+crates/plonix-app/binaries/

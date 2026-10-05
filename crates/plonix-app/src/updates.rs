@@ -249,7 +249,7 @@ fn ask_first_time(app: &AppHandle) {
 
 /// True when the dialog's first button (`label`) was pressed. Platforms report
 /// a custom button either by its label or as the standard button it stands in for.
-fn pressed(result: &MessageDialogResult, label: &str, first: bool) -> bool {
+pub(crate) fn pressed(result: &MessageDialogResult, label: &str, first: bool) -> bool {
     match result {
         MessageDialogResult::Custom(text) => text == label,
         MessageDialogResult::Ok | MessageDialogResult::Yes => first,

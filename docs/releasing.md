@@ -143,7 +143,7 @@ Once the signing and notarization secrets are in place, the next push to `main` 
    git push origin v0.2.0
    ```
 
-4. The **Release** workflow checks that the tag matches the version, builds a universal (Apple silicon and Intel) Plonix.app, signs and notarizes it, signs the update package, writes `latest.json` and publishes a GitHub release with all of them. It stops with an error if the tag and version differ or a key is missing.
+4. The **Release** workflow checks that the tag matches the version, builds the `plonix` command for both architectures and joins them with `lipo` (Plonix.app carries it for Install Command Line Tool…, see [setup.md](setup.md#the-plonix-command-from-the-app)), builds a universal (Apple silicon and Intel) Plonix.app, signs and notarizes it, signs the update package, writes `latest.json` and publishes a GitHub release with all of them. It stops with an error if the tag and version differ or a key is missing.
 5. Edit the release notes on GitHub if needed, then download `Plonix-macOS.zip` from the release and check it on a Mac:
 
    ```sh

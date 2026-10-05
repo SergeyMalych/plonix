@@ -13,6 +13,8 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(unix)]
+mod cli_tool;
 mod updates;
 
 use std::collections::HashMap;
@@ -336,6 +338,10 @@ fn on_menu(app: &AppHandle, id: &str) {
     if updates::on_menu_event(app, id) {
         return;
     }
+    #[cfg(unix)]
+    if cli_tool::on_menu_event(app, id) {
+        return;
+    }
     let win = focused(app);
     let in_project = win.as_ref().is_some_and(|w| w.label() != LAUNCHER);
     match id {
@@ -399,7 +405,8 @@ fn open_in_browser(w: &WebviewWindow) {
 }
 
 /// The platform's standard menu, plus File › New Project…, Projects and
-/// Open Target…, Settings…, the update items, and the Plonix screens in View.
+/// Open Target…, Settings…, Install Command Line Tool… (macOS), the update
+/// items, and the Plonix screens in View.
 fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let menu = Menu::default(app)?;
     let new_project = MenuItem::with_id(app, "new-project", "New Project…", true, Some("CmdOrCtrl+N"))?;
@@ -412,6 +419,12 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     if cfg!(target_os = "macos")
         && let Some(MenuItemKind::Submenu(app_menu)) = menu.items()?.into_iter().next()
     {
+        #[cfg(unix)]
+        {
+            let install = MenuItem::with_id(app, cli_tool::INSTALL_ID, "Install Command Line Tool…", true, None::<&str>)?;
+            let uninstall = MenuItem::with_id(app, cli_tool::UNINSTALL_ID, "Uninstall Command Line Tool…", true, None::<&str>)?;
+            app_menu.insert_items(&[&PredefinedMenuItem::separator(app)?, &install, &uninstall], 1)?;
+        }
         app_menu.insert_items(&[&PredefinedMenuItem::separator(app)?, &settings], 1)?;
     } else {
         file.append_items(&[&PredefinedMenuItem::separator(app)?, &settings])?;

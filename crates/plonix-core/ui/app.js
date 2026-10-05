@@ -83,6 +83,7 @@ class ApiError extends Error {
     this.status = status;
     this.code = code;
     this.problems = data && data.problems;
+    this.data = data;
   }
 }
 
@@ -522,6 +523,8 @@ function openTarget() {
     m.err.textContent = '';
     const r = await launchTarget(target);
     btn.disabled = false;
+    // launchTarget may have replaced this dialog with one of its own.
+    if (!m.el.isConnected) return;
     if (r.ok) closeModal();
     else m.err.textContent = r.message;
   };
@@ -545,10 +548,139 @@ async function launchTarget(target) {
     toast(`Opened ${r.url} in ${r.browser}. Browse the site; requests appear in Traffic.`, 'ok');
     await loadScope();
     if (S.view !== 'traffic') go('traffic');
+    if (r.needs_trust) trustCertificate(r.browser, r.can_trust);
     return { ok: true };
   } catch (e) {
+    if (e.code === 'no_browser' && e.data && e.data.can_install) {
+      getPlonixBrowser(target);
+      return { ok: false, message: '' };
+    }
     return { ok: false, message: e.message };
   }
+}
+
+const megabytes = (n) => (n / 1048576).toFixed(0);
+
+/** No browser to launch: offers the Plonix browser (Chromium, downloaded once), then opens the target in it. */
+function getPlonixBrowser(target) {
+  const fill = h('div', { class: 'pbar-fill' });
+  const bar = h('div', { class: 'pbar', hidden: true }, fill);
+  const line = h('div', { class: 'muted fine' });
+  const btn = h('button', { class: 'btn primary', text: 'Download', onclick: () => start() });
+  const m = modal(
+    'Get the Plonix browser',
+    [
+      h('p', { class: 'mnote', text: 'No Chrome, Brave, Edge or Firefox was found on this computer. Plonix can download its own browser: Chromium, about 150 MB, once.' }),
+      h('p', {
+        class: 'muted mnote',
+        text: 'It is kept with your Plonix data, opens with a profile of its own and trusts the Plonix certificate, so HTTPS sites work right away. Your everyday browser is not touched.',
+      }),
+      bar,
+      line,
+    ],
+    [h('button', { class: 'btn', text: 'Close', onclick: closeModal }), btn],
+  );
+  const stages = { looking: 'Finding the current Chromium build…', unpacking: 'Unpacking…', verifying: 'Checking that it starts…' };
+  const show = (p) => {
+    bar.hidden = false;
+    const pct = p.total ? Math.min(100, (p.received * 100) / p.total) : p.stage === 'done' ? 100 : 0;
+    fill.style.width = pct + '%';
+    bar.classList.toggle('busy', !['downloading', 'done'].includes(p.stage));
+    line.textContent =
+      p.stage === 'downloading'
+        ? `Downloading Chromium ${p.version} · ${megabytes(p.received)}${p.total ? ' of ' + megabytes(p.total) : ''} MB`
+        : stages[p.stage] || '';
+  };
+  const follow = async () => {
+    while (m.el.isConnected) {
+      let st;
+      try {
+        st = await api('/api/browser');
+      } catch (e) {
+        m.err.textContent = e.message;
+        btn.disabled = false;
+        return;
+      }
+      const p = st.install || {};
+      if (p.stage === 'failed') {
+        bar.hidden = true;
+        line.textContent = '';
+        m.err.textContent = 'Could not get the Plonix browser: ' + (p.error || 'unknown error');
+        btn.textContent = 'Try again';
+        btn.disabled = false;
+        return;
+      }
+      if (p.stage === 'done') {
+        show(p);
+        line.textContent = 'Ready. Opening ' + target + '…';
+        const r = await launchTarget(target);
+        if (!m.el.isConnected) return;
+        if (r.ok) closeModal();
+        else m.err.textContent = r.message;
+        return;
+      }
+      show(p);
+      await new Promise((ok) => setTimeout(ok, 400));
+    }
+  };
+  const start = async () => {
+    btn.disabled = true;
+    m.err.textContent = '';
+    try {
+      await api('/api/browser/install', { method: 'POST' });
+    } catch (e) {
+      btn.disabled = false;
+      m.err.textContent = e.message;
+      return;
+    }
+    follow();
+  };
+  // A download started earlier keeps going in the background; pick it up.
+  api('/api/browser')
+    .then((st) => {
+      if (st.install && ['looking', 'downloading', 'unpacking', 'verifying'].includes(st.install.stage)) {
+        btn.disabled = true;
+        follow();
+      }
+    })
+    .catch(() => {});
+}
+
+/** Firefox checks the certificates the system trusts: offers to trust the Plonix CA, once. */
+function trustCertificate(browser, canTrust) {
+  if (!canTrust) {
+    toast(`${browser} needs the Plonix certificate for HTTPS: import ca.pem from your Plonix folder in its certificate settings (plonix ca shows where).`, 'err');
+    return;
+  }
+  const btn = h('button', {
+    class: 'btn primary',
+    text: 'Trust certificate',
+    onclick: async () => {
+      btn.disabled = true;
+      btn.textContent = 'Waiting for macOS…';
+      m.err.textContent = '';
+      try {
+        await api('/api/ca/trust', { method: 'POST' });
+        closeModal();
+        toast(`Certificate trusted. Reload the page in ${browser}; HTTPS now goes through Plonix.`, 'ok');
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = 'Try again';
+        m.err.textContent = e.message;
+      }
+    },
+  });
+  const m = modal(
+    'Trust the Plonix certificate',
+    [
+      h('p', { class: 'mnote', text: `${browser} checks the certificates your Mac trusts, so HTTPS sites show a warning until the Plonix certificate is trusted.` }),
+      h('p', {
+        class: 'muted mnote',
+        text: 'Plonix adds it to your login keychain; macOS asks for your password or Touch ID. The certificate was made on this Mac and its key never leaves it. Remove it any time in Keychain Access ("Plonix CA").',
+      }),
+    ],
+    [h('button', { class: 'btn', text: 'Not now', onclick: closeModal }), btn],
+  );
 }
 
 function go(view, force) {

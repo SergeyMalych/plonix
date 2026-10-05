@@ -627,6 +627,8 @@ async fn agent_token_is_read_only() {
             ("/api/findings", serde_json::json!({ "title": "x", "severity": "low" })),
             ("/api/ui/launch", serde_json::json!({})),
             ("/api/browser/open", serde_json::json!({ "target": "example.com" })),
+            ("/api/browser/install", serde_json::json!({})),
+            ("/api/ca/trust", serde_json::json!({})),
             ("/api/shutdown", serde_json::json!({})),
         ];
         for (path, body) in refused {
@@ -643,7 +645,7 @@ async fn agent_token_is_read_only() {
         assert_eq!(a["mode"], "read-only");
         let c = &a["clients"][0];
         assert_eq!(c["name"], "test-agent");
-        assert_eq!(c["refused"], 8);
+        assert_eq!(c["refused"], 10);
         let (_, a) = get("/api/agents", &agent);
         assert!(a["clients"].is_null() && a["capabilities"].is_array());
     })
@@ -840,6 +842,7 @@ async fn api_opens_the_capture_browser() {
     assert_eq!(opened.0, 200, "{}", opened.1);
     assert_eq!(opened.1["url"], "https://shop.test/login");
     assert_eq!(opened.1["browser"], "fake-chrome");
+    assert_eq!(opened.1["needs_trust"], false, "Chromium trusts the CA by its key pin");
     assert_eq!(r.engine.rules().decide("app.shop.test"), Decision::Accepted);
 
     let mut args = String::new();

@@ -65,6 +65,15 @@ jobs:
         with:
           node-version: 22
 
+      # Plonix.app carries the plonix command (Install Command Line Tool…) as a
+      # Tauri sidecar named after the target it is built for.
+      - name: Build the plonix command for the app
+        run: |
+          cargo build --release --locked -p plonix
+          host=$(rustc -vV | sed -n 's/^host: //p')
+          mkdir -p crates/plonix-app/binaries
+          cp target/release/plonix "crates/plonix-app/binaries/plonix-cli-$host"
+
       - name: Build Plonix.app (unsigned)
         if: env.CAN_SIGN != 'true'
         working-directory: crates/plonix-app
@@ -74,6 +83,7 @@ jobs:
         run: |
           app=target/release/bundle/macos/Plonix.app
           test -x "$app/Contents/MacOS/Plonix"
+          file "$app/Contents/MacOS/plonix-cli" | grep -q Mach-O
           plutil -p "$app/Contents/Info.plist" | grep -E 'CFBundleName|CFBundleIdentifier|CFBundleShortVersionString'
           codesign --verify --verbose "$app" || true
           ditto -c -k --keepParent "$app" Plonix-macOS.zip
@@ -123,6 +133,7 @@ jobs:
         run: |
           app=target/release/bundle/macos/Plonix.app
           test -x "$app/Contents/MacOS/Plonix"
+          file "$app/Contents/MacOS/plonix-cli" | grep -q Mach-O
           plutil -p "$app/Contents/Info.plist" | grep -E 'CFBundleName|CFBundleIdentifier|CFBundleShortVersionString'
           scripts/macos/sign-and-notarize.sh --verify --zip Plonix-macOS.zip "$app"
       - name: Remove the API key

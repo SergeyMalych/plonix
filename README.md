@@ -140,6 +140,9 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - **Plonix.app** is a Mac app: double-click it and the Start screen opens. Pick or create a project and it opens in a window of its own, with capture running. Open more projects and each gets its own window. Closing a project's window closes its session. No terminal needed.
 - With Settings › Interface › **Open projects in: My web browser**, projects open in your default browser instead; View › Open in Browser (⇧⌘B) does it for one window.
 - **Open target** (⌘O, or the button at the top of the sidebar) opens the site you are testing in the capture browser: a separate browser with an isolated profile that routes through Plonix and trusts its certificate. The domain and its subdomains go into scope.
+- **Works on every Mac.** With no Chrome, Brave, Edge or Firefox installed (a Safari-only Mac), Open target offers **Get the Plonix browser**: one click downloads Chromium (Google's Chrome for Testing build, about 150 MB, once) into `~/.plonix/chromium`, with a progress bar and a retry if the download fails, and then opens the target in it. Nothing is bundled with the app, so Plonix.app stays small.
+- **Firefox users** get a one-click **Trust the Plonix certificate** right after Open target, shown only while the certificate is not trusted yet. It adds the certificate to your login keychain (macOS asks for your password or Touch ID); the capture profile makes Firefox follow the keychain, so HTTPS works after a reload.
+- **Plonix › Install Command Line Tool…** puts the `plonix` command on your PATH (`/usr/local/bin/plonix`, linked to the tool inside Plonix.app, so it updates with the app). macOS asks for an administrator password only when that folder needs it. Uninstall Command Line Tool… removes it again. See [docs/setup.md](docs/setup.md) for all three.
 - Native menu bar and shortcuts: ⌘N new project, ⇧⌘P the Start screen, ⌘, Settings, ⌘1 to ⌘6 switch between Traffic, Bench, Scope, Map, Findings and Agents, ⌃⌘S shows or hides the sidebar. Light and dark follow the system.
 - `plonix` commands in a terminal talk to the same sessions while the app is open (`-p` picks the project), and projects started from a terminal show up on the Start screen. Quitting the app closes the projects it opened.
 - The same window also runs in any browser with `plonix ui`, served by the engine itself.
@@ -205,6 +208,8 @@ open ../../target/release/bundle/macos/Plonix.app
 
 Drag `Plonix.app` to Applications to keep it. While developing, `cargo run -p plonix-app` opens the same window without bundling.
 
+Release and CI builds carry the `plonix` command inside the app for **Install Command Line Tool…**: they build it first and put it in `crates/plonix-app/binaries/plonix-cli-<target>` (see `.github/workflows`). A local build without it gets a stand-in, and the menu item then points you to `cargo install --path crates/plonix-cli`. To include it yourself: `cargo build --release -p plonix && mkdir -p crates/plonix-app/binaries && cp target/release/plonix crates/plonix-app/binaries/plonix-cli-$(rustc -vV | sed -n 's/^host: //p')` before `cargo tauri build`.
+
 Each CI run on `main` and on pull requests also builds `Plonix.app` and attaches it as a download (`Plonix-macOS`). Builds from `main` are signed and notarized once the project's signing is set up ([docs/releasing.md](docs/releasing.md)); until then, and for pull requests, they are unsigned: the first time, right-click the app and choose **Open**, or run `xattr -dr com.apple.quarantine Plonix.app`.
 
 ### The first 60 seconds from a terminal
@@ -227,7 +232,7 @@ Plonix · https://example.com/
 Capturing. Browse the site; requests appear below. Ctrl-C stops watching, capture keeps running.
 ```
 
-The browser is Chrome, Brave, Edge or Chromium with its own isolated profile. It routes through the proxy and trusts the Plonix certificate on its own, so HTTPS works with nothing to install. Firefox is used when no Chromium-based browser is found. Set `PLONIX_BROWSER` to pick a specific browser.
+The browser is Chrome, Brave, Edge or Chromium with its own isolated profile. It routes through the proxy and trusts the Plonix certificate on its own, so HTTPS works with nothing to install. With none of those installed, `plonix open` offers to download the Plonix browser (Chromium, about 150 MB, once; or run `plonix browser install`). Firefox is used when no Chromium-based browser is available; it needs the certificate trusted once (`plonix ca trust`). Set `PLONIX_BROWSER` to pick a specific browser, and `plonix browser` shows which one Plonix uses.
 
 To capture HTTPS from other apps too (Safari, curl, your everyday browser), trust the certificate once with `plonix ca trust`. It is added to your login keychain, and macOS asks you to confirm.
 
@@ -314,7 +319,10 @@ The API listens on port 8090 when it is free; `plonix status` shows the actual a
 | --- | --- | --- |
 | GET | `/` | The Plonix window (static page; signs in with a one-time link) |
 | POST | `/api/ui/launch` | Create a one-time link that opens the window signed in |
-| POST | `/api/browser/open` | Open a target in the capture browser (`{"target": "example.com"}`), accepting it into scope |
+| POST | `/api/browser/open` | Open a target in the capture browser (`{"target": "example.com"}`), accepting it into scope. Answers `no_browser` (with `can_install`) when there is none, and `needs_trust` when the browser needs the certificate trusted |
+| GET | `/api/browser` | The browser Open target uses, the Plonix browser and its download progress, whether the certificate is trusted |
+| POST | `/api/browser/install` | Start downloading the Plonix browser (Chromium); follow it with `GET /api/browser` |
+| POST | `/api/ca/trust` | Trust the Plonix certificate in the login keychain (macOS asks the user to confirm) |
 | GET | `/api/status` | Engine, project and CA info, counts |
 | GET | `/api/traffic?q=&limit=&offset=` | Search captured traffic |
 | GET | `/api/traffic/facets` | What recent traffic contains (methods, status classes, content kinds, in-scope hosts and paths), for suggested filters |
@@ -395,6 +403,7 @@ docs/             detection rules, agents and MCP, extension design
 - [x] Token-authenticated, loopback-only local API
 - [x] `plonix` CLI: search, inspect, watch, replay and manage scope from the terminal
 - [x] `plonix open <target>`: one command from nothing to captured traffic, in a pre-configured browser
+- [x] Capture on every Mac: the Plonix browser download when no Chromium-based browser is installed, one-click certificate trust for Firefox, and the `plonix` command installed from the app
 - [x] Technology detection from community rule packs (`plonix tech`, `plonix rules`)
 - [x] The Market: a signed catalog of skills, rule packs, filter packs, bundles and extensions (`plonix market`)
 - [x] Agent skills, offered to MCP clients as prompts (`plonix skills`)

@@ -481,6 +481,8 @@ mod tests {
             ("POST", "/api/shutdown"),
             ("POST", "/api/ui/launch"),
             ("POST", "/api/browser/open"),
+            ("POST", "/api/browser/install"),
+            ("POST", "/api/ca/trust"),
             ("GET", "/api/rules/../send"),
             ("GET", "/api/traffic/"),
             ("GET", "/api/traffic/1/insights/x"),

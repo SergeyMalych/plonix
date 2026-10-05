@@ -66,6 +66,19 @@ jobs:
             printf '%s\n' "$S_APPLE_API_PRIVATE_KEY" > "$key"; chmod 600 "$key"
             echo "APPLE_API_KEY_PATH=$key" >> "$GITHUB_ENV"
           fi
+      # Plonix.app carries the plonix command (Install Command Line Tool…) as a
+      # Tauri sidecar: one binary per architecture for the two cargo builds,
+      # and the universal one the bundle uses.
+      - name: Build the plonix command for the app
+        run: |
+          bin=crates/plonix-app/binaries
+          mkdir -p "$bin"
+          for t in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --locked -p plonix --target "$t"
+            cp "target/$t/release/plonix" "$bin/plonix-cli-$t"
+          done
+          lipo -create -output "$bin/plonix-cli-universal-apple-darwin" "$bin/plonix-cli-aarch64-apple-darwin" "$bin/plonix-cli-x86_64-apple-darwin"
+          lipo -info "$bin/plonix-cli-universal-apple-darwin"
       - name: Build Plonix.app
         working-directory: crates/plonix-app
         env:
