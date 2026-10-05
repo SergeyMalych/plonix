@@ -4,6 +4,9 @@ What changed in each Plonix release. The newest release is at the top.
 
 ## [Unreleased]
 
+### Added
+- secret-sweep in the Market: finds API keys, tokens and passwords for hundreds of services in captured traffic and shows each one in the Lens. It runs trufflehog, which you install yourself (`brew install trufflehog`), on your Mac only.
+
 ## [0.1.0] - 2026-10-05
 
 The first public release of Plonix for Mac.

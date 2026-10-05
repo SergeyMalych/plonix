@@ -808,6 +808,8 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .mcap span { color: var(--ok); font-weight: 700; }
 .mcap.warn span { color: var(--warn); }
 .mcap.off span { color: var(--fg-3); }
+.mneeds { display: flex; gap: 8px; align-items: center; margin: 6px 0 2px 20px; }
+.mneeds code { font-size: 12px; padding: 3px 8px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--line-2); user-select: all; }
 .mcap label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
 .extstate { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line-2); border-radius: 9px; padding: 10px 12px; }
 .extstate.stopped { background: var(--crit-soft); border-color: transparent; }

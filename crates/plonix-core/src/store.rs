@@ -50,6 +50,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 4, what: "requests and responses edited in Intercept, with their originals", run: v4_intercept_edits },
     Migration { version: 5, what: "match-and-replace rules, and which rules changed an exchange", run: v5_replace_rules },
     Migration { version: 6, what: "client certificates for upstream servers, and which one an exchange used", run: v6_client_certs },
+    Migration { version: 7, what: "what program extensions found in each exchange", run: v7_extension_hits },
 ];
 
 /// The schema version this build reads and writes.
@@ -155,6 +156,21 @@ fn v6_client_certs(tx: &rusqlite::Transaction) -> Result<()> {
     if !has_column(tx, "exchanges", "client_cert")? {
         tx.execute_batch("ALTER TABLE exchanges ADD COLUMN client_cert TEXT")?;
     }
+    Ok(())
+}
+
+/// What a program extension found in each exchange it scanned (see
+/// program.rs), as JSON. A row with an empty list means scanned, nothing found.
+fn v7_extension_hits(tx: &rusqlite::Transaction) -> Result<()> {
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS extension_hits (
+            exchange_id INTEGER NOT NULL,
+            extension TEXT NOT NULL,
+            version TEXT NOT NULL,
+            hits TEXT NOT NULL,
+            PRIMARY KEY (exchange_id, extension)
+        );",
+    )?;
     Ok(())
 }
 
@@ -752,6 +768,7 @@ impl Store {
         tx.execute("DELETE FROM exchanges_fts WHERE rowid IN (SELECT id FROM doomed)", [])?;
         tx.execute("DELETE FROM evidence WHERE exchange_id IN (SELECT id FROM doomed)", [])?;
         tx.execute("DELETE FROM ws_messages WHERE exchange_id IN (SELECT id FROM doomed)", [])?;
+        tx.execute("DELETE FROM extension_hits WHERE exchange_id IN (SELECT id FROM doomed)", [])?;
         tx.execute("DELETE FROM doomed", [])?;
         tx.commit()?;
         Ok(n as i64)
@@ -763,6 +780,41 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch("INSERT INTO exchanges_fts(exchanges_fts) VALUES('optimize'); VACUUM; PRAGMA wal_checkpoint(TRUNCATE);")?;
         Ok(())
+    }
+
+    /// Records what a program extension found in each exchange it scanned.
+    pub fn put_extension_hits(&self, extension: &str, version: &str, hits: &[(i64, String)]) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        for (id, json) in hits {
+            tx.execute(
+                "INSERT OR REPLACE INTO extension_hits (exchange_id, extension, version, hits) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![id, extension, version, json],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// What program extensions found in one exchange: (extension, version, hits JSON).
+    pub fn extension_hits(&self, exchange_id: i64) -> Result<Vec<(String, String, String)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT extension, version, hits FROM extension_hits WHERE exchange_id = ?1 ORDER BY extension")?;
+        let rows = stmt.query_map([exchange_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        rows.collect::<Result<_, _>>().map_err(Into::into)
+    }
+
+    /// Which of these exchanges this version of an extension already scanned.
+    pub fn extension_scanned(&self, extension: &str, version: &str, ids: &[i64]) -> Result<BTreeSet<i64>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT 1 FROM extension_hits WHERE exchange_id = ?1 AND extension = ?2 AND version = ?3")?;
+        let mut out = BTreeSet::new();
+        for id in ids {
+            if stmt.exists(rusqlite::params![id, extension, version])? {
+                out.insert(*id);
+            }
+        }
+        Ok(out)
     }
 
     /// Forgets derived scope state so it can be rebuilt by a rescan.

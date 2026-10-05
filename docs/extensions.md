@@ -53,6 +53,23 @@ What happens once it is on:
 
 An example lives in [`examples/extensions/security-headers`](../examples/extensions/security-headers): a small Rust analyzer that notes HTML pages missing common security headers and cookies without `Secure` or `HttpOnly`, and proposes one finding per host. Its packed form is `store/extensions/security-headers.plonixext`.
 
+### Program extensions
+
+A program extension has no code of its own. Its manifest has `"runtime": "program"` and names one program Plonix knows how to drive, which you install yourself. Plonix runs it on your Mac over copies of captured requests and responses, written to a private temporary folder that is deleted when the program finishes, and reads its output back onto the exchanges they came from.
+
+```json
+{ "plonix_extension": 1, "name": "secret-sweep", "runtime": "program", "program": "trufflehog",
+  "capabilities": ["read-traffic", "passive-analysis", "run-program"], "...": "..." }
+```
+
+- **Programs are a closed list** in `crates/plonix-core/src/program.rs`: a manifest names one by id, never a path, command or flags. Today that list is `trufflehog` (`brew install trufflehog`). Plonix looks for it on `PATH` and in the usual install folders, since apps started from the Dock do not get the shell's `PATH`.
+- **Running it needs `run-program`**, a sensitive capability you say yes to at install. A program extension can also have `read-traffic`, `read-out-of-scope` and `passive-analysis`, and nothing else. Its package carries no files.
+- **It stays local.** Plonix passes `--no-verification --no-update`, so found keys are not checked with the services they belong to and the program does not update itself.
+- **What it finds** is stored with the project, per exchange, and shown in the Lens under **Spotted** as exposed secrets labelled with the extension's name. A secret Plonix already spotted itself is shown once. New traffic is checked as it arrives, in batches; **Run on captured traffic** checks the rest. Each exchange is checked once per version of the extension.
+- **When the program is missing**, nothing is switched off: the extension's Market page says how to install it, and `plonix extensions run` says so too.
+
+The Market's `secret-sweep` is one: it finds API keys, tokens and passwords for hundreds of services.
+
 ### Package format
 
 A package is one JSON file, `<name>.plonixext`, holding the manifest and the module, so one SHA-256 pins both:
@@ -187,8 +204,9 @@ The capability list is **closed**: the manifest parser rejects anything not on i
 | `passive-analysis` | Return tags and notes for exchanges it was given | at install |
 | `propose-findings` | Propose findings, stored as unconfirmed and attributed to the extension | at install |
 | `scoped-requests` | Ask the engine to send requests. **Scope-enforced, rate-limited and recorded**, exactly like agent requests | explicit yes |
+| `run-program` | For a [program extension](#program-extensions) only: run the program it names, installed by you, over copies of captured traffic | explicit yes |
 
-At install time the user sees the capabilities in plain words (`Capability::describe`). The two **sensitive** ones (`read-out-of-scope`, `scoped-requests`) each need a separate, explicit yes. An update that asks for **new** capabilities isn't applied silently: it waits for the user to approve the difference.
+At install time the user sees the capabilities in plain words (`Capability::describe`). The **sensitive** ones (`read-out-of-scope`, `scoped-requests`, `run-program`) each need a separate, explicit yes. An update that asks for **new** capabilities isn't applied silently: it waits for the user to approve the difference.
 
 ## UI contributions: tabs, panels, tweaks and filters
 

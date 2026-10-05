@@ -914,7 +914,13 @@ async fn insights(State(s): State<AppState>, caller: MaybeCaller, Path(id): Path
         engine.store.get_exchange(id).map(|ex| {
             ex.map(|ex| {
                 let mut list = crate::insight::analyze(&ex, crate::insight::detectors());
-                list.extend(engine.extension_insights(&ex));
+                for i in engine.extension_insights(&ex) {
+                    // A secret Plonix already spotted is shown once.
+                    let seen = i.category == crate::insight::Category::Secret && list.iter().any(|b| b.category == i.category && b.value == i.value);
+                    if !seen {
+                        list.push(i);
+                    }
+                }
                 list
             })
         })
@@ -1190,7 +1196,10 @@ async fn market_detail(State(s): State<AppState>, Path(name): Path<String>) -> R
         if l.package.kind == registry::Kind::Extension && l.local {
             let info = m.extensions.info(&name);
             let caps = info.as_ref().map(|i| market::capability_infos(&i.requested)).unwrap_or_default();
-            detail = json!({ "extension": { "runtime": "wasm", "capabilities": caps, "installable": true, "sandbox": market::SANDBOX_NOTE, "installed": info } });
+            let program = info.as_ref().and_then(|i| i.program.clone());
+            let note = if program.is_some() { market::PROGRAM_NOTE } else { market::SANDBOX_NOTE };
+            let runtime = if program.is_some() { "program" } else { "wasm" };
+            detail = json!({ "extension": { "runtime": runtime, "capabilities": caps, "installable": true, "sandbox": note, "program": program, "installed": info } });
         }
         if l.package.kind != registry::Kind::Bundle && !l.local {
             let bytes = cat.fetch(&l.package)?;
@@ -1207,7 +1216,8 @@ async fn market_detail(State(s): State<AppState>, Path(name): Path<String>) -> R
                         "capabilities": market::capability_infos(&mf.capabilities),
                         "installable": runnable.is_ok(),
                         "why_not": runnable.err(),
-                        "sandbox": market::SANDBOX_NOTE,
+                        "sandbox": market::runtime_note(&mf),
+                        "program": crate::extension::ProgramStatus::of(&mf),
                         "installed": m.extensions.info(&name),
                     } })
                 }

@@ -8,10 +8,15 @@
 //! the same way as rule packs and re-verified every time they are loaded.
 //!
 //! The capability list is deliberately missing things. There is no
-//! capability for network access, file system access, process spawning,
-//! changing scope, or sending requests to hosts outside accepted scope, and
-//! the manifest parser rejects anything not on the list. A capability that
-//! does not exist cannot be granted by mistake.
+//! capability for network access, file system access, changing scope, or
+//! sending requests to hosts outside accepted scope, and the manifest parser
+//! rejects anything not on the list. A capability that does not exist cannot
+//! be granted by mistake.
+//!
+//! A `program` extension has no code of its own: it names one of the
+//! scanner programs Plonix knows how to drive ([`crate::program`]), which
+//! the user installs separately. Running it needs the sensitive
+//! `run-program` capability, so the user says yes to that at install.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -41,6 +46,8 @@ const MAX_INSTALLED: usize = 100;
 /// What the runtime in this version can do. A manifest asking for anything
 /// else is listed but not installable yet.
 pub const RUNTIME_CAPABILITIES: &[Capability] = &[Capability::ReadTraffic, Capability::ReadOutOfScope, Capability::PassiveAnalysis, Capability::ProposeFindings];
+/// What a `program` extension may ask for.
+pub const PROGRAM_CAPABILITIES: &[Capability] = &[Capability::ReadTraffic, Capability::ReadOutOfScope, Capability::PassiveAnalysis, Capability::RunProgram];
 
 /// What an extension may do. Every capability is mediated by the engine:
 /// the extension never gets a raw socket, file handle or database handle.
@@ -73,6 +80,9 @@ pub enum Capability {
     /// to every request exactly as it does for the CLI and agents, so this
     /// can only ever reach accepted hosts, and each request is recorded.
     ScopedRequests,
+    /// Run the program a `program` extension names, installed by the user,
+    /// over copies of captured requests and responses, on this computer.
+    RunProgram,
 }
 
 impl Capability {
@@ -88,13 +98,14 @@ impl Capability {
             Capability::PassiveAnalysis => "annotate traffic it was given",
             Capability::ProposeFindings => "propose findings (unconfirmed until you confirm)",
             Capability::ScopedRequests => "send requests to accepted hosts only (scope-enforced, recorded)",
+            Capability::RunProgram => "run a program you installed on this Mac over copies of captured requests and responses",
         }
     }
 
     /// Capabilities that need an explicit "yes" at install time rather than
     /// being granted with the rest.
     pub fn sensitive(self) -> bool {
-        matches!(self, Capability::ReadOutOfScope | Capability::ScopedRequests)
+        matches!(self, Capability::ReadOutOfScope | Capability::ScopedRequests | Capability::RunProgram)
     }
 }
 
@@ -106,6 +117,8 @@ pub enum Runtime {
     Declarative,
     /// A WebAssembly component run in the engine's sandbox (planned).
     Wasm,
+    /// Runs a scanner program the user installed (see [`crate::program`]).
+    Program,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,6 +141,9 @@ pub struct Manifest {
     /// Filter pack files inside the package.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub filter_packs: Vec<String>,
+    /// For `program`: which program, by its id in [`crate::program::PROGRAMS`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<String>,
     pub capabilities: Vec<Capability>,
 }
 
@@ -151,6 +167,12 @@ fn check_manifest(m: Manifest) -> Result<Manifest, String> {
     for f in m.entry.iter().chain(&m.rule_packs).chain(&m.filter_packs) {
         check_package_path(f)?;
     }
+    if m.runtime != Runtime::Program && m.program.is_some() {
+        return Err("program: only a program extension names a program".into());
+    }
+    if m.runtime != Runtime::Program && m.capabilities.contains(&Capability::RunProgram) {
+        return Err("capabilities: run-program is for program extensions".into());
+    }
     match m.runtime {
         Runtime::Declarative => {
             if m.entry.is_some() {
@@ -163,6 +185,19 @@ fn check_manifest(m: Manifest) -> Result<Manifest, String> {
         Runtime::Wasm => {
             if !m.entry.as_deref().is_some_and(|e| e.ends_with(".wasm")) {
                 return Err("entry: a wasm extension needs an entry ending in .wasm".into());
+            }
+        }
+        Runtime::Program => {
+            let Some(p) = m.program.as_deref() else { return Err("program: a program extension names the program it runs".into()) };
+            if crate::program::get(p).is_none() {
+                let known: Vec<&str> = crate::program::PROGRAMS.iter().map(|p| p.id).collect();
+                return Err(format!("program: `{}` is not one Plonix can run ({})", clean(p, 40), known.join(", ")));
+            }
+            if m.entry.is_some() || !m.rule_packs.is_empty() || !m.filter_packs.is_empty() {
+                return Err("a program extension has no files of its own".into());
+            }
+            if !m.capabilities.contains(&Capability::RunProgram) {
+                return Err("capabilities: a program extension asks for run-program".into());
             }
         }
     }
@@ -202,6 +237,16 @@ impl Capability {
 /// Whether this version of Plonix can run the extension: a WebAssembly
 /// analyzer that reads traffic and asks only for what the runtime has.
 pub fn installable(m: &Manifest) -> Result<(), String> {
+    if m.runtime == Runtime::Program {
+        let missing: Vec<String> = m.capabilities.iter().filter(|c| !PROGRAM_CAPABILITIES.contains(c)).map(|c| c.id()).collect();
+        if !missing.is_empty() {
+            return Err(format!("{} asks for {}, which a program extension cannot have", m.name, missing.join(", ")));
+        }
+        if !m.capabilities.contains(&Capability::ReadTraffic) || !m.capabilities.contains(&Capability::PassiveAnalysis) {
+            return Err(format!("{} must ask for read-traffic and passive-analysis", m.name));
+        }
+        return Ok(());
+    }
     if m.runtime == Runtime::Declarative {
         return Err(format!(
             "{} is a declarative extension; install its rule and filter packs with `plonix rules add` and `plonix filters add` for now",
@@ -231,7 +276,9 @@ pub fn installable(m: &Manifest) -> Result<(), String> {
 struct PackageDoc {
     plonix_extension_package: u32,
     manifest: Manifest,
-    /// Files by their path in the package, in Base64: exactly the entry module.
+    /// Files by their path in the package, in Base64: exactly the entry
+    /// module, or none for a program extension.
+    #[serde(default)]
     files: BTreeMap<String, String>,
 }
 
@@ -263,6 +310,12 @@ pub fn parse_package(bytes: &[u8]) -> Result<Package, String> {
     }
     let manifest = check_manifest(doc.manifest)?;
     installable(&manifest)?;
+    if manifest.runtime == Runtime::Program {
+        if !doc.files.is_empty() {
+            return Err("files: a program extension carries no files".into());
+        }
+        return Ok(Package { manifest, module: vec![], sha256: sha256_hex(bytes) });
+    }
     let entry = manifest.entry.clone().unwrap_or_default();
     let Some(encoded) = doc.files.get(&entry).filter(|_| doc.files.len() == 1) else {
         return Err(format!("files: the package must hold exactly its entry, {}", clean(&entry, 100)));
@@ -347,6 +400,26 @@ pub struct Info {
     pub state: ExtState,
     /// The file on disk is still the one that was verified.
     pub intact: bool,
+    /// For a program extension: the program and whether it is installed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub program: Option<ProgramStatus>,
+}
+
+/// The program a program extension runs, and whether this computer has it.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProgramStatus {
+    pub id: String,
+    pub found: bool,
+    /// How to install it.
+    pub install: String,
+    pub homepage: String,
+}
+
+impl ProgramStatus {
+    pub fn of(m: &Manifest) -> Option<Self> {
+        let p = crate::program::get(m.program.as_deref()?)?;
+        Some(Self { id: p.id.into(), found: crate::program::locate(p.id).is_some(), install: p.install.into(), homepage: p.homepage.into() })
+    }
 }
 
 /// An enabled extension, verified and compiled, ready to run.
@@ -355,7 +428,15 @@ pub struct Loaded {
     pub name: String,
     pub version: String,
     pub granted: Vec<Capability>,
-    pub compiled: sandbox::Compiled,
+    pub runner: Runner,
+}
+
+/// How a loaded extension runs.
+#[derive(Clone)]
+pub enum Runner {
+    Wasm(sandbox::Compiled),
+    /// The id of the program, in [`crate::program::PROGRAMS`].
+    Program(String),
 }
 
 #[derive(Default, Clone)]
@@ -489,6 +570,7 @@ impl ExtensionLibrary {
                     description: manifest.as_ref().map(|m| m.description.clone()).unwrap_or_else(|| "Not loaded: the file changed since it was installed.".into()),
                     author: manifest.as_ref().map(|m| m.author.clone()).unwrap_or_else(|| "unknown".into()),
                     homepage: manifest.as_ref().map(|m| m.homepage.clone()).unwrap_or_default(),
+                    program: manifest.as_ref().and_then(ProgramStatus::of),
                     requested: manifest.map(|m| m.capabilities).unwrap_or_default(),
                     state: state.extensions.get(&i.name).cloned().unwrap_or_default(),
                     source: i.entry.source.clone(),
@@ -514,8 +596,11 @@ impl ExtensionLibrary {
             let Some(st) = state.extensions.get(&v.name).filter(|s| s.enabled) else { continue };
             let loaded = parse_package(&v.bytes).and_then(|p| {
                 let granted: Vec<Capability> = p.manifest.capabilities.iter().copied().filter(|c| st.granted.contains(c)).collect();
-                let compiled = sandbox::compile(&p.module, &granted)?;
-                Ok(Loaded { name: v.name.clone(), version: p.manifest.version, granted, compiled })
+                let runner = match p.manifest.program {
+                    Some(program) => Runner::Program(program),
+                    None => Runner::Wasm(sandbox::compile(&p.module, &granted)?),
+                };
+                Ok(Loaded { name: v.name.clone(), version: p.manifest.version, granted, runner })
             });
             match loaded {
                 Ok(l) => out.push(l),
@@ -558,6 +643,25 @@ mod tests {
         assert!(parse_manifest(m.as_bytes()).is_err(), "UI needs code, so the sandbox");
         let m = manifest("declarative", r#""detection-rules","named-filters""#, r#","rule_packs":["rules/a.json"],"filter_packs":["filters/a.json"]"#);
         assert!(parse_manifest(m.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn program_extensions_name_a_known_program() {
+        let caps = r#""read-traffic","passive-analysis","run-program""#;
+        let m = parse_manifest(manifest("program", caps, r#","program":"trufflehog""#).as_bytes()).unwrap();
+        assert!(installable(&m).is_ok());
+        assert!(Capability::RunProgram.sensitive());
+        assert!(parse_manifest(manifest("program", caps, r#","program":"sh""#).as_bytes()).unwrap_err().contains("not one Plonix can run"));
+        assert!(parse_manifest(manifest("program", caps, "").as_bytes()).is_err(), "it must name one");
+        let no_run = manifest("program", r#""read-traffic","passive-analysis""#, r#","program":"trufflehog""#);
+        assert!(parse_manifest(no_run.as_bytes()).is_err(), "running it needs the capability");
+        let wasm = manifest("wasm", r#""read-traffic","run-program""#, r#","entry":"x.wasm""#);
+        assert!(parse_manifest(wasm.as_bytes()).is_err(), "wasm code cannot run programs");
+        let more = manifest("program", r#""read-traffic","passive-analysis","run-program","scoped-requests""#, r#","program":"trufflehog""#);
+        assert!(installable(&parse_manifest(more.as_bytes()).unwrap()).is_err());
+        let pkg = format!(r#"{{"plonix_extension_package":1,"manifest":{}}}"#, manifest("program", caps, r#","program":"trufflehog""#));
+        let p = parse_package(pkg.as_bytes()).unwrap();
+        assert!(p.module.is_empty());
     }
 
     #[test]

@@ -5630,6 +5630,15 @@ async function extensionConsent(p, action) {
   };
 }
 
+/** The program an extension runs: installed on this Mac, or how to install it. */
+function programNeeds(pr) {
+  if (pr.found) return h('div', { class: 'mcap' }, h('span', { text: '✓' }), `${pr.id} is installed on this Mac.`);
+  return [
+    h('div', { class: 'mcap warn' }, h('span', { text: '!' }), `${pr.id} is not installed on this Mac yet. Install it in Terminal, then come back:`),
+    h('div', { class: 'mneeds' }, h('code', { text: pr.install }), h('button', { class: 'btn sm', text: 'Copy', onclick: () => copyText(pr.install) })),
+  ];
+}
+
 /** An installed extension: on or off, why Plonix stopped it, and a run over captured traffic. */
 function extensionState(name) {
   const x = MK.ext[name];
@@ -5665,6 +5674,8 @@ function extensionState(name) {
         try {
           const r = await api('/api/extensions/' + encodeURIComponent(name) + '/run', { method: 'POST', body: {} });
           if (r.stopped) toast(`${name}: ${r.stopped}`, 'err');
+          else if (r.problem) toast(`${name}: ${r.problem}`, 'err');
+          else if (x.program) toast(`${name} checked ${r.exchanges} new request(s) and found ${r.notes} secret(s). They show in the Lens.`, 'ok');
           else toast(`${name} looked at ${r.exchanges} request(s): ${r.notes} note(s), ${r.proposed} new finding(s) to review`, 'ok');
         } catch (e) {
           toast(e.message, 'err');
@@ -5676,7 +5687,10 @@ function extensionState(name) {
       box,
       h('div', { class: 'row' }, h('b', { text: x.disabled_reason ? 'Stopped' : on ? 'On' : 'Off' }), toggle, run),
       x.disabled_reason ? h('p', { text: x.disabled_reason }) : null,
-      h('p', { class: 'muted', text: on ? 'Its notes show in the Lens, marked with its name. Findings it proposes stay open until you confirm them.' : 'It is installed but does not run.' }),
+      h('p', {
+        class: 'muted',
+        text: !on ? 'It is installed but does not run.' : x.program ? 'Secrets it finds show in the Lens as Spotted chips, marked with its name.' : 'Its notes show in the Lens, marked with its name. Findings it proposes stay open until you confirm them.',
+      }),
     );
   };
   draw();
@@ -5817,6 +5831,7 @@ async function showPackage(name) {
     const x = det.extension;
     const granted = x.installed ? x.installed.granted : null;
     if (x.installed) parts.unshift(sec('In this Plonix', extensionState(name)));
+    if (x.program) parts.push(sec('Needs', programNeeds(x.program)));
     parts.push(
       sec(
         granted ? 'Allowed to' : 'Would be allowed to',

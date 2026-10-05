@@ -44,7 +44,7 @@ enum MarketCmd {
     Install {
         #[arg(required = true)]
         names: Vec<String>,
-        /// For an extension: also grant a sensitive capability it asks for (read-out-of-scope); repeatable
+        /// For an extension: also grant a sensitive capability it asks for (read-out-of-scope, run-program); repeatable
         #[arg(long, value_name = "CAPABILITY")]
         grant: Vec<String>,
         /// For an extension update that asks for more than before: approve it
