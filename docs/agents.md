@@ -100,7 +100,7 @@ The Plonix window has an **Ask Claude** button on a request (the Lens), a findin
 - clips each request and response body, and estimates the total size against your limit;
 - warns, and makes you confirm, when the context is larger than your limit, so a huge payload is never sent silently.
 
-**Ask Claude** runs Claude Code on this Mac and shows the answer in the sheet as it is written. While it works, a line under the conversation says what Claude is doing (thinking, looking at traffic, writing the answer), how many tokens it has read and written, and how long it has taken. If Claude Code goes quiet, the sheet says so; after two minutes of silence, or five minutes in all, the run is stopped with a message saying why.
+**Ask Claude** runs Claude Code on this Mac and shows the answer in the sheet as it is written, formatted with headings, lists, tables and code blocks you can copy. While it works, a line under the conversation says what Claude is doing (thinking, looking at traffic, writing the answer), how many tokens it has read and written, and how long it has taken. If Claude Code goes quiet, the sheet says so; after two minutes of silence, or five minutes in all, the run is stopped with a message saying why.
 
 **Copy prompt** puts the prompt on your clipboard. **Open in Claude Code** writes the prompt to a private file under `$PLONIX_HOME/claude/` and opens Claude Code in a new Terminal window reading that file, so captured text never goes on a command line. If the Plonix MCP server is connected in that session, Claude Code can follow up with the read-only tools.
 

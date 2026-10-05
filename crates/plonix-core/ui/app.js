@@ -6393,6 +6393,125 @@ const fmtDur = (ms) => {
 };
 /** How much Claude has read and written so far, and for how long: "38k read · 120 written · 0:14". */
 const claudeStats = (p) => [p.tokens_in ? fmtTok(p.tokens_in) + ' tokens read' : null, p.tokens_out ? fmtTok(p.tokens_out) + ' written' : null, fmtDur(p.elapsed_ms)].filter(Boolean).join(' · ');
+/**
+ * Claude's Markdown answer as DOM nodes: headings, paragraphs, lists, quotes,
+ * tables, rules, fenced code (with Copy), and inline code, bold, italics and
+ * links. Built with text nodes only, never innerHTML, since answers quote
+ * captured traffic. An unclosed fence (mid-stream) runs to the end.
+ */
+function mdNodes(src) {
+  const lines = String(src).replace(/\r\n?/g, '\n').split('\n');
+  const out = [];
+  const isRule = (l) => /^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(l);
+  const isRow = (l) => /^\s*\|.*\|\s*$/.test(l);
+  const cells = (l) => l.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+  const listRe = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
+  const startsBlock = (l) => /^\s*(```|~~~|#{1,6}\s|>)/.test(l) || listRe.test(l) || isRule(l) || isRow(l);
+  let i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (!l.trim()) {
+      i++;
+      continue;
+    }
+    const fence = l.match(/^\s*(```|~~~)\s*([\w+-]*)/);
+    if (fence) {
+      const body = [];
+      for (i++; i < lines.length && !lines[i].trim().startsWith(fence[1]); i++) body.push(lines[i]);
+      i++;
+      const code = body.join('\n').replace(/\n+$/, '');
+      const copy = h('button', { class: 'mdcopy', text: 'Copy', title: 'Copy to the clipboard' });
+      copy.onclick = async () => {
+        await copyText(code);
+        copy.textContent = 'Copied';
+        setTimeout(() => (copy.textContent = 'Copy'), 1200);
+      };
+      out.push(h('div', { class: 'mdcode' }, copy, h('pre', null, h('code', { text: code }))));
+      continue;
+    }
+    const head = l.match(/^\s*(#{1,6})\s+(.*?)\s*#*\s*$/);
+    if (head) {
+      out.push(h('h' + Math.min(6, head[1].length + 2), { class: 'mdh' }, mdInline(head[2])));
+      i++;
+      continue;
+    }
+    if (isRule(l)) {
+      out.push(h('hr'));
+      i++;
+      continue;
+    }
+    if (/^\s*>/.test(l)) {
+      const body = [];
+      for (; i < lines.length && /^\s*>/.test(lines[i]); i++) body.push(lines[i].replace(/^\s*>\s?/, ''));
+      out.push(h('blockquote', null, mdNodes(body.join('\n'))));
+      continue;
+    }
+    if (isRow(l) && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i + 1]) && lines[i + 1].includes('-')) {
+      const headCells = cells(l);
+      const rows = [];
+      for (i += 2; i < lines.length && isRow(lines[i]); i++) rows.push(cells(lines[i]));
+      out.push(
+        h(
+          'div',
+          { class: 'mdtable' },
+          h('table', null, h('thead', null, h('tr', null, headCells.map((c) => h('th', null, mdInline(c))))), h('tbody', null, rows.map((r) => h('tr', null, r.map((c) => h('td', null, mdInline(c))))))),
+        ),
+      );
+      continue;
+    }
+    const li = l.match(listRe);
+    if (li) {
+      const ordered = /\d/.test(li[2]);
+      const indent = li[1].length;
+      const items = [];
+      while (i < lines.length) {
+        const m = lines[i].match(listRe);
+        if (m && m[1].length <= indent + 1 && /\d/.test(m[2]) === ordered) {
+          items.push({ text: [m[3]], start: Number.parseInt(m[2], 10) });
+          i++;
+        } else if (lines[i].trim() && items.length && (/^\s{2,}/.test(lines[i]) || !startsBlock(lines[i])) && !(m && m[1].length <= indent)) {
+          // A wrapped line or a nested item: it belongs to the last item.
+          items[items.length - 1].text.push(lines[i].replace(new RegExp('^\\s{0,' + (indent + 3) + '}'), ''));
+          i++;
+        } else if (!lines[i].trim() && i + 1 < lines.length && (/^\s{2,}\S/.test(lines[i + 1]) || ((lines[i + 1].match(listRe) || [])[1] || '').length === indent)) {
+          i++;
+        } else break;
+      }
+      const list = h(ordered ? 'ol' : 'ul', ordered && items[0].start !== 1 ? { start: items[0].start } : null);
+      for (const it of items) list.append(h('li', null, it.text.length > 1 ? mdNodes(it.text.join('\n')) : mdInline(it.text[0])));
+      out.push(list);
+      continue;
+    }
+    const para = [];
+    for (; i < lines.length && lines[i].trim() && (!para.length || !startsBlock(lines[i])); i++) para.push(lines[i].trim());
+    const p = h('p');
+    para.forEach((t, k) => {
+      if (k) p.append(h('br'));
+      append(p, mdInline(t));
+    });
+    out.push(p);
+  }
+  return out;
+}
+
+/** Inline Markdown: `code`, **bold**, *italics*, ~~strike~~ and [links](url). */
+function mdInline(t) {
+  const out = [];
+  const re = /(`+)([\s\S]*?[^`])\1(?!`)|\*\*([\s\S]+?)\*\*|__([\s\S]+?)__|~~([\s\S]+?)~~|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|(?<![\w*])\*(?!\s)([^*]+?)\*(?![\w*])|(?<!\w)_(?!\s)([^_]+?)_(?!\w)/g;
+  let last = 0;
+  for (let m; (m = re.exec(t)); ) {
+    if (m.index > last) out.push(t.slice(last, m.index));
+    if (m[1]) out.push(h('code', { text: m[2].replace(/^ (.*) $/, '$1') }));
+    else if (m[3] || m[4]) out.push(h('strong', null, mdInline(m[3] || m[4])));
+    else if (m[5]) out.push(h('s', null, mdInline(m[5])));
+    else if (m[6]) out.push(h('a', { href: m[7], target: '_blank', rel: 'noopener noreferrer', title: m[7] }, mdInline(m[6])));
+    else out.push(h('em', null, mdInline(m[8] || m[9])));
+    last = re.lastIndex;
+  }
+  if (last < t.length) out.push(t.slice(last));
+  return out;
+}
+
 /** Claude Code says nothing for this long: tell the user it is still waiting, not frozen. */
 const CLAUDE_QUIET_MS = 15000;
 
@@ -6556,11 +6675,14 @@ async function askClaude(subject, opts = {}) {
     // The answer as it is being written, replaced by the finished text.
     if (p.draft) {
       if (!draft) {
-        draft = bubble('bot draft', '');
+        draft = answer('', 'draft');
         add(draft);
       }
       const atEnd = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 40;
-      draft.firstChild.textContent = p.draft;
+      if (draft.dataset.src !== p.draft) {
+        draft.dataset.src = p.draft;
+        clear(draft.firstChild, mdNodes(p.draft));
+      }
       if (atEnd) scroll();
     }
   };
@@ -6570,6 +6692,8 @@ async function askClaude(subject, opts = {}) {
     scroll();
   };
   const bubble = (role, text) => h('div', { class: 'cmsg ' + role }, h('div', { class: 'cbub', text }));
+  // Claude answers in Markdown; show it formatted.
+  const answer = (text, extra = '') => h('div', { class: 'cmsg bot ' + extra }, h('div', { class: 'cbub md' }, mdNodes(text)));
   const sayError = (text) => add(h('div', { class: 'cerr', text }));
   const offerFallback = () => {
     copyBtn.hidden = termBtn.hidden = false;
@@ -6620,7 +6744,7 @@ async function askClaude(subject, opts = {}) {
         convo.since = ev.seq + 1;
         if (ev.type === 'text') {
           dropDraft();
-          add(bubble('bot', ev.text));
+          add(answer(ev.text));
         } else if (ev.type === 'tool') {
           add(h('div', { class: 'ctool', text: '✦ ' + ev.text }));
         } else if (ev.type === 'proposal') {
