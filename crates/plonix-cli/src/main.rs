@@ -15,6 +15,7 @@ mod intercept;
 mod market;
 mod mcp;
 mod open;
+mod program;
 mod replace;
 mod render;
 mod bench;
@@ -161,6 +162,11 @@ enum Cmd {
     Certs {
         #[command(subcommand)]
         cmd: Option<har::CertsCmd>,
+    },
+    /// Follow a bug bounty or disclosure program: its scope and rules apply to the project
+    Program {
+        #[command(subcommand)]
+        cmd: Option<program::ProgramCmd>,
     },
     /// Review and change scope
     Scope {
@@ -548,6 +554,7 @@ fn dispatch(ctx: Ctx, command: Cmd) -> Result<ExitCode> {
         Cmd::Bench { cmd } => bench::bench_cmd(&ctx, cmd)?,
         Cmd::Intercept { cmd } => intercept::intercept_cmd(&ctx, cmd.unwrap_or(intercept::InterceptCmd::Status))?,
         Cmd::Replace { cmd } => replace::replace_cmd(&ctx, cmd.unwrap_or(replace::ReplaceCmd::List))?,
+        Cmd::Program { cmd } => program::program_cmd(&ctx, cmd.unwrap_or(program::ProgramCmd::Show))?,
         Cmd::Rules { cmd } => community::rules_cmd(&ctx, cmd.unwrap_or(community::RulesCmd::List))?,
         Cmd::Filters { cmd } => community::filters_cmd(&ctx, cmd.unwrap_or(community::FiltersCmd::List))?,
         Cmd::Market(a) => market::market_cmd(&ctx, a)?,

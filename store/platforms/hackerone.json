@@ -1,0 +1,69 @@
+{
+  "plonix_platform": 1,
+  "name": "hackerone",
+  "version": "1.0.0",
+  "title": "HackerOne",
+  "description": "Brings in the HackerOne programs you can hack on, with each program's structured scope and policy.",
+  "author": "Plonix contributors",
+  "license": "Apache-2.0",
+  "homepage": "https://hackerone.com",
+  "api": "https://api.hackerone.com",
+  "program_url": "https://hackerone.com/{handle}",
+  "auth": {
+    "kind": "basic",
+    "user_label": "API username",
+    "secret_label": "API token",
+    "help": "Create an API token on HackerOne under Settings, API Token. The username is the identifier shown next to it.",
+    "token_url": "https://hackerone.com/settings/api_token/edit"
+  },
+  "programs": {
+    "path": "/v1/hackers/programs?page%5Bsize%5D=100",
+    "items": "/data",
+    "next": "/links/next",
+    "max_pages": 30,
+    "fields": {
+      "handle": "/attributes/handle",
+      "name": "/attributes/name",
+      "bounty": "/attributes/offers_bounties",
+      "state": "/attributes/submission_state"
+    }
+  },
+  "program": {
+    "path": "/v1/hackers/programs/{handle}",
+    "policy": "/attributes/policy"
+  },
+  "scopes": {
+    "path": "/v1/hackers/programs/{handle}/structured_scopes?page%5Bsize%5D=100",
+    "items": "/data",
+    "next": "/links/next",
+    "max_pages": 20,
+    "fields": {
+      "identifier": "/attributes/asset_identifier",
+      "kind": "/attributes/asset_type",
+      "in_scope": "/attributes/eligible_for_submission",
+      "bounty": "/attributes/eligible_for_bounty",
+      "instruction": "/attributes/instruction",
+      "max_severity": "/attributes/max_severity"
+    }
+  },
+  "asset_kinds": {
+    "URL": "web",
+    "DOMAIN": "web",
+    "API": "web",
+    "WILDCARD": "wildcard",
+    "IP_ADDRESS": "ip",
+    "CIDR": "cidr",
+    "GOOGLE_PLAY_APP_ID": "mobile",
+    "APPLE_STORE_APP_ID": "mobile",
+    "OTHER_APK": "mobile",
+    "OTHER_IPA": "mobile",
+    "TESTFLIGHT": "mobile",
+    "SOURCE_CODE": "source",
+    "HARDWARE": "other",
+    "DOWNLOADABLE_EXECUTABLES": "other",
+    "WINDOWS_APP_STORE_APP_ID": "other",
+    "SMART_CONTRACT": "other",
+    "AI_MODEL": "other",
+    "OTHER": "other"
+  }
+}

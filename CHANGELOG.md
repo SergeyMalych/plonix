@@ -4,6 +4,12 @@ What changed in each Plonix release. The newest release is at the top.
 
 ## [Unreleased]
 
+### Programs
+- A Programs screen (⌘9) and `plonix program`: connect HackerOne, paste a program's policy, or look up a domain's security.txt, then review and follow the program.
+- Following a program sets the project's scope from its assets: in-scope ones are accepted, listed exclusions rejected, and IP ranges work as scope rules.
+- Its rules apply to every request Plonix sends: at most the program's request rate, the headers it asks for (on browser traffic too), and no scans, crawls or Bench runs when it bans automated testing.
+- Bug bounty platforms are a new kind of Market package: declarative and signed, so more platforms can be added without a Plonix release.
+
 ## [0.1.0] - 2026-10-05
 
 The first public release of Plonix for Mac.

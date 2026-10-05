@@ -54,10 +54,14 @@ pub struct Rule {
 
 impl Rule {
     fn matches(&self, host: &str) -> bool {
-        host == self.pattern || (self.include_subdomains && is_subdomain_of(host, &self.pattern))
+        host == self.pattern || (self.include_subdomains && is_subdomain_of(host, &self.pattern)) || (self.pattern.contains('/') && crate::program::cidr_contains(&self.pattern, host))
     }
     /// Longer patterns are more specific; an exact rule beats a subdomain rule of equal length.
     fn specificity(&self, host: &str) -> usize {
+        // An IP range is less specific than any single address or host inside it.
+        if let Some((_, len)) = self.pattern.contains('/').then(|| crate::program::parse_cidr(&self.pattern)).flatten() {
+            return usize::from(len) / 16;
+        }
         self.pattern.len() * 2 + usize::from(host == self.pattern && !self.include_subdomains)
     }
 }

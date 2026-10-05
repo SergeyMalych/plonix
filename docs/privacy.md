@@ -52,11 +52,12 @@ The counted features are a fixed list:
 | `bench_send` | The Bench (or `plonix replay`) sends a request |
 | `bench_run` | The Bench runs payloads through marked positions |
 | `scan_run`, `crawl_run` | A scan or a crawl runs |
+| `program_applied` | A project starts following a bug bounty or disclosure program |
 | `finding_added`, `report_exported` | A finding is added, findings are exported |
 | `market_install` | Something is installed from the Market |
 | `ask_claude`, `agent_launch` | Ask Claude is used, Claude Code is opened from Plonix |
 | `mcp_session` | An AI agent starts the Plonix MCP server |
-| `screen_traffic`, `screen_bench`, `screen_scope`, `screen_map`, `screen_findings`, `screen_agents`, `screen_market`, `screen_scans`, `screen_settings` | A screen of the project window is opened |
+| `screen_traffic`, `screen_bench`, `screen_scope`, `screen_map`, `screen_findings`, `screen_agents`, `screen_market`, `screen_scans`, `screen_programs`, `screen_settings` | A screen of the project window is opened |
 
 ## What is never sent
 

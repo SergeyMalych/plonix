@@ -32,6 +32,7 @@ use crate::extension::{self, Capability, Consent, ExtensionLibrary};
 use crate::filterpack::{self, FilterLibrary};
 use crate::listpack::{self, ListLibrary};
 use crate::paths::{Home, write_private};
+use crate::platform::{self, PlatformLibrary};
 use crate::registry::{self, Index, Kind, Location, OFFICIAL_PUBLISHER, Package, TrustedKey};
 use crate::rulepack::{self, Library, MAX_PACK_BYTES, newer, sha256_hex};
 use crate::settings::{self, Field, Level, Section};
@@ -52,6 +53,7 @@ pub const SNAPSHOT: &[(&str, &str)] = &[
     ("filterpacks/leaks.json", include_str!("../../../store/filterpacks/leaks.json")),
     ("lists/starter-lists.json", include_str!("../../../store/lists/starter-lists.json")),
     ("lists/extra-wordlists.json", include_str!("../../../store/lists/extra-wordlists.json")),
+    ("platforms/hackerone.json", include_str!("../../../store/platforms/hackerone.json")),
     ("skills/triage-host.md", include_str!("../../../store/skills/triage-host.md")),
     ("skills/explain-request.md", include_str!("../../../store/skills/explain-request.md")),
     ("skills/review-sign-in.md", include_str!("../../../store/skills/review-sign-in.md")),
@@ -206,6 +208,7 @@ pub fn describe(kind: Kind, bytes: &[u8]) -> Result<(String, String), String> {
         Kind::Filters => filterpack::parse(bytes).map(|x| (x.doc.name, x.doc.version)),
         Kind::List => listpack::parse(bytes).map(|x| (x.doc.name, x.doc.version)),
         Kind::Skill => skill::parse(bytes).map(|x| (x.name, x.version)),
+        Kind::Platform => platform::parse(bytes).map(|x| (x.doc.name, x.doc.version)),
         // A package with code, or a bare manifest: an extension listed before its code is published.
         Kind::Extension => match extension::parse_package(bytes) {
             Ok(p) => Ok((p.manifest.name, p.manifest.version)),
@@ -488,6 +491,7 @@ pub struct Market {
     pub lists: ListLibrary,
     pub skills: SkillLibrary,
     pub extensions: ExtensionLibrary,
+    pub platforms: PlatformLibrary,
 }
 
 impl Market {
@@ -499,6 +503,7 @@ impl Market {
             lists: ListLibrary::new(home),
             skills: SkillLibrary::new(home),
             extensions: ExtensionLibrary::new(home),
+            platforms: PlatformLibrary::new(home),
         }
     }
 
@@ -557,6 +562,7 @@ impl Market {
         v.extend(self.lists.installed().into_iter().map(|i| (Kind::List, i)));
         v.extend(self.skills.installed().into_iter().map(|i| (Kind::Skill, i)));
         v.extend(self.extensions.installed().into_iter().map(|i| (Kind::Extension, i)));
+        v.extend(self.platforms.installed().into_iter().map(|i| (Kind::Platform, i)));
         v
     }
 
@@ -646,6 +652,8 @@ pub fn detect_kind(bytes: &[u8]) -> Result<Kind, String> {
         Ok(Kind::Filters)
     } else if v.get("plonix_lists").is_some() {
         Ok(Kind::List)
+    } else if v.get("plonix_platform").is_some() {
+        Ok(Kind::Platform)
     } else if v.get("plonix_extension_package").is_some() {
         Ok(Kind::Extension)
     } else if v.get("plonix_extension").is_some() {
@@ -702,6 +710,17 @@ impl Market {
                     vec![format!("Adds {} payload lists for the Bench. Data only; you choose when to send them.", p.doc.lists.len())],
                 )
             }
+            Kind::Platform => {
+                let p = platform::parse(&bytes)?;
+                (
+                    p.doc.description.clone(),
+                    p.doc.author.clone(),
+                    vec![
+                        format!("Lets Plonix read your programs from {} at {}, with a token you give it. It talks to no other address.", p.doc.title, p.doc.api),
+                        "Data only; it cannot run code, and the program's scope still needs your review before it applies.".into(),
+                    ],
+                )
+            }
             Kind::Extension => {
                 let p = extension::parse_package(&bytes)?;
                 capabilities = capability_infos(&p.manifest.capabilities);
@@ -728,6 +747,7 @@ impl Market {
             Kind::Filters => self.filters.install(&ext.bytes, src, Some(&ext.sha256))?.1,
             Kind::List => self.lists.install(&ext.bytes, src, Some(&ext.sha256))?.1,
             Kind::Skill => self.skills.install(&ext.bytes, src, Some(&ext.sha256))?.1,
+            Kind::Platform => self.platforms.install(&ext.bytes, src, Some(&ext.sha256))?.1,
             Kind::Extension => self.extensions.install(&ext.bytes, src, Some(&ext.sha256), &Consent { approve_new: true, ..consent.clone() })?.1,
             Kind::Bundle => bail!("a bundle cannot be added from a file"),
         };
@@ -751,6 +771,7 @@ impl Market {
         let lists = self.lists.load();
         let skills = self.skills.load();
         let extensions = self.extensions.list();
+        let platforms = self.platforms.load().0;
         let mut out = vec![];
         for (kind, item) in self.installed_all() {
             if cat.index.get(&item.name).is_some() {
@@ -762,6 +783,7 @@ impl Market {
                 Kind::List => lists.packs.iter().find(|i| i.name == item.name).map(|i| (i.description.clone(), i.author.clone())),
                 Kind::Skill => skills.get(&item.name).map(|(s, ..)| (s.description.clone(), s.author.clone())),
                 Kind::Extension => extensions.iter().find(|e| e.name == item.name && e.intact).map(|e| (e.description.clone(), e.author.clone())),
+                Kind::Platform => platforms.iter().find(|(p, ..)| p.doc.name == item.name).map(|(p, ..)| (p.doc.description.clone(), p.doc.author.clone())),
                 _ => None,
             }
             .unwrap_or_else(|| ("Not loaded: the file changed since it was installed.".into(), "unknown".into()));
@@ -793,6 +815,7 @@ impl Market {
             Kind::Filters => filterpack::BUILTIN,
             Kind::List => listpack::BUILTIN,
             Kind::Skill => skill::BUILTIN,
+            Kind::Platform => platform::BUILTIN,
             Kind::Bundle | Kind::Extension => return false,
         };
         list.iter().any(|(n, _)| *n == name)
@@ -806,6 +829,7 @@ impl Market {
             Kind::Skill => self.skills.installed_version(name),
             Kind::Bundle => self.read_bundles().bundles.get(name).map(|b| b.version.clone()),
             Kind::Extension => self.extensions.installed_version(name),
+            Kind::Platform => self.platforms.installed_version(name),
         }
     }
 
@@ -901,6 +925,7 @@ impl Market {
                 (Kind::List, Some(b)) => drop(self.lists.install(&b, &source(p), Some(&p.sha256))?),
                 (Kind::Skill, Some(b)) => drop(self.skills.install(&b, &source(p), Some(&p.sha256))?),
                 (Kind::Extension, Some(b)) => drop(self.extensions.install(&b, &source(p), Some(&p.sha256), consent)?),
+                (Kind::Platform, Some(b)) => drop(self.platforms.install(&b, &source(p), Some(&p.sha256))?),
                 (Kind::Bundle, _) => {}
                 _ => unreachable!("files are fetched for every kind but bundles"),
             }
@@ -956,7 +981,7 @@ impl Market {
         }
         let changes = self.remove_one(name)?;
         if changes.is_empty() {
-            for kind in [Kind::Rules, Kind::Filters, Kind::List, Kind::Skill, Kind::Extension] {
+            for kind in [Kind::Rules, Kind::Filters, Kind::List, Kind::Skill, Kind::Extension, Kind::Platform] {
                 if Self::builtin(kind, name) {
                     bail!("`{name}` is a built-in {} and cannot be removed", kind.noun());
                 }
@@ -974,13 +999,14 @@ impl Market {
 
     fn remove_one(&self, name: &str) -> Result<Vec<Change>> {
         let mut changes = vec![];
-        for kind in [Kind::Rules, Kind::Filters, Kind::List, Kind::Skill, Kind::Extension] {
+        for kind in [Kind::Rules, Kind::Filters, Kind::List, Kind::Skill, Kind::Extension, Kind::Platform] {
             let Some(version) = self.installed_version(kind, name) else { continue };
             match kind {
                 Kind::Rules => self.rules.remove(name)?,
                 Kind::Filters => self.filters.remove(name)?,
                 Kind::List => self.lists.remove(name)?,
                 Kind::Extension => self.extensions.remove(name)?,
+                Kind::Platform => self.platforms.remove(name)?,
                 _ => self.skills.remove(name)?,
             };
             changes.push(Change { name: name.into(), kind, version, action: Action::Removed, from: None });

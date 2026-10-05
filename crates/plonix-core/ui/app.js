@@ -369,6 +369,7 @@ const VIEWS = {
   agents: { label: 'Agents', ico: '✦', render: renderAgents },
   market: { label: 'Market', ico: '⬢', render: renderMarket },
   scans: { label: 'Scans', ico: '⌖', render: renderScans },
+  programs: { label: 'Programs', ico: '◈', render: renderPrograms },
   settings: { label: 'Settings', ico: '⚙', render: renderSettings, footer: true },
 };
 
@@ -4918,6 +4919,485 @@ const SC = { host: null, hosts: [], suggest: null, suggestErr: null, picks: null
 const INTRU_LABEL = { passive: 'Passive', safe: 'Safe', active: 'Active', intrusive: 'Intrusive' };
 const INTRU_TAG = { passive: 'in', safe: 'in', active: 'upd', intrusive: 'rej' };
 
+/* ---------- programs ---------- */
+
+/** The Programs screen: bring in a bug bounty or disclosure program, review
+ * what it changes, and follow its rules. */
+const PG = { platforms: [], program: null, lists: {}, source: null, draft: null, preview: null, filter: '', busy: false };
+
+const KIND_LABEL = { web: 'Web', wildcard: 'Wildcard', ip: 'IP', cidr: 'IP range', mobile: 'Mobile app', source: 'Source code', other: 'Other' };
+
+function renderPrograms(main) {
+  clear(
+    main,
+    h(
+      'div',
+      { class: 'view' },
+      h(
+        'div',
+        { class: 'toolbar' },
+        h('h2', { text: 'Programs' }),
+        h('span', { class: 'hint', text: 'Bring in a bug bounty or disclosure program. Plonix sets your scope from it and follows its rules on every request it sends.' }),
+      ),
+      h('div', { class: 'pane' }, h('div', { class: 'stack progs', id: 'progbody' }, h('div', { class: 'muted', text: 'Loading…' }))),
+    ),
+  );
+  loadPrograms();
+}
+
+async function loadPrograms() {
+  try {
+    const [cur, plats] = await Promise.all([api('/api/program'), api('/api/platforms')]);
+    PG.program = cur.program;
+    PG.platforms = plats.platforms || [];
+  } catch (e) {
+    return toast(e.message, 'err');
+  }
+  if (!PG.source) PG.source = (PG.platforms.find((p) => p.connected) || PG.platforms[0] || { name: 'paste' }).name;
+  drawPrograms();
+  const p = PG.platforms.find((x) => x.name === PG.source);
+  if (p && p.connected && !PG.lists[p.name]) loadPlatformPrograms(p.name);
+}
+
+function drawPrograms() {
+  const box = $('#progbody');
+  if (!box || S.view !== 'programs') return;
+  if (PG.preview) return drawProgramReview(box);
+  clear(box, PG.program ? followingCard(PG.program) : null, h('div', { class: 'sechead' }, h('h3', { text: PG.program ? 'Switch to another program' : 'Bring in a program' })), sourcePicker());
+}
+
+function ruleChips(r) {
+  const chips = [];
+  if (r.rate_per_second) chips.push(h('span', { class: 'chip', text: `At most ${fmtRate(r.rate_per_second)}` }));
+  for (const hd of r.headers || []) chips.push(h('span', { class: 'chip k-host' + (hd.needs_value ? ' k-warn' : ''), title: hd.needs_value ? 'Fill in the value to start sending it' : 'Added to every request to the program', text: `${hd.name}: ${hd.value}` }));
+  if (r.no_automation) chips.push(h('span', { class: 'chip k-bad', title: 'Scans, crawls and Bench runs are off for this project', text: 'No automated testing' }));
+  if (r.no_intrusive) chips.push(h('span', { class: 'chip', title: 'Intrusive scan checks are off and cannot be picked', text: 'No disruptive tests' }));
+  return chips;
+}
+
+function fmtRate(n) {
+  if (n >= 1) return `${+n.toFixed(2)} request${n === 1 ? '' : 's'} per second`;
+  const perMin = n * 60;
+  return `${+perMin.toFixed(1)} requests per minute`;
+}
+
+function followingCard(p) {
+  const inScope = p.assets.filter((a) => a.in_scope);
+  const out = p.assets.filter((a) => !a.in_scope);
+  const platform = PG.platforms.find((x) => x.name === p.platform);
+  return h(
+    'div',
+    { class: 'card progcur' },
+    h(
+      'div',
+      { class: 'top' },
+      h('div', { class: 'ttl' }, h('span', { class: 'tag in', text: 'Following' }), h('b', { text: p.name }), h('span', { class: 'meta', text: `${platform ? platform.title : p.platform === 'pasted' ? 'Pasted policy' : p.platform} · synced ${fmtDate(p.synced_at)}` })),
+      h(
+        'span',
+        { class: 'acts' },
+        p.url ? h('a', { class: 'btn sm', href: p.url, target: '_blank', rel: 'noopener', text: 'Program page' }) : null,
+        platform && platform.connected ? h('button', { class: 'btn sm', text: 'Sync again', onclick: () => reviewFromPlatform(p.platform, { handle: p.id, name: p.name, bounty: p.bounty }) }) : null,
+        h('button', { class: 'btn sm', text: 'Edit rules', onclick: () => reviewDraft(structuredClone(p)) }),
+        h('button', { class: 'btn sm danger', text: 'Stop following', onclick: () => stopFollowing(p) }),
+      ),
+    ),
+    h('div', { class: 'chips progrules' }, ruleChips(p.rules)),
+    h('div', { class: 'progsum muted', text: `${inScope.length} in scope · ${out.length} out of scope${p.rules.not_accepted && p.rules.not_accepted.length ? ` · ${p.rules.not_accepted.length} kinds of report not accepted` : ''}` }),
+    assetTable(p.assets),
+    p.rules.not_accepted && p.rules.not_accepted.length
+      ? h('details', { class: 'prognot' }, h('summary', { text: 'What this program does not accept' }), h('ul', null, p.rules.not_accepted.map((x) => h('li', { text: x }))))
+      : null,
+  );
+}
+
+function assetTable(assets) {
+  if (!assets.length) return h('div', { class: 'empty', text: 'No assets listed.' });
+  const sorted = assets.slice().sort((a, b) => Number(b.in_scope) - Number(a.in_scope));
+  return h(
+    'table',
+    { class: 'grid' },
+    h('thead', null, h('tr', null, h('th', { text: 'Asset' }), h('th', { text: 'Type' }), h('th', { text: 'Scope' }), h('th', { text: 'Bounty' }), h('th', { text: 'Notes' }))),
+    h(
+      'tbody',
+      null,
+      sorted.map((a) =>
+        h(
+          'tr',
+          null,
+          h('td', { class: 'mono', text: a.identifier }),
+          h('td', { text: KIND_LABEL[a.kind] || a.kind }),
+          h('td', null, h('span', { class: 'tag ' + (a.in_scope ? 'in' : 'rej'), text: a.in_scope ? 'in scope' : 'out of scope' })),
+          h('td', { class: 'muted', text: a.bounty ? (a.max_severity ? `up to ${a.max_severity}` : 'yes') : '' }),
+          h('td', { class: 'muted pnote', text: a.instruction || (['mobile', 'source', 'other'].includes(a.kind) ? 'Outside Plonix scope rules' : '') }),
+        ),
+      ),
+    ),
+  );
+}
+
+async function stopFollowing(p) {
+  const keep = h('input', { type: 'checkbox', checked: true });
+  const m = modal(
+    `Stop following ${p.name}?`,
+    h('div', null, h('p', { text: 'Its rate limit, headers and testing rules stop applying to this project.' }), h('label', { class: 'frow-inline' }, keep, ' Keep the scope rules it added')),
+    [
+      h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }),
+      h('button', {
+        class: 'btn danger',
+        text: 'Stop following',
+        onclick: async () => {
+          try {
+            await api('/api/program/clear', { method: 'POST', body: { remove_scope: !keep.checked } });
+            closeModal();
+            toast(`No longer following ${p.name}`);
+            await loadScope();
+            loadPrograms();
+          } catch (e) {
+            m.err.textContent = e.message;
+          }
+        },
+      }),
+    ],
+  );
+}
+
+function sourcePicker() {
+  const sources = [...PG.platforms.map((p) => ({ key: p.name, label: p.title })), { key: 'paste', label: 'Paste a policy' }, { key: 'domain', label: 'From a domain' }];
+  const body = h('div', { class: 'progsrc' });
+  const p = PG.platforms.find((x) => x.name === PG.source);
+  if (p) append(body, [p.connected ? platformPrograms(p) : connectForm(p)]);
+  else if (PG.source === 'domain') append(body, [domainForm()]);
+  else append(body, [pasteForm()]);
+  return h(
+    'div',
+    { class: 'card' },
+    h(
+      'div',
+      { class: 'progtabs' },
+      h(
+        'div',
+        { class: 'seg-ctl' },
+        sources.map((s) =>
+          h('button', {
+            class: 'segbtn' + (PG.source === s.key ? ' on' : ''),
+            text: s.label,
+            onclick: () => {
+              PG.source = s.key;
+              drawPrograms();
+              const pl = PG.platforms.find((x) => x.name === s.key);
+              if (pl && pl.connected && !PG.lists[pl.name]) loadPlatformPrograms(pl.name);
+            },
+          }),
+        ),
+      ),
+      h('span', { class: 'muted small', text: 'More platforms come from the Market.' }),
+    ),
+    body,
+  );
+}
+
+function connectForm(p) {
+  const user = p.auth.kind === 'basic' ? h('input', { type: 'text', id: 'pg-user', placeholder: p.auth.user_label, autocomplete: 'off', spellcheck: 'false' }) : null;
+  const secret = h('input', { type: 'password', id: 'pg-secret', placeholder: p.auth.secret_label, autocomplete: 'off' });
+  const status = h('span', { class: 'fstatus' });
+  const go = async () => {
+    status.className = 'fstatus';
+    status.textContent = `Checking with ${p.title}…`;
+    try {
+      const r = await api(`/api/platforms/${encodeURIComponent(p.name)}/connect`, { method: 'POST', body: { user: user ? user.value : '', secret: secret.value } });
+      toast(`Connected to ${p.title}: ${r.programs} program${r.programs === 1 ? '' : 's'}`);
+      p.connected = true;
+      delete PG.lists[p.name];
+      drawPrograms();
+      loadPlatformPrograms(p.name);
+    } catch (e) {
+      status.className = 'fstatus bad';
+      status.textContent = e.message;
+    }
+  };
+  secret.addEventListener('keydown', (e) => e.key === 'Enter' && go());
+  return h(
+    'div',
+    { class: 'progform' },
+    h('p', null, `Connect ${p.title} to see every program you can work on there. `, p.auth.help, ' ', p.auth.token_url ? h('a', { href: p.auth.token_url, target: '_blank', rel: 'noopener', text: 'Get a token' }) : null),
+    h('div', { class: 'progconnect' }, user, secret, h('button', { class: 'btn primary', text: 'Connect', onclick: go })),
+    h('div', { class: 'progfoot' }, status, h('span', { class: 'muted small', text: IN_APP ? 'The token is kept in your Keychain and never shown to AI agents.' : 'The token stays on this computer and is never shown to AI agents.' })),
+  );
+}
+
+async function loadPlatformPrograms(name) {
+  PG.lists[name] = { loading: true };
+  drawPrograms();
+  try {
+    const r = await api(`/api/platforms/${encodeURIComponent(name)}/programs`);
+    PG.lists[name] = { programs: r.programs };
+  } catch (e) {
+    PG.lists[name] = { error: e.message, code: e.code };
+  }
+  drawPrograms();
+}
+
+function platformPrograms(p) {
+  const l = PG.lists[p.name] || { loading: true };
+  const search = h('input', { type: 'search', id: 'pg-filter', placeholder: 'Find a program', value: PG.filter, spellcheck: 'false' });
+  search.addEventListener('input', () => {
+    PG.filter = search.value;
+    const list = $('#pg-list');
+    if (list) clear(list, programRows(p, l.programs || []));
+  });
+  const disconnect = h('button', {
+    class: 'btn sm',
+    text: 'Disconnect',
+    onclick: async () => {
+      await api(`/api/platforms/${encodeURIComponent(p.name)}/disconnect`, { method: 'POST', body: {} }).catch((e) => toast(e.message, 'err'));
+      p.connected = false;
+      delete PG.lists[p.name];
+      drawPrograms();
+    },
+  });
+  if (l.loading) return h('div', { class: 'muted progpad', text: `Loading your ${p.title} programs…` });
+  if (l.error)
+    return h(
+      'div',
+      { class: 'progpad' },
+      h('p', { class: 'ferr', text: l.error }),
+      h('div', { class: 'row' }, h('button', { class: 'btn sm', text: 'Try again', onclick: () => loadPlatformPrograms(p.name) }), l.code === 'platform_refused' ? disconnect : null),
+    );
+  return h(
+    'div',
+    null,
+    h('div', { class: 'addrule' }, search, h('span', { class: 'muted small', text: `${l.programs.length} programs` }), h('button', { class: 'btn sm', text: 'Refresh', onclick: () => loadPlatformPrograms(p.name) }), disconnect),
+    h('div', { class: 'proglist', id: 'pg-list' }, programRows(p, l.programs)),
+  );
+}
+
+function programRows(p, programs) {
+  const q = PG.filter.trim().toLowerCase();
+  const shown = programs.filter((x) => !q || x.name.toLowerCase().includes(q) || x.handle.toLowerCase().includes(q));
+  if (!shown.length) return h('div', { class: 'empty', text: programs.length ? 'No program matches.' : `${p.title} lists no programs for this account yet.` });
+  return shown.slice(0, 300).map((x) =>
+    h(
+      'div',
+      { class: 'progrow' },
+      h('b', { text: x.name }),
+      h('span', { class: 'muted mono', text: x.handle }),
+      x.bounty ? h('span', { class: 'tag in', text: 'bounty' }) : h('span', { class: 'tag out', text: 'no bounty' }),
+      x.state && x.state !== 'open' ? h('span', { class: 'tag out', text: x.state }) : null,
+      h('span', { class: 'spacer' }),
+      h('button', { class: 'btn sm primary', text: 'Review', onclick: () => reviewFromPlatform(p.name, x) }),
+    ),
+  );
+}
+
+function pasteForm() {
+  const name = h('input', { type: 'text', id: 'pg-name', placeholder: 'Program name (optional)', spellcheck: 'false' });
+  const text = h('textarea', { id: 'pg-text', rows: 10, placeholder: 'Paste the program’s policy or scope here, or its address (https://…). Plonix reads the in-scope and out-of-scope assets, the request rate, required headers and what is not allowed.', spellcheck: 'false' });
+  const status = h('span', { class: 'fstatus' });
+  const go = async () => {
+    const v = text.value.trim();
+    if (!v) return text.focus();
+    const body = /^https?:\/\/\S+$/.test(v) ? { url: v, name: name.value } : { text: v, name: name.value };
+    await readProgram(body, status);
+  };
+  return h('div', { class: 'progform' }, name, text, h('div', { class: 'progfoot' }, status, h('button', { class: 'btn primary', text: 'Read it', onclick: go })));
+}
+
+function domainForm() {
+  const dom = h('input', { type: 'text', id: 'pg-domain', placeholder: 'example.com', spellcheck: 'false' });
+  const status = h('span', { class: 'fstatus' });
+  const go = async () => {
+    if (!dom.value.trim()) return dom.focus();
+    await readProgram({ domain: dom.value.trim() }, status);
+  };
+  dom.addEventListener('keydown', (e) => e.key === 'Enter' && go());
+  return h(
+    'div',
+    { class: 'progform' },
+    h('p', { class: 'muted', text: 'For a disclosure program without a platform: Plonix reads the domain’s security.txt and the policy it links to.' }),
+    h('div', { class: 'addrule' }, dom, h('button', { class: 'btn primary', text: 'Look it up', onclick: go })),
+    h('div', { class: 'progfoot' }, status),
+  );
+}
+
+async function readProgram(body, status) {
+  status.className = 'fstatus';
+  status.textContent = 'Reading…';
+  try {
+    const r = await api('/api/program/read', { method: 'POST', body });
+    status.textContent = '';
+    await reviewDraft(r.program);
+  } catch (e) {
+    status.className = 'fstatus bad';
+    status.textContent = e.message;
+  }
+}
+
+async function reviewFromPlatform(platform, summary) {
+  toast(`Reading ${summary.name}…`);
+  try {
+    const q = new URLSearchParams({ name: summary.name || '', bounty: summary.bounty ? 'true' : 'false' });
+    const r = await api(`/api/platforms/${encodeURIComponent(platform)}/programs/${encodeURIComponent(summary.handle)}?${q}`);
+    await reviewDraft(r.program);
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+async function reviewDraft(program) {
+  PG.draft = program;
+  try {
+    PG.preview = await api('/api/program/preview', { method: 'POST', body: { program } });
+  } catch (e) {
+    PG.preview = { program, scope: [], not_scoped: [], error: e.message };
+  }
+  drawPrograms();
+}
+
+const CHANGE_TAG = { add: ['in', 'new'], update: ['upd', 'changes'], same: ['out', 'already set'], remove: ['bad', 'removed'] };
+
+function drawProgramReview(box) {
+  const p = PG.draft;
+  const pv = PG.preview;
+  const r = p.rules;
+  const accepted = pv.scope.filter((c) => c.decision === 'accepted' && c.change !== 'remove').length;
+  const rejected = pv.scope.filter((c) => c.decision === 'rejected' && c.change !== 'remove').length;
+  const summary = [`${accepted} in scope`, `${rejected} excluded`, r.rate_per_second ? fmtRate(r.rate_per_second) : 'no rate limit', `${(r.headers || []).length} required header${(r.headers || []).length === 1 ? '' : 's'}`];
+
+  const rate = h('input', { type: 'number', id: 'pg-rate', min: '0', step: '0.1', value: r.rate_per_second || '', placeholder: 'no limit' });
+  rate.addEventListener('change', () => {
+    const n = parseFloat(rate.value);
+    r.rate_per_second = n > 0 ? n : null;
+    reviewDraft(p);
+  });
+  const toggle = (key, label, hint) => {
+    const c = h('input', { type: 'checkbox', class: 'switch', id: 'pg-' + key, checked: !!r[key] });
+    c.addEventListener('change', () => {
+      r[key] = c.checked;
+    });
+    return h('label', { class: 'progtoggle' }, c, h('span', null, h('b', { text: label }), h('span', { class: 'muted', text: hint })));
+  };
+  const headerRows = (r.headers || []).map((hd, i) => {
+    const v = h('input', { type: 'text', value: hd.value, spellcheck: 'false', class: hd.needs_value ? 'needs' : '' });
+    v.addEventListener('input', () => {
+      hd.value = v.value;
+      hd.needs_value = /<[^>]*>|\[[^\]]*\]|\{[^}]*\}/.test(v.value);
+      v.classList.toggle('needs', hd.needs_value);
+    });
+    return h(
+      'div',
+      { class: 'proghdr' },
+      h('span', { class: 'mono', text: hd.name + ':' }),
+      v,
+      h('button', {
+        class: 'btn sm',
+        text: 'Remove',
+        onclick: () => {
+          r.headers.splice(i, 1);
+          drawPrograms();
+        },
+      }),
+    );
+  });
+  const addHeader = h('button', {
+    class: 'btn sm',
+    text: 'Add a header',
+    onclick: () => {
+      const name = h('input', { type: 'text', placeholder: 'X-Bug-Bounty', spellcheck: 'false' });
+      const value = h('input', { type: 'text', placeholder: 'your username', spellcheck: 'false' });
+      modal('Add a required header', h('div', { class: 'progform' }, name, value), [
+        h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }),
+        h('button', {
+          class: 'btn primary',
+          text: 'Add',
+          onclick: () => {
+            if (!name.value.trim()) return name.focus();
+            (r.headers = r.headers || []).push({ name: name.value.trim(), value: value.value.trim(), needs_value: false });
+            closeModal();
+            drawPrograms();
+          },
+        }),
+      ]);
+    },
+  });
+  const notAccepted = h('textarea', { id: 'pg-not', rows: 4, value: (r.not_accepted || []).join('\n'), spellcheck: 'false', placeholder: 'One per line, e.g. Missing security headers' });
+  notAccepted.addEventListener('input', () => {
+    r.not_accepted = notAccepted.value.split('\n').map((x) => x.trim()).filter(Boolean);
+  });
+  const status = h('span', { class: 'fstatus' + (pv.error ? ' bad' : ''), text: pv.error || '' });
+  const pending = (r.headers || []).filter((x) => x.needs_value);
+  const apply = async () => {
+    status.className = 'fstatus';
+    status.textContent = 'Applying…';
+    try {
+      await api('/api/program/apply', { method: 'POST', body: { program: p } });
+      PG.preview = null;
+      PG.draft = null;
+      toast(`Now following ${p.name}`);
+      await loadScope();
+      loadPrograms();
+    } catch (e) {
+      status.className = 'fstatus bad';
+      status.textContent = e.message;
+    }
+  };
+
+  clear(
+    box,
+    h(
+      'div',
+      { class: 'card progreview' },
+      h(
+        'div',
+        { class: 'top' },
+        h('div', { class: 'ttl' }, h('span', { class: 'tag pend', text: 'Review' }), h('b', { text: p.name }), p.url ? h('a', { href: p.url, target: '_blank', rel: 'noopener', class: 'meta', text: p.url }) : null),
+        h('span', { class: 'acts' }, h('button', { class: 'btn sm', text: 'Back', onclick: () => ((PG.preview = null), drawPrograms()) })),
+      ),
+      h('div', { class: 'progsum', text: summary.join(' · ') }),
+      pv.replaces ? h('div', { class: 'prognote', text: `This project follows ${pv.replaces} now. Applying switches it to ${p.name} and replaces the scope rules ${pv.replaces} added.` }) : null,
+    ),
+    h('div', { class: 'sechead' }, h('h3', { text: 'Scope' })),
+    h(
+      'div',
+      { class: 'card' },
+      pv.scope.length
+        ? h(
+            'table',
+            { class: 'grid' },
+            h('thead', null, h('tr', null, h('th', { text: 'Domain' }), h('th', { text: 'Decision' }), h('th', { text: 'Change' }))),
+            h(
+              'tbody',
+              null,
+              pv.scope.map((c) =>
+                h(
+                  'tr',
+                  null,
+                  h('td', { class: 'mono', text: (c.include_subdomains ? '*.' : '') + c.pattern }),
+                  h('td', null, h('span', { class: 'tag ' + scopeTag(c.decision), text: c.decision })),
+                  h('td', null, h('span', { class: 'tag ' + CHANGE_TAG[c.change][0], text: CHANGE_TAG[c.change][1] })),
+                ),
+              ),
+            ),
+          )
+        : h('div', { class: 'empty', text: 'Nothing here becomes a scope rule. Add the hosts you may test in Scope.' }),
+      pv.not_scoped.length
+        ? h('div', { class: 'progpad muted' }, h('b', { text: 'Not scope rules: ' }), pv.not_scoped.map((a) => `${a.identifier} (${KIND_LABEL[a.kind] || a.kind})`).join(', '), '. They stay listed on the program for reference.')
+        : null,
+    ),
+    h('div', { class: 'sechead' }, h('h3', { text: 'Rules Plonix will follow' })),
+    h(
+      'div',
+      { class: 'card progform' },
+      h('label', { class: 'prograte' }, h('b', { text: 'Requests per second, at most' }), rate, h('span', { class: 'muted', text: 'Applies to everything Plonix sends: Bench, runs, scans and crawls.' })),
+      h('div', { class: 'proghdrs' }, h('b', { text: 'Headers on every request' }), headerRows.length ? headerRows : h('span', { class: 'muted', text: 'None required.' }), h('div', null, addHeader)),
+      pending.length ? h('div', { class: 'prognote', text: `Fill in ${pending.map((x) => x.name).join(', ')}: a header with a placeholder is not sent until it has a real value.` }) : null,
+      toggle('no_automation', 'No automated testing', 'Scans, crawls and Bench runs are off for this project. Browsing and single Bench requests still work.'),
+      toggle('no_intrusive', 'No disruptive tests', 'Intrusive scan checks are off and cannot be picked.'),
+      h('label', { class: 'proglong' }, h('b', { text: 'Reports this program does not accept' }), notAccepted),
+    ),
+    h('div', { class: 'card progform' }, h('div', { class: 'progfoot' }, status, h('button', { class: 'btn', text: 'Cancel', onclick: () => ((PG.preview = null), drawPrograms()) }), h('button', { class: 'btn primary', text: PG.program && PG.program.platform === p.platform && PG.program.id === p.id ? 'Apply changes' : 'Follow this program', disabled: !!pv.error, onclick: apply }))),
+  );
+}
+
 function renderScans(main) {
   clear(
     main,
@@ -4930,10 +5410,33 @@ function renderScans(main) {
         h('h2', { text: 'Scans' }),
         h('span', { class: 'hint', text: 'Pick an in-scope target. Plonix suggests checks from what it fingerprinted and runs only the ones you choose. Every request stays inside your scope.' }),
       ),
+      h('div', { id: 'scanprog' }),
       h('div', { class: 'pane' }, h('div', { class: 'stack', id: 'scanbody' }, h('div', { class: 'muted', text: 'Loading…' }))),
     ),
   );
   loadScans();
+  showProgramLock('scanprog', 'Scans and crawls are off in this project');
+}
+
+/** A note at the top of a screen when the program the project follows bans automated testing. */
+async function showProgramLock(id, what) {
+  let p;
+  try {
+    p = (await api('/api/program')).program;
+  } catch (_) {
+    return;
+  }
+  const box = document.getElementById(id);
+  if (!box || !p || !p.rules.no_automation) return;
+  clear(
+    box,
+    h(
+      'div',
+      { class: 'proglock' },
+      h('span', { text: `${p.name} does not allow automated testing. ${what}; browsing and single Bench requests still work.` }),
+      h('button', { class: 'btn sm', text: 'Program rules', onclick: () => leaveTo('programs') }),
+    ),
+  );
 }
 
 async function loadScans() {
@@ -5423,6 +5926,7 @@ const KIND_INFO = {
   list: { label: 'Lists', one: 'List pack', ico: '≣' },
   bundle: { label: 'Bundles', one: 'Bundle', ico: '❖' },
   extension: { label: 'Extensions', one: 'Extension', ico: '⬡' },
+  platform: { label: 'Platforms', one: 'Platform', ico: '⚐' },
 };
 
 const GROUP_LABELS = { traffic: 'Traffic', insights: 'Insights', map: 'Map', scope: 'Scope', findings: 'Findings', scan: 'Scans' };
@@ -5433,7 +5937,7 @@ const MK = { data: null, kind: 'all', q: '', sel: null, busy: null, ext: {} };
 function renderMarket(main) {
   const q = h('input', {
     id: 'mq',
-    placeholder: 'Search skills, rules, filters, bundles and extensions',
+    placeholder: 'Search skills, rules, filters, platforms, bundles and extensions',
     spellcheck: 'false',
     autocomplete: 'off',
     value: MK.q,
@@ -5830,6 +6334,14 @@ async function showPackage(name) {
   }
   if (det.rules) parts.push(sec(`Detects ${det.rules.count} technologies`, h('div', { class: 'mchips' }, det.rules.detects.map((n) => h('span', { class: 'chip', text: n })))));
   if (det.filters) parts.push(sec('Filters', det.filters.map((f) => h('div', { class: 'marg' }, h('code', { text: 'is:' + f.id }), h('span', { class: 'muted', text: f.label + ' · ' + f.query })))));
+  if (det.platform)
+    parts.push(
+      sec(
+        'Programs',
+        h('p', { class: 'muted', text: `Lists your ${det.platform.title} programs on the Programs screen and brings one in with its scope and rules. Plonix only talks to ${det.platform.api}, with the token you give it.` }),
+        h('button', { class: 'btn sm', text: 'Open Programs', onclick: () => leaveTo('programs') }),
+      ),
+    );
   if (det.lists) parts.push(sec('Lists', det.lists.map((l) => h('div', { class: 'marg' }, h('code', { text: l.id }), h('span', { class: 'muted', text: `${l.title} · ${l.count} value${l.count === 1 ? '' : 's'}` })))));
   clear(
     panel,
