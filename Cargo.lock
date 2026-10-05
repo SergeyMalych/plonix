@@ -2847,7 +2847,7 @@ dependencies = [
 
 [[package]]
 name = "plonix"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -2863,7 +2863,7 @@ dependencies = [
 
 [[package]]
 name = "plonix-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "plonix-core",
@@ -2882,7 +2882,7 @@ dependencies = [
 
 [[package]]
 name = "plonix-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "axum",
