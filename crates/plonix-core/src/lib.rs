@@ -9,6 +9,7 @@
 
 pub mod access;
 pub mod api;
+pub mod apispec;
 pub mod ask;
 pub mod authcheck;
 pub mod assistant;

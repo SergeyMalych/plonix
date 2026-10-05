@@ -340,6 +340,19 @@ impl Store {
         rows.collect::<Result<_, _>>().map_err(Into::into)
     }
 
+    /// A host's recent responses that may be an API description, by path,
+    /// newest first.
+    pub fn spec_candidates(&self, host: &str, limit: usize) -> Result<Vec<Exchange>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {EXCHANGE_COLS} FROM exchanges WHERE host = ?1 AND status BETWEEN 200 AND 299 AND (lower(path) LIKE '%openapi%' \
+             OR lower(path) LIKE '%swagger%' OR lower(path) LIKE '%api-docs%' OR lower(path) LIKE '%.json' OR lower(path) LIKE '%spec%' \
+             OR lower(path) LIKE '%/docs%' OR lower(path) LIKE '%schema%') ORDER BY id DESC LIMIT ?2"
+        ))?;
+        let rows = stmt.query_map(params![host.to_ascii_lowercase(), limit as i64], row_to_exchange)?;
+        rows.collect::<Result<_, _>>().map_err(Into::into)
+    }
+
     /// Stores WebSocket messages, in the order given.
     pub fn insert_ws_messages(&self, messages: &[WsMessage]) -> Result<()> {
         let mut conn = self.conn.lock().unwrap();
