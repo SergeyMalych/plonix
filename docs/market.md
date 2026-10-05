@@ -9,7 +9,7 @@ The Market is where Plonix gets everything modular, in one catalog:
 | **Filter pack** | Named Traffic filters such as `is:auth` ([format](filters.md)) | `$PLONIX_HOME/filters` |
 | **List pack** | Named payload lists for the Bench ([format](bench.md)) | `$PLONIX_HOME/lists` |
 | **Bundle** | A set of other packages, installed and removed together | `$PLONIX_HOME/market/bundles.json` |
-| **Extension** | A sandboxed extension ([design](extensions.md)) | listed only, until the runtime exists |
+| **Extension** | Code that runs in the Plonix sandbox: today, passive analyzers ([extensions.md](extensions.md)) | `$PLONIX_HOME/extensions` |
 
 Open it from the sidebar (⌘7 in the app), or use the CLI:
 
@@ -33,7 +33,7 @@ Nothing is installed unless it can be traced to a signature you trust:
 
 Packages in the Plonix Market are reviewed by the maintainers before the index is signed. A changed index, a swapped file or a key you do not trust is refused with a message that says which.
 
-Nothing from the Market runs code. Skills are text, packs are data, and extensions that need code cannot be installed until the sandboxed runtime exists ([extensions.md](extensions.md)).
+Skills are text and packs are data. Extensions are the only packages that run code, and only in the sandbox: no network, files or processes, a CPU, memory and time budget, and only the capabilities you approved. The Market shows what an extension may do before it installs, and sensitive capabilities need their own yes. An extension that needs something this version cannot run yet is listed as *Coming soon*. See [extensions.md](extensions.md).
 
 A copy of the Plonix Market is built into Plonix, signed with the same key. When the online index cannot be fetched or verified, the Market shows that copy and says so, so it works offline.
 

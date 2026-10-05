@@ -44,6 +44,12 @@ enum MarketCmd {
     Install {
         #[arg(required = true)]
         names: Vec<String>,
+        /// For an extension: also grant a sensitive capability it asks for (read-out-of-scope); repeatable
+        #[arg(long, value_name = "CAPABILITY")]
+        grant: Vec<String>,
+        /// For an extension update that asks for more than before: approve it
+        #[arg(long)]
+        yes: bool,
     },
     /// Install newer versions of everything installed from the Market
     Update,
@@ -53,7 +59,7 @@ enum MarketCmd {
         #[arg(required = true)]
         names: Vec<String>,
     },
-    /// Add a skill, rule pack or filter pack from a file or link, marked Not verified
+    /// Add a skill, rule pack, filter pack or extension from a file or link, marked Not verified
     Add {
         /// Path or https:// address of the file
         source: String,
@@ -134,7 +140,7 @@ fn status_label(s: &Status) -> String {
         Status::Available => "available".into(),
         Status::Installed { .. } => "installed".into(),
         Status::Update { installed } => format!("update {installed}→"),
-        Status::NeedsRuntime => "needs runtime".into(),
+        Status::NeedsRuntime => "coming soon".into(),
     }
 }
 
@@ -160,6 +166,9 @@ fn print_changes(changes: &[Change], requested: &str) {
         let what = c.kind.noun();
         match c.action {
             Action::Installed if c.kind == Kind::Bundle => println!("Installed {} {} (bundle).", c.name, c.version),
+            Action::Installed if c.kind == Kind::Extension => {
+                println!("Installed {} {} ({what}, sha256 verified) and switched it on; `plonix extensions show {}` says what it may do.", c.name, c.version, c.name)
+            }
             Action::Installed => println!("Installed {} {} ({what}, sha256 verified).", c.name, c.version),
             Action::Updated => println!("Updated {} {} → {} ({what}, sha256 verified).", c.name, c.from.as_deref().unwrap_or("?"), c.version),
             Action::Removed => println!("Removed {} ({what}).", c.name),
@@ -231,7 +240,11 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
                 _ => None,
             };
             let manifest = match (&file, p.kind) {
-                (Some(b), Kind::Extension) => plonix_core::extension::parse_manifest(b).ok(),
+                (Some(b), Kind::Extension) => market::extension_manifest(b).ok(),
+                _ => None,
+            };
+            let runnable = match (&file, p.kind) {
+                (Some(b), Kind::Extension) => Some(market::extension_runnable(b)),
                 _ => None,
             };
             if ctx.json {
@@ -258,22 +271,28 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
             if let Some(mf) = manifest {
                 println!("Would be allowed to:");
                 for c in &mf.capabilities {
-                    println!("  - {}", c.describe());
+                    println!("  - {}{}", c.describe(), if c.sensitive() { " (sensitive: only with --grant)" } else { "" });
                 }
-                println!("Not installable yet: it needs the sandboxed extension runtime.");
+                match runnable {
+                    Some(Ok(())) => println!("{}", market::SANDBOX_NOTE),
+                    Some(Err(e)) => println!("Not installable in this version: {e}"),
+                    None => {}
+                }
             }
             if !p.homepage.is_empty() {
                 println!("Homepage: {}", p.homepage);
             }
         }
-        MarketCmd::Install { names } => {
+        MarketCmd::Install { names, grant, yes } => {
             let cat = market::open(&ctx.home, &opts)?;
             if !cat.verified() {
                 eprintln!("warning: installing from an unsigned Market index ({})", cat.location());
             }
+            let grant = grant.iter().map(|g| plonix_core::extension::Capability::parse(g).map_err(|e| anyhow!(e))).collect::<Result<Vec<_>>>()?;
+            let consent = plonix_core::extension::Consent { grant, approve_new: yes };
             let mut all = vec![];
             for name in &names {
-                let changes = m.install(&cat, name)?;
+                let changes = m.install_with(&cat, name, &consent)?;
                 if !ctx.json {
                     print_changes(&changes, name);
                 }
@@ -309,12 +328,18 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
         }
         MarketCmd::Add { source, yes } => {
             let loc = registry::location(&source).map_err(|e| anyhow!(e))?;
-            let bytes = registry::fetch(&loc, plonix_core::rulepack::MAX_PACK_BYTES)?;
+            let bytes = match &loc {
+                registry::Location::File(p) => plonix_core::extension::read_source(p)?,
+                registry::Location::Url(_) => registry::fetch(&loc, market::max_bytes(Kind::Extension))?,
+            };
             let label = match &loc {
                 registry::Location::File(p) => std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()).display().to_string(),
                 registry::Location::Url(u) => u.clone(),
             };
             let ext = m.inspect_external(bytes, &label).map_err(|e| anyhow!(e))?;
+            if ext.kind == Kind::Extension {
+                bail!("that is an extension: add it with `plonix extensions add {source}`, which shows what it asks to do first");
+            }
             if !ctx.json {
                 println!("{} {} · {} by {}", ext.name, ext.version, ext.kind.noun(), ext.author);
                 println!("{}", ext.description);
@@ -330,7 +355,7 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
                 }
                 bail!("not added yet. Read the above, then run it again with --yes to add it");
             }
-            let change = m.add_external(&ext)?;
+            let change = m.add_external(&ext, &Default::default())?;
             if ctx.json {
                 return ctx.print_json(&json!({ "added": true, "file": ext, "change": change }));
             }

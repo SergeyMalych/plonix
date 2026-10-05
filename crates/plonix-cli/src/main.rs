@@ -8,6 +8,7 @@ mod client;
 mod community;
 mod connect;
 mod engine_ctl;
+mod extensions;
 mod findings;
 mod intercept;
 mod market;
@@ -49,6 +50,7 @@ Get started:
   plonix tech                      technologies detected on each host
   plonix findings                  what you found; `plonix findings export -o report.html` for a report
   plonix store                     community detection rule packs
+  plonix extensions                sandboxed extensions: list, add, switch on and off, run
   plonix connect claude            let Claude Code read this project (read-only MCP)
 
 Exit codes:
@@ -183,6 +185,12 @@ enum Cmd {
     /// The Market: install skills, rules, filters, bundles and extensions from a signed catalog
     #[command(visible_alias = "store")]
     Market(market::MarketArgs),
+    /// Sandboxed extensions: list, add, enable, disable, run, remove, pack
+    #[command(visible_alias = "ext")]
+    Extensions {
+        #[command(subcommand)]
+        cmd: Option<extensions::ExtensionsCmd>,
+    },
     /// Agent skills: playbooks agents find through MCP
     Skills {
         #[command(subcommand)]
@@ -469,6 +477,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Cmd::Filters { cmd } => community::filters_cmd(&ctx, cmd.unwrap_or(community::FiltersCmd::List))?,
         Cmd::Market(a) => market::market_cmd(&ctx, a)?,
         Cmd::Skills { cmd } => market::skills_cmd(&ctx, cmd.unwrap_or(market::SkillsCmd::List))?,
+        Cmd::Extensions { cmd } => extensions::extensions_cmd(&ctx, cmd.unwrap_or(extensions::ExtensionsCmd::List))?,
         Cmd::Connect { cmd } => connect::connect_cmd(&ctx, cmd)?,
         Cmd::Mcp => mcp::serve(ctx.home.clone())?,
         Cmd::Ca { cmd } => ca_cmd(&ctx, cmd.unwrap_or(CaCmd::Show))?,

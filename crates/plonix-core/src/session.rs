@@ -62,6 +62,7 @@ pub async fn open(home: &Home, mut project: Project, options: OpenOptions) -> Re
     engine.set_rule_library(Library::new(home));
     engine.set_filter_library(crate::filterpack::FilterLibrary::new(home));
     engine.set_list_library(crate::listpack::ListLibrary::new(home));
+    engine.set_extension_library(crate::extension::ExtensionLibrary::new(home));
     if project.file.demo {
         engine.set_responder(crate::demo::responder());
     }

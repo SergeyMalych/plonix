@@ -201,7 +201,7 @@ The store is a **static JSON index** that can be hosted anywhere: the Plonix rep
 ```
 
 - A relative `url` resolves against the index's own location and may not contain `..`. An absolute `url` must be `https://`.
-- `kind` is `rules` today. `extension` entries are listed (marked *needs runtime*) but can't be installed until the extension sandbox ships; see [extensions.md](extensions.md).
+- `kind` is `rules` today. `extension` entries are sandboxed code extensions; see [extensions.md](extensions.md).
 - Installing downloads the pack, checks its SHA-256 against the index, checks that its name and version match the entry, validates it, and only then writes it to disk.
 
 ```sh

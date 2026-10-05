@@ -1802,7 +1802,7 @@ async function loadInsights(ex) {
   return ex.insights;
 }
 
-const CAT_TITLE = { secret: 'Exposed secret', decode: 'Decodable value', pii: 'Personal data', info: 'Infrastructure detail' };
+const CAT_TITLE = { secret: 'Exposed secret', decode: 'Decodable value', pii: 'Personal data', info: 'Infrastructure detail', extension: 'From an installed extension, not from Plonix' };
 
 /** A row of chips under the Request or Response label, one per thing spotted. */
 function drawInsights(col, list) {
@@ -4697,7 +4697,7 @@ const KIND_INFO = {
 const GROUP_LABELS = { traffic: 'Traffic', insights: 'Insights', map: 'Map', scope: 'Scope', findings: 'Findings', scan: 'Scans' };
 const groupLabel = (g) => GROUP_LABELS[g] || g;
 
-const MK = { data: null, kind: 'all', q: '', sel: null, busy: null };
+const MK = { data: null, kind: 'all', q: '', sel: null, busy: null, ext: {} };
 
 function renderMarket(main) {
   const q = h('input', {
@@ -4723,7 +4723,7 @@ function renderMarket(main) {
         h('h2', { text: 'Market' }),
         h('div', { class: 'search' }, h('span', { class: 'mg', text: '⌕' }), q),
         h('button', { class: 'btn sm', id: 'mupdate', hidden: true, onclick: updateAll }),
-        h('button', { class: 'btn sm', text: 'Add from a file or link', title: 'Add a skill, rule pack or filter pack from outside the Market. It is marked Not verified.', onclick: addExternal }),
+        h('button', { class: 'btn sm', text: 'Add from a file or link', title: 'Add a skill, pack or extension from outside the Market. It is marked Not verified.', onclick: addExternal }),
         h('button', { class: 'iconbtn', title: 'Check the Market again', text: '↻', onclick: () => loadMarket(true) }),
       ),
       h('div', { class: 'mtrust', id: 'mtrust' }),
@@ -4737,6 +4737,8 @@ function renderMarket(main) {
 async function loadMarket(refresh) {
   try {
     MK.data = await api('/api/market' + (refresh ? '?refresh=true' : ''));
+    const ex = await api('/api/extensions').catch(() => ({ extensions: [] }));
+    MK.ext = Object.fromEntries((ex.extensions || []).map((x) => [x.name, x]));
   } catch (e) {
     const grid = $('#mgrid');
     if (grid) clear(grid, h('div', { class: 'empty' }, h('h3', { text: 'The Market is not available' }), h('p', { text: e.message })));
@@ -4760,6 +4762,9 @@ const isUnverified = (p) => p.verification && ['unverified', 'changed'].includes
 function marketStatus(p) {
   const st = p.status.state;
   if (st === 'built_in') return { text: 'Built in', cls: 'tag in', action: null };
+  const x = p.kind === 'extension' && MK.ext[p.name];
+  if (st === 'installed' && x && x.disabled_reason) return { text: 'Stopped', cls: 'tag bad', action: 'remove' };
+  if (st === 'installed' && x && !x.enabled) return { text: 'Installed · off', cls: 'tag out', action: 'remove' };
   if (st === 'installed') return { text: 'Installed', cls: 'tag in', action: 'remove' };
   if (st === 'update') return { text: 'Update ' + p.status.installed + ' → ' + p.version, cls: 'tag upd', action: 'update' };
   if (st === 'needs_runtime') return { text: 'Coming soon', cls: 'tag out', action: null };
@@ -4841,12 +4846,13 @@ function marketButton(p, action, small) {
   });
 }
 
-async function marketAction(p, action) {
+async function marketAction(p, action, consent) {
   if (action === 'remove' && p.kind === 'bundle' && !confirm(`Remove ${p.name} and the packages it installed?`)) return;
+  if (action !== 'remove' && p.kind === 'extension' && !consent) return extensionConsent(p, action);
   MK.busy = p.name;
   drawMarket();
   try {
-    const r = await api('/api/market/' + (action === 'remove' ? 'remove' : 'install'), { method: 'POST', body: { name: p.name } });
+    const r = await api('/api/market/' + (action === 'remove' ? 'remove' : 'install'), { method: 'POST', body: { name: p.name, ...(consent || {}) } });
     const changed = (r.changes || []).filter((c) => c.action !== 'unchanged');
     const verb = action === 'remove' ? 'Removed' : action === 'update' ? 'Updated' : 'Installed';
     toast(changed.length > 1 ? `${verb} ${p.name} with ${changed.length - 1} more` : `${verb} ${p.name}`, 'ok');
@@ -4858,16 +4864,105 @@ async function marketAction(p, action) {
   loadFacets();
 }
 
+/** Capabilities an extension asks for, with a checkbox for each sensitive one. Returns the boxes. */
+function capabilityList(caps) {
+  const boxes = [];
+  const rows = caps.map((c) => {
+    if (!c.sensitive) return h('div', { class: 'mcap' }, h('span', { text: '✓' }), c.what);
+    const box = h('input', { type: 'checkbox', value: c.id });
+    boxes.push(box);
+    return h('div', { class: 'mcap warn' }, h('label', null, box, h('span', { text: '!' }), c.what + ' (only if you tick it)'));
+  });
+  return { rows, boxes };
+}
+
+/** Before an extension installs: what it may do, and an explicit yes for anything sensitive. */
+async function extensionConsent(p, action) {
+  let d;
+  try {
+    d = await api('/api/market/' + encodeURIComponent(p.name));
+  } catch (e) {
+    return toast(e.message, 'err');
+  }
+  const x = (d.detail && d.detail.extension) || {};
+  if (!x.installable) return toast(x.why_not || `${p.name} cannot be installed in this version of Plonix`, 'err');
+  const { rows, boxes } = capabilityList(x.capabilities || []);
+  const go = h('button', { class: 'btn primary', text: action === 'update' ? 'Update' : 'Install' });
+  modal(
+    `${action === 'update' ? 'Update' : 'Install'} ${p.name}?`,
+    [h('p', { class: 'muted mnote', text: 'It will be allowed to:' }), rows, h('p', { class: 'muted fine', text: x.sandbox })],
+    [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), go],
+  );
+  go.onclick = () => {
+    closeModal();
+    marketAction(p, action, { approve: true, grant: boxes.filter((b) => b.checked).map((b) => b.value) });
+  };
+}
+
+/** An installed extension: on or off, why Plonix stopped it, and a run over captured traffic. */
+function extensionState(name) {
+  const x = MK.ext[name];
+  if (!x) return null;
+  const box = h('div', { class: 'extstate' + (x.disabled_reason ? ' stopped' : '') });
+  const draw = () => {
+    const on = x.enabled;
+    const toggle = h('button', {
+      class: 'btn sm' + (on ? '' : ' primary'),
+      text: on ? 'Switch off' : 'Switch on',
+      onclick: async () => {
+        try {
+          const r = await api('/api/extensions/' + encodeURIComponent(name) + '/enabled', { method: 'PUT', body: { enabled: !on } });
+          Object.assign(x, r.state);
+          if (!r.state.disabled_reason) delete x.disabled_reason;
+          toast(`${name} is ${x.enabled ? 'on' : 'off'}`, 'ok');
+        } catch (e) {
+          toast(e.message, 'err');
+        }
+        box.className = 'extstate' + (x.disabled_reason ? ' stopped' : '');
+        draw();
+        drawMarket();
+      },
+    });
+    const run = h('button', {
+      class: 'btn sm',
+      text: 'Run on captured traffic',
+      disabled: !on,
+      title: 'Hand everything captured so far to this extension. New traffic reaches it on its own.',
+      onclick: async () => {
+        run.disabled = true;
+        run.textContent = 'Running…';
+        try {
+          const r = await api('/api/extensions/' + encodeURIComponent(name) + '/run', { method: 'POST', body: {} });
+          if (r.stopped) toast(`${name}: ${r.stopped}`, 'err');
+          else toast(`${name} looked at ${r.exchanges} request(s): ${r.notes} note(s), ${r.proposed} new finding(s) to review`, 'ok');
+        } catch (e) {
+          toast(e.message, 'err');
+        }
+        await loadMarket(false);
+      },
+    });
+    clear(
+      box,
+      h('div', { class: 'row' }, h('b', { text: x.disabled_reason ? 'Stopped' : on ? 'On' : 'Off' }), toggle, run),
+      x.disabled_reason ? h('p', { text: x.disabled_reason }) : null,
+      h('p', { class: 'muted', text: on ? 'Its notes show in the Lens, marked with its name. Findings it proposes stay open until you confirm them.' : 'It is installed but does not run.' }),
+    );
+  };
+  draw();
+  return box;
+}
+
 /** Adds a file from outside the Market: look at it first, then confirm. It is always marked Not verified. */
 function addExternal() {
-  const input = h('input', { placeholder: 'https://example.com/skill.md  or  /path/to/pack.json', spellcheck: 'false', autocomplete: 'off' });
+  const input = h('input', { placeholder: 'https://example.com/skill.md  or  /path/to/pack.json  or  /path/to/extension', spellcheck: 'false', autocomplete: 'off' });
+  let boxes = [];
   const preview = h('div', { class: 'xpreview' });
   const check = h('button', { class: 'btn', text: 'Look at it' });
   const confirmBtn = h('button', { class: 'btn primary', text: 'Add it, not verified', hidden: true });
   const m = modal(
     'Add from a file or link',
     [
-      h('p', { class: 'muted mnote', text: 'A skill (Markdown), rule pack or filter pack. Plonix checks it in full, shows you what it does, and adds it only after you confirm. Nobody vouches for it, so it is marked Not verified.' }),
+      h('p', { class: 'muted mnote', text: 'A skill (Markdown), a rule, filter or list pack, or an extension (a .plonixext file or its folder). Plonix checks it in full, shows you what it does, and adds it only after you confirm. Nobody vouches for it, so it is marked Not verified.' }),
       h('label', null, 'Address or path', input),
       preview,
     ],
@@ -4879,7 +4974,8 @@ function addExternal() {
     if (!source) return input.focus();
     check.disabled = confirmBtn.disabled = true;
     try {
-      const r = await api('/api/market/add', { method: 'POST', body: { source, confirm } });
+      const grant = boxes.filter((b) => b.checked).map((b) => b.value);
+      const r = await api('/api/market/add', { method: 'POST', body: { source, confirm, grant } });
       if (r.added) {
         closeModal();
         toast(`Added ${r.file.name} (not verified)`, 'ok');
@@ -4888,13 +4984,15 @@ function addExternal() {
         return showPackage(r.file.name);
       }
       const f = r.file;
+      const caps = f.capabilities ? capabilityList(f.capabilities) : { rows: [], boxes: [] };
+      boxes = caps.boxes;
       clear(
         preview,
         h('div', { class: 'xhead' }, h('b', { class: 'mono', text: f.name }), h('span', { class: 'muted', text: ` ${KIND_INFO[f.kind].one} · ${f.version} · ${f.author}` })),
         h('p', { text: f.description }),
-        f.effects.map((e) => h('div', { class: 'mcap' }, h('span', { text: '•' }), e)),
+        f.kind === 'extension' ? [h('p', { class: 'muted', text: 'It will be allowed to:' }), caps.rows, h('p', { class: 'muted fine', text: f.effects[f.effects.length - 1] })] : f.effects.map((e) => h('div', { class: 'mcap' }, h('span', { text: '•' }), e)),
         f.replaces ? h('p', { class: 'muted', text: `This replaces ${f.name} ${f.replaces}, which is installed.` }) : null,
-        h('div', { class: 'mtrustbox warn' }, h('span', { class: 'trust warn' }, h('i', { text: '!' }), 'Not verified'), h('p', { text: 'It did not come from a signed Market. It is checked and cannot run code, but nobody has reviewed what it says or does.' })),
+        h('div', { class: 'mtrustbox warn' }, h('span', { class: 'trust warn' }, h('i', { text: '!' }), 'Not verified'), h('p', { text: f.kind === 'extension' ? 'It did not come from a signed Market. Its code only runs in the sandbox, but nobody has reviewed what it does.' : 'It did not come from a signed Market. It is checked and cannot run code, but nobody has reviewed what it says or does.' })),
         h('p', { class: 'muted fine mono', text: 'sha256 ' + f.sha256 }),
       );
       confirmBtn.hidden = false;
@@ -4985,11 +5083,17 @@ async function showPackage(name) {
     parts.push(h('p', { class: 'muted fine' }, 'In Claude Code, run ', h('code', { text: '/mcp__plonix__' + p.name }), ' once it is installed.'));
   }
   if (det.extension) {
+    const x = det.extension;
+    const granted = x.installed ? x.installed.granted : null;
+    if (x.installed) parts.unshift(sec('In this Plonix', extensionState(name)));
     parts.push(
       sec(
-        'Would be allowed to',
-        det.extension.capabilities.map((c) => h('div', { class: 'mcap' + (c.sensitive ? ' warn' : '') }, h('span', { text: c.sensitive ? '!' : '✓' }), c.what)),
-        h('p', { class: 'muted fine', text: 'Extensions that run code need the sandboxed extension runtime, which is not in this version of Plonix yet. Until then they are listed so you can see what is coming.' }),
+        granted ? 'Allowed to' : 'Would be allowed to',
+        x.capabilities.map((c) => {
+          const off = granted && !granted.includes(c.id);
+          return h('div', { class: 'mcap' + (off ? ' off' : c.sensitive ? ' warn' : '') }, h('span', { text: off ? '✗' : c.sensitive ? '!' : '✓' }), c.what + (off ? ' (not granted)' : c.sensitive && !granted ? ' (only if you say yes)' : ''));
+        }),
+        h('p', { class: 'muted fine', text: x.installable ? x.sandbox : x.why_not ? 'Not installable in this version: ' + x.why_not : 'Listed so you can see what is coming; its code is not published yet.' }),
       ),
     );
   }

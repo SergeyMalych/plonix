@@ -5,7 +5,7 @@ This folder is the Plonix Market: `index.json` lists every package, `index.json.
 - `skills/`: agent skills ([format](../docs/market.md#writing-a-skill))
 - `packs/`: detection rule packs ([format](../docs/detection-rules.md))
 - `filterpacks/`: filter packs ([format](../docs/filters.md))
-- `extensions/`: extension manifests ([design](../docs/extensions.md))
+- `extensions/`: extension packages (`.plonixext`) and listings of ones still to come ([extensions](../docs/extensions.md))
 
 Bundles live only in `index.json`: a bundle entry has no `url` or `sha256`, just `requires`.
 

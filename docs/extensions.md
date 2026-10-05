@@ -2,18 +2,18 @@
 
 Plonix is meant to be maintained by its community. Extensions are how people add what the core deliberately leaves out: new detections, filters, tabs and panels, tweaks to how Plonix behaves, passive analyzers for a specific framework, helpers for a token format, finding templates. This document is the design for the extension system: what an extension is, how it's found, installed and loaded, and above all **what it is never allowed to do**.
 
-**Status.** Three pieces are live today:
+**Status.** Four pieces are live today:
 
 - **Rule packs** are installable from files, URLs and the store, with schema validation and SHA-256 pinning. See [detection-rules.md](detection-rules.md).
 - **Filter packs** add named Traffic filters (`is:graphql`, `-is:trackers`) to search and to the window's **+ Filter** builder. See [filters.md](filters.md).
-- The **Market** (`plonix market`, and the Market screen) lists skills, rule packs, filter packs, bundles and extensions from a signed index and installs everything but code extensions, verifying the signature and every checksum. See [market.md](market.md).
+- The **Market** (`plonix market`, and the Market screen) lists skills, rule packs, filter packs, bundles and extensions from a signed index, verifying the signature and every checksum. See [market.md](market.md).
+- **Code extensions, first slice: passive analyzers.** A WebAssembly module runs in a sandbox with no network, files, processes or clock, under a CPU, memory and time budget. It reads the traffic the engine hands it (in-scope only, unless you grant more), adds notes that show in the Lens under its own name, and proposes findings that stay open until you confirm them. Install one from a file, a folder or the signed Market; switch it on and off; a crash or a runaway loop stops it and switches it off with a message, and the engine carries on. See [Running extensions today](#running-extensions-today).
 
-Tabs, panels and tweaks are designed below ([UI contributions](#ui-contributions-tabs-panels-tweaks-and-filters)) and not built yet.
-
-The **extension manifest and capability model** are implemented and tested (`crates/plonix-core/src/extension.rs`), so the contract is fixed before any code runs. The **code runtime is not built**. Store entries of kind `extension` are listed but refused at install time. That is deliberate: an unsandboxed plugin loader in a security tool would be a backdoor with a nice API, and we won't ship one.
+Tabs, panels and tweaks are designed below ([UI contributions](#ui-contributions-tabs-panels-tweaks-and-filters)) and not built yet. Neither are `read-scope`, `detection-rules` and `named-filters` from code, nor `scoped-requests`: an extension asking for any of them is listed in the Market but not installable yet.
 
 ## Contents
 
+- [Running extensions today](#running-extensions-today)
 - [Threat model](#threat-model)
 - [The trust boundary](#the-trust-boundary)
 - [Invariants](#invariants)
@@ -26,6 +26,64 @@ The **extension manifest and capability model** are implemented and tested (`cra
 - [Store and distribution](#store-and-distribution)
 - [Versioning](#versioning)
 - [Roadmap](#roadmap)
+
+## Running extensions today
+
+```sh
+plonix extensions                              # installed ones: on, off, or stopped and why
+plonix extensions add ./my-extension           # a folder with plonix-extension.json, or a .plonixext file
+plonix extensions add ./x.plonixext --yes --grant read-out-of-scope
+plonix market install security-headers         # from the signed Market: checksum and signature verified
+plonix extensions show security-headers        # what it is allowed to do
+plonix extensions run security-headers         # hand it everything captured so far
+plonix extensions disable security-headers     # or enable; enable clears a "stopped" state
+plonix extensions remove security-headers
+plonix extensions pack ./my-extension          # for authors: one .plonixext file to publish
+plonix extensions check ./my-extension         # for authors: validate without installing
+```
+
+In the window, the **Market** shows each extension's capabilities before it installs, with a separate tick box for each sensitive one. An installed extension's page has **Switch on / Switch off**, **Run on captured traffic**, and the reason when Plonix stopped it. The Market's **Installed** tab lists it with its state.
+
+What happens once it is on:
+
+- **New traffic reaches it on its own**, in small batches, after it is recorded. Captured traffic from before it was installed is analyzed when you click **Run on captured traffic** (`plonix extensions run`).
+- **Notes** show in the Lens under **Spotted**, with a dashed outline, labelled with the extension's name and "not from Plonix".
+- **Proposed findings** are stored as **open**, created by `extension:<name>`, with a line saying which extension proposed them. A proposal with the same title as one it made before is not added again.
+- **Faults are contained.** Running out of its instruction budget, its memory cap or its time, trapping, or breaking the host API stops the call. Plonix switches the extension off right away, records why, and shows it in `plonix extensions` and on its Market page. The engine, the proxy and other extensions carry on. Turning it back on is your call.
+
+An example lives in [`examples/extensions/security-headers`](../examples/extensions/security-headers): a small Rust analyzer that notes HTML pages missing common security headers and cookies without `Secure` or `HttpOnly`, and proposes one finding per host. Its packed form is `store/extensions/security-headers.plonixext`.
+
+### Package format
+
+A package is one JSON file, `<name>.plonixext`, holding the manifest and the module, so one SHA-256 pins both:
+
+```json
+{
+  "plonix_extension_package": 1,
+  "manifest": { "plonix_extension": 1, "name": "security-headers", "runtime": "wasm", "entry": "security_headers.wasm", "...": "..." },
+  "files": { "security_headers.wasm": "<Base64>" }
+}
+```
+
+`files` holds exactly the entry module. Packages are at most 6 MiB, modules at most 4 MiB. Installing checks everything short of running it: the manifest, that this version can run what it asks for, and every import and export of the module against the host API and the capabilities it asks for.
+
+### Host API, version 1
+
+This first slice uses plain WebAssembly modules (no component model yet) with a small, versioned ABI. Every host function lives in the import module `plonix:extension@1`, and a function is only linked when the capability that unlocks it was granted. Importing anything else, including any WASI function, is refused at install time.
+
+| Import | Signature | Needs |
+| --- | --- | --- |
+| `log` | `(ptr: i32, len: i32)` | always; at most 50 lines of 300 characters per call |
+| `note` | `(exchange_id: i64, tag_ptr, tag_len, text_ptr, text_len: i32) -> i32` | `passive-analysis` |
+| `propose_finding` | `(severity: i32, title_ptr, title_len, desc_ptr, desc_len, ids_ptr, ids_count: i32) -> i32` | `propose-findings` |
+
+The module exports its `memory`, `plonix_alloc(len: i32) -> i32` (a buffer for the engine to write into) and `plonix_analyze(ptr: i32, len: i32) -> i32` (0 for success). The engine writes a batch as JSON, `{"api": 1, "exchanges": [...]}`, where each exchange has `id`, `method`, `scheme`, `host`, `port`, `path`, `query`, `in_scope`, `request_headers`, `request_body`, `status`, `mime`, `response_headers` and `response_body` (bodies as text, cut at 64 KiB, with `*_truncated` flags).
+
+Host functions return 0 when they accept, -1 for invalid input (outside memory, not UTF-8, too long, control or invisible characters), -2 when the per-call limit is reached (200 notes, 20 proposals) and -3 for an exchange id that was not in the batch. Severity is 0 info to 4 critical. Tags are up to 40 characters, notes 500, titles 120, descriptions 4000.
+
+### Limits
+
+Each call gets a fresh instance: 400 million units of fuel (roughly instructions), 32 MiB of memory, one memory and one table, and 5 seconds. A start function is not allowed. The runtime is [Wasmi](https://github.com/wasmi-labs/wasmi), a WebAssembly interpreter written in Rust: it meters fuel, caps memory per instance, and adds no native code generation to Plonix, which keeps the app small and the build simple. The wall-clock limit is enforced by running each call on its own thread and abandoning it when time is up; its fuel budget stops it soon after.
 
 ## Threat model
 
@@ -81,7 +139,7 @@ These hold for every extension, whatever capabilities it has. They're enforced b
 | Tweak pack | none (data) | Change defaults from an allowlist: default filters, columns, shortcuts, accent colour | **Designed** |
 | Declarative extension | none (data) | Bundle one or more rule packs under one name and version | Manifest implemented; install planned |
 | Lens detector | none (data) | Flag a value in requests and responses: a regex, a label and a category (personal data, secret, decodable, info) | Built-in set shipped; packs planned |
-| WASM extension | WebAssembly sandbox | Passive analysis, finding proposals, scoped requests, panels and tabs, per its capabilities | **Designed** (this document) |
+| WASM extension | WebAssembly sandbox | Passive analysis, finding proposals, scoped requests, panels and tabs, per its capabilities | **Passive analyzers shipped**; the rest designed |
 
 The guiding rule: **anything that can be data is data.** Most community contributions (detecting a framework, flagging a header, recognising a token format) should be declarative, because data can be fully validated and can't misbehave. Code is for what data can't express.
 
@@ -140,7 +198,7 @@ People want to change the window as well as the engine: a tab for a workflow the
 | --- | --- | --- | --- |
 | New filters | Filter pack | No | **Shipped** |
 | Tweaks to defaults | Tweak pack | No | Designed |
-| A panel in an existing screen | WASM extension with `ui-panels` | Yes, sandboxed | Designed |
+| A panel in an existing screen | WASM extension with `ui-panels` | Yes, sandboxed | Designed (the sandbox ships; panels do not yet) |
 | A new tab | WASM extension with `ui-tab` | Yes, sandboxed | Designed |
 
 ### Filters (shipped)
@@ -169,12 +227,14 @@ Panels and tabs need logic, so they come from WASM extensions, with two extra ca
 
 ## Sandbox: WebAssembly
 
-**Recommendation: run extension code as WebAssembly components in an embedded runtime (Wasmtime), with no WASI file system, network or clock imports, and a host API defined in WIT that maps one-to-one to capabilities.**
+**Recommendation: run extension code as WebAssembly in an embedded runtime, with no WASI file system, network or clock imports, and a host API that maps one-to-one to capabilities.**
+
+What shipped first uses the Wasmi interpreter and plain modules with the small ABI in [Host API, version 1](#host-api-version-1). The WIT sketch below is where the API goes as it grows (panels, tabs, scoped requests); the capability rules are the same either way.
 
 Why WebAssembly:
 
 - **Deny by default.** A WASM module can't do anything it isn't given an import for. That's what we need: capabilities become the *only* imports. Compare dynamic libraries (`.dylib`), which run with the full rights of the Plonix process, and scripting runtimes, whose standard libraries have to be stripped and audited one function at a time.
-- **Resource limits built in.** Wasmtime supports fuel metering (instruction budgets), epoch interruption (wall-clock timeouts) and memory limits per instance. A runaway extension is stopped, and the engine keeps running.
+- **Resource limits built in.** WebAssembly runtimes support fuel metering (instruction budgets) and memory limits per instance, and the call can be abandoned on a wall-clock timeout. A runaway extension is stopped, and the engine keeps running.
 - **Any language.** Authors can write in Rust, Go, AssemblyScript, C, Zig, or Python and JavaScript through componentized interpreters. The community isn't tied to one language.
 - **Portable and reproducible.** One `.wasm` file runs on every macOS architecture and on Linux CI, and its SHA-256 identifies the exact code that runs.
 - **Mature in exactly this role.** It's the model behind proxy-wasm in Envoy, plus Zed, Extism and Shopify Functions: untrusted third-party code inside a sensitive host.
@@ -242,9 +302,9 @@ The engine delivers traffic **to** the extension in batches. The extension never
 5. **Consent**: the user sees what the extension can do in plain words, and sensitive capabilities need an explicit yes.
 6. **Install**: bytes go to `~/.plonix/extensions/<name>/`, with name, version, sha256, source and granted capabilities recorded in a lock file.
 7. **Load**: on engine start, each extension is re-verified against the lock. Anything that changed on disk is skipped and reported.
-8. **Run**: each call gets a fresh, metered instance (or a pooled one, reset between calls). Faults and limit violations are logged. Repeated violations disable the extension until the user re-enables it.
+8. **Run**: each call gets a fresh, metered instance. Faults and limit violations are logged, and the first one switches the extension off, with the reason, until the user switches it back on.
 
-`plonix ext list | info | disable | enable | remove` will manage installed extensions, mirroring `plonix rules`.
+`plonix extensions list | show | add | enable | disable | run | remove` manages installed extensions (`plonix ext` for short). Installed packages and their state live in `~/.plonix/extensions/` (`lock.json`, `packs/`, `state.json`).
 
 ## Store and distribution
 
@@ -270,9 +330,9 @@ The store is a static JSON index, already implemented for rule packs (`plonix_co
 3a. ✅ Filter packs: named Traffic filters in search, the CLI and the window's filter builder, installable from the store.
 4. Declarative extensions: install bundles of rule packs through the same flow.
    Lens detectors come next in the same format: today's built-in pattern detectors (`crates/plonix-core/src/insight.rs`) are already plain data, so a pack only needs a schema for them. Decoders that need code (JWT, Base64, hex) stay built in.
-5. WASM runtime: Wasmtime with fuel, epoch and memory limits; `analyzer` world with `read-traffic` and `passive-analysis`.
-6. `propose-findings`, then `scoped-requests`, reusing the engine's scope enforcement and recording.
+5. ✅ WASM runtime: a sandbox with fuel, time and memory limits; analyzers with `read-traffic`, `read-out-of-scope` and `passive-analysis`; installs from a file, a folder or the signed Market.
+6. ✅ `propose-findings`. Next: `scoped-requests`, reusing the engine's scope enforcement and recording.
 7. Signed store indexes.
-8. GUI: an Extensions pane in the Mac app with the same consent flow.
+8. ✅ GUI: install with the same consent flow, switch on and off, run, and see why one was stopped, from the Market screen.
 9. Tweak packs: allowlisted settings, with a diff before applying and one-step undo.
 10. `ui-panels`, then `ui-tab`: view trees rendered with Plonix components.
