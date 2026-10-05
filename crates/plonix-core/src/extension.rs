@@ -46,8 +46,17 @@ const MAX_INSTALLED: usize = 100;
 /// What the runtime in this version can do. A manifest asking for anything
 /// else is listed but not installable yet.
 pub const RUNTIME_CAPABILITIES: &[Capability] = &[Capability::ReadTraffic, Capability::ReadOutOfScope, Capability::PassiveAnalysis, Capability::ProposeFindings];
-/// What a `program` extension may ask for.
-pub const PROGRAM_CAPABILITIES: &[Capability] = &[Capability::ReadTraffic, Capability::ReadOutOfScope, Capability::PassiveAnalysis, Capability::RunProgram];
+/// What a `program` extension may ask for. Which of these it *must* ask for
+/// depends on the program's kind (see [`installable`]).
+pub const PROGRAM_CAPABILITIES: &[Capability] = &[
+    Capability::ReadTraffic,
+    Capability::ReadOutOfScope,
+    Capability::PassiveAnalysis,
+    Capability::RunProgram,
+    Capability::SuggestScope,
+    Capability::ScopedRequests,
+    Capability::ProposeFindings,
+];
 
 /// What an extension may do. Every capability is mediated by the engine:
 /// the extension never gets a raw socket, file handle or database handle.
@@ -83,6 +92,11 @@ pub enum Capability {
     /// Run the program a `program` extension names, installed by the user,
     /// over copies of captured requests and responses, on this computer.
     RunProgram,
+    /// Contribute scope *suggestions* (never decisions): record a domain as a
+    /// candidate for the user to accept or reject, with its evidence. The
+    /// engine still makes every accept/reject decision; nothing is brought
+    /// into scope by an extension.
+    SuggestScope,
 }
 
 impl Capability {
@@ -99,6 +113,7 @@ impl Capability {
             Capability::ProposeFindings => "propose findings (unconfirmed until you confirm)",
             Capability::ScopedRequests => "send requests to accepted hosts only (scope-enforced, recorded)",
             Capability::RunProgram => "run a program you installed on this Mac over copies of captured requests and responses",
+            Capability::SuggestScope => "suggest domains for scope, with evidence (you accept or reject each; it never changes scope)",
         }
     }
 
@@ -242,8 +257,23 @@ pub fn installable(m: &Manifest) -> Result<(), String> {
         if !missing.is_empty() {
             return Err(format!("{} asks for {}, which a program extension cannot have", m.name, missing.join(", ")));
         }
-        if !m.capabilities.contains(&Capability::ReadTraffic) || !m.capabilities.contains(&Capability::PassiveAnalysis) {
-            return Err(format!("{} must ask for read-traffic and passive-analysis", m.name));
+        // Each kind of program may ask only for the capabilities that match
+        // what it does, and must ask for the ones it cannot work without. An
+        // unknown program is already rejected in `check_manifest`.
+        use Capability::*;
+        let (allowed, needs): (&[Capability], &[Capability]) = match m.program.as_deref().and_then(crate::program::get).map(|p| p.kind) {
+            Some(crate::program::Kind::Scan) => (&[ReadTraffic, ReadOutOfScope, PassiveAnalysis, RunProgram], &[ReadTraffic, PassiveAnalysis]),
+            Some(crate::program::Kind::Enumerate) => (&[RunProgram, SuggestScope], &[SuggestScope]),
+            Some(crate::program::Kind::Probe) => (&[RunProgram, ScopedRequests, ProposeFindings], &[ScopedRequests, ProposeFindings]),
+            None => return Ok(()),
+        };
+        let extra: Vec<String> = m.capabilities.iter().filter(|c| !allowed.contains(c)).map(|c| c.id()).collect();
+        if !extra.is_empty() {
+            return Err(format!("{} asks for {}, which its program does not use", m.name, extra.join(", ")));
+        }
+        let absent: Vec<String> = needs.iter().filter(|c| !m.capabilities.contains(c)).map(|c| c.id()).collect();
+        if !absent.is_empty() {
+            return Err(format!("{} must ask for {}", m.name, absent.join(" and ")));
         }
         return Ok(());
     }
@@ -418,7 +448,8 @@ pub struct ProgramStatus {
 impl ProgramStatus {
     pub fn of(m: &Manifest) -> Option<Self> {
         let p = crate::program::get(m.program.as_deref()?)?;
-        Some(Self { id: p.id.into(), found: crate::program::locate(p.id).is_some(), install: p.install.into(), homepage: p.homepage.into() })
+        let install = if p.builtin { "Built in to Plonix." } else { p.install };
+        Some(Self { id: p.id.into(), found: crate::program::available(p.id), install: install.into(), homepage: p.homepage.into() })
     }
 }
 
@@ -662,6 +693,26 @@ mod tests {
         let pkg = format!(r#"{{"plonix_extension_package":1,"manifest":{}}}"#, manifest("program", caps, r#","program":"trufflehog""#));
         let p = parse_package(pkg.as_bytes()).unwrap();
         assert!(p.module.is_empty());
+    }
+
+    #[test]
+    fn program_extensions_match_their_kind() {
+        // subfinder enumerates: it needs suggest-scope, not read-traffic.
+        let ok = manifest("program", r#""run-program","suggest-scope""#, r#","program":"subfinder""#);
+        assert!(installable(&parse_manifest(ok.as_bytes()).unwrap()).is_ok());
+        let extra = manifest("program", r#""run-program","suggest-scope","read-traffic""#, r#","program":"subfinder""#);
+        assert!(installable(&parse_manifest(extra.as_bytes()).unwrap()).unwrap_err().contains("does not use"));
+        let missing = manifest("program", r#""run-program""#, r#","program":"subfinder""#);
+        assert!(installable(&parse_manifest(missing.as_bytes()).unwrap()).unwrap_err().contains("suggest-scope"));
+
+        // param-probe sends scoped requests and proposes findings.
+        let ok = manifest("program", r#""run-program","scoped-requests","propose-findings""#, r#","program":"param-probe""#);
+        assert!(installable(&parse_manifest(ok.as_bytes()).unwrap()).is_ok());
+        let missing = manifest("program", r#""run-program","propose-findings""#, r#","program":"param-probe""#);
+        assert!(installable(&parse_manifest(missing.as_bytes()).unwrap()).unwrap_err().contains("scoped-requests"));
+        // A scanner may not ask to send requests.
+        let scan = manifest("program", r#""read-traffic","passive-analysis","run-program","scoped-requests""#, r#","program":"trufflehog""#);
+        assert!(installable(&parse_manifest(scan.as_bytes()).unwrap()).unwrap_err().contains("does not use"));
     }
 
     #[test]

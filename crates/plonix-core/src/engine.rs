@@ -1297,6 +1297,33 @@ pub struct ExtensionRun {
     pub problem: Option<String>,
 }
 
+/// The outcome of a parameter probe (see [`Engine::run_param_probe`]).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ParamProbeReport {
+    pub target: String,
+    /// The baseline request's exchange id.
+    pub baseline_exchange: i64,
+    /// Candidate parameters sent, not counting the baseline and calibration.
+    pub sent: usize,
+    /// Candidates whose request could not be sent.
+    pub errors: usize,
+    /// Parameter names that changed the response.
+    pub influential: Vec<String>,
+    /// Whether a finding was proposed (false when one was already there).
+    pub proposed: bool,
+}
+
+/// A probe request: the target endpoint, optionally with one extra query
+/// parameter `name=<marker>` appended. Only a parameter name and a benign
+/// marker are added; the probe sends no payload of its own.
+fn probe_request(url: &str, param: Option<&str>, marker: &str) -> SendRequest {
+    let url = match param {
+        Some(p) => format!("{url}{}{p}={marker}", if url.contains('?') { '&' } else { '?' }),
+        None => url.to_string(),
+    };
+    SendRequest { method: "GET".into(), url, headers: vec![], body: None, body_base64: None }
+}
+
 impl Engine {
     /// Uses this library for extensions and starts feeding newly captured
     /// traffic to the enabled ones.
@@ -1445,6 +1472,23 @@ impl Engine {
         let mut run = ExtensionRun { extension: ext.name.clone(), ..Default::default() };
         let mut last = 0;
         if let Runner::Program(program) = &ext.runner {
+            match crate::program::get(program).map(|p| p.kind) {
+                Some(crate::program::Kind::Enumerate) => {
+                    match self.discover_subdomains(&ext) {
+                        Ok(found) => run.notes += found,
+                        Err(e) => run.problem = Some(e),
+                    }
+                    return Ok(run);
+                }
+                Some(crate::program::Kind::Probe) => {
+                    run.problem = Some(format!(
+                        "{} probes one endpoint at a time. Run it on an in-scope request instead (`plonix extensions probe {} <url>`).",
+                        ext.name, ext.name
+                    ));
+                    return Ok(run);
+                }
+                _ => {}
+            }
             loop {
                 let batch = self.store.exchanges_after(last, crate::program::BATCH)?;
                 let Some(tail) = batch.last() else { break };
@@ -1543,6 +1587,131 @@ impl Engine {
             self.program_problems.lock().unwrap().remove(&ext.name);
         }
         Ok((todo.len(), hits))
+    }
+
+    /// Runs the extension's enumeration tool over every accepted scope domain
+    /// and records the subdomains it finds as scope *suggestions*. Returns how
+    /// many it suggested. The tool reads public sources; Plonix sends nothing
+    /// to the target and brings nothing into scope — each suggestion waits for
+    /// the user's own accept/reject decision.
+    fn discover_subdomains(&self, ext: &Loaded) -> std::result::Result<usize, String> {
+        if !ext.granted.contains(&Capability::RunProgram) || !ext.granted.contains(&Capability::SuggestScope) {
+            return Err(format!("{} needs permission to run its tool and to suggest scope", ext.name));
+        }
+        let Runner::Program(program) = &ext.runner else { return Ok(0) };
+        let rules = self.rules();
+        // The accepted domains to enumerate, deduplicated so a seed and one of
+        // its own subdomains are not both enumerated.
+        let mut domains: Vec<String> = rules
+            .rules
+            .iter()
+            .filter(|r| r.decision == Decision::Accepted)
+            .map(|r| crate::scope::normalize_host(&r.pattern))
+            .filter(|h| !h.is_empty())
+            .collect();
+        domains.sort();
+        domains.dedup();
+        let all = domains.clone();
+        domains.retain(|d| !all.iter().any(|other| other != d && crate::scope::is_subdomain_of(d, other)));
+        if domains.is_empty() {
+            return Err("no accepted scope domain to enumerate yet. Accept a domain in Scope first.".into());
+        }
+        let now = crate::model::now_ms();
+        let mut suggested = 0;
+        for domain in domains {
+            let found = crate::program::enumerate(program, &domain)?;
+            let evidence: Vec<crate::scope::NewEvidence> = found
+                .into_iter()
+                .filter(|h| rules.decide_domain(h) == Decision::Unknown && !crate::scope::is_noise(h))
+                .map(|h| crate::scope::NewEvidence {
+                    domain: h,
+                    kind: crate::scope::EvidenceKind::Discovered,
+                    via: domain.clone(),
+                    detail: format!("subdomain enumeration of {domain} ({})", ext.name),
+                })
+                .collect();
+            suggested += evidence.len();
+            self.store.add_suggestions(&evidence, now).map_err(|e| e.to_string())?;
+        }
+        Ok(suggested)
+    }
+
+    /// Probes one in-scope endpoint for undocumented query parameters. Plonix
+    /// sends every request itself through [`Engine::send`], so each is
+    /// scope-enforced and recorded; the extension supplies only the candidate
+    /// names, never a payload. Parameters that change the response become one
+    /// unconfirmed finding for a person to review.
+    pub async fn run_param_probe(&self, name: &str, target_url: &str) -> std::result::Result<ParamProbeReport, SendError> {
+        let set = self.extensions();
+        let ext = set
+            .extensions
+            .iter()
+            .find(|e| e.name == name)
+            .ok_or_else(|| SendError::BadRequest(format!("no enabled extension named `{}` (see `plonix extensions`)", crate::detect::clean(name, 64))))?
+            .clone();
+        let is_probe = matches!(&ext.runner, Runner::Program(p) if crate::program::get(p).map(|p| p.kind) == Some(crate::program::Kind::Probe));
+        if !is_probe {
+            return Err(SendError::BadRequest(format!("{name} is not a parameter probe")));
+        }
+        if !ext.granted.contains(&Capability::ScopedRequests) || !ext.granted.contains(&Capability::RunProgram) {
+            return Err(SendError::BadRequest(format!("{name} needs permission to send scoped requests and run its probe")));
+        }
+        let initiator = extension_author(name);
+        const MARKER: &str = "plnxprobe7q";
+
+        // Baseline, then a calibration probe with a name nothing should read,
+        // to tell whether responses are stable enough to compare by length.
+        let baseline = self.send(probe_request(target_url, None, MARKER), &initiator).await?;
+        let calib = self.send(probe_request(target_url, Some("plnxcalib9z"), MARKER), &initiator).await.ok();
+        let base_len = baseline.resp_body.len() as i64;
+        let base_status = baseline.status;
+        let calib_len = calib.as_ref().map(|c| c.resp_body.len() as i64);
+        let length_reliable = calib.as_ref().map_or(true, |c| c.status == base_status && (c.resp_body.len() as i64 - base_len).abs() <= 8);
+
+        let mut report = ParamProbeReport { target: target_url.to_string(), baseline_exchange: baseline.id, ..Default::default() };
+        let mut influential: Vec<(String, i64)> = vec![];
+        for cand in crate::program::PARAM_NAMES.iter().take(crate::program::MAX_PROBES) {
+            let ex = match self.send(probe_request(target_url, Some(cand), MARKER), &initiator).await {
+                Ok(ex) => ex,
+                // Scope is the same host throughout: a refusal stops the probe.
+                Err(e @ SendError::OutOfScope { .. }) => return Err(e),
+                Err(_) => {
+                    report.errors += 1;
+                    continue;
+                }
+            };
+            report.sent += 1;
+            let len = ex.resp_body.len() as i64;
+            let reflected = String::from_utf8_lossy(&ex.resp_body).contains(MARKER);
+            let status_changed = ex.status != base_status;
+            let len_changed = length_reliable && (len - base_len).abs() > 64 && Some(len) != calib_len;
+            if reflected || status_changed || len_changed {
+                influential.push((cand.to_string(), ex.id));
+            }
+        }
+        report.influential = influential.iter().map(|(n, _)| n.clone()).collect();
+
+        if !influential.is_empty() {
+            let host = crate::scope::normalize_host(target_url);
+            let names = report.influential.join(", ");
+            let title = format!("Undocumented parameters on {host}");
+            let mut ids = vec![baseline.id];
+            ids.extend(influential.iter().map(|(_, id)| *id));
+            let description = format!(
+                "The parameter probe found query parameters that change this endpoint's response, so the application reads them although they are not documented here: {names}.\n\n\
+                 Each was sent once as `name={MARKER}` through Plonix's scope-gated send path and compared with the baseline (exchange {}). Review whether any reach data or behaviour that should not be.\n\n\
+                 Proposed by the extension {} {}. Not confirmed: check it before you rely on it.",
+                baseline.id, ext.name, ext.version
+            );
+            let by = extension_author(&ext.name);
+            let existing: BTreeSet<String> = self.store.findings()?.into_iter().filter(|f| f.created_by == by).map(|f| f.title).collect();
+            if !existing.contains(&title) {
+                let f = crate::model::NewFinding { title, severity: "info".into(), description, exchange_ids: ids };
+                self.store.add_finding(&f, &by)?;
+                report.proposed = true;
+            }
+        }
+        Ok(report)
     }
 
     /// Logs why a program extension could not run, once until it changes.

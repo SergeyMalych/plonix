@@ -62,6 +62,8 @@ pub const SNAPSHOT: &[(&str, &str)] = &[
     ("extensions/security-headers.plonixext", include_str!("../../../store/extensions/security-headers.plonixext")),
     ("extensions/secret-sweep.plonixext", include_str!("../../../store/extensions/secret-sweep.plonixext")),
     ("extensions/js-endpoints.plonixext", include_str!("../../../store/extensions/js-endpoints.plonixext")),
+    ("extensions/subdomain-discovery.plonixext", include_str!("../../../store/extensions/subdomain-discovery.plonixext")),
+    ("extensions/parameter-probe.plonixext", include_str!("../../../store/extensions/parameter-probe.plonixext")),
 ];
 
 // ---- settings -------------------------------------------------------------------

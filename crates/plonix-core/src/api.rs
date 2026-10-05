@@ -121,6 +121,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/extensions", get(extensions_list))
         .route("/api/extensions/{name}/enabled", put(extension_enabled))
         .route("/api/extensions/{name}/run", post(extension_run))
+        .route("/api/extensions/{name}/probe", post(extension_probe))
         .route("/api/scope", get(scope))
         .route("/api/scope/accept", post(accept))
         .route("/api/scope/reject", post(reject))
@@ -1446,6 +1447,25 @@ async fn extension_run(State(s): State<AppState>, Path(name): Path<String>) -> R
         Ok(Ok(run)) => Json(run).into_response(),
         Ok(Err(e)) => err(StatusCode::BAD_REQUEST, "cannot_run", &format!("{e:#}")),
         Err(e) => internal(e.into()),
+    }
+}
+
+#[derive(Deserialize)]
+struct ProbeBody {
+    url: String,
+}
+
+/// Probes one in-scope endpoint for undocumented query parameters. Every
+/// request goes through the scope choke point, so an out-of-scope target is
+/// refused here just as a replay would be.
+async fn extension_probe(State(s): State<AppState>, Path(name): Path<String>, Json(b): Json<ProbeBody>) -> Response {
+    match s.engine.run_param_probe(&name, &b.url).await {
+        Ok(report) => Json(report).into_response(),
+        Err(crate::engine::SendError::OutOfScope { host, decision }) => {
+            err(StatusCode::FORBIDDEN, "out_of_scope", &format!("{host} is not in scope ({decision}); accept it first"))
+        }
+        Err(crate::engine::SendError::BadRequest(m)) => err(StatusCode::BAD_REQUEST, "cannot_probe", &m),
+        Err(e) => internal(anyhow::anyhow!("{e}")),
     }
 }
 

@@ -22,18 +22,60 @@ use crate::detect::clean;
 use crate::insight::Side;
 use crate::model::Exchange;
 
-/// A program Plonix can drive.
-#[derive(Debug, Clone, Copy, Serialize)]
-pub struct Program {
-    /// The id a manifest uses, also the executable's name.
-    pub id: &'static str,
-    /// How to install it on a Mac.
-    pub install: &'static str,
-    pub homepage: &'static str,
+/// What driving a program does, so the engine knows how to run it and the
+/// manifest parser knows which capabilities it must ask for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    /// Reads copies of captured traffic and reports what it found in each
+    /// exchange (e.g. secrets). Passive; sends nothing.
+    Scan,
+    /// Takes an in-scope domain and enumerates its subdomains, which Plonix
+    /// records as scope suggestions to review. Reads public sources; does not
+    /// touch the target.
+    Enumerate,
+    /// Probes an in-scope endpoint with a bounded set of candidate inputs.
+    /// Built in: Plonix sends every request itself through the scope choke
+    /// point ([`crate::engine::Engine::send`]); no external process sends.
+    Probe,
 }
 
-pub const PROGRAMS: &[Program] =
-    &[Program { id: "trufflehog", install: "brew install trufflehog", homepage: "https://github.com/trufflesecurity/trufflehog" }];
+/// A program Plonix can drive: a tool the user installs, or a built-in
+/// operation Plonix performs itself.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct Program {
+    /// The id a manifest uses. For an installed tool it is also the
+    /// executable's name.
+    pub id: &'static str,
+    pub kind: Kind,
+    /// How to install it on a Mac, or "" for a built-in.
+    pub install: &'static str,
+    pub homepage: &'static str,
+    /// True when Plonix performs this itself, with no external program.
+    pub builtin: bool,
+}
+
+pub const PROGRAMS: &[Program] = &[
+    Program {
+        id: "trufflehog",
+        kind: Kind::Scan,
+        install: "brew install trufflehog",
+        homepage: "https://github.com/trufflesecurity/trufflehog",
+        builtin: false,
+    },
+    Program {
+        id: "subfinder",
+        kind: Kind::Enumerate,
+        install: "brew install subfinder",
+        homepage: "https://github.com/projectdiscovery/subfinder",
+        builtin: false,
+    },
+    Program { id: "param-probe", kind: Kind::Probe, install: "", homepage: "", builtin: true },
+];
+
+/// The installed tool enumeration tries first (by program id), then these,
+/// so the extension still works when only another recon tool is present.
+const ENUMERATE_FALLBACKS: &[&str] = &["bbot"];
 
 pub fn get(id: &str) -> Option<&'static Program> {
     PROGRAMS.iter().find(|p| p.id == id)
@@ -63,16 +105,39 @@ pub struct Hit {
     pub notes: Vec<String>,
 }
 
-/// Where the program is installed, if it is. Apps started from the Dock do
-/// not get the shell's `PATH`, so the usual install folders are tried too.
-pub fn locate(id: &str) -> Option<PathBuf> {
-    let p = get(id)?;
+/// The folders an executable might be in. Apps started from the Dock do not
+/// get the shell's `PATH`, so the usual install folders are tried too.
+fn search_dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|v| std::env::split_paths(&v).collect()).unwrap_or_default();
     dirs.extend(["/opt/homebrew/bin", "/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin"].map(PathBuf::from));
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
         dirs.extend([home.join("go/bin"), home.join(".local/bin"), home.join("bin")]);
     }
-    dirs.into_iter().map(|d| d.join(p.id)).find(|f| f.is_file())
+    dirs
+}
+
+/// Where an executable named `name` is installed, if it is.
+pub fn locate_exe(name: &str) -> Option<PathBuf> {
+    search_dirs().into_iter().map(|d| d.join(name)).find(|f| f.is_file())
+}
+
+/// Where the program is installed, if it is. A built-in has no executable.
+pub fn locate(id: &str) -> Option<PathBuf> {
+    let p = get(id)?;
+    if p.builtin {
+        return None;
+    }
+    locate_exe(p.id)
+}
+
+/// Whether this program is available to run: built-ins always are; an
+/// enumeration program is available if its tool or any fallback is installed.
+pub fn available(id: &str) -> bool {
+    match get(id) {
+        Some(p) if p.builtin => true,
+        Some(p) if p.kind == Kind::Enumerate => locate(id).is_some() || ENUMERATE_FALLBACKS.iter().any(|f| locate_exe(f).is_some()),
+        _ => locate(id).is_some(),
+    }
 }
 
 /// What a file the program reads holds: one side of one exchange.
@@ -217,6 +282,88 @@ fn parse_trufflehog(stdout: &str, files: &HashMap<String, Written>) -> Vec<(Stri
     out
 }
 
+/// Candidate query-parameter names the built-in probe ([`Kind::Probe`]) tries
+/// on an in-scope endpoint. These are only parameter *names*, not payloads:
+/// the probe sends each as `name=<marker>` and reports names that change the
+/// response, so a person can see which undocumented inputs an endpoint reads.
+/// A modest, bundled list — the user installs nothing.
+pub const PARAM_NAMES: &[&str] = &[
+    "id", "user", "user_id", "userid", "uid", "account", "account_id", "customer", "customer_id", "profile", "email", "username",
+    "name", "page", "per_page", "limit", "offset", "start", "count", "size", "sort", "order", "order_by", "q", "query", "search",
+    "filter", "fields", "field", "format", "type", "mode", "view", "lang", "locale", "country", "region", "currency", "callback",
+    "redirect", "redirect_uri", "return", "return_url", "next", "url", "uri", "path", "file", "filename", "dir", "folder", "download",
+    "token", "access_token", "api_key", "apikey", "key", "secret", "session", "sid", "auth", "code", "state", "nonce", "signature",
+    "role", "admin", "is_admin", "debug", "test", "trace", "verbose", "preview", "draft", "status", "active", "enabled", "force",
+    "include", "exclude", "expand", "with", "embed", "version", "v", "ref", "source", "utm_source", "tag", "category", "group",
+    "parent", "parent_id", "org", "org_id", "team", "team_id", "project", "project_id", "action", "op", "cmd", "method", "target",
+];
+/// Most candidates the probe sends over one run (plus the baseline).
+pub const MAX_PROBES: usize = 128;
+
+/// Longest an enumeration may run over one domain.
+pub const ENUMERATE_TIMEOUT: Duration = Duration::from_secs(120);
+/// Most subdomains kept from one enumeration.
+pub const MAX_DISCOVERED: usize = 500;
+
+/// Enumerates subdomains of `domain` with the program `id`, or a fallback
+/// tool if its own is not installed (see [`ENUMERATE_FALLBACKS`]). Returns
+/// hostnames under `domain`, deduplicated. The tool reads public sources; it
+/// does not connect to the target, and the caller gates `domain` on scope.
+pub fn enumerate(id: &str, domain: &str) -> Result<Vec<String>, String> {
+    let program = get(id).filter(|p| p.kind == Kind::Enumerate).ok_or_else(|| format!("`{}` does not enumerate subdomains", clean(id, 40)))?;
+    let domain = crate::scope::normalize_host(domain);
+    if domain.is_empty() || !is_hostname(&domain) {
+        return Err(format!("`{}` is not a domain to enumerate", clean(&domain, 60)));
+    }
+    let (exe, name) = locate(id)
+        .map(|e| (e, program.id.to_string()))
+        .or_else(|| ENUMERATE_FALLBACKS.iter().find_map(|f| locate_exe(f).map(|e| (e, (*f).to_string()))))
+        .ok_or_else(|| format!("{} is not installed. Install it with `{}`, then run this again.", program.id, program.install))?;
+    let stdout = run(&exe, &enumerate_args(&name, &domain), ENUMERATE_TIMEOUT)?;
+    Ok(parse_hosts(&stdout, &domain))
+}
+
+/// Keeps the tool local and quiet. subfinder prints one hostname per line with
+/// `-silent`; a fallback is asked for the same, and read the same tolerant way.
+fn enumerate_args(name: &str, domain: &str) -> Vec<String> {
+    match name {
+        "bbot" => ["-t", domain, "-f", "subdomain-enum", "-y", "--silent"].map(String::from).to_vec(),
+        // subfinder and anything else: bare hostnames, one per line.
+        _ => ["-d", domain, "-silent"].map(String::from).to_vec(),
+    }
+}
+
+/// Pulls hostnames under `domain` out of a tool's output, whatever its exact
+/// shape: each token may be a bare hostname (subfinder `-silent`) or sit
+/// inside JSON. Only valid hostnames that are `domain` or a subdomain of it
+/// are kept, so a tool that wanders off the target cannot widen the result.
+fn parse_hosts(stdout: &str, domain: &str) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    let mut seen = std::collections::HashSet::new();
+    for token in stdout.split(|c: char| c.is_whitespace() || matches!(c, '"' | ',' | '{' | '}' | '[' | ']' | '=' | ':' | '/' | '\\')) {
+        let t = token.trim().trim_matches('.').to_ascii_lowercase();
+        let h = t.strip_prefix("*.").unwrap_or(&t);
+        if h != domain && !crate::scope::is_subdomain_of(h, domain) {
+            continue;
+        }
+        if !is_hostname(h) || !seen.insert(h.to_string()) {
+            continue;
+        }
+        out.push(h.to_string());
+        if out.len() >= MAX_DISCOVERED {
+            break;
+        }
+    }
+    out
+}
+
+fn is_hostname(h: &str) -> bool {
+    let labels: Vec<&str> = h.split('.').collect();
+    labels.len() >= 2
+        && labels.iter().all(|l| !l.is_empty() && l.len() <= 63 && l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') && !l.starts_with('-') && !l.ends_with('-'))
+        && labels.last().is_some_and(|tld| tld.len() >= 2 && tld.bytes().all(|b| b.is_ascii_alphabetic()))
+}
+
 /// A label for a hit: `SendGrid` becomes `SendGrid secret`, `PrivateKey`
 /// becomes `Private key`. Names are kept as the program writes them.
 pub fn label(detector: &str) -> String {
@@ -311,5 +458,27 @@ mod tests {
     fn only_known_programs_run() {
         assert!(scan("sh", &[]).unwrap_err().contains("does not know"));
         assert!(trufflehog_args(Path::new("/t")).contains(&"--no-verification".to_string()));
+    }
+
+    #[test]
+    fn enumeration_keeps_only_hostnames_under_the_target() {
+        // Bare lines (subfinder -silent) and hostnames embedded in JSON are
+        // read the same way; anything not under the target is dropped.
+        let out = "www.example.com\napi.example.com\n{\"host\":\"dev.example.com\",\"source\":\"crtsh\"}\nevil.com\nexample.com.attacker.net\nwww.example.com\n";
+        let hosts = parse_hosts(out, "example.com");
+        assert!(hosts.contains(&"www.example.com".to_string()));
+        assert!(hosts.contains(&"api.example.com".to_string()));
+        assert!(hosts.contains(&"dev.example.com".to_string()), "pulled out of JSON too");
+        assert_eq!(hosts.iter().filter(|h| *h == "www.example.com").count(), 1, "deduplicated");
+        assert!(!hosts.contains(&"evil.com".to_string()));
+        assert!(!hosts.iter().any(|h| h.contains("attacker")), "example.com.attacker.net is not a subdomain of example.com");
+    }
+
+    #[test]
+    fn only_enumerate_programs_enumerate_and_the_domain_is_checked() {
+        assert!(enumerate("trufflehog", "example.com").unwrap_err().contains("does not enumerate"));
+        assert!(enumerate("subfinder", "not a domain").unwrap_err().contains("not a domain"));
+        assert_eq!(enumerate_args("subfinder", "example.com"), ["-d", "example.com", "-silent"]);
+        assert!(get("param-probe").unwrap().builtin && available("param-probe"));
     }
 }

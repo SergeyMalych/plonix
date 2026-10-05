@@ -43,8 +43,16 @@ pub enum ExtensionsCmd {
         #[arg(required = true)]
         names: Vec<String>,
     },
-    /// Run an extension over the traffic captured so far (needs a running engine)
+    /// Run an extension over the traffic captured so far, or (for a subdomain
+    /// finder) over your accepted scope domains (needs a running engine)
     Run { name: String },
+    /// Probe one in-scope endpoint for undocumented query parameters, sending
+    /// every request through Plonix's scope-gated path (needs a running engine)
+    Probe {
+        name: String,
+        /// The in-scope endpoint, e.g. https://api.example.com/v1/users
+        url: String,
+    },
     /// For authors: check a package or folder without installing it
     Check { source: String },
     /// For authors: pack a folder (plonix-extension.json and its module) into one .plonixext file
@@ -215,6 +223,29 @@ pub fn extensions_cmd(ctx: &Ctx, cmd: ExtensionsCmd) -> Result<()> {
             }
             if r["proposed"].as_u64().unwrap_or(0) > 0 {
                 println!("Proposed findings are open until you confirm them: `plonix findings`.");
+            }
+        }
+        ExtensionsCmd::Probe { name, url } => {
+            let c = ctx.client()?;
+            let r = c.post(&format!("/api/extensions/{}/probe", encode(&name)), json!({ "url": url }))?;
+            if ctx.json {
+                return ctx.print_json(&r);
+            }
+            let influential = r["influential"].as_array().map(|a| a.len()).unwrap_or(0);
+            println!(
+                "{} probed {}: sent {} candidate parameter(s); {} changed the response.",
+                name,
+                r["target"].as_str().unwrap_or(&url),
+                r["sent"].as_u64().unwrap_or(0),
+                influential
+            );
+            for p in r["influential"].as_array().into_iter().flatten().filter_map(|p| p.as_str()) {
+                println!("  parameter: {p}");
+            }
+            if r["proposed"].as_bool().unwrap_or(false) {
+                println!("Proposed an unconfirmed finding; review it with `plonix findings`.");
+            } else if influential > 0 {
+                println!("A finding for these was already open; see `plonix findings`.");
             }
         }
         ExtensionsCmd::Check { source } => {

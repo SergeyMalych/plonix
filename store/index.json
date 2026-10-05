@@ -142,6 +142,36 @@
       ]
     },
     {
+      "name": "subdomain-discovery",
+      "kind": "extension",
+      "version": "0.1.0",
+      "description": "Enumerates an accepted domain's subdomains with a recon tool you install, and adds the ones it finds to Scope as suggestions to review. It never changes scope on its own.",
+      "author": "Plonix contributors",
+      "url": "extensions/subdomain-discovery.plonixext",
+      "sha256": "eb4cfe101f135cc31b7384f7e10858bf4f63333b92381cad0e14a4582114e63a",
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "about": [
+        "Finds a target's other subdomains so your scope can grow to match the real application. It runs a subdomain enumeration tool you install, over a domain you have already accepted into scope.",
+        "Everything it finds is added to Scope as a suggestion, with the evidence that it was enumerated, for you to accept or reject. It never brings anything into scope on its own, and it reads public sources rather than touching the target.",
+        "Install subfinder (brew install subfinder), accept your first domain in Scope, then run it from its page or with `plonix extensions run subdomain-discovery`."
+      ]
+    },
+    {
+      "name": "parameter-probe",
+      "kind": "extension",
+      "version": "0.1.0",
+      "description": "Probes an in-scope endpoint for undocumented query parameters. Plonix sends a bounded set of candidate names through its scope-gated path and proposes one unconfirmed finding for any that change the response.",
+      "author": "Plonix contributors",
+      "url": "extensions/parameter-probe.plonixext",
+      "sha256": "d81a6e2341a171ffce095b66059ec63244f876ee8bb057abdcf92649d5882694",
+      "homepage": "https://github.com/SergeyMalych/plonix",
+      "about": [
+        "Finds query parameters an endpoint reads but does not advertise. Point it at one in-scope request and it tries a bounded set of common parameter names, one at a time.",
+        "Plonix sends every request itself, through the same scope-gated path as replay, so it only ever reaches accepted hosts and each request is recorded in Traffic. The extension supplies candidate names only, never a payload.",
+        "Parameters that change the response become one unconfirmed finding for you to review. Run it with `plonix extensions probe parameter-probe <url>`."
+      ]
+    },
+    {
       "name": "graphql-explorer",
       "kind": "extension",
       "version": "0.1.0",
