@@ -39,6 +39,7 @@ pub mod hub;
 pub mod model;
 pub mod paths;
 pub mod platform;
+pub mod bounty;
 pub mod program;
 pub mod project;
 pub mod proposal;

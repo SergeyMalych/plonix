@@ -1,704 +1,400 @@
-//! Bug bounty and vulnerability disclosure programs.
+//! Extensions that run a scanner program the user installed themselves.
 //!
-//! A program says which assets may be tested and under which rules. Plonix
-//! turns it into settings it already enforces: in-scope assets become accepted
-//! scope rules, listed exclusions become rejected ones, and the rules of
-//! engagement (a request rate, headers every request must carry, no automated
-//! testing, no disruptive tests) become a [`Guard`] the engine applies at its
-//! single send choke point. Nothing Plonix sends can then go outside what the
-//! program allows.
-//!
-//! Programs come from a bug bounty platform (see [`crate::platform`]) or from
-//! policy text the user pastes, which [`parse_policy`] reads. Either way the
-//! user reviews the result before it is applied.
+//! Plonix knows how to drive each program on [`PROGRAMS`] and nothing else:
+//! a manifest names one by id, never a path or a command line. The program
+//! gets copies of requests and responses written to a private temporary
+//! folder, which is deleted when it finishes, and its output is read back
+//! as [`Hit`]s against the exchanges they came from. The flags Plonix passes
+//! keep it local: it checks nothing with outside services and does not
+//! update itself.
 
-use std::sync::LazyLock;
+use std::collections::HashMap;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, bail};
-use regex::Regex;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
+use crate::codec;
 use crate::detect::clean;
-use crate::scope::{self, Decision, Rule};
+use crate::insight::Side;
+use crate::model::Exchange;
 
-pub const MAX_ASSETS: usize = 2_000;
-pub const MAX_HEADERS: usize = 8;
-pub const MAX_NOT_ACCEPTED: usize = 60;
-/// Fastest request rate a program can set, per second.
-pub const MAX_RATE: f64 = 1_000.0;
-
-/// What kind of thing an asset is. Only web assets become scope rules.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// What driving a program does, so the engine knows how to run it and the
+/// manifest parser knows which capabilities it must ask for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub enum AssetKind {
-    /// A host or URL: `app.example.com`, `https://api.example.com/v2`.
-    Web,
-    /// A domain and all its subdomains: `*.example.com`.
-    Wildcard,
-    /// One IP address.
-    Ip,
-    /// An IP range: `203.0.113.0/24`.
-    Cidr,
-    /// A mobile app (store id or package).
-    Mobile,
-    /// A source code repository.
-    Source,
-    /// Anything else: hardware, executables, other services.
-    Other,
+pub enum Kind {
+    /// Reads copies of captured traffic and reports what it found in each
+    /// exchange (e.g. secrets). Passive; sends nothing.
+    Scan,
+    /// Takes an in-scope domain and enumerates its subdomains, which Plonix
+    /// records as scope suggestions to review. Reads public sources; does not
+    /// touch the target.
+    Enumerate,
+    /// Probes an in-scope endpoint with a bounded set of candidate inputs.
+    /// Built in: Plonix sends every request itself through the scope choke
+    /// point ([`crate::engine::Engine::send`]); no external process sends.
+    Probe,
 }
 
-impl AssetKind {
-    pub fn parse(s: &str) -> Self {
-        match s.to_ascii_lowercase().as_str() {
-            "web" | "url" | "domain" | "api" => AssetKind::Web,
-            "wildcard" => AssetKind::Wildcard,
-            "ip" => AssetKind::Ip,
-            "cidr" => AssetKind::Cidr,
-            "mobile" => AssetKind::Mobile,
-            "source" => AssetKind::Source,
-            _ => AssetKind::Other,
-        }
-    }
-
-    /// Whether Plonix can test this kind of asset through its proxy and sends.
-    pub fn testable(self) -> bool {
-        matches!(self, AssetKind::Web | AssetKind::Wildcard | AssetKind::Ip | AssetKind::Cidr)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Asset {
-    /// As the program writes it: `*.example.com`, `https://app.example.com`.
-    pub identifier: String,
-    pub kind: AssetKind,
-    /// In scope (true) or listed as out of scope (false).
-    pub in_scope: bool,
-    #[serde(default)]
-    pub bounty: bool,
-    /// The program's note about this asset.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub instruction: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub max_severity: String,
-}
-
-/// A header the program wants on every request to its assets.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RequiredHeader {
-    pub name: String,
-    pub value: String,
-    /// The program's text had a placeholder (`<your username>`) that the
-    /// user still has to fill in. Such a header is not sent until they do.
-    #[serde(default)]
-    pub needs_value: bool,
-}
-
-/// A program's rules of engagement, as Plonix enforces them.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct Rules {
-    /// Most requests per second Plonix sends to the program's assets.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rate_per_second: Option<f64>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub headers: Vec<RequiredHeader>,
-    /// No automated testing: Scans, crawls and Bench runs are off.
-    #[serde(default)]
-    pub no_automation: bool,
-    /// No disruptive tests: intrusive scan checks are off and cannot be picked.
-    #[serde(default)]
-    pub no_intrusive: bool,
-    /// Kinds of report the program does not accept, as it words them.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub not_accepted: Vec<String>,
-}
-
-/// One program, ready to apply to a project.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// A program Plonix can drive: a tool the user installs, or a built-in
+/// operation Plonix performs itself.
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct Program {
-    /// `[a-z0-9-]`, unique per platform: the platform's handle, or a slug.
-    pub id: String,
-    pub name: String,
-    /// The platform pack it came from, or `pasted`.
-    pub platform: String,
-    /// The program's page, for the user to open.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub url: String,
-    #[serde(default)]
-    pub bounty: bool,
-    pub assets: Vec<Asset>,
-    #[serde(default)]
-    pub rules: Rules,
-    /// When it was fetched or pasted, in ms.
-    #[serde(default)]
-    pub synced_at: i64,
+    /// The id a manifest uses. For an installed tool it is also the
+    /// executable's name.
+    pub id: &'static str,
+    pub kind: Kind,
+    /// How to install it on a Mac, or "" for a built-in.
+    pub install: &'static str,
+    pub homepage: &'static str,
+    /// True when Plonix performs this itself, with no external program.
+    pub builtin: bool,
 }
 
-impl Program {
-    /// The note scope rules made from this program carry, so a re-sync can
-    /// replace exactly those rules.
-    pub fn rule_note(&self) -> String {
-        format!("program:{}", self.key())
-    }
-
-    pub fn key(&self) -> String {
-        format!("{}/{}", self.platform, self.id)
-    }
-
-    /// Checks a program that came from a client or a platform before it is
-    /// stored or applied.
-    pub fn validate(&self) -> Result<()> {
-        if self.id.is_empty() || self.id.len() > 100 || !self.id.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b)) {
-            bail!("program id `{}` must be 1-100 letters, digits, `-`, `_` or `.`", clean(&self.id, 100));
-        }
-        if self.platform.is_empty() || self.platform.len() > 64 || !self.platform.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') {
-            bail!("platform `{}` must be 1-64 of [a-z0-9-]", clean(&self.platform, 64));
-        }
-        crate::detect::check_text(&self.name, 200, false).map_err(|e| anyhow::anyhow!("name: {e}"))?;
-        if self.assets.len() > MAX_ASSETS {
-            bail!("a program can list at most {MAX_ASSETS} assets");
-        }
-        for a in &self.assets {
-            crate::detect::check_text(&a.identifier, 500, false).map_err(|e| anyhow::anyhow!("asset: {e}"))?;
-        }
-        let r = &self.rules;
-        if let Some(rate) = r.rate_per_second
-            && !(rate > 0.0 && rate <= MAX_RATE)
-        {
-            bail!("the request rate must be above 0 and at most {MAX_RATE} per second");
-        }
-        if r.headers.len() > MAX_HEADERS {
-            bail!("at most {MAX_HEADERS} required headers");
-        }
-        for h in &r.headers {
-            if !valid_header_name(&h.name) {
-                bail!("`{}` is not a valid header name", clean(&h.name, 60));
-            }
-            if h.value.len() > 500 || h.value.chars().any(|c| c.is_control()) {
-                bail!("the value of {} must be one line of at most 500 characters", h.name);
-            }
-        }
-        if r.not_accepted.len() > MAX_NOT_ACCEPTED {
-            bail!("at most {MAX_NOT_ACCEPTED} not-accepted items");
-        }
-        Ok(())
-    }
-
-    /// The scope rules this program asks for: accepted rules for in-scope web
-    /// assets and rejected ones for listed exclusions. Assets Plonix cannot
-    /// express as a host rule (mobile apps, `*.example.*`) are left out.
-    pub fn scope_rules(&self, now: i64) -> Vec<Rule> {
-        let note = self.rule_note();
-        let mut out: Vec<Rule> = vec![];
-        for a in self.assets.iter().filter(|a| a.kind.testable()) {
-            for target in scope_targets(&a.identifier, a.kind) {
-                let decision = if a.in_scope { Decision::Accepted } else { Decision::Rejected };
-                // One rule per pattern; an exclusion wins over an inclusion of the same pattern.
-                if let Some(prev) = out.iter_mut().find(|r| r.pattern == target.0) {
-                    if decision == Decision::Rejected {
-                        prev.decision = Decision::Rejected;
-                    }
-                    prev.include_subdomains |= target.1;
-                    continue;
-                }
-                out.push(Rule { pattern: target.0, include_subdomains: target.1, decision, created_at: now, note: note.clone() });
-            }
-        }
-        out
-    }
-
-    /// Headers ready to send: those with a value filled in.
-    pub fn headers_to_send(&self) -> Vec<(String, String)> {
-        self.rules.headers.iter().filter(|h| !h.needs_value && !h.value.is_empty()).map(|h| (h.name.clone(), h.value.clone())).collect()
-    }
-}
-
-fn valid_header_name(name: &str) -> bool {
-    !name.is_empty() && name.len() <= 100 && name.bytes().all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
-}
-
-/// The host patterns an asset identifier stands for, each with whether it
-/// covers subdomains. Identifiers sometimes list several targets at once
-/// (`a.example.com, b.example.com`).
-pub fn scope_targets(identifier: &str, kind: AssetKind) -> Vec<(String, bool)> {
-    identifier
-        .split([',', ' ', '\n', '\t', ';'])
-        .filter(|s| !s.is_empty())
-        .filter_map(|part| {
-            let trimmed = part.split_once("://").map(|(_, r)| r).unwrap_or(part);
-            if kind == AssetKind::Cidr || (trimmed.contains('/') && is_cidr(trimmed.split(['?', '#']).next().unwrap_or(""))) {
-                let c = trimmed.split(['?', '#']).next().unwrap_or("");
-                return is_cidr(c).then(|| (c.to_string(), false));
-            }
-            let host = scope::normalize_host(part);
-            let (base, wild) = match host.strip_prefix("*.") {
-                Some(b) => (b.to_string(), true),
-                None => (host.clone(), kind == AssetKind::Wildcard),
-            };
-            let base = base.trim_start_matches('.').to_string();
-            (is_host(&base) || is_ip(&base)).then_some((base, wild))
-        })
-        .collect()
-}
-
-/// A plain host name: letters, digits, `-` and dots, with at least one dot.
-/// Rejects wildcards in the middle (`*.example.*`) and file names.
-pub fn is_host(s: &str) -> bool {
-    if s.len() > 253 || !s.contains('.') || s.starts_with('.') || s.ends_with('.') || is_ip(s) {
-        return false;
-    }
-    let labels: Vec<&str> = s.split('.').collect();
-    let tld = labels.last().copied().unwrap_or("");
-    labels.iter().all(|l| !l.is_empty() && l.len() <= 63 && l.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && !l.starts_with('-'))
-        && tld.len() >= 2
-        && tld.bytes().all(|b| b.is_ascii_lowercase())
-        && !NOT_TLDS.contains(&tld)
-}
-
-/// File extensions that look like top-level domains in pasted text.
-const NOT_TLDS: &[&str] = &[
-    "js", "php", "html", "htm", "json", "png", "jpg", "jpeg", "gif", "svg", "md", "txt", "pdf", "zip", "exe", "apk", "ipa", "xml", "css", "asp", "aspx", "jsp", "yaml", "yml", "csv", "doc", "docx", "py", "rb", "sh", "map",
+pub const PROGRAMS: &[Program] = &[
+    Program {
+        id: "trufflehog",
+        kind: Kind::Scan,
+        install: "brew install trufflehog",
+        homepage: "https://github.com/trufflesecurity/trufflehog",
+        builtin: false,
+    },
+    Program {
+        id: "subfinder",
+        kind: Kind::Enumerate,
+        install: "brew install subfinder",
+        homepage: "https://github.com/projectdiscovery/subfinder",
+        builtin: false,
+    },
+    Program { id: "param-probe", kind: Kind::Probe, install: "", homepage: "", builtin: true },
 ];
 
-pub fn is_ip(s: &str) -> bool {
-    s.parse::<std::net::IpAddr>().is_ok()
+/// The installed tool enumeration tries first (by program id), then these,
+/// so the extension still works when only another recon tool is present.
+const ENUMERATE_FALLBACKS: &[&str] = &["bbot"];
+
+pub fn get(id: &str) -> Option<&'static Program> {
+    PROGRAMS.iter().find(|p| p.id == id)
 }
 
-pub fn is_cidr(s: &str) -> bool {
-    parse_cidr(s).is_some()
+/// Longest a program may run over one batch.
+pub const TIMEOUT: Duration = Duration::from_secs(180);
+/// Exchanges handed to the program in one run.
+pub const BATCH: usize = 200;
+/// Hits kept per exchange.
+const MAX_HITS: usize = 40;
+/// Longest value a hit carries.
+const MAX_VALUE: usize = 4096;
+
+/// One secret the program found in an exchange.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Hit {
+    pub side: Side,
+    /// Where in the exchange, e.g. `header Authorization`, `response body`.
+    pub location: String,
+    /// What kind of secret, as the program names it, e.g. `AWS`.
+    pub detector: String,
+    /// The text as it appears in the request or response.
+    pub value: String,
+    /// Anything else worth knowing the program said about it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
-/// `203.0.113.0/24` → (network, prefix length).
-pub fn parse_cidr(s: &str) -> Option<(std::net::IpAddr, u8)> {
-    let (ip, len) = s.split_once('/')?;
-    let ip: std::net::IpAddr = ip.parse().ok()?;
-    let len: u8 = len.parse().ok()?;
-    let max = if ip.is_ipv4() { 32 } else { 128 };
-    (len <= max).then_some((ip, len))
-}
-
-/// Whether `host` (an IP address) is inside the range `cidr`.
-pub fn cidr_contains(cidr: &str, host: &str) -> bool {
-    let Some((net, len)) = parse_cidr(cidr) else { return false };
-    let Ok(ip) = host.parse::<std::net::IpAddr>() else { return false };
-    match (net, ip) {
-        (std::net::IpAddr::V4(n), std::net::IpAddr::V4(i)) => {
-            let mask = if len == 0 { 0 } else { u32::MAX << (32 - len) };
-            u32::from(n) & mask == u32::from(i) & mask
-        }
-        (std::net::IpAddr::V6(n), std::net::IpAddr::V6(i)) => {
-            let mask = if len == 0 { 0 } else { u128::MAX << (128 - len) };
-            u128::from(n) & mask == u128::from(i) & mask
-        }
-        _ => false,
+/// The folders an executable might be in. Apps started from the Dock do not
+/// get the shell's `PATH`, so the usual install folders are tried too.
+fn search_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|v| std::env::split_paths(&v).collect()).unwrap_or_default();
+    dirs.extend(["/opt/homebrew/bin", "/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin"].map(PathBuf::from));
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        dirs.extend([home.join("go/bin"), home.join(".local/bin"), home.join("bin")]);
     }
+    dirs
 }
 
-// ---- reading policy text ---------------------------------------------------
-
-/// What Plonix read from a program's policy text. The user reviews it.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-pub struct Reading {
-    pub assets: Vec<Asset>,
-    pub rules: Rules,
+/// Where an executable named `name` is installed, if it is.
+pub fn locate_exe(name: &str) -> Option<PathBuf> {
+    search_dirs().into_iter().map(|d| d.join(name)).find(|f| f.is_file())
 }
 
-static RATE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(\d+(?:\.\d+)?)\s*(?:http\s+)?(?:requests?|reqs?|rps|queries)\s*(?:per|/|a|each|every)\s*(second|sec|s|minute|min|m|hour|hr|h)\b").unwrap()
-});
-static RPS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\b(\d+(?:\.\d+)?)\s*(?:rps|req/s|requests/s)\b").unwrap());
-static HEADER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(?:^|[\s`'"(])((?:x-[a-z0-9][a-z0-9-]*)|user-agent)\s*:\s*([^\n`"]{1,200})"#).unwrap());
-static PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)<[^>]{1,60}>|\[[^\]]{1,60}\]|\{\{?[^}]{1,60}\}\}?|\byour[_ -]?(?:user(?:name)?|handle|alias|email|id)\b|\busername\b").unwrap());
-static TRAILER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\s+(?:to|on|in|for|when|with|and|so|while|header|headers)\b").unwrap());
-static TOKEN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(?:https?://)?(?:\*\.)?[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)+(?::\d{1,5})?(?:/[^\s,;)\]'`]*)?|\b\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?\b").unwrap()
-});
-
-/// Domains of the platforms themselves and common references, which policy
-/// text mentions but which are never the program's assets.
-const NOT_ASSETS: &[&str] = &[
-    "hackerone.com", "bugcrowd.com", "intigriti.com", "yeswehack.com", "owasp.org", "cve.mitre.org", "first.org", "disclose.io", "securitytxt.org", "rfc-editor.org", "wearehackerone.com", "bugcrowdninja.com",
-    "intigriti.me", "yeswehack.ninja", "cwe.mitre.org", "nvd.nist.gov", "w3.org", "example.com", "example.org", "example.net",
-];
-
-#[derive(Clone, Copy, PartialEq)]
-enum Section {
-    None,
-    In,
-    Out,
-}
-
-fn heading_section(line: &str) -> Option<Section> {
-    let l = line.to_ascii_lowercase();
-    let short = l.trim().trim_matches(|c: char| !c.is_alphanumeric()).len() <= 60;
-    if !short {
+/// Where the program is installed, if it is. A built-in has no executable.
+pub fn locate(id: &str) -> Option<PathBuf> {
+    let p = get(id)?;
+    if p.builtin {
         return None;
     }
-    let out_words = ["out of scope", "out-of-scope", "not in scope", "exclusion", "excluded", "ineligible", "not eligible", "non-qualifying", "not qualify", "not accepted", "won't accept", "will not accept", "do not test", "don't test"];
-    if out_words.iter().any(|w| l.contains(w)) {
-        return Some(Section::Out);
-    }
-    let in_words = ["in scope", "in-scope", "targets", "scope", "assets", "eligible"];
-    if in_words.iter().any(|w| l.contains(w)) {
-        return Some(Section::In);
-    }
-    None
+    locate_exe(p.id)
 }
 
-fn bullet_text(line: &str) -> Option<&str> {
-    let t = line.trim();
-    let rest = t.strip_prefix(['-', '*', '•', '·', '–']).or_else(|| t.split_once(". ").filter(|(n, _)| n.len() <= 3 && n.bytes().all(|b| b.is_ascii_digit())).map(|(_, r)| r))?;
-    Some(rest.trim())
+/// Whether this program is available to run: built-ins always are; an
+/// enumeration program is available if its tool or any fallback is installed.
+pub fn available(id: &str) -> bool {
+    match get(id) {
+        Some(p) if p.builtin => true,
+        Some(p) if p.kind == Kind::Enumerate => locate(id).is_some() || ENUMERATE_FALLBACKS.iter().any(|f| locate_exe(f).is_some()),
+        _ => locate(id).is_some(),
+    }
 }
 
-/// Reads a program's policy: assets under in-scope and out-of-scope headings,
-/// the request rate, required headers, whether automated testing or
-/// disruptive tests are banned, and what the program won't accept. It is a
-/// careful first reading that the user confirms, not a promise.
-pub fn parse_policy(text: &str) -> Reading {
-    let mut r = Reading { rules: extract_rules(text), ..Default::default() };
-    let mut section = Section::None;
-    for line in text.lines().take(5_000) {
-        let lower = line.to_ascii_lowercase();
-        if let Some(s) = heading_section(line)
-            && bullet_text(line).is_none()
-        {
-            section = s;
-            continue;
+/// What a file the program reads holds: one side of one exchange.
+struct Written {
+    id: i64,
+    side: Side,
+    /// The location of each line, from line 1.
+    lines: Vec<String>,
+}
+
+/// One side of an exchange as text: the request or status line, headers,
+/// then the body, one header per line.
+fn render(ex: &Exchange, side: Side) -> (String, Vec<String>) {
+    let one = |s: &str| s.replace(['\r', '\n'], " ");
+    let (first, first_loc, headers, body, body_loc) = match side {
+        Side::Request => {
+            let target = if ex.query.is_empty() { ex.path.clone() } else { format!("{}?{}", ex.path, ex.query) };
+            (format!("{} {}", ex.method, one(&target)), "URL", &ex.req_headers, codec::body_text(&ex.req_headers, &ex.req_body), "request body")
         }
-        let tokens: Vec<&str> = TOKEN.find_iter(line).map(|m| m.as_str()).collect();
-        let mut found = false;
-        for tok in tokens {
-            // Skip e-mail addresses and anything after `@`.
-            if let Some(i) = line.find(tok)
-                && i > 0
-                && line.as_bytes()[i - 1] == b'@'
-            {
-                continue;
-            }
-            let kind = if tok.contains("*.") {
-                AssetKind::Wildcard
-            } else if is_cidr(tok) {
-                AssetKind::Cidr
-            } else if is_ip(tok) {
-                AssetKind::Ip
-            } else {
-                AssetKind::Web
-            };
-            let targets = scope_targets(tok, kind);
-            let Some((host, _)) = targets.first() else { continue };
-            if NOT_ASSETS.iter().any(|d| host == d || scope::is_subdomain_of(host, d)) {
-                continue;
-            }
-            // A line that says "out of scope" next to a host decides it, whatever the section.
-            let in_scope = if lower.contains("out of scope") || lower.contains("out-of-scope") || lower.contains("not in scope") || lower.contains("excluded") {
-                false
-            } else {
-                section != Section::Out
-            };
-            let identifier = tok.trim_end_matches(['.', ':']).to_string();
-            found = true;
-            if let Some(prev) = r.assets.iter_mut().find(|a| a.identifier == identifier) {
-                prev.in_scope &= in_scope;
-                continue;
-            }
-            if r.assets.len() < MAX_ASSETS {
-                r.assets.push(Asset { identifier, kind, in_scope, bounty: false, instruction: String::new(), max_severity: String::new() });
-            }
-        }
-        // Under an exclusions heading, a bullet without a host is a kind of
-        // report the program won't accept.
-        if !found
-            && section == Section::Out
-            && let Some(item) = bullet_text(line)
-            && (3..=200).contains(&item.chars().count())
-            && r.rules.not_accepted.len() < MAX_NOT_ACCEPTED
-            && !r.rules.not_accepted.iter().any(|x| x == item)
-        {
-            r.rules.not_accepted.push(clean(item, 200));
+        Side::Response => (format!("{}", ex.status.unwrap_or(0)), "status line", &ex.resp_headers, codec::body_text(&ex.resp_headers, &ex.resp_body), "response body"),
+    };
+    let mut text = first + "\n";
+    let mut lines = vec![first_loc.to_string()];
+    for (name, value) in headers {
+        text.push_str(&format!("{}: {}\n", one(name), one(value)));
+        lines.push(format!("header {name}"));
+    }
+    text.push('\n');
+    lines.push(body_loc.to_string());
+    if let Some(b) = body {
+        text.push_str(&b);
+        if !text.ends_with('\n') {
+            text.push('\n');
         }
     }
-    r
+    (text, lines)
 }
 
-/// The rules of engagement in a policy text.
-pub fn extract_rules(text: &str) -> Rules {
-    let mut rules = Rules::default();
-    let mut rate: Option<f64> = None;
-    let mut keep = |per_second: f64| {
-        if per_second > 0.0 && per_second <= MAX_RATE {
-            rate = Some(rate.map_or(per_second, |r: f64| r.min(per_second)));
+/// Runs the program over these exchanges and returns what it found in
+/// each. Every exchange given is in the result, with no hits when it found
+/// nothing, so callers can tell scanned from not yet scanned.
+pub fn scan(id: &str, exchanges: &[&Exchange]) -> Result<HashMap<i64, Vec<Hit>>, String> {
+    let program = get(id).ok_or_else(|| format!("Plonix does not know how to run `{}`", clean(id, 40)))?;
+    let exe = locate(id).ok_or_else(|| format!("{} is not installed. Install it with `{}`, then run this again.", program.id, program.install))?;
+    let mut out: HashMap<i64, Vec<Hit>> = exchanges.iter().map(|ex| (ex.id, vec![])).collect();
+    if exchanges.is_empty() {
+        return Ok(out);
+    }
+    let dir = TempDir::new()?;
+    let mut files = HashMap::new();
+    for ex in exchanges {
+        for side in [Side::Request, Side::Response] {
+            let (text, lines) = render(ex, side);
+            let name = format!("{}-{}.txt", ex.id, if side == Side::Request { "request" } else { "response" });
+            crate::paths::write_private(&dir.0.join(&name), text.as_bytes()).map_err(|e| format!("writing a copy for {}: {e}", program.id))?;
+            files.insert(name, Written { id: ex.id, side, lines });
+        }
+    }
+    let stdout = run(&exe, &trufflehog_args(&dir.0), TIMEOUT)?;
+    for (name, hit) in parse_trufflehog(&stdout, &files) {
+        let Some(w) = files.get(&name) else { continue };
+        let list = out.entry(w.id).or_default();
+        if list.len() < MAX_HITS && !list.iter().any(|h| h.value == hit.value && h.location == hit.location) {
+            list.push(hit);
+        }
+    }
+    Ok(out)
+}
+
+/// Local only: no checks against the services the keys belong to, and no
+/// self-update.
+fn trufflehog_args(dir: &Path) -> Vec<String> {
+    ["filesystem", &dir.to_string_lossy(), "--json", "--no-verification", "--no-update", "--no-color"].map(String::from).to_vec()
+}
+
+/// Runs a program, giving up after `timeout`. Returns what it printed.
+fn run(exe: &Path, args: &[String], timeout: Duration) -> Result<String, String> {
+    let name = exe.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut child = Command::new(exe)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("could not start {name}: {e}"))?;
+    let mut stdout = child.stdout.take().expect("stdout is piped");
+    let mut stderr = child.stderr.take().expect("stderr is piped");
+    let reader = std::thread::spawn(move || {
+        let mut s = String::new();
+        let _ = stdout.read_to_string(&mut s);
+        s
+    });
+    let err_reader = std::thread::spawn(move || {
+        let mut s = String::new();
+        let _ = stderr.read_to_string(&mut s);
+        s
+    });
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed() > timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("{name} took longer than {} seconds and was stopped", timeout.as_secs()));
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(e) => return Err(format!("{name}: {e}")),
         }
     };
-    for c in RATE.captures_iter(text) {
-        let n: f64 = c[1].parse().unwrap_or(0.0);
-        let per = match c[2].to_ascii_lowercase().chars().next() {
-            Some('m') => n / 60.0,
-            Some('h') => n / 3600.0,
-            _ => n,
-        };
-        keep(per);
+    let out = reader.join().unwrap_or_default();
+    let err = err_reader.join().unwrap_or_default();
+    if !status.success() {
+        let last = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("");
+        return Err(format!("{name} stopped with {status}: {}", clean(last, 300)));
     }
-    for c in RPS.captures_iter(text) {
-        keep(c[1].parse().unwrap_or(0.0));
-    }
-    rules.rate_per_second = rate.map(|r| (r * 1000.0).round() / 1000.0);
+    Ok(out)
+}
 
-    for c in HEADER.captures_iter(text) {
-        let name = canonical_header(&c[1]);
-        // "X-Bug-Bounty: <your username> to all requests": the value ends where the sentence goes on.
-        let raw = c[2].trim();
-        let raw = TRAILER.find(raw).map_or(raw, |m| &raw[..m.start()]);
-        let value = raw.trim().trim_end_matches(['.', ',', ';', ')']).trim().to_string();
-        if value.is_empty() || rules.headers.len() >= MAX_HEADERS || rules.headers.iter().any(|h| h.name.eq_ignore_ascii_case(&name)) {
+/// Reads the program's JSON lines into hits, keyed by the file each came from.
+fn parse_trufflehog(stdout: &str, files: &HashMap<String, Written>) -> Vec<(String, Hit)> {
+    let mut out = vec![];
+    for line in stdout.lines().filter(|l| l.starts_with('{')) {
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        let fs = &v["SourceMetadata"]["Data"]["Filesystem"];
+        let Some(file) = fs["file"].as_str().and_then(|f| Path::new(f).file_name()).map(|f| f.to_string_lossy().into_owned()) else { continue };
+        let Some(w) = files.get(&file) else { continue };
+        let raw = v["Raw"].as_str().unwrap_or("");
+        let detector = v["DetectorName"].as_str().unwrap_or("");
+        if raw.is_empty() || detector.is_empty() {
             continue;
         }
-        let needs_value = PLACEHOLDER.is_match(&value);
-        rules.headers.push(RequiredHeader { name, value: clean(&value, 200), needs_value });
+        let line_no = fs["line"].as_u64().unwrap_or(0) as usize;
+        let location = w.lines.get(line_no.saturating_sub(1)).or(w.lines.last()).cloned().unwrap_or_default();
+        let mut notes = vec![];
+        if let Some(m) = v["ExtraData"]["message"].as_str() {
+            notes.push(clean(m, 200));
+        }
+        let value: String = if raw.len() > MAX_VALUE { raw.chars().take(MAX_VALUE / 4).collect() } else { raw.to_string() };
+        out.push((file, Hit { side: w.side, location, detector: clean(detector, 60), value, notes }));
     }
+    out
+}
 
-    for sentence in sentences(text) {
-        let s = sentence.to_ascii_lowercase();
-        let negative = ["not allowed", "not permitted", "prohibited", "forbidden", "do not", "don't", "must not", "never", "disallowed", "no automated", "not be used", "strictly", "banned", "will be disqualified"].iter().any(|n| s.contains(n));
-        if !negative {
+/// Candidate query-parameter names the built-in probe ([`Kind::Probe`]) tries
+/// on an in-scope endpoint. These are only parameter *names*, not payloads:
+/// the probe sends each as `name=<marker>` and reports names that change the
+/// response, so a person can see which undocumented inputs an endpoint reads.
+/// A modest, bundled list — the user installs nothing.
+pub const PARAM_NAMES: &[&str] = &[
+    "id", "user", "user_id", "userid", "uid", "account", "account_id", "customer", "customer_id", "profile", "email", "username",
+    "name", "page", "per_page", "limit", "offset", "start", "count", "size", "sort", "order", "order_by", "q", "query", "search",
+    "filter", "fields", "field", "format", "type", "mode", "view", "lang", "locale", "country", "region", "currency", "callback",
+    "redirect", "redirect_uri", "return", "return_url", "next", "url", "uri", "path", "file", "filename", "dir", "folder", "download",
+    "token", "access_token", "api_key", "apikey", "key", "secret", "session", "sid", "auth", "code", "state", "nonce", "signature",
+    "role", "admin", "is_admin", "debug", "test", "trace", "verbose", "preview", "draft", "status", "active", "enabled", "force",
+    "include", "exclude", "expand", "with", "embed", "version", "v", "ref", "source", "utm_source", "tag", "category", "group",
+    "parent", "parent_id", "org", "org_id", "team", "team_id", "project", "project_id", "action", "op", "cmd", "method", "target",
+];
+/// Most candidates the probe sends over one run (plus the baseline).
+pub const MAX_PROBES: usize = 128;
+
+/// Longest an enumeration may run over one domain.
+pub const ENUMERATE_TIMEOUT: Duration = Duration::from_secs(120);
+/// Most subdomains kept from one enumeration.
+pub const MAX_DISCOVERED: usize = 500;
+
+/// Enumerates subdomains of `domain` with the program `id`, or a fallback
+/// tool if its own is not installed (see [`ENUMERATE_FALLBACKS`]). Returns
+/// hostnames under `domain`, deduplicated. The tool reads public sources; it
+/// does not connect to the target, and the caller gates `domain` on scope.
+pub fn enumerate(id: &str, domain: &str) -> Result<Vec<String>, String> {
+    let program = get(id).filter(|p| p.kind == Kind::Enumerate).ok_or_else(|| format!("`{}` does not enumerate subdomains", clean(id, 40)))?;
+    let domain = crate::scope::normalize_host(domain);
+    if domain.is_empty() || !is_hostname(&domain) {
+        return Err(format!("`{}` is not a domain to enumerate", clean(&domain, 60)));
+    }
+    let (exe, name) = locate(id)
+        .map(|e| (e, program.id.to_string()))
+        .or_else(|| ENUMERATE_FALLBACKS.iter().find_map(|f| locate_exe(f).map(|e| (e, (*f).to_string()))))
+        .ok_or_else(|| format!("{} is not installed. Install it with `{}`, then run this again.", program.id, program.install))?;
+    let stdout = run(&exe, &enumerate_args(&name, &domain), ENUMERATE_TIMEOUT)?;
+    Ok(parse_hosts(&stdout, &domain))
+}
+
+/// Keeps the tool local and quiet. subfinder prints one hostname per line with
+/// `-silent`; a fallback is asked for the same, and read the same tolerant way.
+fn enumerate_args(name: &str, domain: &str) -> Vec<String> {
+    match name {
+        "bbot" => ["-t", domain, "-f", "subdomain-enum", "-y", "--silent"].map(String::from).to_vec(),
+        // subfinder and anything else: bare hostnames, one per line.
+        _ => ["-d", domain, "-silent"].map(String::from).to_vec(),
+    }
+}
+
+/// Pulls hostnames under `domain` out of a tool's output, whatever its exact
+/// shape: each token may be a bare hostname (subfinder `-silent`) or sit
+/// inside JSON. Only valid hostnames that are `domain` or a subdomain of it
+/// are kept, so a tool that wanders off the target cannot widen the result.
+fn parse_hosts(stdout: &str, domain: &str) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    let mut seen = std::collections::HashSet::new();
+    for token in stdout.split(|c: char| c.is_whitespace() || matches!(c, '"' | ',' | '{' | '}' | '[' | ']' | '=' | ':' | '/' | '\\')) {
+        let t = token.trim().trim_matches('.').to_ascii_lowercase();
+        let h = t.strip_prefix("*.").unwrap_or(&t);
+        if h != domain && !crate::scope::is_subdomain_of(h, domain) {
             continue;
         }
-        if ["automated scan", "automated tool", "automated test", "automatic scan", "vulnerability scanner", "scanners", "automated vulnerability", "no automated", "automated traffic", "fuzzing", "brute force", "brute-force"].iter().any(|w| s.contains(w))
-            && !s.contains("rate limit")
-        {
-            rules.no_automation = true;
-        }
-        if ["denial of service", "dos", "ddos", "load test", "stress test", "flood", "degrade", "disrupt"].iter().any(|w| s.split(|c: char| !c.is_alphanumeric() && c != ' ').any(|part| part.contains(w))) {
-            rules.no_intrusive = true;
-        }
-    }
-    rules
-}
-
-fn sentences(text: &str) -> impl Iterator<Item = &str> {
-    text.split(['.', '\n', '!', ';']).filter(|s| s.trim().len() > 3)
-}
-
-fn canonical_header(name: &str) -> String {
-    name.split('-')
-        .map(|part| {
-            let mut c = part.chars();
-            match c.next() {
-                Some(f) => f.to_ascii_uppercase().to_string() + &c.as_str().to_ascii_lowercase(),
-                None => String::new(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("-")
-}
-
-/// Fills placeholders in required headers with the user's platform name.
-pub fn fill_placeholders(rules: &mut Rules, username: &str) {
-    if username.is_empty() || username.chars().any(|c| c.is_control()) {
-        return;
-    }
-    for h in rules.headers.iter_mut().filter(|h| h.needs_value) {
-        h.value = PLACEHOLDER.replace_all(&h.value, username).into_owned();
-        h.needs_value = false;
-    }
-}
-
-/// The `Policy:` links and contacts in a security.txt file (RFC 9116).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-pub struct SecurityTxt {
-    pub contact: Vec<String>,
-    pub policy: Vec<String>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub expires: String,
-}
-
-pub fn parse_security_txt(text: &str) -> SecurityTxt {
-    let mut out = SecurityTxt::default();
-    for line in text.lines().take(500) {
-        let line = line.trim();
-        if line.starts_with('#') {
+        if !is_hostname(h) || !seen.insert(h.to_string()) {
             continue;
         }
-        let Some((k, v)) = line.split_once(':') else { continue };
-        let v = clean(v.trim(), 500);
-        match k.trim().to_ascii_lowercase().as_str() {
-            "contact" if out.contact.len() < 10 => out.contact.push(v),
-            "policy" if out.policy.len() < 10 => out.policy.push(v),
-            "expires" => out.expires = v,
-            _ => {}
+        out.push(h.to_string());
+        if out.len() >= MAX_DISCOVERED {
+            break;
         }
     }
     out
 }
 
-/// Readable text from an HTML page: tags dropped, block elements on their own lines.
-pub fn html_to_text(html: &str) -> String {
-    static SCRIPT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<(script|style|noscript)\b.*?</(script|style|noscript)>").unwrap());
-    static BLOCK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)<(br|/?p|/?li|/?h[1-6]|/?div|/?tr|/?ul|/?ol|/?section|/?table)\b[^>]*>").unwrap());
-    static LI: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)<li\b[^>]*>").unwrap());
-    static TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<[^>]*>").unwrap());
-    let s = SCRIPT.replace_all(html, "");
-    let s = LI.replace_all(&s, "\n- ");
-    let s = BLOCK.replace_all(&s, "\n");
-    let s = TAG.replace_all(&s, "");
-    let s = s.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ");
-    s.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join("\n")
+fn is_hostname(h: &str) -> bool {
+    let labels: Vec<&str> = h.split('.').collect();
+    labels.len() >= 2
+        && labels.iter().all(|l| !l.is_empty() && l.len() <= 63 && l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') && !l.starts_with('-') && !l.ends_with('-'))
+        && labels.last().is_some_and(|tld| tld.len() >= 2 && tld.bytes().all(|b| b.is_ascii_alphabetic()))
 }
 
-/// A short id for a pasted program: `acme-cloud`.
-pub fn slug(name: &str) -> String {
-    let mut s = String::new();
-    for c in name.chars().flat_map(char::to_lowercase) {
-        if c.is_ascii_alphanumeric() {
-            s.push(c);
-        } else if !s.ends_with('-') && !s.is_empty() {
-            s.push('-');
+/// A label for a hit: `SendGrid` becomes `SendGrid secret`, `PrivateKey`
+/// becomes `Private key`. Names are kept as the program writes them.
+pub fn label(detector: &str) -> String {
+    for suffix in ["Webhook", "Key", "Token", "Secret", "Password"] {
+        if let Some(rest) = detector.strip_suffix(suffix).filter(|r| !r.is_empty() && !r.ends_with(' ')) {
+            return format!("{rest} {}", suffix.to_lowercase());
         }
     }
-    let s = s.trim_end_matches('-');
-    if s.is_empty() { "program".into() } else { s.chars().take(60).collect() }
+    format!("{detector} secret")
 }
 
-// ---- reading a program from what the user gives -------------------------
+/// A private temporary folder, deleted when dropped.
+struct TempDir(PathBuf);
 
-/// What the user gave: policy text, a policy page, or a domain whose
-/// security.txt points at its policy.
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct ReadRequest {
-    #[serde(default)]
-    pub text: String,
-    #[serde(default)]
-    pub url: String,
-    #[serde(default)]
-    pub domain: String,
-    #[serde(default)]
-    pub name: String,
-}
-
-/// Largest policy page Plonix reads.
-const MAX_POLICY_BYTES: u64 = 2 * 1024 * 1024;
-
-/// Fetches a policy page or security.txt as text. Only http(s), a few redirects.
-pub fn fetch_text(url: &str) -> Result<String> {
-    use std::io::Read;
-    if !(url.starts_with("https://") || url.starts_with("http://")) {
-        bail!("give an address that starts with https://");
-    }
-    let mut b = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(10)).timeout(Duration::from_secs(30)).redirects(3).user_agent(&format!("Plonix/{}", env!("CARGO_PKG_VERSION")));
-    if let Some(p) = std::env::var("HTTPS_PROXY").ok().or_else(|| std::env::var("https_proxy").ok()).filter(|p| !p.is_empty()) {
-        b = b.proxy(ureq::Proxy::new(&p).map_err(|e| anyhow::anyhow!("invalid HTTPS_PROXY: {e}"))?);
-    }
-    let resp = match b.build().get(url).call() {
-        Ok(r) => r,
-        Err(ureq::Error::Status(code, _)) => bail!("{} answered HTTP {code}", clean(url, 80)),
-        Err(ureq::Error::Transport(t)) => bail!("could not reach {} ({t})", clean(url, 80)),
-    };
-    let html = resp.content_type().contains("html");
-    let mut body = vec![];
-    resp.into_reader().take(MAX_POLICY_BYTES).read_to_end(&mut body)?;
-    let text = String::from_utf8_lossy(&body).into_owned();
-    Ok(if html { html_to_text(&text) } else { text })
-}
-
-/// Reads a program from what the user gave. The result is a draft to review.
-pub fn read(req: &ReadRequest, fetch: &dyn Fn(&str) -> Result<String>) -> Result<Program> {
-    let (text, url, domain) = if !req.text.trim().is_empty() {
-        (req.text.clone(), String::new(), String::new())
-    } else if !req.url.trim().is_empty() {
-        let url = req.url.trim().to_string();
-        (fetch(&url)?, url, String::new())
-    } else if !req.domain.trim().is_empty() {
-        let domain = scope::normalize_host(req.domain.trim().trim_start_matches("*."));
-        if !is_host(&domain) {
-            bail!("`{}` is not a domain", clean(&domain, 80));
+impl TempDir {
+    fn new() -> Result<Self, String> {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("plonix-scan-{}-{nanos}", std::process::id()));
+        std::fs::create_dir(&dir).map_err(|e| format!("making a temporary folder: {e}"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
         }
-        let txt = fetch(&format!("https://{domain}/.well-known/security.txt")).or_else(|_| fetch(&format!("https://{domain}/security.txt"))).map_err(|_| {
-            anyhow::anyhow!("{domain} has no security.txt. Paste its disclosure policy instead, or give the policy page's address.")
-        })?;
-        let sec = parse_security_txt(&txt);
-        let policy_url = sec.policy.iter().find(|p| p.starts_with("https://")).cloned();
-        let policy = match &policy_url {
-            Some(u) => fetch(u).unwrap_or_default(),
-            None => String::new(),
-        };
-        (policy, policy_url.unwrap_or_default(), domain)
-    } else {
-        bail!("paste the program's policy, or give its address or domain");
-    };
-    let mut reading = parse_policy(&text);
-    if reading.assets.is_empty() && !domain.is_empty() {
-        reading.assets.push(Asset { identifier: format!("*.{domain}"), kind: AssetKind::Wildcard, in_scope: true, bounty: false, instruction: "From security.txt: the policy lists no assets, so the whole domain is assumed. Check this.".into(), max_severity: String::new() });
+        Ok(Self(dir))
     }
-    reading.rules.no_intrusive = true;
-    let name = if !req.name.trim().is_empty() {
-        clean(req.name.trim(), 200)
-    } else if !domain.is_empty() {
-        domain.clone()
-    } else {
-        first_heading(&text).or_else(|| reading.assets.iter().find(|a| a.in_scope).map(|a| scope::normalize_host(a.identifier.trim_start_matches("*.")))).unwrap_or_else(|| "Pasted program".into())
-    };
-    Ok(Program { id: slug(&name), name, platform: "pasted".into(), url, bounty: false, assets: reading.assets, rules: reading.rules, synced_at: crate::model::now_ms() })
 }
 
-/// The first short line of a policy, which is usually its title.
-fn first_heading(text: &str) -> Option<String> {
-    text.lines().map(|l| l.trim().trim_start_matches('#').trim()).find(|l| !l.is_empty()).filter(|l| l.chars().count() <= 80 && TOKEN.find(l).is_none()).map(|l| clean(l, 80))
-}
-
-// ---- enforcement -----------------------------------------------------------
-
-/// The program in effect for a project, as the engine enforces it.
-pub struct Guard {
-    pub program: Program,
-    headers: Vec<(String, String)>,
-    interval: Option<Duration>,
-    next: tokio::sync::Mutex<Instant>,
-}
-
-impl Guard {
-    pub fn new(program: Program) -> Self {
-        let interval = program.rules.rate_per_second.filter(|r| *r > 0.0).map(|r| Duration::from_secs_f64(1.0 / r));
-        let headers = program.headers_to_send();
-        Self { program, headers, interval, next: tokio::sync::Mutex::new(Instant::now()) }
-    }
-
-    /// Waits until the program's request rate allows one more request.
-    pub async fn pace(&self) {
-        let Some(interval) = self.interval else { return };
-        let mut next = self.next.lock().await;
-        let now = Instant::now();
-        if *next > now {
-            tokio::time::sleep(*next - now).await;
-        }
-        *next = Instant::now().max(*next) + interval;
-    }
-
-    /// Adds the program's required headers that a request does not carry yet.
-    /// Returns whether anything was added.
-    pub fn add_headers(&self, headers: &mut Vec<(String, String)>) -> bool {
-        let mut added = false;
-        for (k, v) in &self.headers {
-            if !headers.iter().any(|(hk, _)| hk.eq_ignore_ascii_case(k)) {
-                headers.push((k.clone(), v.clone()));
-                added = true;
-            }
-        }
-        added
-    }
-
-    /// Refuses automated testing when the program bans it.
-    pub fn check_automation(&self, what: &str) -> Result<(), String> {
-        if self.program.rules.no_automation {
-            return Err(format!(
-                "{} does not allow automated testing, so {what} is off in this project. Single requests from the Bench still work.",
-                self.program.name
-            ));
-        }
-        Ok(())
-    }
-
-    pub fn no_intrusive(&self) -> bool {
-        self.program.rules.no_intrusive
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
@@ -706,165 +402,83 @@ impl Guard {
 mod tests {
     use super::*;
 
-    fn program(assets: Vec<Asset>) -> Program {
-        Program { id: "acme".into(), name: "Acme Cloud".into(), platform: "pasted".into(), url: String::new(), bounty: true, assets, rules: Rules::default(), synced_at: 0 }
-    }
-
-    fn asset(id: &str, kind: AssetKind, in_scope: bool) -> Asset {
-        Asset { identifier: id.into(), kind, in_scope, bounty: true, instruction: String::new(), max_severity: String::new() }
-    }
-
-    #[test]
-    fn assets_become_scope_rules() {
-        let p = program(vec![
-            asset("*.acme.example", AssetKind::Wildcard, true),
-            asset("https://app.acme.example/login", AssetKind::Web, true),
-            asset("status.acme.example", AssetKind::Web, false),
-            asset("203.0.113.0/24", AssetKind::Cidr, true),
-            asset("com.acme.mobile", AssetKind::Mobile, true),
-            asset("*.acme.*", AssetKind::Wildcard, true),
-            asset("a.example.org, b.example.org", AssetKind::Web, true),
-        ]);
-        let rules = p.scope_rules(1);
-        let got: Vec<(String, bool, Decision)> = rules.iter().map(|r| (r.pattern.clone(), r.include_subdomains, r.decision)).collect();
-        assert_eq!(
-            got,
-            vec![
-                ("acme.example".into(), true, Decision::Accepted),
-                ("app.acme.example".into(), false, Decision::Accepted),
-                ("status.acme.example".into(), false, Decision::Rejected),
-                ("203.0.113.0/24".into(), false, Decision::Accepted),
-                ("a.example.org".into(), false, Decision::Accepted),
-                ("b.example.org".into(), false, Decision::Accepted),
-            ]
-        );
-        assert!(rules.iter().all(|r| r.note == "program:pasted/acme"));
-        // The exclusion is more specific than the wildcard, so it wins.
-        let set = scope::ScopeRules { rules };
-        assert_eq!(set.decide("api.acme.example"), Decision::Accepted);
-        assert_eq!(set.decide("status.acme.example"), Decision::Rejected);
-        assert_eq!(set.decide("203.0.113.9"), Decision::Accepted);
-        assert_eq!(set.decide("203.0.114.9"), Decision::Unknown);
-    }
-
-    #[test]
-    fn cidr_ranges() {
-        assert!(cidr_contains("10.0.0.0/8", "10.200.1.1"));
-        assert!(!cidr_contains("10.0.0.0/8", "11.0.0.1"));
-        assert!(cidr_contains("2001:db8::/32", "2001:db8::1"));
-        assert!(!cidr_contains("10.0.0.0/8", "app.example.com"));
-        assert!(!is_cidr("10.0.0.0/33"));
-    }
-
-    const POLICY: &str = "Acme Cloud Bug Bounty
-
-In Scope
-- *.api.acme.io
-- https://app.acme.io
-- 198.51.100.0/24
-
-Out of Scope
-- status.acme.io
-- Missing security headers
-- Self-XSS
-- Reports from automated tools without a working proof
-
-Rules
-Please limit your testing to 5 requests per second. Do not use automated scanners.
-Add the header X-Bug-Bounty: <your username> to all requests.
-Denial of service testing is strictly prohibited.
-Report to security@acme.io. Read https://hackerone.com/acme for details.";
-
-    #[test]
-    fn reads_a_policy() {
-        let r = parse_policy(POLICY);
-        let ids: Vec<(&str, bool)> = r.assets.iter().map(|a| (a.identifier.as_str(), a.in_scope)).collect();
-        assert_eq!(ids, vec![("*.api.acme.io", true), ("https://app.acme.io", true), ("198.51.100.0/24", true), ("status.acme.io", false)]);
-        assert_eq!(r.rules.rate_per_second, Some(5.0));
-        assert!(r.rules.no_automation);
-        assert!(r.rules.no_intrusive);
-        assert_eq!(r.rules.headers, vec![RequiredHeader { name: "X-Bug-Bounty".into(), value: "<your username>".into(), needs_value: true }]);
-        assert_eq!(r.rules.not_accepted, vec!["Missing security headers", "Self-XSS", "Reports from automated tools without a working proof"]);
-    }
-
-    #[test]
-    fn rates_in_other_units_and_placeholders() {
-        assert_eq!(extract_rules("no more than 60 requests per minute").rate_per_second, Some(1.0));
-        assert_eq!(extract_rules("keep it under 10 rps, ideally 2 req/s").rate_per_second, Some(2.0));
-        assert_eq!(extract_rules("Use automated scanners responsibly.").no_automation, false);
-        let mut rules = extract_rules("Set `User-Agent: hackerone-[username]` on your traffic");
-        assert_eq!(rules.headers[0].name, "User-Agent");
-        assert!(rules.headers[0].needs_value);
-        fill_placeholders(&mut rules, "neo");
-        assert_eq!(rules.headers[0].value, "hackerone-neo");
-        assert!(!rules.headers[0].needs_value);
-    }
-
-    #[test]
-    fn validation_rejects_bad_headers_and_rates() {
-        let mut p = program(vec![]);
-        p.rules.headers.push(RequiredHeader { name: "X-Ok".into(), value: "a\r\nInjected: 1".into(), needs_value: false });
-        assert!(p.validate().is_err());
-        p.rules.headers.clear();
-        p.rules.rate_per_second = Some(0.0);
-        assert!(p.validate().is_err());
-        p.rules.rate_per_second = Some(2.0);
-        assert!(p.validate().is_ok());
-    }
-
-    #[tokio::test]
-    async fn guard_paces_and_adds_headers() {
-        let mut p = program(vec![]);
-        p.rules.rate_per_second = Some(20.0);
-        p.rules.headers = vec![
-            RequiredHeader { name: "X-Bug-Bounty".into(), value: "neo".into(), needs_value: false },
-            RequiredHeader { name: "X-Later".into(), value: "<you>".into(), needs_value: true },
-        ];
-        let g = Guard::new(p);
-        let start = Instant::now();
-        for _ in 0..5 {
-            g.pace().await;
+    fn exchange() -> Exchange {
+        Exchange {
+            id: 7,
+            method: "GET".into(),
+            path: "/api".into(),
+            query: "k=1".into(),
+            req_headers: vec![("Host".into(), "a.test".into()), ("X-Key".into(), "AKIAQYLPMN5HHHFPZAM2".into())],
+            status: Some(200),
+            resp_headers: vec![("Content-Type".into(), "application/json".into())],
+            resp_body: b"{\n\"token\": \"ghp_x\"\n}".to_vec(),
+            ..Default::default()
         }
-        assert!(start.elapsed() >= Duration::from_millis(190), "{:?}", start.elapsed());
-        let mut h = vec![("x-bug-bounty".to_string(), "mine".to_string())];
-        assert!(!g.add_headers(&mut h));
-        let mut h = vec![];
-        assert!(g.add_headers(&mut h));
-        assert_eq!(h, vec![("X-Bug-Bounty".to_string(), "neo".to_string())]);
     }
 
     #[test]
-    fn reads_from_text_a_page_or_security_txt() {
-        let pasted = read(&ReadRequest { text: POLICY.into(), ..Default::default() }, &|_| bail!("no network")).unwrap();
-        assert_eq!(pasted.name, "Acme Cloud Bug Bounty");
-        assert_eq!(pasted.id, "acme-cloud-bug-bounty");
-        assert_eq!(pasted.platform, "pasted");
-        assert!(pasted.validate().is_ok());
-
-        let fetch = |url: &str| -> Result<String> {
-            match url {
-                "https://acme.io/.well-known/security.txt" => Ok("Contact: mailto:s@acme.io\nPolicy: https://acme.io/policy\n".into()),
-                "https://acme.io/policy" => Ok("Test only app.acme.io. 2 requests per second.".into()),
-                "https://quiet.io/.well-known/security.txt" => Ok("Contact: mailto:s@quiet.io\n".into()),
-                _ => bail!("404"),
-            }
-        };
-        let p = read(&ReadRequest { domain: "acme.io".into(), ..Default::default() }, &fetch).unwrap();
-        assert_eq!(p.url, "https://acme.io/policy");
-        assert_eq!(p.assets[0].identifier, "app.acme.io");
-        assert_eq!(p.rules.rate_per_second, Some(2.0));
-        let q = read(&ReadRequest { domain: "quiet.io".into(), ..Default::default() }, &fetch).unwrap();
-        assert_eq!(q.assets[0].identifier, "*.quiet.io");
-        assert!(read(&ReadRequest { domain: "none.io".into(), ..Default::default() }, &fetch).unwrap_err().to_string().contains("no security.txt"));
+    fn lines_map_to_where_they_came_from() {
+        let ex = exchange();
+        let (text, lines) = render(&ex, Side::Request);
+        assert_eq!(text.lines().next(), Some("GET /api?k=1"));
+        assert_eq!(lines, ["URL", "header Host", "header X-Key", "request body"]);
+        let (text, lines) = render(&ex, Side::Response);
+        assert_eq!(text.lines().nth(3), Some("{"));
+        assert_eq!(lines, ["status line", "header Content-Type", "response body"]);
     }
 
     #[test]
-    fn security_txt_and_html() {
-        let s = parse_security_txt("# hi\nContact: mailto:security@acme.io\nPolicy: https://acme.io/security\nExpires: 2027-01-01T00:00:00Z\n");
-        assert_eq!(s.policy, vec!["https://acme.io/security"]);
-        assert_eq!(s.contact.len(), 1);
-        let t = html_to_text("<h2>In scope</h2><ul><li>app.acme.io</li></ul><script>x()</script><p>5 requests&nbsp;per second</p>");
-        assert_eq!(t, "In scope\n- app.acme.io\n5 requests per second");
-        assert_eq!(slug("Acme Cloud (VDP)"), "acme-cloud-vdp");
+    fn reads_the_output_back_onto_exchanges() {
+        let ex = exchange();
+        let mut files = HashMap::new();
+        for side in [Side::Request, Side::Response] {
+            let name = format!("7-{}.txt", if side == Side::Request { "request" } else { "response" });
+            files.insert(name, Written { id: ex.id, side, lines: render(&ex, side).1 });
+        }
+        let out = r#"noise that is not JSON
+{"SourceMetadata":{"Data":{"Filesystem":{"file":"/tmp/x/7-request.txt","line":3}}},"DetectorName":"AWS","Raw":"AKIAQYLPMN5HHHFPZAM2","ExtraData":{"message":"a canary"}}
+{"SourceMetadata":{"Data":{"Filesystem":{"file":"/tmp/x/7-response.txt","line":5}}},"DetectorName":"Github","Raw":"ghp_x"}
+{"SourceMetadata":{"Data":{"Filesystem":{"file":"/tmp/x/elsewhere.txt","line":1}}},"DetectorName":"Github","Raw":"ghp_y"}"#;
+        let hits = parse_trufflehog(out, &files);
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].1, Hit { side: Side::Request, location: "header X-Key".into(), detector: "AWS".into(), value: "AKIAQYLPMN5HHHFPZAM2".into(), notes: vec!["a canary".into()] });
+        assert_eq!((hits[1].1.side, hits[1].1.location.as_str()), (Side::Response, "response body"));
+    }
+
+    #[test]
+    fn labels_read_like_words() {
+        assert_eq!(label("AWS"), "AWS secret");
+        assert_eq!(label("PrivateKey"), "Private key");
+        assert_eq!(label("SendGrid"), "SendGrid secret");
+        assert_eq!(label("SlackWebhook"), "Slack webhook");
+        assert_eq!(label("JDBC"), "JDBC secret");
+    }
+
+    #[test]
+    fn only_known_programs_run() {
+        assert!(scan("sh", &[]).unwrap_err().contains("does not know"));
+        assert!(trufflehog_args(Path::new("/t")).contains(&"--no-verification".to_string()));
+    }
+
+    #[test]
+    fn enumeration_keeps_only_hostnames_under_the_target() {
+        // Bare lines (subfinder -silent) and hostnames embedded in JSON are
+        // read the same way; anything not under the target is dropped.
+        let out = "www.example.com\napi.example.com\n{\"host\":\"dev.example.com\",\"source\":\"crtsh\"}\nevil.com\nexample.com.attacker.net\nwww.example.com\n";
+        let hosts = parse_hosts(out, "example.com");
+        assert!(hosts.contains(&"www.example.com".to_string()));
+        assert!(hosts.contains(&"api.example.com".to_string()));
+        assert!(hosts.contains(&"dev.example.com".to_string()), "pulled out of JSON too");
+        assert_eq!(hosts.iter().filter(|h| *h == "www.example.com").count(), 1, "deduplicated");
+        assert!(!hosts.contains(&"evil.com".to_string()));
+        assert!(!hosts.iter().any(|h| h.contains("attacker")), "example.com.attacker.net is not a subdomain of example.com");
+    }
+
+    #[test]
+    fn only_enumerate_programs_enumerate_and_the_domain_is_checked() {
+        assert!(enumerate("trufflehog", "example.com").unwrap_err().contains("does not enumerate"));
+        assert!(enumerate("subfinder", "not a domain").unwrap_err().contains("not a domain"));
+        assert_eq!(enumerate_args("subfinder", "example.com"), ["-d", "example.com", "-silent"]);
+        assert!(get("param-probe").unwrap().builtin && available("param-probe"));
     }
 }

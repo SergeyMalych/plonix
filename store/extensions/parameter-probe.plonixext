@@ -1,0 +1,18 @@
+{
+  "plonix_extension_package": 1,
+  "manifest": {
+    "plonix_extension": 1,
+    "name": "parameter-probe",
+    "version": "0.1.0",
+    "description": "Probes an in-scope endpoint for undocumented query parameters. Plonix sends a bounded set of candidate names through its scope-gated path and proposes one unconfirmed finding for any that change the response.",
+    "author": "Plonix contributors",
+    "homepage": "https://github.com/SergeyMalych/plonix",
+    "runtime": "program",
+    "program": "param-probe",
+    "capabilities": [
+      "run-program",
+      "scoped-requests",
+      "propose-findings"
+    ]
+  }
+}

@@ -16,7 +16,7 @@ use plonix_core::Engine;
 use plonix_core::ca::CertAuthority;
 use plonix_core::engine::{self, EngineConfig, Running, SendError, SendRequest};
 use plonix_core::paths::Home;
-use plonix_core::program::{Asset, AssetKind, Program, RequiredHeader, Rules};
+use plonix_core::bounty::{Asset, AssetKind, Program, RequiredHeader, Rules};
 use plonix_core::scope::Decision;
 use plonix_core::store::Store;
 use plonix_core::upstream::Upstream;

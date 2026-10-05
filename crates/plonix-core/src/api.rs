@@ -121,6 +121,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/extensions", get(extensions_list))
         .route("/api/extensions/{name}/enabled", put(extension_enabled))
         .route("/api/extensions/{name}/run", post(extension_run))
+        .route("/api/extensions/{name}/probe", post(extension_probe))
         .route("/api/scope", get(scope))
         .route("/api/scope/accept", post(accept))
         .route("/api/scope/reject", post(reject))
@@ -928,7 +929,13 @@ async fn insights(State(s): State<AppState>, caller: MaybeCaller, Path(id): Path
         engine.store.get_exchange(id).map(|ex| {
             ex.map(|ex| {
                 let mut list = crate::insight::analyze(&ex, crate::insight::detectors());
-                list.extend(engine.extension_insights(&ex));
+                for i in engine.extension_insights(&ex) {
+                    // A secret Plonix already spotted is shown once.
+                    let seen = i.category == crate::insight::Category::Secret && list.iter().any(|b| b.category == i.category && b.value == i.value);
+                    if !seen {
+                        list.push(i);
+                    }
+                }
                 list
             })
         })
@@ -1267,7 +1274,10 @@ async fn market_detail(State(s): State<AppState>, Path(name): Path<String>) -> R
         if l.package.kind == registry::Kind::Extension && l.local {
             let info = m.extensions.info(&name);
             let caps = info.as_ref().map(|i| market::capability_infos(&i.requested)).unwrap_or_default();
-            detail = json!({ "extension": { "runtime": "wasm", "capabilities": caps, "installable": true, "sandbox": market::SANDBOX_NOTE, "installed": info } });
+            let program = info.as_ref().and_then(|i| i.program.clone());
+            let note = if program.is_some() { market::PROGRAM_NOTE } else { market::SANDBOX_NOTE };
+            let runtime = if program.is_some() { "program" } else { "wasm" };
+            detail = json!({ "extension": { "runtime": runtime, "capabilities": caps, "installable": true, "sandbox": note, "program": program, "installed": info } });
         }
         if l.package.kind != registry::Kind::Bundle && !l.local {
             let bytes = cat.fetch(&l.package)?;
@@ -1284,7 +1294,8 @@ async fn market_detail(State(s): State<AppState>, Path(name): Path<String>) -> R
                         "capabilities": market::capability_infos(&mf.capabilities),
                         "installable": runnable.is_ok(),
                         "why_not": runnable.err(),
-                        "sandbox": market::SANDBOX_NOTE,
+                        "sandbox": market::runtime_note(&mf),
+                        "program": crate::extension::ProgramStatus::of(&mf),
                         "installed": m.extensions.info(&name),
                     } })
                 }
@@ -1454,6 +1465,25 @@ async fn extension_run(State(s): State<AppState>, Path(name): Path<String>) -> R
         Ok(Ok(run)) => Json(run).into_response(),
         Ok(Err(e)) => err(StatusCode::BAD_REQUEST, "cannot_run", &format!("{e:#}")),
         Err(e) => internal(e.into()),
+    }
+}
+
+#[derive(Deserialize)]
+struct ProbeBody {
+    url: String,
+}
+
+/// Probes one in-scope endpoint for undocumented query parameters. Every
+/// request goes through the scope choke point, so an out-of-scope target is
+/// refused here just as a replay would be.
+async fn extension_probe(State(s): State<AppState>, Path(name): Path<String>, Json(b): Json<ProbeBody>) -> Response {
+    match s.engine.run_param_probe(&name, &b.url).await {
+        Ok(report) => Json(report).into_response(),
+        Err(crate::engine::SendError::OutOfScope { host, decision }) => {
+            err(StatusCode::FORBIDDEN, "out_of_scope", &format!("{host} is not in scope ({decision}); accept it first"))
+        }
+        Err(crate::engine::SendError::BadRequest(m)) => err(StatusCode::BAD_REQUEST, "cannot_probe", &m),
+        Err(e) => internal(anyhow::anyhow!("{e}")),
     }
 }
 
@@ -2171,8 +2201,8 @@ async fn program_get(State(s): State<AppState>) -> Response {
 
 /// Reads a program from pasted policy text, a policy page or a domain's
 /// security.txt. Nothing is applied: the result is a draft to review.
-async fn program_read(Json(req): Json<crate::program::ReadRequest>) -> Response {
-    match tokio::task::spawn_blocking(move || crate::program::read(&req, &crate::program::fetch_text)).await {
+async fn program_read(Json(req): Json<crate::bounty::ReadRequest>) -> Response {
+    match tokio::task::spawn_blocking(move || crate::bounty::read(&req, &crate::bounty::fetch_text)).await {
         Ok(Ok(p)) => Json(json!({ "program": p })).into_response(),
         Ok(Err(e)) => err(StatusCode::BAD_REQUEST, "bad_request", &format!("{e:#}")),
         Err(e) => internal(e.into()),
@@ -2181,7 +2211,7 @@ async fn program_read(Json(req): Json<crate::program::ReadRequest>) -> Response 
 
 #[derive(Deserialize)]
 struct ProgramBody {
-    program: crate::program::Program,
+    program: crate::bounty::Program,
 }
 
 /// What applying a program would change.

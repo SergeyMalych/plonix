@@ -50,6 +50,8 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 4, what: "requests and responses edited in Intercept, with their originals", run: v4_intercept_edits },
     Migration { version: 5, what: "match-and-replace rules, and which rules changed an exchange", run: v5_replace_rules },
     Migration { version: 6, what: "client certificates for upstream servers, and which one an exchange used", run: v6_client_certs },
+    Migration { version: 7, what: "what program extensions found in each exchange", run: v7_extension_hits },
+    Migration { version: 8, what: "scope evidence that came from a tool, not an exchange", run: v8_evidence_without_exchange },
 ];
 
 /// The schema version this build reads and writes.
@@ -158,6 +160,54 @@ fn v6_client_certs(tx: &rusqlite::Transaction) -> Result<()> {
     Ok(())
 }
 
+/// What a program extension found in each exchange it scanned (see
+/// program.rs), as JSON. A row with an empty list means scanned, nothing found.
+fn v7_extension_hits(tx: &rusqlite::Transaction) -> Result<()> {
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS extension_hits (
+            exchange_id INTEGER NOT NULL,
+            extension TEXT NOT NULL,
+            version TEXT NOT NULL,
+            hits TEXT NOT NULL,
+            PRIMARY KEY (exchange_id, extension)
+        );",
+    )?;
+    Ok(())
+}
+
+/// Evidence for a scope suggestion used to always come from a captured
+/// exchange. Enumeration tools (see program.rs) suggest subdomains with no
+/// originating exchange, so `exchange_id` becomes nullable. SQLite cannot
+/// drop a NOT NULL constraint in place, so the table is rebuilt.
+fn v8_evidence_without_exchange(tx: &rusqlite::Transaction) -> Result<()> {
+    // Already nullable (fresh database on the new schema): nothing to do.
+    let not_null: bool = tx
+        .query_row("SELECT \"notnull\" FROM pragma_table_info('evidence') WHERE name = 'exchange_id'", [], |r| r.get(0))
+        .optional()?
+        .unwrap_or(0i64)
+        == 1;
+    if !not_null {
+        return Ok(());
+    }
+    tx.execute_batch(
+        "CREATE TABLE evidence_new (
+            domain TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            via TEXT NOT NULL,
+            detail TEXT NOT NULL,
+            exchange_id INTEGER,
+            count INTEGER NOT NULL,
+            first_seen INTEGER NOT NULL,
+            last_seen INTEGER NOT NULL,
+            PRIMARY KEY (domain, kind, via)
+        );
+        INSERT INTO evidence_new SELECT domain, kind, via, detail, exchange_id, count, first_seen, last_seen FROM evidence;
+        DROP TABLE evidence;
+        ALTER TABLE evidence_new RENAME TO evidence;",
+    )?;
+    Ok(())
+}
+
 fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let names = stmt.query_map([], |r| r.get::<_, String>(1))?.collect::<Result<Vec<_>, _>>()?;
@@ -206,7 +256,7 @@ CREATE TABLE IF NOT EXISTS evidence (
     kind TEXT NOT NULL,
     via TEXT NOT NULL,
     detail TEXT NOT NULL,
-    exchange_id INTEGER NOT NULL,
+    exchange_id INTEGER,
     count INTEGER NOT NULL,
     first_seen INTEGER NOT NULL,
     last_seen INTEGER NOT NULL,
@@ -697,7 +747,21 @@ impl Store {
     }
 
     pub fn add_evidence(&self, ev: &NewEvidence, exchange_id: i64, ts: i64) -> Result<()> {
-        put_evidence(&self.conn.lock().unwrap(), ev, exchange_id, ts)
+        put_evidence(&self.conn.lock().unwrap(), ev, Some(exchange_id), ts)
+    }
+
+    /// Records scope suggestions that came from a tool rather than captured
+    /// traffic (see program.rs), so they carry no originating exchange. Each
+    /// is recorded exactly as a traffic-derived suggestion and is subject to
+    /// the same user accept/reject decision; nothing is brought into scope.
+    pub fn add_suggestions(&self, evidence: &[NewEvidence], ts: i64) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        for ev in evidence {
+            put_evidence(&tx, ev, None, ts)?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     /// Writes what scope analysis learned from many exchanges in one
@@ -708,7 +772,7 @@ impl Store {
         for l in learned {
             put_tokens(&tx, &l.tokens, &l.host)?;
             for ev in &l.evidence {
-                put_evidence(&tx, ev, l.exchange_id, l.ts)?;
+                put_evidence(&tx, ev, Some(l.exchange_id), l.ts)?;
             }
         }
         tx.commit()?;
@@ -770,6 +834,7 @@ impl Store {
         tx.execute("DELETE FROM exchanges_fts WHERE rowid IN (SELECT id FROM doomed)", [])?;
         tx.execute("DELETE FROM evidence WHERE exchange_id IN (SELECT id FROM doomed)", [])?;
         tx.execute("DELETE FROM ws_messages WHERE exchange_id IN (SELECT id FROM doomed)", [])?;
+        tx.execute("DELETE FROM extension_hits WHERE exchange_id IN (SELECT id FROM doomed)", [])?;
         tx.execute("DELETE FROM doomed", [])?;
         tx.commit()?;
         Ok(n as i64)
@@ -781,6 +846,41 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch("INSERT INTO exchanges_fts(exchanges_fts) VALUES('optimize'); VACUUM; PRAGMA wal_checkpoint(TRUNCATE);")?;
         Ok(())
+    }
+
+    /// Records what a program extension found in each exchange it scanned.
+    pub fn put_extension_hits(&self, extension: &str, version: &str, hits: &[(i64, String)]) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        for (id, json) in hits {
+            tx.execute(
+                "INSERT OR REPLACE INTO extension_hits (exchange_id, extension, version, hits) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![id, extension, version, json],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// What program extensions found in one exchange: (extension, version, hits JSON).
+    pub fn extension_hits(&self, exchange_id: i64) -> Result<Vec<(String, String, String)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT extension, version, hits FROM extension_hits WHERE exchange_id = ?1 ORDER BY extension")?;
+        let rows = stmt.query_map([exchange_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        rows.collect::<Result<_, _>>().map_err(Into::into)
+    }
+
+    /// Which of these exchanges this version of an extension already scanned.
+    pub fn extension_scanned(&self, extension: &str, version: &str, ids: &[i64]) -> Result<BTreeSet<i64>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT 1 FROM extension_hits WHERE exchange_id = ?1 AND extension = ?2 AND version = ?3")?;
+        let mut out = BTreeSet::new();
+        for id in ids {
+            if stmt.exists(rusqlite::params![id, extension, version])? {
+                out.insert(*id);
+            }
+        }
+        Ok(out)
     }
 
     /// Forgets derived scope state so it can be rebuilt by a rescan.
@@ -809,7 +909,8 @@ impl Store {
                 kind,
                 via,
                 detail: r.get(3)?,
-                exchange_id: r.get(4)?,
+                // Tool-sourced suggestions have no originating exchange; 0 reads as "none".
+                exchange_id: r.get::<_, Option<i64>>(4)?.unwrap_or(0),
                 count: r.get(5)?,
                 first_seen: r.get(6)?,
                 last_seen: r.get(7)?,
@@ -1075,7 +1176,7 @@ fn put_tokens(conn: &Connection, hashes: &[String], host: &str) -> Result<()> {
     Ok(())
 }
 
-fn put_evidence(conn: &Connection, ev: &NewEvidence, exchange_id: i64, ts: i64) -> Result<()> {
+fn put_evidence(conn: &Connection, ev: &NewEvidence, exchange_id: Option<i64>, ts: i64) -> Result<()> {
     conn.prepare_cached(
         "INSERT INTO evidence (domain, kind, via, detail, exchange_id, count, first_seen, last_seen)
          VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6)

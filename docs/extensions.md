@@ -53,6 +53,28 @@ What happens once it is on:
 
 An example lives in [`examples/extensions/security-headers`](../examples/extensions/security-headers): a small Rust analyzer that notes HTML pages missing common security headers and cookies without `Secure` or `HttpOnly`, and proposes one finding per host. Its packed form is `store/extensions/security-headers.plonixext`.
 
+### Program extensions
+
+A program extension has no code of its own. Its manifest has `"runtime": "program"` and names one program Plonix knows how to drive. Its package carries no files.
+
+```json
+{ "plonix_extension": 1, "name": "secret-sweep", "runtime": "program", "program": "trufflehog",
+  "capabilities": ["read-traffic", "passive-analysis", "run-program"], "...": "..." }
+```
+
+- **Programs are a closed list** in `crates/plonix-core/src/program.rs`: a manifest names one by id, never a path, command or flags. Plonix looks for an installed one on `PATH` and in the usual install folders, since apps started from the Dock do not get the shell's `PATH`.
+- **Running it needs `run-program`**, a sensitive capability you say yes to at install.
+- **Each program has a kind** that decides how Plonix drives it and which other capabilities the extension must ask for:
+  - **`scan`** reads copies of captured requests and responses in a private temporary folder, deleted when the program finishes, and reads its output back onto the exchanges they came from. It needs `read-traffic` and `passive-analysis` (and may add `read-out-of-scope`). `trufflehog` is one; it stays local (`--no-verification --no-update`), and what it finds shows in the Lens under **Spotted**, labelled with the extension's name. New traffic is checked as it arrives; **Run on captured traffic** checks the rest, once per version.
+  - **`enumerate`** takes a domain you have already accepted into scope and runs a subdomain tool over it. It needs `suggest-scope`. The tool reads public sources — Plonix sends nothing to the target — and every host it returns is added to **Scope as a suggestion**, with its evidence, for you to accept or reject. It never changes scope. `subfinder` is one (`brew install subfinder`), with another installed recon tool used as a fallback.
+  - **`probe`** is built in: Plonix performs it itself, so you install nothing. It takes one in-scope endpoint and sends a bounded set of candidate inputs through [`Engine::send`](#the-trust-boundary) — the same scope-enforced, recorded path as replay — never letting an outside program send. It needs `scoped-requests` and `propose-findings`. `param-probe` is one: it tries common query-parameter names and proposes one unconfirmed finding for any that change the response.
+- **A kind may ask only for the capabilities it uses.** A scanner cannot ask for `scoped-requests`; an enumerator cannot ask for `read-traffic`. The manifest parser enforces this.
+- **When an installed program is missing**, nothing is switched off: the extension's Market page says how to install it, and `plonix extensions run` says so too.
+
+The Market ships three: `secret-sweep` (scan), `subdomain-discovery` (enumerate), and `parameter-probe` (probe).
+
+A code extension can also be a passive analyzer with no program, like the Market's `js-endpoints`: it reads captured JavaScript and pulls out the API paths and URLs the code references, so endpoints nothing has visited yet stand out in the Lens. It is a WebAssembly extension in [`examples/extensions/js-endpoints`](../examples/extensions/js-endpoints), built the same way as `security-headers`.
+
 ### Package format
 
 A package is one JSON file, `<name>.plonixext`, holding the manifest and the module, so one SHA-256 pins both:
@@ -187,8 +209,10 @@ The capability list is **closed**: the manifest parser rejects anything not on i
 | `passive-analysis` | Return tags and notes for exchanges it was given | at install |
 | `propose-findings` | Propose findings, stored as unconfirmed and attributed to the extension | at install |
 | `scoped-requests` | Ask the engine to send requests. **Scope-enforced, rate-limited and recorded**, exactly like agent requests | explicit yes |
+| `suggest-scope` | Contribute scope **suggestions** (never decisions): record a domain as a candidate, with evidence, for you to accept or reject | at install |
+| `run-program` | For a [program extension](#program-extensions) only: run the program it names (a tool you installed, or a built-in operation) | explicit yes |
 
-At install time the user sees the capabilities in plain words (`Capability::describe`). The two **sensitive** ones (`read-out-of-scope`, `scoped-requests`) each need a separate, explicit yes. An update that asks for **new** capabilities isn't applied silently: it waits for the user to approve the difference.
+At install time the user sees the capabilities in plain words (`Capability::describe`). The **sensitive** ones (`read-out-of-scope`, `scoped-requests`, `run-program`) each need a separate, explicit yes. An update that asks for **new** capabilities isn't applied silently: it waits for the user to approve the difference.
 
 ## UI contributions: tabs, panels, tweaks and filters
 

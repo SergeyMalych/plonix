@@ -23,7 +23,7 @@ use serde_json::Value;
 use crate::detect::{check_text, clean};
 use crate::model::now_ms;
 use crate::paths::{Home, write_private};
-use crate::program::{Asset, AssetKind, Program, Rules};
+use crate::bounty::{Asset, AssetKind, Program, Rules};
 use crate::rulepack::{MAX_PACK_BYTES, check_pack_name, check_version, sha256_hex};
 use crate::shelf::Shelf;
 
@@ -824,7 +824,7 @@ impl<'a> Client<'a> {
                     max_severity: text(it, &s.max_severity).unwrap_or_default(),
                 })
             })
-            .take(crate::program::MAX_ASSETS)
+            .take(crate::bounty::MAX_ASSETS)
             .collect();
         let policy = match &self.doc.program {
             Some(d) if !d.policy.is_empty() => {
@@ -833,13 +833,13 @@ impl<'a> Client<'a> {
             }
             _ => String::new(),
         };
-        let mut rules: Rules = crate::program::extract_rules(&policy);
-        rules.not_accepted = crate::program::parse_policy(&policy).rules.not_accepted;
+        let mut rules: Rules = crate::bounty::extract_rules(&policy);
+        rules.not_accepted = crate::bounty::parse_policy(&policy).rules.not_accepted;
         rules.no_intrusive = true;
-        crate::program::fill_placeholders(&mut rules, &self.cred.user);
+        crate::bounty::fill_placeholders(&mut rules, &self.cred.user);
         let id: String = summary.handle.chars().filter(|c| c.is_ascii_alphanumeric() || "-_.".contains(*c)).take(100).collect();
         Ok(Program {
-            id: if id.is_empty() { crate::program::slug(&summary.name) } else { id },
+            id: if id.is_empty() { crate::bounty::slug(&summary.name) } else { id },
             name: clean(&summary.name, 200),
             platform: self.doc.name.clone(),
             url: summary.url.clone(),
