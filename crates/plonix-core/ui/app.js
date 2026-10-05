@@ -922,26 +922,21 @@ function rawPre({ lines, body }) {
 
 const T = { text: '', filters: [], items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: store('plonix.inspH'), picked: new Set(), pickAnchor: null, group: store('plonix.groupAlike') !== false, open: new Set(), visible: null };
 
-/** A path with its ids folded to {id}, the same way the Map groups endpoints. */
-function foldPath(path) {
-  return (path || '/')
-    .split('/')
-    .map((seg) => (/^\d+$/.test(seg) || (seg.length >= 16 && /^[0-9a-f-]+$/i.test(seg)) ? '{id}' : seg))
-    .join('/');
-}
+const sameKey = (ex) => `${ex.method} ${ex.host}:${ex.port} ${target(ex)}`;
 
-const alikeKey = (ex) => `${ex.method} ${ex.host}:${ex.port} ${foldPath(ex.path)}`;
-
-/** Look-alike requests in the current page: same method, host and path once ids are folded. */
-function alikeGroups(items) {
-  const groups = new Map();
+/** Runs of the same request sent one right after another, in list order.
+ *  The same request again after something else starts a new run. */
+function repeatRuns(items) {
+  const runs = [];
   for (const ex of items) {
-    const k = alikeKey(ex);
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k).push(ex);
+    const last = runs[runs.length - 1];
+    if (last && sameKey(last[0]) === sameKey(ex)) last.push(ex);
+    else runs.push([ex]);
   }
-  return groups;
+  return runs;
 }
+/** A run's id stays put while it grows: its oldest member does not change. */
+const runId = (run) => Math.min(...run.map((x) => x.id));
 
 function setGrouping(on) {
   T.group = on;
@@ -952,13 +947,22 @@ function setGrouping(on) {
   drawRows(Infinity);
 }
 
-/** Grouped (repeats and look-alikes folded into one row each) or every request on its own row. */
+/** "21:35:58–36:13" for a run (newest first in the list), or one time if they match. */
+function timeSpan(run) {
+  const ts = run.map((x) => x.ts);
+  const a = fmtTime(Math.min(...ts)), b = fmtTime(Math.max(...ts));
+  if (a === b) return a;
+  // Drop the hour the end shares with the start: 21:35:58–36:13.
+  return a + '–' + b.slice(a.slice(0, 3) === b.slice(0, 3) ? 3 : 0);
+}
+
+/** Grouped (repeats folded into one row each) or every request on its own row. */
 function drawGroupToggle() {
   const box = $('#groupseg');
   if (!box) return;
   clear(
     box,
-    h('button', { class: T.group ? 'on' : '', text: 'Grouped', title: 'Fold repeated requests, and ones that differ only by an id, into one row each. Click a row to see them all.', onclick: () => setGrouping(true) }),
+    h('button', { class: T.group ? 'on' : '', text: 'Grouped', title: 'Fold the same request sent several times in a row into one row. Click it to see each one.', onclick: () => setGrouping(true) }),
     h('button', { class: T.group ? '' : 'on', text: 'Every request', title: 'Show every request on its own row', onclick: () => setGrouping(false) }),
   );
 }
@@ -1099,7 +1103,7 @@ const TCOLS = [
   { key: 'type', label: 'Type', w: 92 },
   { key: 'size', label: 'Size', w: 72, col: 'c-size', th: 'num c-size' },
   { key: 'ms', label: 'ms', w: 60, col: 'c-ms', th: 'num c-ms' },
-  { key: 'time', label: 'Time', w: 84 },
+  { key: 'time', label: 'Time', w: 112 },
 ];
 const TCOL_MIN = 36;
 
@@ -1816,28 +1820,28 @@ function drawRows(freshAbove) {
     clear(tbody, h('tr', null, h('td', { colspan: 9, style: { height: 'auto', whiteSpace: 'normal' } }, msg)));
     return;
   }
-  const groups = T.group ? alikeGroups(T.items) : null;
   const shown = [];
-  for (const ex of T.items) {
-    const g = groups && groups.get(alikeKey(ex));
-    if (!g || g.length < 2) shown.push({ ex });
-    else if (g[0] === ex) {
-      // An open group lists its members right under its first row.
-      shown.push({ ex, group: g });
-      if (T.open.has(alikeKey(ex))) for (const m of g.slice(1)) shown.push({ ex: m, member: true });
+  if (T.group) {
+    for (const run of repeatRuns(T.items)) {
+      if (run.length < 2) shown.push({ ex: run[0] });
+      else {
+        // An open run lists the rest of its requests right under its first row.
+        shown.push({ ex: run[0], group: run });
+        if (T.open.has(runId(run))) for (const m of run.slice(1)) shown.push({ ex: m, member: true });
+      }
     }
-  }
-  T.visible = groups ? shown.map((r) => r.ex.id) : null;
+  } else for (const ex of T.items) shown.push({ ex });
+  T.visible = T.group ? shown.map((r) => r.ex.id) : null;
   const rows = shown.map(({ ex, group, member }) => {
     const tags = [];
+    const k = group && runId(group);
+    const isOpen = group && T.open.has(k);
     if (group) {
-      const k = alikeKey(ex);
-      const isOpen = T.open.has(k);
       tags.push(
         h('button', {
           class: 'tag alike' + (isOpen ? ' on' : ''),
           text: (isOpen ? '▾ ' : '▸ ') + '×' + group.length,
-          title: `${group.length} look-alike requests to ${foldPath(ex.path)}. Click to ${isOpen ? 'fold them' : 'show them all'}.`,
+          title: `Sent ${group.length} times in a row. Click to ${isOpen ? 'fold them' : 'show each one'}.`,
           onclick: (e) => {
             e.stopPropagation();
             if (isOpen) T.open.delete(k);
@@ -1858,8 +1862,8 @@ function drawRows(freshAbove) {
         onclick: (e) => {
           if (e.metaKey || e.ctrlKey || e.shiftKey) return pickRow(ex.id, e.shiftKey);
           // Clicking a folded group opens it, so its members show right under it.
-          if (group && !T.open.has(alikeKey(ex))) {
-            T.open.add(alikeKey(ex));
+          if (group && !isOpen) {
+            T.open.add(k);
             drawRows(Infinity);
           }
           openInspector(ex.id);
@@ -1870,12 +1874,12 @@ function drawRows(freshAbove) {
       h('td', { class: 'num', text: ex.id }),
       h('td', null, h('span', { class: 'meth m-' + ex.method, text: ex.method })),
       h('td', { class: 'host c-host', text: ex.host + (ex.port !== 443 && ex.port !== 80 ? ':' + ex.port : ''), title: ex.host }),
-      h('td', { class: 'url', title: target(ex) }, tags, tags.length ? ' ' : '', group && !T.open.has(alikeKey(ex)) ? foldPath(ex.path) : target(ex)),
+      h('td', { class: 'url', title: target(ex) }, tags, tags.length ? ' ' : '', target(ex)),
       h('td', null, h('span', { class: statusClass(ex.status), text: ex.status == null ? 'ERR' : ex.status })),
       h('td', null, ex.in_scope ? null : h('span', { class: 'tag out', text: 'out' }), ' ', h('span', { class: 'mime', text: shortMime(ex.mime) })),
       h('td', { class: 'num c-size', text: fmtSize(ex.resp_len) }),
       h('td', { class: 'num c-ms', text: ex.duration_ms }),
-      h('td', { class: 'num', text: fmtTime(ex.ts) }),
+      h('td', { class: 'num', text: group && !isOpen ? timeSpan(group) : fmtTime(ex.ts), title: group && !isOpen ? 'First to last: ' + fmtTime(Math.min(...group.map((x) => x.ts))) + ' – ' + fmtTime(Math.max(...group.map((x) => x.ts))) : null }),
     );
     return tr;
   });
@@ -2048,9 +2052,11 @@ async function openInspector(id) {
       respCol,
       h('div', { class: 'lbl' }, 'Response', enc ? h('span', { class: 'decodetag', text: 'decoded · ' + enc }) : null, cutTag(ex.resp_truncated, ex.resp_size, ex.resp_body), seg),
       h('div', { class: 'spotslot' }),
+      h('div', { class: 'selslot' }),
       rawPre(responseText(ex, T.pretty)),
       msgBox,
     );
+    wireLensSelection(respCol, ex, 'response');
     if (ex.insights) drawInsights(respCol, ex.insights.filter((i) => i.side === 'response'));
   };
   drawResp();
@@ -2060,8 +2066,10 @@ async function openInspector(id) {
     { class: 'col' },
     h('div', { class: 'lbl' }, 'Request', cutTag(ex.req_truncated, ex.req_size, ex.req_body), h('span', { class: 'r', text: '#' + ex.id + ' · ' + fmtTime(ex.ts) + ' · ' + (ex.initiator || ex.source || 'proxy') })),
     h('div', { class: 'spotslot' }),
+    h('div', { class: 'selslot' }),
     rawPre(requestText(ex)),
   );
+  wireLensSelection(reqCol, ex, 'request');
   append(insp, [
     h(
       'div',
@@ -2101,6 +2109,58 @@ async function openInspector(id) {
     drawInsights(reqCol, list.filter((i) => i.side === 'request'));
     drawInsights(respCol, list.filter((i) => i.side === 'response'));
   });
+}
+
+/* ---------- decode a selection in the Lens ----------
+   Select any text in a request or response and a small bar offers to decode
+   it (JWT, URL-encoding, Base64, hex), find it in traffic or ask Claude about
+   it. Read-only: the Lens shows what was captured. */
+function wireLensSelection(col, ex, side) {
+  const bar = h('div', { class: 'qbar lensqbar' });
+  col.appendChild(bar);
+  const picked = () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return '';
+    const pre = col.querySelector('pre.raw');
+    return pre && pre.contains(sel.anchorNode) && pre.contains(sel.focusNode) ? sel.toString() : '';
+  };
+  const show = () => {
+    const t = picked();
+    if (!t.trim()) return bar.classList.remove('show');
+    clear(
+      bar,
+      h('button', { text: '◇ Decode', onmousedown: (e) => e.preventDefault(), onclick: () => (bar.classList.remove('show'), decodeSelection(col, t)) }),
+      t.trim().length >= 4 ? h('button', { text: 'Find in traffic', onmousedown: (e) => e.preventDefault(), onclick: () => setQuery('"' + t.trim().replace(/"/g, '').slice(0, 120) + '"') }) : null,
+      agentsOn() ? h('span', { class: 'qsep' }) : null,
+      agentsOn()
+        ? h('button', { class: 'ai', onmousedown: (e) => e.preventDefault(), onclick: () => askClaude({ kind: 'request', id: ex.id }, { question: `In the ${side} of this request, what is this value and is it worth testing?\n\n${t.slice(0, 600)}` }) }, '✦ Ask Claude')
+        : null,
+    );
+    bar.classList.add('show');
+  };
+  col.addEventListener('mouseup', () => setTimeout(show, 0));
+  col.addEventListener('keyup', (e) => e.shiftKey && setTimeout(show, 0));
+}
+document.addEventListener('selectionchange', () => {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed) for (const b of document.querySelectorAll('.lensqbar.show')) b.classList.remove('show');
+});
+
+function decodeSelection(col, t) {
+  const slot = col.querySelector('.selslot');
+  if (!slot) return;
+  const it = genericDecode(t);
+  const close = h('button', { class: 'blx', text: '✕', title: 'Close', onclick: () => clear(slot) });
+  const head = h('div', { class: 'sdh' }, h('b', { text: it.kind === 'text' ? 'Selection' : it.label }), h('span', { class: 'muted', text: ' from selection' }), h('span', { class: 'sdact' }), close);
+  const notes = it.notes && it.notes.length ? h('div', { class: 'sdnotes' }, it.notes.map((n) => h('span', { class: 'sdnote' + (/^(unsigned|expired)/.test(n) ? ' warn' : ''), text: n }))) : null;
+  const block = (label, text) => [h('div', { class: 'sdk' }, label), h('pre', { class: 'sdv', text })];
+  const body =
+    it.kind === 'jwt'
+      ? [block('Claims', JSON.stringify(it.jwt.payload, null, 2)), block('Header', JSON.stringify(it.jwt.header, null, 2))]
+      : it.kind === 'text'
+        ? h('div', { class: 'dnote blnote', text: 'This does not look encoded (JWT, URL, Base64 or hex).' })
+        : block('Decoded', bl_pretty(it.decode()));
+  clear(slot, h('div', { class: 'spotdetail' }, head, notes, body));
 }
 
 /** The client certificate Plonix presented for this exchange, if the server asked for one. */

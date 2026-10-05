@@ -1225,3 +1225,10 @@ tr.acnote > td { border-bottom: none; }
 .progdrift span { flex: 1; }
 #pg-cat .proglist { max-height: max(420px, calc(100vh - 390px)); }
 .proglist .grid td { vertical-align: middle; }
+/* Decode a selection in the Lens */
+.inspector .col { position: relative; }
+.lensqbar { top: 34px; right: 12px; }
+.selslot { flex: 0 1 auto; min-height: 0; max-height: 60%; overflow: auto; }
+.selslot:empty { display: none; }
+.selslot .spotdetail { margin-top: 8px; }
+.selslot .sdv { max-height: none; }
