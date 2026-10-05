@@ -187,6 +187,21 @@
       ]
     },
     {
+      "name": "security-headers",
+      "kind": "extension",
+      "version": "0.1.0",
+      "description": "Notes HTML pages that miss common security headers or set cookies without Secure or HttpOnly, and proposes one finding per host.",
+      "author": "Plonix contributors",
+      "url": "extensions/security-headers.plonixext",
+      "sha256": "351804ba5a079471d432caaf630378530123c91aeadba479450df932683d6d43",
+      "homepage": "https://github.com/SergeyMalych/plonix/tree/main/examples/extensions/security-headers",
+      "about": [
+        "A passive analyzer that runs in the WebAssembly sandbox. It reads in-scope traffic and notes HTML pages that miss common security headers, and cookies set without Secure or HttpOnly.",
+        "It proposes one finding per host, which stays open until you confirm it. It has no network, file or process access.",
+        "A small example to start from when you write your own extension."
+      ]
+    },
+    {
       "name": "web-servers",
       "kind": "rules",
       "version": "1.0.0",
