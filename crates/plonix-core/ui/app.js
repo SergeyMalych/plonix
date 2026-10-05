@@ -3229,6 +3229,14 @@ function buildQbar(tab, editor, strip, main) {
 
 const MARK = '•'; // •, the position marker, matched to the engine.
 let LIST_CATALOG = null;
+// Which position cards have their full list picker expanded, per tab. Kept off
+// the tab object so it is never persisted to the project file.
+const RUN_MORE = new WeakMap();
+function moreSet(tab) {
+  let s = RUN_MORE.get(tab);
+  if (!s) RUN_MORE.set(tab, (s = new Set()));
+  return s;
+}
 
 async function loadLists() {
   if (LIST_CATALOG) return LIST_CATALOG;
@@ -3308,10 +3316,162 @@ function detectKind(p) {
   return { label: 'value', suggest: ['input-probes', 'common-params', 'common-usernames'] };
 }
 
-/** The suggested lists for a position that actually exist in the library. */
-function suggestionsFor(pos, max = 2) {
+/** A number range centred on `n`, the smart default for a numeric id. */
+function rangeAround(n) {
+  const span = 10;
+  return { kind: 'range', from: n - span, to: n + span, step: 1 };
+}
+
+/** The list title for a built-in id, for a suggestion chip label. */
+function listTitle(id) {
+  const l = (LIST_CATALOG || []).find((x) => x.id === id);
+  return l ? l.title : id;
+}
+
+/** Ready-to-use list choices for a position, best first. Each is a chip the
+ * user can apply in one click; the first is the recommended pre-pick, applied
+ * automatically when the position is created. Numeric ids get a range centred
+ * on the current value — the situation-aware default — ahead of the generic
+ * built-in lists. */
+function smartSuggestions(pos) {
   const have = new Set((LIST_CATALOG || []).map((l) => l.id));
-  return (pos.suggest || []).filter((id) => have.has(id)).slice(0, max);
+  const out = [];
+  const v = (pos.value || '').trim();
+  if (/^-?\d+$/.test(v) && pos.label !== 'content type' && v.length <= 15) {
+    const n = Number(v);
+    const cfg = rangeAround(n);
+    const { count } = listPreview(cfg);
+    out.push({ key: 'around:' + n, title: `Around ${v}`, cfg, count });
+  }
+  for (const id of pos.suggest || []) {
+    if (!have.has(id)) continue;
+    const cfg = { kind: 'builtin', id };
+    out.push({ key: 'builtin:' + id, title: listTitle(id), cfg, count: listPreview(cfg).count });
+  }
+  return out.slice(0, 4);
+}
+
+/** True when a list config is the one a suggestion would apply. */
+function cfgMatches(cfg, s) {
+  if (!cfg || cfg.kind !== s.cfg.kind) return false;
+  if (s.cfg.kind === 'builtin') return cfg.id === s.cfg.id;
+  if (s.cfg.kind === 'range') return Number(cfg.from) === s.cfg.from && Number(cfg.to) === s.cfg.to && Number(cfg.step || 1) === s.cfg.step;
+  return false;
+}
+
+/** The spans of a URL or raw request that are worth varying — path segments,
+ * query values, a few header values, and body values. Offsets are into `text`
+ * as given; spans that fall inside an existing position marker are left out by
+ * the caller. `which` is 'url' or 'raw'. */
+function candidateSpans(text, which) {
+  const spans = [];
+  const add = (s, e) => {
+    if (e > s && !text.slice(s, e).includes(MARK)) spans.push({ start: s, end: e });
+  };
+  if (which === 'url') {
+    const q = text.indexOf('?');
+    const pathEnd = q < 0 ? text.length : q;
+    const m = text.match(/^[a-z][a-z0-9+.-]*:\/\/[^/]+/i);
+    let seg = m ? m[0].length : 0;
+    for (let k = seg; k <= pathEnd; k++) {
+      if (k === pathEnd || text[k] === '/') {
+        add(seg, k);
+        seg = k + 1;
+      }
+    }
+    if (q >= 0) {
+      const re = /([?&])([^=&]+)=([^&]*)/g;
+      re.lastIndex = q;
+      let mm;
+      while ((mm = re.exec(text))) {
+        const vs = mm.index + 1 + mm[2].length + 1;
+        add(vs, vs + mm[3].length);
+      }
+    }
+    return spans;
+  }
+  const nl = text.indexOf('\n\n');
+  const headEnd = nl < 0 ? text.length : nl;
+  const hre = /^([A-Za-z0-9-]+):[ \t]*(.*)$/gm;
+  let hm;
+  while ((hm = hre.exec(text)) && hm.index < headEnd) {
+    const name = hm[1].toLowerCase();
+    const val = hm[2];
+    const valStart = hm.index + hm[0].length - val.length;
+    if (name === 'authorization') {
+      const sm = val.match(/^(\S+)[ \t]+(\S.*)$/);
+      if (sm) {
+        const ts = valStart + sm[0].length - sm[2].length;
+        add(ts, ts + sm[2].trimEnd().length);
+      } else if (val.trim()) add(valStart, valStart + val.trimEnd().length);
+    } else if (name === 'user-agent' || name === 'content-type') {
+      if (val.trim()) add(valStart, valStart + val.trimEnd().length);
+    }
+  }
+  if (nl >= 0) {
+    const bodyStart = nl + 2;
+    const body = text.slice(bodyStart);
+    const trimmed = body.trimStart();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      const jre = /:[ \t]*(?:"((?:[^"\\]|\\.)*)"|(-?\d+(?:\.\d+)?|true|false))/g;
+      let jm;
+      while ((jm = jre.exec(body))) {
+        if (jm[1] !== undefined) {
+          const vs = bodyStart + jm.index + jm[0].indexOf('"') + 1;
+          add(vs, vs + jm[1].length);
+        } else {
+          const vs = bodyStart + jm.index + jm[0].length - jm[2].length;
+          add(vs, vs + jm[2].length);
+        }
+      }
+    } else if (/^[^=&\s]+=/.test(trimmed)) {
+      const fre = /([^=&\n]+)=([^&\n]*)/g;
+      let fm;
+      while ((fm = fre.exec(body))) {
+        const vs = bodyStart + fm.index + fm[1].length + 1;
+        add(vs, vs + fm[2].length);
+      }
+    }
+  }
+  return spans;
+}
+
+/** Wraps the span [start,end) of the tab's URL or raw in position markers,
+ * turning a candidate value into a run position, and re-renders the Bench. */
+function addPositionAt(tab, which, start, end, main) {
+  const key = which === 'url' ? 'url' : 'raw';
+  const text = tab[key] || '';
+  tab[key] = text.slice(0, start) + MARK + text.slice(start, end) + MARK + text.slice(end);
+  // The list for the new position is filled with its recommended default by
+  // renderRunPanel's sizing, so the run is ready without hunting for a list.
+  saveBench();
+  renderBench(main);
+}
+
+/** Removes the nth position's markers (0-based, engine fill order). */
+function removePosition(tab, n, main) {
+  let seen = 0;
+  const strip = (text) => {
+    const parts = (text || '').split(MARK);
+    let out = '';
+    for (let i = 0; i < parts.length; i++) {
+      if (i % 2 === 1) {
+        if (seen === n) {
+          out += parts[i];
+          seen++;
+          continue;
+        }
+        out += MARK + parts[i] + (i < parts.length - 1 ? MARK : '');
+        seen++;
+      } else out += parts[i];
+    }
+    return out;
+  };
+  tab.url = strip(tab.url);
+  // `seen` continues into the raw so the index is global across URL + raw.
+  tab.raw = strip(tab.raw);
+  saveBench();
+  renderBench(main);
 }
 
 /** A short sample and total count for a list config, for the preview line. */
@@ -3378,6 +3538,144 @@ function listPicker(cfg, onchange, redraw) {
   return h('div', { class: 'listpick' }, h('div', { class: 'pickrow' }, sel, detail), preview);
 }
 
+/** The request drawn as a live surface: every value worth varying is a
+ * clickable token, and every marked position is a numbered chip you can
+ * remove. This is how positions are made — point at a value, no manual
+ * marking. Positions are numbered in the engine's fill order (URL, then the
+ * raw request). */
+function runCanvas(tab, main) {
+  let posIdx = 0;
+  const draw = (text, which) => {
+    const nodes = [];
+    const markers = [];
+    let open = -1;
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] !== MARK) continue;
+      if (open < 0) open = i;
+      else {
+        markers.push({ start: open, end: i + 1, inner: text.slice(open + 1, i) });
+        open = -1;
+      }
+    }
+    const inMarker = (s, e) => markers.some((m) => s < m.end && e > m.start);
+    const regions = markers.map((m) => ({ type: 'pos', ...m }));
+    for (const c of candidateSpans(text, which)) if (!inMarker(c.start, c.end)) regions.push({ type: 'cand', start: c.start, end: c.end });
+    regions.sort((a, b) => a.start - b.start);
+    let cur = 0;
+    for (const r of regions) {
+      if (r.start > cur) nodes.push(document.createTextNode(text.slice(cur, r.start)));
+      if (r.type === 'pos') {
+        const idx = posIdx++;
+        nodes.push(
+          h(
+            'span',
+            { class: 'cvchip', title: `Position ${idx + 1}` },
+            h('span', { class: 'cvnum' }, h('span', { class: 'pnudge', text: String(idx + 1) })),
+            h('span', { class: 'cvval', text: r.inner === '' ? '∅' : r.inner }),
+            h('button', { class: 'cvx', text: '×', title: 'Stop varying this', onclick: (e) => (e.stopPropagation(), removePosition(tab, idx, main)) }),
+          ),
+        );
+      } else {
+        const s = r.start, e = r.end;
+        nodes.push(h('span', { class: 'cvcand', title: 'Vary this value', onclick: () => addPositionAt(tab, which, s, e, main) }, text.slice(s, e)));
+      }
+      cur = r.end;
+    }
+    if (cur < text.length) nodes.push(document.createTextNode(text.slice(cur)));
+    return nodes;
+  };
+  return h(
+    'div',
+    { class: 'runcanvas' },
+    h('div', { class: 'cvline' }, h('span', { class: 'cvmethod', text: tab.method || 'GET' }), ' ', ...draw(tab.url || '', 'url')),
+    (tab.raw || '').trim() ? h('div', { class: 'cvraw' }, ...draw(tab.raw || '', 'raw')) : null,
+  );
+}
+
+/** A plain-language name for a list config, for the run summary. */
+function listDesc(cfg) {
+  const { count } = listPreview(cfg);
+  if (cfg.kind === 'range') return `${count} nearby value${count === 1 ? '' : 's'}`;
+  if (cfg.kind === 'values') return `${count} value${count === 1 ? '' : 's'} you typed`;
+  return `the ${listTitle(cfg.id)} list`;
+}
+
+/** An estimate of how many requests the run will send, matching the engine's
+ * mode semantics closely enough for a summary line. */
+function estimateRequests(positions, cfg, lists) {
+  const n = positions.length;
+  if (!n) return 0;
+  const counts = (cfg.mode === 'sweep' ? [lists[0]] : lists.slice(0, n)).map((c) => listPreview(c || {}).count);
+  let total;
+  if (cfg.mode === 'matrix') total = counts.reduce((a, b) => a * b, 1);
+  else if (cfg.mode === 'parallel') total = Math.min(...counts);
+  else total = n <= 1 ? counts[0] || 0 : (counts[0] || 0) * n;
+  return total + (cfg.base ? 1 : 0);
+}
+
+/** The one-sentence description of what Start will do. */
+function runSummary(positions, cfg, lists) {
+  const n = positions.length;
+  const req = estimateRequests(positions, cfg, lists);
+  const tail = ` — about ${req} request${req === 1 ? '' : 's'}.`;
+  if (n === 1) return `Vary the ${positions[0].label} through ${listDesc(lists[0])}${tail}`;
+  if (cfg.mode === 'matrix') return `Try every combination across ${n} positions${tail}`;
+  if (cfg.mode === 'parallel') return `Step ${n} positions together, each through its own list${tail}`;
+  return `Vary ${n} positions one at a time through ${listDesc(lists[0])}${tail}`;
+}
+
+/** One position's list controls: a header, one-tap suggested lists (the first
+ * is the smart default), a "More options" disclosure holding the full picker,
+ * and a live preview of the values. */
+function runCard(tab, pos, cfg, i, redraw) {
+  const persist = () => saveBench();
+  const apply = (s) => {
+    for (const k of Object.keys(cfg)) delete cfg[k];
+    Object.assign(cfg, JSON.parse(JSON.stringify(s.cfg)));
+    persist();
+    redraw();
+  };
+  const suggs = smartSuggestions(pos);
+  const chips = suggs.map((s) => {
+    const on = cfgMatches(cfg, s);
+    return h('button', { class: 'suggchip' + (on ? ' on' : ''), title: `${s.count} value${s.count === 1 ? '' : 's'}`, onclick: () => apply(s) }, (on ? '✓ ' : '') + s.title);
+  });
+  const open = moreSet(tab).has(i);
+  const moreBtn = h(
+    'button',
+    {
+      class: 'morebtn' + (open ? ' on' : ''),
+      onclick: () => {
+        const m = moreSet(tab);
+        open ? m.delete(i) : m.add(i);
+        redraw();
+      },
+    },
+    open ? 'Fewer options' : 'More options',
+  );
+  const { sample, count } = listPreview(cfg);
+  return h(
+    'div',
+    { class: 'runcard' },
+    h(
+      'div',
+      { class: 'cardhead' },
+      h('span', { class: 'posnum' }, h('span', { class: 'pnudge', text: String(i + 1) })),
+      h('span', { class: 'poskind', text: pos.label }),
+      h('span', { class: 'poswhere', text: whereLabel(pos.where) }),
+      h('span', { class: 'posval', title: pos.value, text: pos.value === '' ? '∅' : pos.value }),
+    ),
+    h('div', { class: 'cardsugg' }, ...chips, moreBtn),
+    open ? listPicker(cfg, persist, redraw) : null,
+    h(
+      'div',
+      { class: 'cardprev' },
+      h('span', { class: 'prevcount', text: count ? `${count} value${count === 1 ? '' : 's'}` : 'no values' }),
+      sample.length ? h('span', { class: 'prevvals', text: sample.map((v) => (v === '' ? '∅' : v)).join('  ·  ') + (count > sample.length ? '  …' : '') }) : null,
+    ),
+  );
+}
+
 async function renderRunPanel(tab, main, col) {
   await loadLists();
   if (!col.isConnected) return;
@@ -3386,167 +3684,127 @@ async function renderRunPanel(tab, main, col) {
   const n = positions.length;
   const multi = cfg.mode !== 'sweep';
   const redraw = () => renderRunPanel(tab, main, col);
-
-  // Size the per-position list array to the positions (multi modes), or one
-  // shared list (sweep).
-  const lists = cfg.lists;
-  const need = multi ? n : 1;
-  while (lists.length < need) lists.push({ kind: 'builtin', id: (LIST_CATALOG[0] || {}).id });
-  if (lists.length > need) lists.length = need;
   const persist = () => saveBench();
 
-  const modeHelp = {
-    sweep: 'Change one position at a time, using one list for all of them.',
-    parallel: 'Step every position together, each through its own list.',
-    matrix: 'Try every combination of values across the positions.',
+  // Size the list array: nothing until a position exists, one per position in
+  // the multi modes, one shared list for sweep. Each new slot is filled with
+  // the recommended list for its position — the situation-aware default — so a
+  // freshly picked position is ready to run.
+  const lists = cfg.lists;
+  const fallback = { kind: 'builtin', id: (LIST_CATALOG[0] || {}).id };
+  const defaultFor = (i) => {
+    const sug = smartSuggestions(positions[i] || positions[0] || {});
+    return sug.length ? JSON.parse(JSON.stringify(sug[0].cfg)) : { ...fallback };
   };
-  const modeSeg = h(
-    'span',
-    { class: 'seg' },
-    [
-      ['sweep', 'One at a time'],
-      ['parallel', 'Lockstep'],
-      ['matrix', 'All combinations'],
-    ].map(([id, lbl]) =>
-      h('button', {
-        class: cfg.mode === id ? 'on' : '',
-        text: lbl,
-        title: modeHelp[id],
-        onclick: () => {
-          cfg.mode = id;
-          saveBench();
-          redraw();
-        },
-      }),
-    ),
-  );
+  const need = n === 0 ? 0 : multi ? n : 1;
+  while (lists.length < need) lists.push(defaultFor(lists.length));
+  if (lists.length > need) lists.length = need;
 
-  // A read-only preview of the request with the positions highlighted, so it
-  // is obvious where the values go.
-  const chip = (i, value) => h('span', { class: 'poschip', title: `Position ${i + 1}` }, h('b', null, h('span', { class: 'pnudge', text: String(i + 1) })), value === '' ? '∅' : value);
-  const highlight = (text, startIdx) => {
-    const parts = (text || '').split(MARK);
-    const nodes = [];
-    let k = startIdx;
-    for (let i = 0; i < parts.length; i++) {
-      if (i % 2 === 1) nodes.push(chip(k++, parts[i]));
-      else if (parts[i]) nodes.push(document.createTextNode(parts[i]));
-    }
-    return nodes;
-  };
-  const urlMarks = (tab.url || '').split(MARK).length - 1;
-  const preview =
+  // Lead line: friendly invitation when nothing is marked, the run summary once
+  // there is at least one position.
+  const lead =
     n === 0
+      ? h('div', { class: 'runlead' }, h('b', { text: 'Point at a value to vary it.' }), ' Click any highlighted value in the request below. Plonix picks a fitting list, so the run is ready to start.')
+      : h('div', { class: 'runlead on', text: runSummary(positions, cfg, lists) });
+
+  // The list controls under the canvas.
+  let cards = null;
+  if (n >= 1) {
+    if (!multi) {
+      // Sweep: one shared list. A single position shows its own card; several
+      // positions get a compact read-only list, then one shared list card.
+      if (n === 1) {
+        cards = h('div', { class: 'runcards' }, runCard(tab, positions[0], lists[0], 0, redraw));
+      } else {
+        const rows = positions.map((p, i) =>
+          h(
+            'div',
+            { class: 'posrow' },
+            h('span', { class: 'posnum' }, h('span', { class: 'pnudge', text: String(i + 1) })),
+            h('span', { class: 'poskind', text: p.label }),
+            h('span', { class: 'poswhere', text: whereLabel(p.where) }),
+            h('span', { class: 'posval', title: p.value, text: p.value === '' ? '∅' : p.value }),
+          ),
+        );
+        cards = h('div', { class: 'runcards' }, h('div', { class: 'posrows' }, ...rows), runCard(tab, { ...positions[0], label: 'one shared list' }, lists[0], 0, redraw));
+      }
+    } else {
+      cards = h('div', { class: 'runcards' }, ...positions.map((p, i) => runCard(tab, p, lists[i], i, redraw)));
+    }
+  }
+
+  // Mode only matters with two or more positions.
+  const modeHelp = {
+    sweep: 'One position changes at a time, through one shared list.',
+    parallel: 'Every position steps together, each through its own list.',
+    matrix: 'Every combination of values across the positions.',
+  };
+  const modeSeg =
+    n < 2
       ? null
       : h(
           'div',
-          { class: 'runprev' },
-          h('div', { class: 'prevline' }, h('span', { class: 'prevmethod', text: tab.method || 'GET' }), ' ', ...highlight(tab.url, 0)),
-          (tab.raw || '').includes(MARK) ? h('div', { class: 'prevraw' }, ...highlight(tab.raw, Math.floor(urlMarks / 2))) : null,
+          { class: 'runmode' },
+          h('span', { class: 'plabel', text: 'How' }),
+          h(
+            'span',
+            { class: 'seg' },
+            [
+              ['sweep', 'One at a time'],
+              ['parallel', 'Lockstep'],
+              ['matrix', 'All combinations'],
+            ].map(([id, lbl]) =>
+              h('button', {
+                class: cfg.mode === id ? 'on' : '',
+                text: lbl,
+                title: modeHelp[id],
+                onclick: () => {
+                  cfg.mode = id;
+                  saveBench();
+                  redraw();
+                },
+              }),
+            ),
+          ),
+          h('span', { class: 'modehelp', text: modeHelp[cfg.mode] }),
         );
 
-  // One card per position: what it is and, in multi modes, its list.
-  const posCard = (pos, i, withPicker) =>
-    h(
-      'div',
-      { class: 'poscard' },
-      h(
-        'div',
-        { class: 'poshead' },
-        h('span', { class: 'posnum' }, h('span', { class: 'pnudge', text: String(i + 1) })),
-        h('span', { class: 'poskind', text: pos.label }),
-        h('span', { class: 'poswhere', text: whereLabel(pos.where) }),
-        h('span', { class: 'posval', title: pos.value, text: pos.value === '' ? '∅' : pos.value }),
-      ),
-      withPicker ? listPicker(lists[i], persist, redraw) : null,
-      withPicker ? suggestRow(suggestionsFor(pos), lists[i], persist, redraw) : null,
-    );
-
-  let listSection;
-  if (n === 0) {
-    listSection = null;
-  } else if (multi) {
-    listSection = h('div', { class: 'poscards' }, ...positions.map((p, i) => posCard(p, i, true)));
-  } else {
-    // Sweep: positions listed read-only, then one shared list + suggestions
-    // drawn from across the positions.
-    const union = [];
-    for (const p of positions) for (const id of suggestionsFor(p, 3)) if (!union.includes(id)) union.push(id);
-    listSection = h(
-      'div',
-      { class: 'poscards' },
-      h('div', { class: 'poscards' }, ...positions.map((p, i) => posCard(p, i, false))),
-      h(
-        'div',
-        { class: 'poscard sharedlist' },
-        h('div', { class: 'poshead' }, h('span', { class: 'poskind', text: n === 1 ? 'List' : 'One list, run through each position' })),
-        listPicker(lists[0], persist, redraw),
-        suggestRow(union.slice(0, 3), lists[0], persist, redraw),
-      ),
-    );
-  }
-
-  const base = h('input', { type: 'checkbox', checked: !!cfg.base, onchange: () => ((cfg.base = base.checked), persist()) });
+  // Options are tucked away so the common path stays uncluttered.
+  const base = h('input', { type: 'checkbox', checked: !!cfg.base, onchange: () => ((cfg.base = base.checked), persist(), redraw()) });
   const max = h('input', { class: 'num', type: 'number', placeholder: '1000', value: cfg.max, oninput: () => ((cfg.max = max.value), persist()) });
   const delay = h('input', { class: 'num', type: 'number', placeholder: '50', value: cfg.delay, oninput: () => ((cfg.delay = delay.value), persist()) });
-  const startBtn = h('button', { class: 'btn primary', disabled: n === 0, text: n === 0 ? 'Mark a position to run' : 'Start run', onclick: () => startRun(tab, main) });
+  const optsOpen = moreSet(tab).has('opts');
+  const optsBtn = h(
+    'button',
+    {
+      class: 'morebtn' + (optsOpen ? ' on' : ''),
+      onclick: () => {
+        const m = moreSet(tab);
+        optsOpen ? m.delete('opts') : m.add('opts');
+        redraw();
+      },
+    },
+    optsOpen ? 'Hide options' : 'Options',
+  );
+  const opts = optsOpen
+    ? h(
+        'div',
+        { class: 'runopts' },
+        h('label', { class: 'chk' }, base, ' Send the original first, as a baseline'),
+        h('label', null, 'Stop after ', max, ' requests'),
+        h('label', null, 'Wait ', delay, ' ms between requests'),
+      )
+    : null;
 
-  const posNote =
-    n === 0
-      ? h(
-          'div',
-          { class: 'scopehint blocked' },
-          'Mark the parts to vary: select text in the URL and press ',
-          h('b', { text: '•' }),
-          ', or select in the request and press ',
-          h('b', { text: '+ Mark position' }),
-          '.',
-        )
-      : h('div', { class: 'runpos', text: `${n} position${n === 1 ? '' : 's'} marked. Pick a list for ${n === 1 ? 'it' : 'each'} below.` });
+  const startBtn = h('button', { class: 'btn primary runstart', disabled: n === 0, text: n === 0 ? 'Pick a value to run' : 'Start run', onclick: () => startRun(tab, main) });
+
+  const manualHint = n === 0 ? h('div', { class: 'runmanual' }, 'Varying something the highlights missed? Select it in the request on the left and press ', h('b', { text: '+ Mark position' }), '.') : null;
 
   clear(
     col,
     h('div', { class: 'lbl', text: 'Run' }),
-    h(
-      'div',
-      { class: 'runconf' },
-      posNote,
-      preview,
-      h('div', { class: 'runfield' }, h('span', { class: 'plabel', text: 'Mode' }), modeSeg),
-      h('div', { class: 'modehelp', text: modeHelp[cfg.mode] }),
-      listSection,
-      h(
-        'div',
-        { class: 'runopts' },
-        h('label', { class: 'chk' }, base, ' Send original first (baseline)'),
-        h('label', null, 'Max requests ', max),
-        h('label', null, 'Delay ms ', delay),
-      ),
-      startBtn,
-    ),
+    h('div', { class: 'runconf' }, lead, runCanvas(tab, main), modeSeg, cards, h('div', { class: 'runactions' }, startBtn, optsBtn), opts, manualHint),
   );
-}
-
-/** A row of one-click suggested lists for a position. */
-function suggestRow(ids, cfg, onchange, redraw) {
-  if (!ids || !ids.length) return null;
-  const chip = (id) => {
-    const l = (LIST_CATALOG || []).find((x) => x.id === id);
-    if (!l) return null;
-    const on = cfg.kind === 'builtin' && cfg.id === id;
-    return h('button', {
-      class: 'suggchip' + (on ? ' on' : ''),
-      text: (on ? '✓ ' : '+ ') + l.title,
-      title: `Use the ${l.title} list (${l.count} values)`,
-      onclick: () => {
-        cfg.kind = 'builtin';
-        cfg.id = id;
-        onchange();
-        redraw();
-      },
-    });
-  };
-  return h('div', { class: 'suggrow' }, h('span', { class: 'sugglbl', text: 'Suggested:' }), ...ids.map(chip).filter(Boolean));
 }
 
 async function startRun(tab, main) {
