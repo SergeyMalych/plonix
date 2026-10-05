@@ -5420,10 +5420,17 @@ function drawAccessReport(box) {
     }
     rows.push(h('tr', { class: row.notes && row.notes.length ? 'acnote' : '' }, tds));
     if (row.notes && row.notes.length) {
-      rows.push(h('tr', { class: 'acnoterow' }, h('td', { colspan: String(r.identities.length + 1) }, row.notes.map((n) => h('span', { class: 'acnotechip', text: '⚑ ' + n })))));
+      rows.push(
+        h(
+          'tr',
+          { class: 'acnoterow' },
+          h('td', { colspan: String(r.identities.length + 1) }, h('div', { class: 'acnotes' }, row.notes.map((n) => h('span', { class: 'acnotechip' }, h('span', { class: 'acnoteico', text: '⚑' }), h('span', { text: n }))))),
+        ),
+      );
     }
   }
-  clear(box, head, h('table', { class: 'actable' }, h('thead', null, h('tr', null, headCells)), h('tbody', null, rows)));
+  const cols = h('colgroup', null, [h('col', { class: 'acreqcol' }), ...r.identities.map(() => h('col', { class: 'acidc' }))]);
+  clear(box, head, h('table', { class: 'actable' }, cols, h('thead', null, h('tr', null, headCells)), h('tbody', null, rows)));
 }
 
 /* ======================================================================

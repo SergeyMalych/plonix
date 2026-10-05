@@ -1078,21 +1078,25 @@ button.tag.edited { cursor: pointer; }
 
 .aclead { margin: 4px 0 10px; color: var(--fg-2); }
 .aclead .acflag { color: var(--warn); }
-.actable { width: 100%; border-collapse: collapse; }
-.actable th, .actable td { border-bottom: 1px solid var(--line-2); padding: 7px 8px; text-align: left; vertical-align: middle; }
+.actable { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.actable col.acreqcol { width: 36%; }
+.actable col.acidc { width: auto; }
+.actable th, .actable td { border-bottom: 1px solid var(--line-2); padding: 6px 10px; text-align: left; vertical-align: middle; }
 .actable th.acidcol { text-align: center; white-space: nowrap; }
 .actable th.acidcol.anon { color: var(--fg-3); font-style: italic; }
-.actable .actarget { display: flex; align-items: center; gap: 8px; max-width: 420px; }
-.actable .acpath { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.actable td.actarget { display: flex; align-items: center; gap: 8px; overflow: hidden; }
+.actable .acpath { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .actable td.accell { text-align: center; }
-.acbtn { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; min-width: 62px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 4px 8px; }
+.acbtn { display: inline-flex; align-items: baseline; justify-content: center; gap: 6px; min-width: 66px; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 3px 9px; line-height: 1.25; cursor: pointer; }
 .acbtn:hover { border-color: var(--accent); }
 .acbtn.ok { background: var(--ok-soft); border-color: transparent; }
 .acbtn.err { background: var(--crit-soft); border-color: transparent; }
 .acbtn .aclen { color: var(--fg-3); font-size: 11px; }
-tr.acnote td { border-bottom: none; }
-.acnoterow td { padding-top: 0; padding-bottom: 9px; }
-.acnotechip { display: inline-block; margin: 2px 8px 2px 0; padding: 2px 9px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-size: 12px; }
+tr.acnote > td { border-bottom: none; }
+.acnoterow > td { padding: 0; }
+.acnotes { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 6px 10px 8px; background: var(--warn-soft); border-bottom: 1px solid var(--line-2); }
+.acnotechip { display: inline-flex; align-items: center; gap: 5px; color: var(--warn); font-size: 12px; }
+.acnotechip .acnoteico { font-size: 11px; opacity: 0.9; }
 
 /* manage-users sheet */
 .usersheet { width: min(560px, 86vw); display: flex; flex-direction: column; gap: 10px; }
