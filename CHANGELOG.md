@@ -15,7 +15,9 @@ What changed in each Plonix release. The newest release is at the top.
 - The Lens spots stack traces in responses.
 - API descriptions (OpenAPI and Swagger) found in traffic: the Map lists the endpoints nobody has visited yet, each one click from the Bench.
 - When a Bench send comes back logged out but worked before, Plonix offers the newest login captured for that host, in that tab or in every tab still on the old one.
-- Traffic offers to group look-alike requests (the same path with different ids) into one row each, expandable.
+- Traffic folds the same request sent several times in a row into one row, with the count and the time from first to last. Click it to see each one; *Every request* in the toolbar shows each request on its own row.
+- Select any text in the Lens to decode it (JWT, URL-encoding, Base64, hex), find it in traffic or ask Claude about it.
+- On the Bench, a Spotted value (a decoded JWT, URL or Base64 value) opens large enough to show all of it, and History shows about a dozen sends. Drag the top edge of either to resize; double-click it to fit again.
 - secret-sweep in the Market: finds API keys, tokens and passwords for hundreds of services in captured traffic and shows each one in the Lens. It runs trufflehog, which you install yourself (`brew install trufflehog`), on your Mac only.
 - js-endpoints in the Market: reads captured JavaScript and pulls out the API paths and URLs it references, so endpoints nothing has visited yet stand out in the Lens.
 - subdomain-discovery in the Market: enumerates an accepted domain's subdomains with a recon tool you install (`subfinder`, with another installed tool as a fallback) and adds the ones it finds to Scope as suggestions to review. It reads public sources, never touches the target, and never changes scope on its own.

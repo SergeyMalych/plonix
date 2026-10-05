@@ -920,35 +920,51 @@ function rawPre({ lines, body }) {
    Traffic
    ====================================================================== */
 
-const T = { text: '', filters: [], items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: store('plonix.inspH'), picked: new Set(), pickAnchor: null, group: !!store('plonix.groupAlike'), open: new Set(), visible: null };
+const T = { text: '', filters: [], items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: store('plonix.inspH'), picked: new Set(), pickAnchor: null, group: store('plonix.groupAlike') !== false, open: new Set(), visible: null };
 
-/** A path with its ids folded to {id}, the same way the Map groups endpoints. */
-function foldPath(path) {
-  return (path || '/')
-    .split('/')
-    .map((seg) => (/^\d+$/.test(seg) || (seg.length >= 16 && /^[0-9a-f-]+$/i.test(seg)) ? '{id}' : seg))
-    .join('/');
-}
+const sameKey = (ex) => `${ex.method} ${ex.host}:${ex.port} ${target(ex)}`;
 
-const alikeKey = (ex) => `${ex.method} ${ex.host}:${ex.port} ${foldPath(ex.path)}`;
-
-/** Look-alike requests in the current page: same method, host and path once ids are folded. */
-function alikeGroups(items) {
-  const groups = new Map();
+/** Runs of the same request sent one right after another, in list order.
+ *  The same request again after something else starts a new run. */
+function repeatRuns(items) {
+  const runs = [];
   for (const ex of items) {
-    const k = alikeKey(ex);
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k).push(ex);
+    const last = runs[runs.length - 1];
+    if (last && sameKey(last[0]) === sameKey(ex)) last.push(ex);
+    else runs.push([ex]);
   }
-  return groups;
+  return runs;
 }
+/** A run's id stays put while it grows: its oldest member does not change. */
+const runId = (run) => Math.min(...run.map((x) => x.id));
 
 function setGrouping(on) {
   T.group = on;
   T.open.clear();
-  store('plonix.groupAlike', on || null);
-  renderChips();
+  // Grouped is the default, so only turning it off is remembered.
+  store('plonix.groupAlike', on ? null : false);
+  drawGroupToggle();
   drawRows(Infinity);
+}
+
+/** "21:35:58–36:13" for a run (newest first in the list), or one time if they match. */
+function timeSpan(run) {
+  const ts = run.map((x) => x.ts);
+  const a = fmtTime(Math.min(...ts)), b = fmtTime(Math.max(...ts));
+  if (a === b) return a;
+  // Drop the hour the end shares with the start: 21:35:58–36:13.
+  return a + '–' + b.slice(a.slice(0, 3) === b.slice(0, 3) ? 3 : 0);
+}
+
+/** Grouped (repeats folded into one row each) or every request on its own row. */
+function drawGroupToggle() {
+  const box = $('#groupseg');
+  if (!box) return;
+  clear(
+    box,
+    h('button', { class: T.group ? 'on' : '', text: 'Grouped', title: 'Fold the same request sent several times in a row into one row. Click it to see each one.', onclick: () => setGrouping(true) }),
+    h('button', { class: T.group ? '' : 'on', text: 'Every request', title: 'Show every request on its own row', onclick: () => setGrouping(false) }),
+  );
 }
 
 /* ---------- include / exclude filters ----------
@@ -1087,7 +1103,7 @@ const TCOLS = [
   { key: 'type', label: 'Type', w: 92 },
   { key: 'size', label: 'Size', w: 72, col: 'c-size', th: 'num c-size' },
   { key: 'ms', label: 'ms', w: 60, col: 'c-ms', th: 'num c-ms' },
-  { key: 'time', label: 'Time', w: 84 },
+  { key: 'time', label: 'Time', w: 112 },
 ];
 const TCOL_MIN = 36;
 
@@ -1273,6 +1289,7 @@ function renderTraffic(main) {
         backButton(),
         h('div', { class: 'search', id: 'searchbox' }, h('span', { class: 'mg', text: '⌕' }), input, h('kbd', { text: '/' })),
         h('span', { class: 'count', id: 'tcount' }),
+        h('span', { class: 'seg groupseg', id: 'groupseg' }),
         liveBtn,
         interceptButton(),
         h('button', { class: 'btn sm', id: 'harbtn', text: 'HAR ▾', title: 'Import a HAR file, or export traffic as one', onclick: (e) => harMenu(e.currentTarget) }),
@@ -1285,6 +1302,7 @@ function renderTraffic(main) {
     ),
   ]);
   renderChips();
+  drawGroupToggle();
   renderBanner();
   IC.drawn = null;
   drawInterceptPanel();
@@ -1516,14 +1534,6 @@ function renderChips() {
   if (!box) return;
   const active = (term) => T.filters.some((f) => f.term.toLowerCase() === term.toLowerCase());
   const sugg = suggestedFilters(S.facets).filter((c) => !active(c.term));
-  // Many requests that differ only by an id: offer to fold them into one row each.
-  let alike = null;
-  if (!T.group && T.items.length) {
-    const g = alikeGroups(T.items);
-    const saved = T.items.length - g.size;
-    const biggest = Math.max(...[...g.values()].map((x) => x.length));
-    if (saved >= 5 && biggest >= 3) alike = saved;
-  }
   const inc = T.filters.filter((f) => f.mode === 'include');
   const exc = T.filters.filter((f) => f.mode === 'exclude');
   const q = fullQuery();
@@ -1543,25 +1553,9 @@ function renderChips() {
           }),
         ]
       : null,
-    T.group
-      ? h(
-          'span',
-          { class: 'fgroup' },
-          h('span', { class: 'chipslbl', text: 'View' }),
-          h('span', { class: 'fchip include' }, h('span', { class: 'fbody' }, h('span', { class: 'fv', text: 'Look-alikes grouped' })), h('button', { class: 'fx', title: 'Show every request on its own row', 'aria-label': 'Stop grouping look-alikes', text: '×', onclick: () => setGrouping(false) })),
-        )
-      : null,
-    sugg.length || alike ? h('span', { class: 'fsep' }) : null,
+    sugg.length ? h('span', { class: 'fsep' }) : null,
     // Labelled so one-click suggestions are not mistaken for active filters.
-    sugg.length || alike ? h('span', { class: 'chipslbl', text: 'Suggested' }) : null,
-    alike
-      ? h(
-          'button',
-          { class: 'chip k-alike', title: 'Fold requests that differ only by an id (like /orders/1041 and /orders/1042) into one row each. Nothing is hidden: expand a row to see them all.', onclick: () => setGrouping(true) },
-          h('span', { text: 'Group look-alikes' }),
-          h('span', { class: 'n', text: '−' + alike + ' rows' }),
-        )
-      : null,
+    sugg.length ? h('span', { class: 'chipslbl', text: 'Suggested' }) : null,
     sugg.map((c) =>
       h(
         'button',
@@ -1784,7 +1778,6 @@ async function refreshTraffic(userAction) {
   T.total = data.total;
   T.maxId = Math.max(prevMax, ...data.items.map((i) => i.id), 0);
   $('#tcount').textContent = data.total > data.items.length ? `${data.items.length} of ${data.total}` : `${data.total} request${data.total === 1 ? '' : 's'}`;
-  if (!T.group) renderChips();
   drawRows(userAction ? Infinity : prevMax);
 }
 
@@ -1827,25 +1820,28 @@ function drawRows(freshAbove) {
     clear(tbody, h('tr', null, h('td', { colspan: 9, style: { height: 'auto', whiteSpace: 'normal' } }, msg)));
     return;
   }
-  const groups = T.group ? alikeGroups(T.items) : null;
   const shown = [];
-  for (const ex of T.items) {
-    const g = groups && groups.get(alikeKey(ex));
-    if (!g || g.length < 2) shown.push({ ex });
-    else if (g[0] === ex) shown.push({ ex, group: g });
-    else if (T.open.has(alikeKey(ex))) shown.push({ ex, member: true });
-  }
-  T.visible = groups ? shown.map((r) => r.ex.id) : null;
+  if (T.group) {
+    for (const run of repeatRuns(T.items)) {
+      if (run.length < 2) shown.push({ ex: run[0] });
+      else {
+        // An open run lists the rest of its requests right under its first row.
+        shown.push({ ex: run[0], group: run });
+        if (T.open.has(runId(run))) for (const m of run.slice(1)) shown.push({ ex: m, member: true });
+      }
+    }
+  } else for (const ex of T.items) shown.push({ ex });
+  T.visible = T.group ? shown.map((r) => r.ex.id) : null;
   const rows = shown.map(({ ex, group, member }) => {
     const tags = [];
+    const k = group && runId(group);
+    const isOpen = group && T.open.has(k);
     if (group) {
-      const k = alikeKey(ex);
-      const isOpen = T.open.has(k);
       tags.push(
         h('button', {
           class: 'tag alike' + (isOpen ? ' on' : ''),
           text: (isOpen ? '▾ ' : '▸ ') + '×' + group.length,
-          title: `${group.length} look-alike requests to ${foldPath(ex.path)}. Click to ${isOpen ? 'fold them' : 'show them all'}.`,
+          title: `Sent ${group.length} times in a row. Click to ${isOpen ? 'fold them' : 'show each one'}.`,
           onclick: (e) => {
             e.stopPropagation();
             if (isOpen) T.open.delete(k);
@@ -1863,19 +1859,27 @@ function drawRows(freshAbove) {
       {
         'data-id': ex.id,
         class: [ex.id === T.sel ? 'sel' : '', T.picked.has(ex.id) ? 'picked' : '', ex.in_scope ? '' : 'out', ex.id > freshAbove ? 'fresh' : '', member ? 'member' : ''].join(' ').trim(),
-        onclick: (e) => (e.metaKey || e.ctrlKey || e.shiftKey ? pickRow(ex.id, e.shiftKey) : openInspector(ex.id)),
+        onclick: (e) => {
+          if (e.metaKey || e.ctrlKey || e.shiftKey) return pickRow(ex.id, e.shiftKey);
+          // Clicking a folded group opens it, so its members show right under it.
+          if (group && !isOpen) {
+            T.open.add(k);
+            drawRows(Infinity);
+          }
+          openInspector(ex.id);
+        },
         ondblclick: () => sendToBench(ex.id),
         oncontextmenu: (e) => rowMenu(e, ex),
       },
       h('td', { class: 'num', text: ex.id }),
       h('td', null, h('span', { class: 'meth m-' + ex.method, text: ex.method })),
       h('td', { class: 'host c-host', text: ex.host + (ex.port !== 443 && ex.port !== 80 ? ':' + ex.port : ''), title: ex.host }),
-      h('td', { class: 'url', title: target(ex) }, tags, tags.length ? ' ' : '', group && !T.open.has(alikeKey(ex)) ? foldPath(ex.path) : target(ex)),
+      h('td', { class: 'url', title: target(ex) }, tags, tags.length ? ' ' : '', target(ex)),
       h('td', null, h('span', { class: statusClass(ex.status), text: ex.status == null ? 'ERR' : ex.status })),
       h('td', null, ex.in_scope ? null : h('span', { class: 'tag out', text: 'out' }), ' ', h('span', { class: 'mime', text: shortMime(ex.mime) })),
       h('td', { class: 'num c-size', text: fmtSize(ex.resp_len) }),
       h('td', { class: 'num c-ms', text: ex.duration_ms }),
-      h('td', { class: 'num', text: fmtTime(ex.ts) }),
+      h('td', { class: 'num', text: group && !isOpen ? timeSpan(group) : fmtTime(ex.ts), title: group && !isOpen ? 'First to last: ' + fmtTime(Math.min(...group.map((x) => x.ts))) + ' – ' + fmtTime(Math.max(...group.map((x) => x.ts))) : null }),
     );
     return tr;
   });
@@ -2048,9 +2052,11 @@ async function openInspector(id) {
       respCol,
       h('div', { class: 'lbl' }, 'Response', enc ? h('span', { class: 'decodetag', text: 'decoded · ' + enc }) : null, cutTag(ex.resp_truncated, ex.resp_size, ex.resp_body), seg),
       h('div', { class: 'spotslot' }),
+      h('div', { class: 'selslot' }),
       rawPre(responseText(ex, T.pretty)),
       msgBox,
     );
+    wireLensSelection(respCol, ex, 'response');
     if (ex.insights) drawInsights(respCol, ex.insights.filter((i) => i.side === 'response'));
   };
   drawResp();
@@ -2060,8 +2066,10 @@ async function openInspector(id) {
     { class: 'col' },
     h('div', { class: 'lbl' }, 'Request', cutTag(ex.req_truncated, ex.req_size, ex.req_body), h('span', { class: 'r', text: '#' + ex.id + ' · ' + fmtTime(ex.ts) + ' · ' + (ex.initiator || ex.source || 'proxy') })),
     h('div', { class: 'spotslot' }),
+    h('div', { class: 'selslot' }),
     rawPre(requestText(ex)),
   );
+  wireLensSelection(reqCol, ex, 'request');
   append(insp, [
     h(
       'div',
@@ -2101,6 +2109,58 @@ async function openInspector(id) {
     drawInsights(reqCol, list.filter((i) => i.side === 'request'));
     drawInsights(respCol, list.filter((i) => i.side === 'response'));
   });
+}
+
+/* ---------- decode a selection in the Lens ----------
+   Select any text in a request or response and a small bar offers to decode
+   it (JWT, URL-encoding, Base64, hex), find it in traffic or ask Claude about
+   it. Read-only: the Lens shows what was captured. */
+function wireLensSelection(col, ex, side) {
+  const bar = h('div', { class: 'qbar lensqbar' });
+  col.appendChild(bar);
+  const picked = () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return '';
+    const pre = col.querySelector('pre.raw');
+    return pre && pre.contains(sel.anchorNode) && pre.contains(sel.focusNode) ? sel.toString() : '';
+  };
+  const show = () => {
+    const t = picked();
+    if (!t.trim()) return bar.classList.remove('show');
+    clear(
+      bar,
+      h('button', { text: '◇ Decode', onmousedown: (e) => e.preventDefault(), onclick: () => (bar.classList.remove('show'), decodeSelection(col, t)) }),
+      t.trim().length >= 4 ? h('button', { text: 'Find in traffic', onmousedown: (e) => e.preventDefault(), onclick: () => setQuery('"' + t.trim().replace(/"/g, '').slice(0, 120) + '"') }) : null,
+      agentsOn() ? h('span', { class: 'qsep' }) : null,
+      agentsOn()
+        ? h('button', { class: 'ai', onmousedown: (e) => e.preventDefault(), onclick: () => askClaude({ kind: 'request', id: ex.id }, { question: `In the ${side} of this request, what is this value and is it worth testing?\n\n${t.slice(0, 600)}` }) }, '✦ Ask Claude')
+        : null,
+    );
+    bar.classList.add('show');
+  };
+  col.addEventListener('mouseup', () => setTimeout(show, 0));
+  col.addEventListener('keyup', (e) => e.shiftKey && setTimeout(show, 0));
+}
+document.addEventListener('selectionchange', () => {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed) for (const b of document.querySelectorAll('.lensqbar.show')) b.classList.remove('show');
+});
+
+function decodeSelection(col, t) {
+  const slot = col.querySelector('.selslot');
+  if (!slot) return;
+  const it = genericDecode(t);
+  const close = h('button', { class: 'blx', text: '✕', title: 'Close', onclick: () => clear(slot) });
+  const head = h('div', { class: 'sdh' }, h('b', { text: it.kind === 'text' ? 'Selection' : it.label }), h('span', { class: 'muted', text: ' from selection' }), h('span', { class: 'sdact' }), close);
+  const notes = it.notes && it.notes.length ? h('div', { class: 'sdnotes' }, it.notes.map((n) => h('span', { class: 'sdnote' + (/^(unsigned|expired)/.test(n) ? ' warn' : ''), text: n }))) : null;
+  const block = (label, text) => [h('div', { class: 'sdk' }, label), h('pre', { class: 'sdv', text })];
+  const body =
+    it.kind === 'jwt'
+      ? [block('Claims', JSON.stringify(it.jwt.payload, null, 2)), block('Header', JSON.stringify(it.jwt.header, null, 2))]
+      : it.kind === 'text'
+        ? h('div', { class: 'dnote blnote', text: 'This does not look encoded (JWT, URL, Base64 or hex).' })
+        : block('Decoded', bl_pretty(it.decode()));
+  clear(slot, h('div', { class: 'spotdetail' }, head, notes, body));
 }
 
 /** The client certificate Plonix presented for this exchange, if the server asked for one. */
@@ -2502,6 +2562,39 @@ function sideBySide(cls, key, left, right) {
     },
   });
   return append(wrap, [left, bar, right]);
+}
+
+/** A handle that drags `box`'s height: moving it up makes `box` taller.
+ *  `get`/`set` read and apply the height so the caller decides what it
+ *  means (a fixed height or a cap); the last size is remembered under `key`
+ *  and a double-click forgets it so the box fits its content again. */
+function heightGrip(key, { get, set, fit, min = 80, max }) {
+  return h('div', {
+    class: 'hgrip',
+    title: 'Drag to resize · double-click to fit',
+    ondblclick: () => {
+      store(key, null);
+      fit();
+    },
+    onmousedown: (e) => {
+      e.preventDefault();
+      const startY = e.clientY;
+      const startH = get();
+      document.body.classList.add('rowresize');
+      const move = (ev) => {
+        const px = Math.round(Math.max(min, Math.min(max(), startH - (ev.clientY - startY))));
+        set(px);
+        store(key, px);
+      };
+      const up = () => {
+        document.body.classList.remove('rowresize');
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    },
+  });
 }
 
 function startResize(e, insp) {
@@ -2909,6 +3002,7 @@ function renderBench(main) {
     { class: 'rcol' },
     h('div', { class: 'lbl' }, 'Request', binaryNote),
     editWrap,
+    lensStrip ? lensGrip(lensStrip) : null,
     lensStrip,
   );
   if (lensStrip) wireBenchLens(tab, editor, editWrap, lensStrip, main);
@@ -3147,7 +3241,58 @@ function wireBenchLens(tab, editor, editWrap, strip, main) {
   redraw();
 }
 
+/* ---- sizing ----
+   An open value card gets room to show all of it: the strip grows to fit its
+   content, leaving the request editor a few lines, unless the user dragged
+   it to a size of their own, which is kept from then on. */
+const LENS_H = 'plonix.bench.lensH';
+const EDITOR_MIN = 110;
+function lensRoom(strip) {
+  const col = strip.parentElement;
+  if (!col) return 400;
+  const lbl = col.querySelector('.lbl');
+  return Math.max(120, col.clientHeight - (lbl ? lbl.offsetHeight : 0) - EDITOR_MIN);
+}
+function lensOpen(strip) {
+  strip.classList.add('open');
+  strip.parentElement?.classList.add('lensopen');
+  requestAnimationFrame(() => {
+    for (const ta of strip.querySelectorAll('textarea.blv')) fitText(ta);
+    strip.style.height = 'auto';
+    const want = store(LENS_H) || strip.scrollHeight + 1;
+    // Short of room: make the Request and Response columns taller (the Bench
+    // scrolls) rather than squeeze the card, up to most of the window.
+    const split = strip.closest('.rsplit');
+    const short = want - lensRoom(strip);
+    if (split && short > 0) split.style.minHeight = Math.min(split.clientHeight + short, Math.round(window.innerHeight * 0.85)) + 'px';
+    strip.style.height = Math.min(want, lensRoom(strip)) + 'px';
+    strip.scrollIntoView({ block: 'nearest' });
+  });
+}
+function lensClose(strip) {
+  strip.classList.remove('open');
+  strip.parentElement?.classList.remove('lensopen');
+  strip.style.height = '';
+  const split = strip.closest('.rsplit');
+  if (split) split.style.minHeight = '';
+}
+function lensGrip(strip) {
+  return heightGrip(LENS_H, {
+    get: () => strip.getBoundingClientRect().height,
+    set: (px) => (strip.style.height = px + 'px'),
+    fit: () => lensOpen(strip),
+    min: 90,
+    max: () => lensRoom(strip),
+  });
+}
+/** Grow a textarea to show all of its text, so it never scrolls on its own. */
+function fitText(ta) {
+  ta.style.height = 'auto';
+  ta.style.height = ta.scrollHeight + 2 + 'px';
+}
+
 function drawBenchLens(tab, editor, strip, main) {
+  lensClose(strip);
   const items = scanDraft(editor.value);
   const slot = h('div', { class: 'blslot' });
   const chips = items.length
@@ -3166,9 +3311,10 @@ function benchChip(it, tab, editor, strip, slot, main) {
       onclick: () => {
         const was = chip.classList.contains('on');
         for (const c of strip.querySelectorAll('.spot')) c.classList.remove('on');
-        if (was) return clear(slot);
+        if (was) return clear(slot), lensClose(strip);
         chip.classList.add('on');
         clear(slot, buildValueCard(it, { start: it.start, end: it.end }, editor, tab, strip, main, true));
+        lensOpen(strip);
       },
     },
     h('i'),
@@ -3199,7 +3345,16 @@ function buildValueCard(it, span, editor, tab, strip, main, editable) {
     h('b', { text: it.label }),
     h('span', { class: 'muted', text: ' in ' + (it.loc || 'selection') }),
     h('span', { class: 'sdact' }, needle.length >= 4 ? h('button', { class: 'btn sm', text: 'Find in traffic', onclick: () => setQuery('"' + needle + '"') }) : null, askDraftButton(tab, editor, it.value)),
-    h('button', { class: 'blx', text: '✕', title: 'Close', onclick: () => clear(strip._slot) }),
+    h('button', {
+      class: 'blx',
+      text: '✕',
+      title: 'Close',
+      onclick: () => {
+        clear(strip._slot);
+        for (const c of strip.querySelectorAll('.spot.on')) c.classList.remove('on');
+        lensClose(strip);
+      },
+    }),
   );
   const notes = it.notes && it.notes.length ? h('div', { class: 'sdnotes' }, it.notes.map((n) => h('span', { class: 'sdnote' + (/^(unsigned|expired)/.test(n) ? ' warn' : ''), text: n }))) : null;
   if (it.kind === 'jwt') return h('div', { class: 'spotdetail' }, head, notes, jwtEditor(it, span, editor, tab));
@@ -3207,6 +3362,7 @@ function buildValueCard(it, span, editor, tab, strip, main, editable) {
   const ta = h('textarea', { class: 'sdv blv', spellcheck: 'false', value: it.decode() });
   if (!editable) ta.readOnly = true;
   ta.addEventListener('input', () => {
+    fitText(ta);
     try {
       spliceEditor(editor, tab, span, it.encode(ta.value));
       blFlash(live);
@@ -3224,7 +3380,10 @@ function jwtEditor(it, span, editor, tab) {
   const st = { part: 'payload', key: '' };
   const live = h('span', { class: 'bllive' });
   const ta = h('textarea', { class: 'sdv blv bljwt', spellcheck: 'false' });
-  const load = () => (ta.value = JSON.stringify(st.part === 'payload' ? it.jwt.payload : it.jwt.header, null, 2));
+  const load = () => {
+    ta.value = JSON.stringify(st.part === 'payload' ? it.jwt.payload : it.jwt.header, null, 2);
+    if (ta.isConnected) fitText(ta);
+  };
   load();
   const mk = (p, label) =>
     h('button', {
@@ -3258,6 +3417,7 @@ function jwtEditor(it, span, editor, tab) {
     blFlash(live);
   };
   ta.addEventListener('input', () => {
+    fitText(ta);
     const obj = bl_tryJson(ta.value);
     if (!obj) return;
     if (st.part === 'payload') it.jwt.payload = obj;
@@ -3484,7 +3644,7 @@ function buildQbar(tab, editor, strip, main) {
     it.value = t;
     it.loc = 'selection';
     clear(strip._slot, buildValueCard(it, { start: editor.selectionStart, end: editor.selectionEnd }, editor, tab, strip, main, editable));
-    strip.scrollIntoView({ block: 'nearest' });
+    lensOpen(strip);
   };
   const applyEnc = (fn, label) => {
     const t = sel();
@@ -4477,9 +4637,21 @@ function historyPanel(tab, main) {
     ),
   );
   const picks = tab.picks || [];
+  // Shows up to a dozen sends at once; drag the top edge for more or fewer.
+  const list = h('div', { class: 'histrows' }, rows.length ? rows : h('div', { class: 'histrow muted', text: 'No sends yet.' }));
+  const saved = store(HIST_H);
+  if (saved) list.style.maxHeight = saved + 'px';
+  const grip = heightGrip(HIST_H, {
+    get: () => list.getBoundingClientRect().height,
+    set: (px) => (list.style.maxHeight = px + 'px'),
+    fit: () => (list.style.maxHeight = ''),
+    min: 40,
+    max: () => Math.max(120, window.innerHeight - 260),
+  });
   return h(
     'div',
     { class: 'hist' },
+    rows.length > 1 ? grip : null,
     h(
       'div',
       { class: 'histhead' },
@@ -4491,9 +4663,10 @@ function historyPanel(tab, main) {
         h('button', { class: 'btn sm', text: picks.length === 2 ? 'Compare ✓' : `Compare (${picks.length}/2)`, disabled: tab.history.length < 2, onclick: () => compareLatest(tab, main) }),
       ),
     ),
-    h('div', { class: 'histrows' }, rows.length ? rows : h('div', { class: 'histrow muted', text: 'No sends yet.' })),
+    list,
   );
 }
+const HIST_H = 'plonix.bench.histH';
 
 function compareLatest(tab, main) {
   if ((tab.picks || []).length !== 2) tab.picks = tab.history.slice(0, 2).map((e) => e.id).reverse();
