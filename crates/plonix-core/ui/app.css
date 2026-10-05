@@ -199,6 +199,8 @@ code, .mono { font-family: var(--mono); }
 .ttable tbody tr.fresh { animation: fresh 1.6s ease-out; }
 @keyframes fresh { from { background: var(--new); } to { background: transparent; } }
 .ttable tbody tr.sel { background: var(--sel); }
+.ttable tbody tr.picked td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.ttable tbody tr.picked { background: var(--accent-soft); }
 .ttable td.url { font-family: var(--mono); font-size: 11.5px; }
 .ttable td.host { color: var(--fg-2); }
 .ttable .num { text-align: right; color: var(--fg-2); font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 11px; }
@@ -227,6 +229,8 @@ code, .mono { font-family: var(--mono); }
 .tag.in { background: var(--ok-soft); color: var(--ok); }
 .tag.rej { background: var(--crit-soft); color: var(--crit); }
 .tag.pend { background: var(--accent-soft); color: var(--accent); }
+.tag.imported { background: var(--info-soft); color: var(--info); }
+.tag.cert { background: var(--ok-soft); color: var(--ok); text-transform: none; letter-spacing: 0; }
 .mime { color: var(--fg-3); font-size: 11px; }
 
 /* lens (request inspector pane) */
@@ -577,6 +581,8 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .rrule .rpat { font-size: 11.5px; overflow-wrap: anywhere; }
 .rrule .iconbtn { margin-left: auto; }
 .rform { margin-top: 10px; }
+.spanel.certs input[type=file] { font-size: 12px; color: var(--fg-2); }
+.spanel.certs input[type=password] { border: 1px solid var(--line-2); background: var(--surface); color: var(--fg); border-radius: 7px; padding: 5px 8px; font-size: 12px; outline: 0; }
 .view.settingsview .settings { border-top: 0; }
 
 /* ---------- Start screen ---------- */

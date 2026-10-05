@@ -15,11 +15,13 @@ use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::ca::CertAuthority;
+use crate::clientcert::{CertInfo, ClientCerts, StoredCert};
+use crate::har;
 use crate::detect::{self, Detection, Detector, HostTech};
 use crate::extension::{self, Capability, ExtensionLibrary, Loaded, LoadedSet};
 use crate::insight::{Category as InsightCategory, Insight, Side as InsightSide};
 use crate::sandbox;
-use crate::model::{Exchange, Headers, Source, now_ms};
+use crate::model::{Exchange, Headers, Source, WsMessage, now_ms};
 use crate::paths::{EngineInfo, Home};
 use crate::filterpack::{FilterLibrary, FilterSet};
 use crate::listpack::{ListLibrary, ListSet};
@@ -77,6 +79,9 @@ pub struct Engine {
     /// Newly recorded exchanges, on their way to the extensions' worker.
     extension_feed: Mutex<Option<std::sync::mpsc::Sender<i64>>>,
     extension_limits: RwLock<sandbox::Limits>,
+    /// Client certificates presented to servers (see [`crate::clientcert`]); empty while switched off.
+    client_certs: RwLock<Arc<ClientCerts>>,
+    client_certs_on: AtomicBool,
 }
 
 /// A stand-in for the network: given an outbound request it may return a
@@ -207,7 +212,7 @@ impl Engine {
         let rules = store.rules()?;
         let replace = RuleSet::new(&store.replace_rules()?);
         let (recorder, rx) = mpsc::unbounded_channel();
-        Ok(Arc::new(Self {
+        let engine = Arc::new(Self {
             recorder,
             recorder_rx: Mutex::new(Some(rx)),
             project: project.to_string(),
@@ -234,7 +239,11 @@ impl Engine {
             extensions: Mutex::default(),
             extension_feed: Mutex::new(None),
             extension_limits: RwLock::new(sandbox::Limits::default()),
-        }))
+            client_certs: RwLock::default(),
+            client_certs_on: AtomicBool::new(true),
+        });
+        engine.reload_client_certs()?;
+        Ok(engine)
     }
 
     /// Installs a stand-in for the network (see [`Responder`]). Only the demo
@@ -262,7 +271,49 @@ impl Engine {
     }
 
     pub fn set_upstream(&self, upstream: Upstream) {
+        upstream.set_client_certs(self.client_certs.read().unwrap().clone());
         *self.upstream.write().unwrap() = Arc::new(upstream);
+    }
+
+    /// Switches client certificates on or off (Settings › Client certificates).
+    pub fn set_client_certs_on(&self, on: bool) -> Result<()> {
+        self.client_certs_on.store(on, Ordering::Relaxed);
+        self.reload_client_certs()
+    }
+
+    /// Reads the client certificates again after they changed. Ones that
+    /// cannot be used are left out with a warning that names the host only.
+    pub fn reload_client_certs(&self) -> Result<()> {
+        let certs = if self.client_certs_on.load(Ordering::Relaxed) {
+            let (certs, problems) = ClientCerts::load(&self.store.client_certs()?);
+            for p in problems {
+                tracing::warn!("{p}");
+            }
+            Arc::new(certs)
+        } else {
+            Arc::default()
+        };
+        *self.client_certs.write().unwrap() = certs.clone();
+        self.upstream().set_client_certs(certs);
+        Ok(())
+    }
+
+    /// The project's client certificates, described without their keys.
+    pub fn client_cert_list(&self) -> Result<Vec<CertInfo>> {
+        Ok(self.store.client_certs()?.iter().map(crate::clientcert::describe).collect())
+    }
+
+    /// Adds a client certificate and starts presenting it.
+    pub fn add_client_cert(&self, cert: &StoredCert) -> Result<CertInfo> {
+        let stored = self.store.add_client_cert(cert)?;
+        self.reload_client_certs()?;
+        Ok(crate::clientcert::describe(&stored))
+    }
+
+    pub fn remove_client_cert(&self, id: i64) -> Result<bool> {
+        let removed = self.store.delete_client_cert(id)?;
+        self.reload_client_certs()?;
+        Ok(removed)
     }
 
     /// Whether HTTPS to `host` is decrypted (and recorded) or tunneled as is.
@@ -575,6 +626,68 @@ impl Engine {
             .expect("spawn recorder thread");
     }
 
+    /// Imports a HAR file: each entry is stored and analyzed like captured
+    /// traffic, with source `import`. Entries the project has already (same
+    /// time, method, URL and status) are left out, so importing a file twice
+    /// adds nothing. Bodies over the recording limit are kept in part.
+    pub fn import_har(&self, reader: impl std::io::Read) -> Result<har::ImportReport> {
+        let mut report = har::ImportReport::default();
+        let limit = self.body_limit();
+        let rules = self.rules();
+        let mut n = 0;
+        har::read_entries(reader, |entry| {
+            n += 1;
+            let (ex, messages) = match har::to_exchange(&entry, limit) {
+                Ok(x) => x,
+                Err(why) => {
+                    report.skip(n, why);
+                    return Ok(());
+                }
+            };
+            if self.store.has_same_exchange(&ex)? {
+                report.duplicates += 1;
+                return Ok(());
+            }
+            let id = self.store.insert_exchange(&ex)?;
+            self.analyze(&ex, id, &rules)?;
+            if !messages.is_empty() {
+                let messages: Vec<WsMessage> = messages.into_iter().map(|m| WsMessage { exchange_id: id, ..m }).collect();
+                self.store.insert_ws_messages(&messages)?;
+            }
+            report.imported += 1;
+            report.first_id.get_or_insert(id);
+            report.last_id = Some(id);
+            Ok(())
+        })?;
+        Ok(report)
+    }
+
+    /// The exchanges a HAR export holds: `ids` when given, else everything
+    /// matching the Traffic search `q`, oldest first.
+    pub fn har_selection(&self, q: &str, ids: &[i64]) -> Result<Vec<i64>> {
+        if !ids.is_empty() {
+            let mut ids = ids.to_vec();
+            ids.sort_unstable();
+            ids.dedup();
+            return Ok(ids);
+        }
+        let query = self.filters().parse(q)?;
+        self.store.search_ids(&query, &self.rules())
+    }
+
+    /// Writes the exchanges `ids` as a HAR file, one entry at a time.
+    pub fn write_har(&self, ids: &[i64], out: impl std::io::Write) -> Result<usize> {
+        let entries = ids.iter().filter_map(|&id| match self.store.get_exchange(id) {
+            Ok(Some(ex)) => {
+                let messages = if ex.status == Some(101) { self.store.ws_messages(id, 100_000, 0).map(|(m, _)| m) } else { Ok(vec![]) };
+                Some(messages.map(|m| (ex, m)))
+            }
+            Ok(None) => None,
+            Err(e) => Some(Err(e)),
+        });
+        har::write(out, entries)
+    }
+
     /// Stores an exchange and feeds it to the scope analyzer.
     pub fn record(&self, ex: Exchange) -> Result<i64> {
         Ok(self.record_all(vec![ex])?[0])
@@ -780,6 +893,7 @@ impl Engine {
                 ex.resp_body = up.body.to_vec();
                 ex.tls_sans = up.tls_sans;
                 ex.http_version = up.version;
+                ex.client_cert = up.client_cert;
             }
             Err(e) => ex.error = Some(format!("{e:#}")),
         }

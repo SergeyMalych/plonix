@@ -1261,3 +1261,52 @@ fn extensions_install_switch_off_and_remove() {
     p.run(&["extensions", "remove", "security-headers"]).ok();
     assert!(p.run(&["extensions"]).ok().stdout().contains("No extensions installed"));
 }
+
+#[test]
+fn har_files_export_and_import_and_client_certs_are_managed() {
+    let p = Plonix::new();
+    let target = serve_target();
+    let proxy = p.start();
+    via_proxy(&proxy, &format!("http://localhost:{target}/"), &[]);
+    via_proxy(&proxy, &format!("http://localhost:{target}/echo?x=1"), &[]);
+    p.search_until("host:localhost", 2);
+
+    let dir = tempfile::tempdir().unwrap();
+    let all = dir.path().join("all.har");
+    let out = p.run(&["har", "export", "-o", all.to_str().unwrap()]).ok().stdout();
+    assert!(out.contains("Wrote 2 request(s)"), "{out}");
+    let some = dir.path().join("echo.har");
+    p.run(&["har", "export", "path:/echo", "-o", some.to_str().unwrap()]).ok();
+    let har: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&some).unwrap()).unwrap();
+    assert_eq!(har["log"]["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(har["log"]["entries"][0]["request"]["queryString"][0]["name"], "x");
+
+    // Importing what is already there adds nothing; another file adds its entries.
+    let out = p.run(&["har", "import", all.to_str().unwrap()]).ok().stdout();
+    assert!(out.contains("Imported 0 request(s); 2 already in the project"), "{out}");
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../plonix-core/tests/fixtures/sample.har");
+    let out = p.run(&["har", "import", fixture.to_str().unwrap()]).ok().stdout();
+    assert!(out.contains("Imported 6 request(s); 1 could not be read") && out.contains("entry 7"), "{out}");
+    assert_eq!(p.search_until("source:import", 6)["items"].as_array().unwrap().len(), 6);
+    let bad = dir.path().join("bad.har");
+    std::fs::write(&bad, "{\"log\": {}}").unwrap();
+    let r = p.run(&["har", "import", bad.to_str().unwrap()]);
+    assert_ne!(r.code(), 0);
+    assert!(r.stderr().contains("no log.entries"), "{}", r.stderr());
+
+    // Client certificates: added from PEM files, listed without their keys, removed.
+    assert!(p.run(&["certs"]).ok().stdout().contains("No client certificates"));
+    let (cert_pem, key_pem) = plonix_core::ca::CertAuthority::generate_pem().unwrap();
+    let (c, k) = (dir.path().join("c.pem"), dir.path().join("k.pem"));
+    std::fs::write(&c, &cert_pem).unwrap();
+    std::fs::write(&k, &key_pem).unwrap();
+    let out = p.run(&["certs", "add", "*.Example.com", "--cert", c.to_str().unwrap(), "--key", k.to_str().unwrap(), "--note", "staging"]).ok().stdout();
+    assert!(out.contains("Added certificate 1 for *.example.com") && out.contains("Plonix CA"), "{out}");
+    let list = p.run(&["certs", "list", "--json"]).ok().stdout();
+    assert!(list.contains("*.example.com") && !list.contains("PRIVATE KEY"), "{list}");
+    let r = p.run(&["certs", "add", "api.example.com", "--cert", k.to_str().unwrap()]);
+    assert_ne!(r.code(), 0);
+    assert!(r.stderr().contains("no certificate found"), "{}", r.stderr());
+    p.run(&["certs", "rm", "1"]).ok();
+    assert_eq!(p.run(&["certs", "rm", "1"]).code(), 5, "not found");
+}

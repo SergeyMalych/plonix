@@ -16,7 +16,7 @@
 //! ext:js                file extension of the path
 //! mime:json             substring of the response content type
 //! kind:static           images, fonts, stylesheets, scripts and media
-//! scope:in | scope:out  source:proxy | source:replay
+//! scope:in | scope:out  source:proxy | source:replay | source:import
 //! is:graphql            a named filter from a filter pack (see filterpack.rs)
 //! "set-cookie: sid"     quoted phrase, full text
 //! passw -logout         full text is substring and case-insensitive

@@ -913,7 +913,7 @@ function rawPre({ lines, body }) {
    Traffic
    ====================================================================== */
 
-const T = { text: '', filters: [], items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: store('plonix.inspH') };
+const T = { text: '', filters: [], items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: store('plonix.inspH'), picked: new Set(), pickAnchor: null };
 
 /* ---------- include / exclude filters ----------
  * The search box holds free text (and accepts the full query syntax). Filters
@@ -994,6 +994,7 @@ function filterLabel(term) {
     'scope:out': 'Out of scope',
     'source:replay': 'Sent from Bench',
     'source:proxy': 'Captured',
+    'source:import': 'Imported from HAR',
     'status:none': 'No response',
   }[term.toLowerCase()];
   if (named) return { key: '', value: named };
@@ -1238,6 +1239,7 @@ function renderTraffic(main) {
         h('span', { class: 'count', id: 'tcount' }),
         liveBtn,
         interceptButton(),
+        h('button', { class: 'btn sm', id: 'harbtn', text: 'HAR ▾', title: 'Import a HAR file, or export traffic as one', onclick: (e) => harMenu(e.currentTarget) }),
       ),
       h('div', { class: 'filterchips', id: 'chips' }),
       h('div', { class: 'qerr', id: 'qerr', hidden: true }),
@@ -1539,7 +1541,7 @@ function fieldValues(field) {
     case 'scope':
       return ['in', 'out'];
     case 'source':
-      return ['proxy', 'replay'];
+      return ['proxy', 'replay', 'import'];
     default:
       return [];
   }
@@ -1766,13 +1768,14 @@ function drawRows(freshAbove) {
   const rows = T.items.map((ex) => {
     const tags = [];
     if (ex.source === 'replay') tags.push(h('span', { class: 'tag replay', text: 'sent' }));
+    if (ex.source === 'import') tags.push(h('span', { class: 'tag imported', text: 'har', title: 'Imported from a HAR file' }));
     if (ex.edited) tags.push(h('span', { class: 'tag edited', text: 'edited', title: 'Changed in Intercept before it went on' }));
     const tr = h(
       'tr',
       {
         'data-id': ex.id,
-        class: [ex.id === T.sel ? 'sel' : '', ex.in_scope ? '' : 'out', ex.id > freshAbove ? 'fresh' : ''].join(' ').trim(),
-        onclick: () => openInspector(ex.id),
+        class: [ex.id === T.sel ? 'sel' : '', T.picked.has(ex.id) ? 'picked' : '', ex.in_scope ? '' : 'out', ex.id > freshAbove ? 'fresh' : ''].join(' ').trim(),
+        onclick: (e) => (e.metaKey || e.ctrlKey || e.shiftKey ? pickRow(ex.id, e.shiftKey) : openInspector(ex.id)),
         ondblclick: () => sendToBench(ex.id),
         oncontextmenu: (e) => rowMenu(e, ex),
       },
@@ -1798,6 +1801,126 @@ function selectRow(delta) {
   openInspector(T.items[i].id);
   const tr = document.querySelector(`#rows tr[data-id="${T.items[i].id}"]`);
   if (tr) tr.scrollIntoView({ block: 'nearest' });
+}
+
+/** ⌘/Ctrl-click picks a row for export, Shift-click picks every row up to it. */
+function pickRow(id, range) {
+  if (range && T.pickAnchor != null) {
+    const ids = T.items.map((x) => x.id);
+    const [a, b] = [ids.indexOf(T.pickAnchor), ids.indexOf(id)].sort((x, y) => x - y);
+    if (a >= 0) ids.slice(a, b + 1).forEach((x) => T.picked.add(x));
+  } else if (T.picked.has(id)) {
+    T.picked.delete(id);
+  } else {
+    T.picked.add(id);
+  }
+  T.pickAnchor = id;
+  for (const tr of document.querySelectorAll('#rows tr[data-id]')) tr.classList.toggle('picked', T.picked.has(Number(tr.dataset.id)));
+  updatePicked();
+}
+
+function clearPicked() {
+  T.picked.clear();
+  T.pickAnchor = null;
+  for (const tr of document.querySelectorAll('#rows tr.picked')) tr.classList.remove('picked');
+  updatePicked();
+}
+
+function updatePicked() {
+  const btn = $('#harbtn');
+  if (btn) btn.textContent = T.picked.size ? `HAR · ${T.picked.size} picked ▾` : 'HAR ▾';
+}
+
+/** Import a HAR file, or export all traffic, the filtered view or the picked rows. */
+function harMenu(anchor) {
+  closePopover();
+  const q = fullQuery();
+  const item = (label, run, title) => h('button', { role: 'menuitem', text: label, title, onclick: () => (closePopover(), run()) });
+  const items = [
+    item('Export all traffic…', () => exportHar({ q: '' })),
+    q ? item(`Export the filtered view (${T.total})…`, () => exportHar({ q }), q) : null,
+    T.picked.size ? item(`Export ${T.picked.size} picked row${T.picked.size === 1 ? '' : 's'}…`, () => exportHar({ ids: [...T.picked] })) : null,
+    T.picked.size ? item('Clear picked rows', clearPicked) : null,
+    h('div', { class: 'msep' }),
+    item('Import HAR file…', importHar),
+  ];
+  const menu = h('div', { class: 'ctxmenu', role: 'menu' }, items, T.picked.size ? null : h('div', { class: 'mnote', text: '⌘-click or Shift-click rows to pick them for export.' }));
+  showPopover(menu, anchor.getBoundingClientRect());
+}
+
+/** The app saves with the system's Save dialog; a browser downloads. */
+const nativeFiles = () => IN_APP && S.status && S.status.native_dialogs;
+
+async function exportHar({ q = '', ids = [] } = {}) {
+  try {
+    if (nativeFiles()) {
+      const r = await api('/api/har/export-file', { method: 'POST', body: { q, ids } });
+      if (!r.cancelled) toast(`Saved ${r.entries} request${r.entries === 1 ? '' : 's'} to ${r.path}`, 'ok');
+      return;
+    }
+    const qs = ids.length ? 'ids=' + ids.join(',') : 'q=' + encodeURIComponent(q);
+    let resp;
+    try {
+      resp = await fetch('/api/har?' + qs, { headers: { Authorization: 'Bearer ' + S.token, 'X-Plonix-Client': 'gui' }, cache: 'no-store' });
+    } catch (_) {
+      throw new ApiError(0, 'engine_down', 'The Plonix engine is not reachable.');
+    }
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => null);
+      throw new ApiError(resp.status, (data && data.code) || 'error', (data && data.error) || resp.statusText, data);
+    }
+    const name = ((resp.headers.get('content-disposition') || '').match(/filename="([^"]+)"/) || [])[1] || 'plonix.har';
+    const url = URL.createObjectURL(await resp.blob());
+    const a = h('a', { href: url, download: name, hidden: true });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    toast(`Exported ${name}`, 'ok');
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+async function importHar() {
+  const done = (r) => {
+    if (r.cancelled) return;
+    const parts = [`Imported ${r.imported} request${r.imported === 1 ? '' : 's'}`];
+    if (r.duplicates) parts.push(`${r.duplicates} already here`);
+    if (r.skipped) parts.push(`${r.skipped} could not be read`);
+    toast(parts.join(' · '), r.imported || !r.skipped ? 'ok' : 'err');
+    if (r.imported) setQuery('source:import');
+  };
+  if (nativeFiles()) {
+    try {
+      done(await api('/api/har/import-file', { method: 'POST', body: {} }));
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+    return;
+  }
+  const input = h('input', { type: 'file', accept: '.har,application/json', hidden: true });
+  input.addEventListener('change', async () => {
+    const file = input.files && input.files[0];
+    input.remove();
+    if (!file) return;
+    if (file.size > 64 * 1024 * 1024) return toast('This file is over 64 MB. Import it with `plonix har import ' + file.name + '`, or from the Plonix app.', 'err');
+    toast('Importing ' + file.name + '…');
+    try {
+      const resp = await fetch('/api/har/import', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + S.token, 'X-Plonix-Client': 'gui', 'Content-Type': 'application/json' },
+        body: file,
+      });
+      const data = await resp.json().catch(() => null);
+      if (!resp.ok) throw new ApiError(resp.status, (data && data.code) || 'error', (data && data.error) || resp.statusText, data);
+      done(data);
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  });
+  document.body.append(input);
+  input.click();
 }
 
 async function openInspector(id) {
@@ -1864,6 +1987,8 @@ async function openInspector(id) {
         ex.http_version ? h('span', { text: ex.http_version, title: 'The protocol spoken with the server' }) : null,
         ex.edited ? h('button', { class: 'tag edited', text: 'edited', title: 'Changed in Intercept before it went on. Show the original', onclick: () => showOriginal(ex) }) : null,
         ex.replaced && ex.replaced.length ? h('span', { class: 'tag edited', text: 'replaced', title: 'Changed by match-and-replace rules:\n' + ex.replaced.join('\n') }) : null,
+        clientCertTag(ex),
+        ex.source === 'import' ? h('span', { class: 'tag imported', text: 'har', title: 'Imported from a HAR file' }) : null,
         h('span', { class: 'tag ' + scopeTag(decide(ex.host)), text: scopeLabel(decide(ex.host)) }),
       ),
       h('button', { class: 'btn sm primary', text: 'Send to Bench', title: 'Edit and re-send on the Bench (b, or double-click a row)', onclick: () => sendToBench(id) }),
@@ -1881,6 +2006,12 @@ async function openInspector(id) {
     drawInsights(reqCol, list.filter((i) => i.side === 'request'));
     drawInsights(respCol, list.filter((i) => i.side === 'response'));
   });
+}
+
+/** The client certificate Plonix presented for this exchange, if the server asked for one. */
+function clientCertTag(ex) {
+  if (!ex.client_cert) return null;
+  return h('span', { class: 'tag cert', text: 'cert · ' + ex.client_cert.split(' for ')[0], title: 'Client certificate presented: ' + ex.client_cert + '\n(Settings › Client certificates)' });
 }
 
 /* ---------- WebSocket messages of a handshake ---------- */
@@ -3544,7 +3675,7 @@ async function drawRunSelection(tab) {
   if (!slot.isConnected) return;
   clear(
     slot,
-    h('div', { class: 'lbl' }, 'Response', h('span', { class: 'r' }, h('span', { class: statusClass(ex.status), text: ex.status == null ? 'no response' : ex.status }), ` · ${ex.duration_ms} ms · ${fmtSize(b64len(ex.resp_body))} · #${ex.id}`)),
+    h('div', { class: 'lbl' }, 'Response', h('span', { class: 'r' }, h('span', { class: statusClass(ex.status), text: ex.status == null ? 'no response' : ex.status }), ` · ${ex.duration_ms} ms · ${fmtSize(b64len(ex.resp_body))} · #${ex.id}`, ex.client_cert ? ' ' : null, clientCertTag(ex))),
     rawPre(responseText(ex, true)),
   );
 }
@@ -3612,6 +3743,8 @@ async function drawBenchResponse(tab, col) {
         ' ',
         h('span', { class: statusClass(ex.status), text: ex.status == null ? 'no response' : ex.status }),
         ` · ${ex.duration_ms} ms · ${fmtSize(b64len(ex.resp_body))} · #${ex.id}`,
+        ex.client_cert ? ' ' : null,
+        clientCertTag(ex),
       ),
     ),
     h('div', { class: 'spotslot' }),
@@ -5839,6 +5972,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if ($('.popover, .ctxmenu')) return closePopover();
     if ($('.modal')) return closeModal();
+    if (S.view === 'traffic' && T.picked.size && !typing) return clearPicked();
     if ($('#inspector') && !typing) return closeInspector();
   }
   if (S.view === 'bench' && e.key === 'Enter' && (e.metaKey || e.ctrlKey) && R.send) {
@@ -5905,6 +6039,7 @@ async function renderSettings(main) {
       if (section.id === 'proxy') el.append(proxyPanel());
       if (section.id === 'storage') el.append(storagePanel());
       if (section.id === 'replace') el.append(replacePanel());
+      if (section.id === 'client-certs') el.append(clientCertPanel());
     },
   });
 }
@@ -6020,6 +6155,102 @@ function replacePanel() {
   return panel;
 }
 
+/** Client certificates: list, remove, add from PEM or .p12 files. Keys never come back from the engine. */
+function clientCertPanel() {
+  const panel = h('div', { class: 'spanel replace certs' }, h('h4', { text: 'Certificates' }), h('p', { text: 'Loading…' }));
+  const row = (c) => {
+    const until = c.not_after ? new Date(c.not_after).toISOString().slice(0, 10) : '';
+    return h(
+      'div',
+      { class: 'rrule' + (c.problem || c.expired ? ' off' : '') },
+      h('span', { class: 'rtarget mono', text: c.host }),
+      h('span', { text: c.subject || 'certificate #' + c.id, title: 'Issued by ' + (c.issuer || 'unknown') + '\nSHA-256 ' + c.fingerprint }),
+      until ? h('span', { class: 'muted', text: (c.expired ? 'expired ' : 'until ') + until }) : null,
+      c.chain > 1 ? h('span', { class: 'tag', text: c.chain + ' in chain' }) : null,
+      c.problem ? h('span', { class: 'tag rej', text: 'cannot be used', title: c.problem }) : null,
+      c.note ? h('span', { class: 'muted', text: c.note }) : null,
+      h('button', {
+        class: 'iconbtn',
+        text: '✕',
+        title: 'Remove this certificate',
+        onclick: async () => {
+          try {
+            await api('/api/client-certs/' + c.id, { method: 'DELETE' });
+            load();
+          } catch (e) {
+            toast(e.message, 'err');
+          }
+        },
+      }),
+    );
+  };
+  const fileText = (input, binary) =>
+    new Promise((resolve, reject) => {
+      const f = input.files && input.files[0];
+      if (!f) return resolve(null);
+      const r = new FileReader();
+      r.onload = () => resolve(binary ? r.result.split(',')[1] || '' : r.result);
+      r.onerror = () => reject(new Error('Could not read ' + f.name));
+      if (binary) r.readAsDataURL(f);
+      else r.readAsText(f);
+    });
+  const form = () => {
+    const host = h('input', { type: 'text', placeholder: 'api.example.com or *.example.com', spellcheck: false });
+    const cert = h('input', { type: 'file', accept: '.pem,.crt,.cer,.key,.p12,.pfx' });
+    const key = h('input', { type: 'file', accept: '.pem,.key' });
+    const password = h('input', { type: 'password', placeholder: '.p12 password', autocomplete: 'off' });
+    const note = h('input', { type: 'text', placeholder: 'Note (optional)' });
+    const keyRow = h('label', null, 'Key ', key);
+    const passRow = h('label', { hidden: true }, password);
+    cert.addEventListener('change', () => {
+      const p12 = /\.(p12|pfx)$/i.test((cert.files[0] || {}).name || '');
+      keyRow.hidden = p12;
+      passRow.hidden = !p12;
+    });
+    const add = async () => {
+      if (!host.value.trim()) return host.focus();
+      if (!cert.files.length) return toast('Choose the certificate file (.pem, or .p12 with its key inside).', 'err');
+      try {
+        const p12 = !passRow.hidden;
+        const body = { host: host.value.trim(), note: note.value };
+        if (p12) {
+          body.pkcs12_base64 = await fileText(cert, true);
+          body.password = password.value;
+        } else {
+          body.cert_pem = await fileText(cert, false);
+          const k = await fileText(key, false);
+          if (k) body.key_pem = k;
+        }
+        const c = await api('/api/client-certs', { method: 'POST', body });
+        toast(`Added. Plonix presents ${c.subject || 'it'} when ${c.host} asks for a certificate.`, 'ok');
+        load();
+      } catch (e) {
+        toast(e.message, 'err');
+      }
+    };
+    return h(
+      'div',
+      { class: 'rform' },
+      h('div', { class: 'row' }, host),
+      h('div', { class: 'row' }, h('label', null, 'Certificate ', cert), keyRow, passRow),
+      h('div', { class: 'row' }, note, h('button', { class: 'btn primary', text: 'Add Certificate', onclick: add })),
+      h('p', { class: 'muted', text: 'PEM: a certificate (chain) and an unencrypted key, in one file or two. PKCS#12: one .p12 or .pfx file and its password. The key is kept in this project and never shown again.' }),
+    );
+  };
+  const load = () =>
+    api('/api/client-certs')
+      .then((v) => {
+        const rows = [h('h4', { text: 'Certificates' })];
+        if (!v.enabled) rows.push(h('p', { class: 'muted', text: 'Client certificates are switched off above; none is presented until it is on.' }));
+        if (!v.certs.length) rows.push(h('p', { class: 'muted', text: 'No certificates yet.' }));
+        rows.push(v.certs.map(row), form());
+        clear(panel, rows);
+      })
+      .catch((e) => clear(panel, h('p', { text: e.message })));
+  load();
+  return panel;
+}
+
 function confirmPrune(st) {
   const m = modal(
     'Delete out-of-scope traffic?',
@@ -6053,6 +6284,8 @@ window.plonix = {
   go: (view) => S.token && $('#main') && go(view),
   openTarget: () => S.token && $('#main') && openTarget(),
   toggleSidebar: () => S.token && $('#main') && toggleSidebar(),
+  importHar: () => S.token && $('#main') && importHar(),
+  exportHar: () => S.token && $('#main') && exportHar({ q: S.view === 'traffic' ? fullQuery() : '', ids: S.view === 'traffic' ? [...T.picked] : [] }),
 };
 
 boot();

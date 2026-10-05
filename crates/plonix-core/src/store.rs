@@ -7,6 +7,7 @@ use std::sync::Mutex;
 use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OptionalExtension, Row, params, params_from_iter};
 
+use crate::clientcert::StoredCert;
 use crate::codec;
 use crate::model::*;
 use crate::query::Query;
@@ -48,6 +49,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 3, what: "how much of long bodies was kept, WebSocket messages and the HTTP version", run: v3_proxy_transport },
     Migration { version: 4, what: "requests and responses edited in Intercept, with their originals", run: v4_intercept_edits },
     Migration { version: 5, what: "match-and-replace rules, and which rules changed an exchange", run: v5_replace_rules },
+    Migration { version: 6, what: "client certificates for upstream servers, and which one an exchange used", run: v6_client_certs },
 ];
 
 /// The schema version this build reads and writes.
@@ -133,6 +135,25 @@ fn v5_replace_rules(tx: &rusqlite::Transaction) -> Result<()> {
     )?;
     if !has_column(tx, "exchanges", "replaced")? {
         tx.execute_batch("ALTER TABLE exchanges ADD COLUMN replaced TEXT")?;
+    }
+    Ok(())
+}
+
+/// Client certificates the engine presents to servers that ask for one (see
+/// clientcert.rs), and the certificate each exchange used.
+fn v6_client_certs(tx: &rusqlite::Transaction) -> Result<()> {
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS client_certs (
+            id INTEGER PRIMARY KEY,
+            host TEXT NOT NULL,
+            cert_pem TEXT NOT NULL,
+            key_pem TEXT NOT NULL,
+            note TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL
+        );",
+    )?;
+    if !has_column(tx, "exchanges", "client_cert")? {
+        tx.execute_batch("ALTER TABLE exchanges ADD COLUMN client_cert TEXT")?;
     }
     Ok(())
 }
@@ -247,7 +268,7 @@ fn sort_clause(sort: Option<&str>) -> String {
 /// The columns [`row_to_exchange`] reads, in order.
 const EXCHANGE_COLS: &str = "id, ts, scheme, host, port, method, path, query, req_headers, req_body, status, resp_headers,
     resp_body, duration_ms, error, tls_sans, source, initiator, req_truncated, req_size, resp_truncated, resp_size, http_version,
-    edited, original_request, original_response, replaced";
+    edited, original_request, original_response, replaced, client_cert";
 
 impl Store {
     pub fn open(path: &Path) -> Result<Self> {
@@ -411,6 +432,31 @@ impl Store {
             })
         })?;
         Ok((rows.collect::<Result<_, _>>()?, total))
+    }
+
+    /// Ids of every exchange matching `query`, oldest first (for exports).
+    pub fn search_ids(&self, query: &Query, rules: &ScopeRules) -> Result<Vec<i64>> {
+        let scope_hosts: Vec<String> = self.distinct_hosts()?.into_iter().filter(|h| rules.in_scope(h)).collect();
+        let (clause, params) = query.to_sql(&scope_hosts);
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(&format!("SELECT e.id FROM exchanges e WHERE {clause} ORDER BY e.id"))?;
+        let rows = stmt.query_map(params_from_iter(params.iter()), |r| r.get(0))?;
+        rows.collect::<Result<_, _>>().map_err(Into::into)
+    }
+
+    /// Whether an exchange like `ex` is stored already: same time, method,
+    /// URL and status. A HAR file imported twice adds nothing the second time.
+    pub fn has_same_exchange(&self, ex: &Exchange) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let found = conn
+            .query_row(
+                "SELECT 1 FROM exchanges WHERE ts = ?1 AND method = ?2 AND scheme = ?3 AND host = ?4 AND port = ?5 AND path = ?6 AND query = ?7
+                 AND status IS ?8 LIMIT 1",
+                params![ex.ts, ex.method, ex.scheme, ex.host.to_ascii_lowercase(), ex.port, ex.path, ex.query, ex.status],
+                |_| Ok(()),
+            )
+            .optional()?;
+        Ok(found.is_some())
     }
 
     pub fn hosts(&self, rules: &ScopeRules) -> Result<Vec<HostSummary>> {
@@ -823,6 +869,32 @@ impl Store {
         Ok(self.conn.lock().unwrap().execute("DELETE FROM findings WHERE id = ?1", [id])? > 0)
     }
 
+    // ---- client certificates ---------------------------------------------
+
+    /// Client certificates with their keys, oldest first. Only the engine
+    /// reads keys; the API shows what [`crate::clientcert::describe`] gives.
+    pub fn client_certs(&self) -> Result<Vec<StoredCert>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id, host, cert_pem, key_pem, note, created_at FROM client_certs ORDER BY id")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(StoredCert { id: r.get(0)?, host: r.get(1)?, cert_pem: r.get(2)?, key_pem: r.get(3)?, note: r.get(4)?, created_at: r.get(5)? })
+        })?;
+        rows.collect::<Result<_, _>>().map_err(Into::into)
+    }
+
+    pub fn add_client_cert(&self, c: &StoredCert) -> Result<StoredCert> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO client_certs (host, cert_pem, key_pem, note, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![c.host, c.cert_pem, c.key_pem, c.note, c.created_at],
+        )?;
+        Ok(StoredCert { id: conn.last_insert_rowid(), ..c.clone() })
+    }
+
+    pub fn delete_client_cert(&self, id: i64) -> Result<bool> {
+        Ok(self.conn.lock().unwrap().execute("DELETE FROM client_certs WHERE id = ?1", [id])? > 0)
+    }
+
     // ---- match and replace -------------------------------------------------
 
     /// Every match-and-replace rule, in the order they apply.
@@ -953,6 +1025,7 @@ fn row_to_exchange(r: &Row) -> rusqlite::Result<Exchange> {
         original_request: r.get(24)?,
         original_response: r.get(25)?,
         replaced: r.get::<_, Option<String>>(26)?.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default(),
+        client_cert: r.get(27)?,
     })
 }
 
@@ -1013,8 +1086,8 @@ fn insert_one(tx: &rusqlite::Transaction, ex: &Exchange) -> Result<i64> {
     tx.prepare_cached(
         "INSERT INTO exchanges (ts, scheme, host, port, method, path, query, req_headers, req_body, status,
             resp_headers, resp_body, resp_len, mime, duration_ms, error, tls_sans, source, initiator,
-            req_truncated, req_size, resp_truncated, resp_size, http_version, edited, original_request, original_response, replaced)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
+            req_truncated, req_size, resp_truncated, resp_size, http_version, edited, original_request, original_response, replaced, client_cert)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
     )?
     .execute(params![
         ex.ts,
@@ -1045,6 +1118,7 @@ fn insert_one(tx: &rusqlite::Transaction, ex: &Exchange) -> Result<i64> {
         ex.original_request,
         ex.original_response,
         if ex.replaced.is_empty() { None } else { Some(serde_json::to_string(&ex.replaced)?) },
+        ex.client_cert,
     ])?;
     let id = tx.last_insert_rowid();
     tx.prepare_cached("INSERT INTO exchanges_fts (rowid, url, req, resp) VALUES (?1, ?2, ?3, ?4)")?

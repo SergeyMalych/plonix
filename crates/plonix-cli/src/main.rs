@@ -10,6 +10,7 @@ mod connect;
 mod engine_ctl;
 mod extensions;
 mod findings;
+mod har;
 mod intercept;
 mod market;
 mod mcp;
@@ -49,6 +50,8 @@ Get started:
   plonix replay 42 -H 'X-Debug: 1'
   plonix intercept on              hold requests to in-scope hosts; `plonix intercept list` to see them
   plonix replace                   rules that change traffic as it passes through the proxy
+  plonix har export -o all.har     traffic as a HAR file; `plonix har import file.har` loads one
+  plonix certs add api.example.com --cert c.pem --key k.pem   a client certificate (mutual TLS)
   plonix tech                      technologies detected on each host
   plonix findings                  what you found; `plonix findings export -o report.html` for a report
   plonix store                     community detection rule packs
@@ -120,7 +123,7 @@ enum Cmd {
     /// Search captured traffic, newest first
     #[command(
         visible_alias = "s",
-        after_help = "Filters: host:example.com  method:POST  status:404|5xx|none  path:/api  mime:json  ext:js\n         kind:static  scope:in|out  source:proxy|replay  \"quoted phrase\"  free text\n         is:graphql  is:auth  -is:trackers   named filters from filter packs (`plonix filters`)\nInclude and exclude: a term shows only what matches, -term hides it; commas match any value:\n  plonix search status:4xx,5xx -kind:static -host:cdn.example.com\nPut options such as -n before the query: everything after the first term is search text."
+        after_help = "Filters: host:example.com  method:POST  status:404|5xx|none  path:/api  mime:json  ext:js\n         kind:static  scope:in|out  source:proxy|replay|import  \"quoted phrase\"  free text\n         is:graphql  is:auth  -is:trackers   named filters from filter packs (`plonix filters`)\nInclude and exclude: a term shows only what matches, -term hides it; commas match any value:\n  plonix search status:4xx,5xx -kind:static -host:cdn.example.com\nPut options such as -n before the query: everything after the first term is search text."
     )]
     Search(SearchArgs),
     /// Print new traffic as it is captured (Ctrl-C to stop)
@@ -148,6 +151,16 @@ enum Cmd {
     Replace {
         #[command(subcommand)]
         cmd: Option<replace::ReplaceCmd>,
+    },
+    /// HAR files: export traffic to one, import one as captured traffic
+    Har {
+        #[command(subcommand)]
+        cmd: har::HarCmd,
+    },
+    /// Client certificates presented to servers that ask for one (mutual TLS)
+    Certs {
+        #[command(subcommand)]
+        cmd: Option<har::CertsCmd>,
     },
     /// Review and change scope
     Scope {
@@ -511,6 +524,8 @@ fn dispatch(ctx: Ctx, command: Cmd) -> Result<ExitCode> {
             }
         }
         Cmd::Replay(a) => replay_cmd(&ctx, a)?,
+        Cmd::Har { cmd } => har::har_cmd(&ctx, cmd)?,
+        Cmd::Certs { cmd } => har::certs_cmd(&ctx, cmd.unwrap_or(har::CertsCmd::List))?,
         Cmd::Scope { cmd } => scope_cmd(&ctx, cmd.unwrap_or(ScopeCmd::List))?,
         Cmd::Hosts => {
             let v = ctx.client()?.get("/api/hosts")?;

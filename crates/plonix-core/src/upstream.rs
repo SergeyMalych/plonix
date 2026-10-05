@@ -8,8 +8,13 @@
 //! [`Upstream::send`] reads the whole response; [`Upstream::open`] returns
 //! as soon as the response head arrives and leaves the body streaming, which
 //! the proxy uses so event streams and downloads reach the client as they come.
+//!
+//! When a server asks for a client certificate and the project has one for
+//! its host (see [`crate::clientcert`]), it is presented, and the response
+//! notes which one went out.
 
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -26,6 +31,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
+use crate::clientcert::{ClientCerts, Offer};
 use crate::model::Headers;
 use crate::settings::ProxySettings;
 
@@ -64,6 +70,8 @@ pub struct InboundResponse {
     pub tls_sans: Vec<String>,
     /// The protocol spoken with the server, such as `HTTP/2`.
     pub version: String,
+    /// The client certificate presented, when the server asked for one.
+    pub client_cert: Option<String>,
 }
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -81,6 +89,7 @@ pub struct UpgradeResponse {
     pub status: u16,
     pub headers: Headers,
     pub tls_sans: Vec<String>,
+    pub client_cert: Option<String>,
     pub outcome: Upgrade,
 }
 
@@ -99,6 +108,7 @@ pub struct StreamingResponse {
     pub body: Incoming,
     pub tls_sans: Vec<String>,
     pub version: String,
+    pub client_cert: Option<String>,
 }
 
 /// How a protocol version is shown and recorded.
@@ -223,9 +233,11 @@ pub fn host_matches(host: &str, patterns: &[String]) -> bool {
 
 pub struct Upstream {
     /// Offers HTTP/2 and HTTP/1.1.
-    tls: TlsConnector,
+    tls: Arc<ClientConfig>,
     /// Offers HTTP/1.1 only, for connections that switch protocols.
-    tls_http1: TlsConnector,
+    tls_http1: Arc<ClientConfig>,
+    /// Client certificates by host, presented when a server asks.
+    client_certs: RwLock<Arc<ClientCerts>>,
     pub connect_timeout: Duration,
     pub total_timeout: Duration,
     proxy: Option<ProxyServer>,
@@ -262,9 +274,45 @@ impl Upstream {
             builder.with_root_certificates(roots).with_no_client_auth()
         };
         config.alpn_protocols = vec![b"http/1.1".to_vec()];
-        let tls_http1 = TlsConnector::from(Arc::new(config.clone()));
+        let tls_http1 = Arc::new(config.clone());
         config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-        Ok(Self { tls: TlsConnector::from(Arc::new(config)), tls_http1, connect_timeout, total_timeout, proxy, bypass, insecure })
+        Ok(Self { tls: Arc::new(config), tls_http1, client_certs: RwLock::default(), connect_timeout, total_timeout, proxy, bypass, insecure })
+    }
+
+    /// Replaces the client certificates presented to servers.
+    pub fn set_client_certs(&self, certs: Arc<ClientCerts>) {
+        *self.client_certs.write().unwrap() = certs;
+    }
+
+    pub fn client_certs(&self) -> Arc<ClientCerts> {
+        self.client_certs.read().unwrap().clone()
+    }
+
+    /// Opens TLS to `host` over `tcp`, offering the host's client
+    /// certificate if it has one. Returns the stream, the server's DNS names
+    /// and the certificate presented, if the server asked for it.
+    async fn tls_connect(&self, host: &str, port: u16, tcp: TcpStream, http1: bool) -> Result<(tokio_rustls::client::TlsStream<TcpStream>, Handshake)> {
+        let name = ServerName::try_from(host.to_string()).map_err(|_| anyhow!("invalid server name {host}"))?;
+        let asked = Arc::new(AtomicBool::new(false));
+        let mut config = (**if http1 { &self.tls_http1 } else { &self.tls }).clone();
+        let label = match self.client_certs().for_host(host) {
+            None => {
+                config.client_auth_cert_resolver = Arc::new(Offer { key: None, asked: asked.clone() });
+                None
+            }
+            Some((label, key)) => {
+                config.client_auth_cert_resolver = Arc::new(Offer { key: Some(key), asked: asked.clone() });
+                // A resumed session skips the certificate request, which
+                // would hide that the certificate is in use.
+                config.resumption = rustls::client::Resumption::disabled();
+                Some(label)
+            }
+        };
+        let offered = label.is_some();
+        let tls = TlsConnector::from(Arc::new(config)).connect(name, tcp).await.map_err(|e| tls_error(host, port, e, offered))?;
+        let sans = tls.get_ref().1.peer_certificates().and_then(|c| c.first()).map(cert_dns_names).unwrap_or_default();
+        let asked = asked.load(Ordering::SeqCst);
+        Ok((tls, Handshake { host: host.to_string(), sans, presented: label.filter(|_| asked), offered, asked }))
     }
 
     /// The upstream proxy used for `host`, if any.
@@ -302,7 +350,7 @@ impl Upstream {
         let fut = async {
             let r = self.open_inner(req, None).await?;
             let body = r.body.collect().await.context("reading response body")?.to_bytes();
-            Ok(InboundResponse { status: r.status, headers: r.headers, body, tls_sans: r.tls_sans, version: r.version })
+            Ok(InboundResponse { status: r.status, headers: r.headers, body, tls_sans: r.tls_sans, version: r.version, client_cert: r.client_cert })
         };
         tokio::time::timeout(self.total_timeout, fut)
             .await
@@ -328,13 +376,11 @@ impl Upstream {
         req.extra_headers.push(("Upgrade".into(), protocol.into()));
         let fut = async {
             let tcp = self.connect(&req.host, req.port).await?;
-            let (resp, tls_sans) = if req.scheme == "https" {
-                let name = ServerName::try_from(req.host.clone()).map_err(|_| anyhow!("invalid server name {}", req.host))?;
-                let tls = self.tls_http1.connect(name, tcp).await.map_err(|e| tls_error(&req.host, req.port, e))?;
-                let sans = tls.get_ref().1.peer_certificates().and_then(|c| c.first()).map(cert_dns_names).unwrap_or_default();
-                (send_http1(TokioIo::new(tls), req, None).await?, sans)
+            let (resp, tls_sans, client_cert) = if req.scheme == "https" {
+                let (tls, hs) = self.tls_connect(&req.host, req.port, tcp, true).await?;
+                (send_http1(TokioIo::new(tls), req, None).await.map_err(|e| hs.hint(e))?, hs.sans, hs.presented)
             } else {
-                (send_http1(TokioIo::new(tcp), req, None).await?, vec![])
+                (send_http1(TokioIo::new(tcp), req, None).await?, vec![], None)
             };
             let (status, headers) = head_of(&resp);
             let outcome = if status == 101 {
@@ -342,7 +388,7 @@ impl Upstream {
             } else {
                 Upgrade::Refused(resp.into_body())
             };
-            Ok(UpgradeResponse { status, headers, tls_sans, outcome })
+            Ok(UpgradeResponse { status, headers, tls_sans, client_cert, outcome })
         };
         tokio::time::timeout(self.total_timeout, fut)
             .await
@@ -371,17 +417,17 @@ impl Upstream {
         let tcp = self.connect(&req.host, req.port).await?;
 
         if req.scheme == "https" {
-            let name = ServerName::try_from(req.host.clone()).map_err(|_| anyhow!("invalid server name {}", req.host))?;
-            let tls = self.tls.connect(name, tcp).await.map_err(|e| tls_error(&req.host, req.port, e))?;
-            let sans = tls.get_ref().1.peer_certificates().and_then(|c| c.first()).map(cert_dns_names).unwrap_or_default();
+            let (tls, hs) = self.tls_connect(&req.host, req.port, tcp, false).await?;
+            let hint = |e| hs.hint(e);
             let mut resp = if tls.get_ref().1.alpn_protocol() == Some(b"h2") {
-                let resp = send_http2(TokioIo::new(tls), req, body).await?;
+                let resp = send_http2(TokioIo::new(tls), req, body).await.map_err(hint)?;
                 let (status, headers) = head_of(&resp);
-                StreamingResponse { status, headers, body: resp.into_body(), tls_sans: vec![], version: "HTTP/2".into() }
+                StreamingResponse { status, headers, body: resp.into_body(), tls_sans: vec![], version: "HTTP/2".into(), client_cert: None }
             } else {
-                exchange(TokioIo::new(tls), req, body).await?
+                exchange(TokioIo::new(tls), req, body).await.map_err(hint)?
             };
-            resp.tls_sans = sans;
+            resp.tls_sans = hs.sans;
+            resp.client_cert = hs.presented;
             Ok(resp)
         } else {
             exchange(TokioIo::new(tcp), req, body).await
@@ -392,15 +438,59 @@ impl Upstream {
 /// Describes a failed TLS handshake. A server that drops the connection as
 /// soon as the handshake starts usually serves no HTTPS on that port, so the
 /// message says so instead of only naming the socket error.
-fn tls_error(host: &str, port: u16, e: std::io::Error) -> anyhow::Error {
+fn tls_error(host: &str, port: u16, e: std::io::Error, offered_cert: bool) -> anyhow::Error {
     use std::io::ErrorKind as K;
-    let hint = if matches!(e.kind(), K::ConnectionReset | K::ConnectionAborted | K::UnexpectedEof) {
-        let plain = if port == 443 { format!("http://{host}") } else { format!("http://{host}:{port}") };
-        format!(" (the server closed the connection before any TLS reply, so it may not serve HTTPS on port {port}; try {plain})")
-    } else {
-        String::new()
+    let hint = match client_cert_hint(host, &e.to_string(), offered_cert) {
+        Some(h) => h,
+        None if matches!(e.kind(), K::ConnectionReset | K::ConnectionAborted | K::UnexpectedEof) => {
+            let plain = if port == 443 { format!("http://{host}") } else { format!("http://{host}:{port}") };
+            format!(" (the server closed the connection before any TLS reply, so it may not serve HTTPS on port {port}; try {plain})")
+        }
+        None => String::new(),
     };
     anyhow!("TLS handshake with {host}: {e}{hint}")
+}
+
+/// With TLS 1.3 a server checks the client's certificate after the client
+/// considers the handshake done, so a refusal arrives with the first
+/// request. Either way, say what to do about it.
+fn client_cert_hint(host: &str, text: &str, offered_cert: bool) -> Option<String> {
+    let alert = text.contains("received fatal alert");
+    if text.contains("CertificateRequired") || (alert && text.contains("Certificate") && !offered_cert) {
+        Some(format!(" ({host} asks for a client certificate; add one in Settings › Client certificates or with `plonix certs add {host}`)"))
+    } else if alert && offered_cert {
+        Some(" (the server did not accept the client certificate Plonix presented)".to_string())
+    } else {
+        None
+    }
+}
+
+/// What a TLS handshake with a server settled about client certificates.
+struct Handshake {
+    host: String,
+    /// The DNS names of the server's certificate.
+    sans: Vec<String>,
+    /// The client certificate presented, as [`ClientCerts::for_host`] labels it.
+    presented: Option<String>,
+    /// Whether the host has a certificate to present.
+    offered: bool,
+    /// Whether the server asked for a client certificate.
+    asked: bool,
+}
+
+impl Handshake {
+    /// Adds [`client_cert_hint`] to an error from a request sent after the
+    /// handshake. In TLS 1.3 a server that wanted a certificate and got none
+    /// refuses after the handshake has completed, and the request often only
+    /// sees the connection close; that the server asked is then the clue.
+    fn hint(&self, e: anyhow::Error) -> anyhow::Error {
+        let text = format!("{e:#}");
+        let hint = client_cert_hint(&self.host, &text, self.offered).or_else(|| (self.asked && self.presented.is_none()).then(|| client_cert_hint(&self.host, "CertificateRequired", false)).flatten());
+        match hint {
+            Some(h) => anyhow!("{text}{h}"),
+            None => e,
+        }
+    }
 }
 
 async fn exchange<T>(io: TokioIo<T>, req: OutboundRequest, body: Option<StreamBody>) -> Result<StreamingResponse>
@@ -410,7 +500,7 @@ where
     let resp = send_http1(io, req, body).await?;
     let (status, headers) = head_of(&resp);
     let version = version_name(resp.version()).to_string();
-    Ok(StreamingResponse { status, headers, body: resp.into_body(), tls_sans: vec![], version })
+    Ok(StreamingResponse { status, headers, body: resp.into_body(), tls_sans: vec![], version, client_cert: None })
 }
 
 fn head_of<B>(resp: &http::Response<B>) -> (u16, Headers) {
@@ -430,10 +520,17 @@ where
         .handshake::<_, StreamBody>(io)
         .await
         .context("HTTP handshake")?;
+    let (failed, why) = tokio::sync::oneshot::channel();
     tokio::spawn(async move {
-        let _ = conn.with_upgrades().await;
+        if let Err(e) = conn.with_upgrades().await {
+            let _ = failed.send(e);
+        }
     });
-    sender.send_request(build_request(req, body, false)?).await.context("sending request")
+    let req = build_request(req, body, false)?;
+    match sender.send_request(req).await {
+        Ok(resp) => Ok(resp),
+        Err(e) => Err(send_failed(e, why).await),
+    }
 }
 
 async fn send_http2<T>(io: TokioIo<T>, req: OutboundRequest, body: Option<StreamBody>) -> Result<http::Response<Incoming>>
@@ -444,10 +541,28 @@ where
         .handshake::<_, StreamBody>(io)
         .await
         .context("HTTP/2 handshake")?;
+    let (failed, why) = tokio::sync::oneshot::channel();
     tokio::spawn(async move {
-        let _ = conn.await;
+        if let Err(e) = conn.await {
+            let _ = failed.send(e);
+        }
     });
-    sender.send_request(build_request(req, body, true)?).await.context("sending request")
+    let req = build_request(req, body, true)?;
+    match sender.send_request(req).await {
+        Ok(resp) => Ok(resp),
+        Err(e) => Err(send_failed(e, why).await),
+    }
+}
+
+/// A failed send, with the reason the connection closed when it has one. A
+/// send that loses the race with a closing connection only says "connection
+/// was not ready"; the connection's own error says why (a TLS alert asking for
+/// a client certificate, for one).
+async fn send_failed(e: hyper::Error, why: tokio::sync::oneshot::Receiver<hyper::Error>) -> anyhow::Error {
+    match tokio::time::timeout(Duration::from_millis(500), why).await {
+        Ok(Ok(closed)) => anyhow::Error::new(closed).context("sending request"),
+        _ => anyhow::Error::new(e).context("sending request"),
+    }
 }
 
 /// `host`, or `host:port` when the port is not the scheme's default.

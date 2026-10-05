@@ -94,6 +94,10 @@ pub async fn open(home: &Home, mut project: Project, options: OpenOptions) -> Re
     if let Err(e) = engine.set_replace_on(replace_on) {
         tracing::warn!("{}: match-and-replace rules could not be read: {e:#}", project.name());
     }
+    let certs_on = project.settings(crate::clientcert::SETTINGS_SECTION).get("enabled").and_then(serde_json::Value::as_bool).unwrap_or(true);
+    if let Err(e) = engine.set_client_certs_on(certs_on) {
+        tracing::warn!("{}: client certificates could not be read: {e:#}", project.name());
+    }
     if let Err(e) = engine.apply_proxy_settings(&proxy).await {
         let _ = std::fs::remove_file(project.open_marker());
         return Err(e);

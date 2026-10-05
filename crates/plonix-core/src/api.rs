@@ -27,11 +27,13 @@ use crate::ask::{self, AskError, AskRequest};
 use crate::assistant::{Conversations, StartError};
 use crate::browser;
 use crate::chromium;
+use crate::clientcert::{self, CertInput};
 use crate::codec;
+use crate::dialogs;
 use crate::engine::{Engine, ReplayRequest, SendError, SendRequest};
 use crate::intercept;
 use crate::replace;
-use crate::model::{Exchange, FindingEdit, NewFinding, check_severity};
+use crate::model::{Exchange, FindingEdit, NewFinding, check_severity, now_ms};
 use crate::report;
 use crate::paths::Home;
 use crate::{market, registry, skill};
@@ -136,6 +138,12 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/intercept/{id}/drop", post(intercept_drop))
         .route("/api/replace", get(replace_rules).post(add_replace_rule))
         .route("/api/replace/{id}", axum::routing::patch(edit_replace_rule).delete(delete_replace_rule))
+        .route("/api/har", get(har_export))
+        .route("/api/har/import", post(har_import))
+        .route("/api/har/export-file", post(har_export_file))
+        .route("/api/har/import-file", post(har_import_file))
+        .route("/api/client-certs", get(client_certs).post(add_client_cert))
+        .route("/api/client-certs/{id}", axum::routing::delete(delete_client_cert))
         .route("/api/send", post(send))
         .route("/api/replay", post(replay))
         .route("/api/run", post(run))
@@ -311,6 +319,8 @@ async fn status(State(s): State<AppState>, caller: MaybeCaller) -> Response {
     if is_user(&caller) {
         let i = &s.engine.intercept;
         v["intercept"] = json!({ "on": i.is_on(), "held": i.held(), "seq": i.seq() });
+        // The app's own Open and Save dialogs, for HAR files.
+        v["native_dialogs"] = json!(dialogs::get().is_some());
     }
     Json(v).into_response()
 }
@@ -532,6 +542,257 @@ async fn delete_replace_rule(State(s): State<AppState>, caller: MaybeCaller, Pat
     match s.engine.store.delete_replace_rule(id) {
         Ok(true) => rules_changed(&s, json!({ "deleted": id })),
         Ok(false) => err(StatusCode::NOT_FOUND, "not_found", &format!("no match-and-replace rule {id}")),
+        Err(e) => internal(e),
+    }
+}
+
+// ---- HAR files ---------------------------------------------------------------
+
+#[derive(Deserialize, Default)]
+struct HarParams {
+    /// A Traffic search; everything when empty.
+    #[serde(default)]
+    q: String,
+    /// Comma-separated exchange ids; when given, `q` is ignored.
+    #[serde(default)]
+    ids: String,
+}
+
+impl HarParams {
+    fn ids(&self) -> Result<Vec<i64>, Response> {
+        self.ids
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.parse().map_err(|_| err(StatusCode::BAD_REQUEST, "bad_request", &format!("'{s}' is not an exchange id"))))
+            .collect()
+    }
+}
+
+/// The exchanges an export holds, or why the request is wrong.
+async fn har_selection(s: &AppState, p: &HarParams) -> Result<Vec<i64>, Response> {
+    let ids = p.ids()?;
+    let (engine, q) = (s.engine.clone(), p.q.clone());
+    match tokio::task::spawn_blocking(move || engine.har_selection(&q, &ids)).await {
+        Ok(Ok(ids)) => Ok(ids),
+        Ok(Err(e)) => Err(err(StatusCode::BAD_REQUEST, "bad_query", &format!("{e:#}"))),
+        Err(e) => Err(internal(e.into())),
+    }
+}
+
+/// Captured traffic as a HAR file: everything, a Traffic search (`q`) or
+/// chosen exchanges (`ids`). The file streams as it is written. HAR files
+/// hold whole requests, cookies and tokens included, so this is the user's
+/// alone.
+async fn har_export(State(s): State<AppState>, caller: MaybeCaller, Query(p): Query<HarParams>) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    let ids = match har_selection(&s, &p).await {
+        Ok(ids) => ids,
+        Err(r) => return r,
+    };
+    let (tx, rx) = tokio::sync::mpsc::channel(8);
+    let engine = s.engine.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut out = ChannelWriter { tx, buf: Vec::with_capacity(CHUNK) };
+        if let Err(e) = engine.write_har(&ids, &mut out) {
+            // Cuts the download short, so a broken file is not taken for a whole one.
+            let _ = out.tx.blocking_send(Err(std::io::Error::other(format!("{e:#}"))));
+        }
+    });
+    (
+        [
+            ("content-type", "application/json; charset=utf-8".to_string()),
+            ("content-disposition", format!("attachment; filename=\"{}\"", crate::har::file_name(&s.engine.project))),
+            ("x-content-type-options", "nosniff".to_string()),
+        ],
+        axum::body::Body::new(ChannelBody(rx)),
+    )
+        .into_response()
+}
+
+/// Bytes go to the response in chunks of this size.
+const CHUNK: usize = 64 * 1024;
+
+/// Writes into a streaming response from a blocking task.
+struct ChannelWriter {
+    tx: tokio::sync::mpsc::Sender<std::io::Result<bytes::Bytes>>,
+    buf: Vec<u8>,
+}
+
+impl std::io::Write for ChannelWriter {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        self.buf.extend_from_slice(data);
+        if self.buf.len() >= CHUNK {
+            self.flush()?;
+        }
+        Ok(data.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if self.buf.is_empty() {
+            return Ok(());
+        }
+        let chunk = bytes::Bytes::from(std::mem::replace(&mut self.buf, Vec::with_capacity(CHUNK)));
+        self.tx.blocking_send(Ok(chunk)).map_err(|_| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "the download was cancelled"))
+    }
+}
+
+/// A response body fed by a [`ChannelWriter`].
+struct ChannelBody(tokio::sync::mpsc::Receiver<std::io::Result<bytes::Bytes>>);
+
+impl hyper::body::Body for ChannelBody {
+    type Data = bytes::Bytes;
+    type Error = std::io::Error;
+
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<hyper::body::Frame<bytes::Bytes>, Self::Error>>> {
+        self.0.poll_recv(cx).map(|chunk| chunk.map(|r| r.map(hyper::body::Frame::data)))
+    }
+}
+
+#[derive(Deserialize, Default)]
+struct ImportParams {
+    /// A HAR file on this computer to read, instead of the request body.
+    #[serde(default)]
+    path: Option<String>,
+}
+
+/// Imports a HAR file into this project: the request body, or the file at
+/// `path` (which may be larger than a request body can be).
+async fn har_import(State(s): State<AppState>, caller: MaybeCaller, Query(p): Query<ImportParams>, body: axum::body::Bytes) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    let engine = s.engine.clone();
+    let done = match p.path.filter(|p| !p.trim().is_empty()) {
+        Some(path) => {
+            let path = std::path::PathBuf::from(path.trim());
+            if !path.is_absolute() {
+                return err(StatusCode::BAD_REQUEST, "bad_request", "path must be absolute");
+            }
+            tokio::task::spawn_blocking(move || crate::har::open(&path).and_then(|f| engine.import_har(f))).await
+        }
+        None if body.is_empty() => return err(StatusCode::BAD_REQUEST, "bad_request", "send the HAR file as the request body, or give ?path="),
+        None => tokio::task::spawn_blocking(move || engine.import_har(&body[..])).await,
+    };
+    match done {
+        Ok(Ok(report)) => Json(report).into_response(),
+        Ok(Err(e)) => err(StatusCode::BAD_REQUEST, "bad_har", &format!("{e:#}")),
+        Err(e) => internal(e.into()),
+    }
+}
+
+fn no_dialogs() -> Response {
+    err(StatusCode::NOT_IMPLEMENTED, "no_dialogs", "file dialogs are only available in the Plonix app; download or upload the file instead")
+}
+
+#[derive(Deserialize, Default)]
+struct ExportFileBody {
+    #[serde(default)]
+    q: String,
+    #[serde(default)]
+    ids: Vec<i64>,
+}
+
+/// In the app: asks where to save with the system's Save dialog, then writes
+/// the HAR file there. `{"cancelled": true}` when the user cancels.
+async fn har_export_file(State(s): State<AppState>, caller: MaybeCaller, Json(b): Json<ExportFileBody>) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    let Some(d) = dialogs::get() else { return no_dialogs() };
+    let p = HarParams { q: b.q, ids: b.ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",") };
+    let ids = match har_selection(&s, &p).await {
+        Ok(ids) => ids,
+        Err(r) => return r,
+    };
+    let engine = s.engine.clone();
+    let done = tokio::task::spawn_blocking(move || -> anyhow::Result<Value> {
+        let name = crate::har::file_name(&engine.project);
+        let Some(path) = d.save("Export Traffic as HAR", &name, &[("HAR file", &["har"])]) else {
+            return Ok(json!({ "cancelled": true }));
+        };
+        let file = std::fs::File::create(&path).map_err(|e| anyhow::anyhow!("writing {}: {e}", path.display()))?;
+        let entries = engine.write_har(&ids, std::io::BufWriter::new(file))?;
+        Ok(json!({ "path": path, "entries": entries }))
+    })
+    .await;
+    match done {
+        Ok(Ok(v)) => Json(v).into_response(),
+        Ok(Err(e)) => internal(e),
+        Err(e) => internal(e.into()),
+    }
+}
+
+/// In the app: asks for a HAR file with the system's Open dialog and imports it.
+async fn har_import_file(State(s): State<AppState>, caller: MaybeCaller) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    let Some(d) = dialogs::get() else { return no_dialogs() };
+    let picked = tokio::task::spawn_blocking(move || d.open("Import a HAR File", &[("HAR file", &["har", "json"])])).await;
+    let Some(path) = picked.ok().flatten() else {
+        return Json(json!({ "cancelled": true })).into_response();
+    };
+    let engine = s.engine.clone();
+    let file = path.clone();
+    match tokio::task::spawn_blocking(move || crate::har::open(&file).and_then(|f| engine.import_har(f))).await {
+        Ok(Ok(report)) => {
+            let mut v = json!(report);
+            v["path"] = json!(path);
+            Json(v).into_response()
+        }
+        Ok(Err(e)) => err(StatusCode::BAD_REQUEST, "bad_har", &format!("{e:#}")),
+        Err(e) => internal(e.into()),
+    }
+}
+
+// ---- client certificates -----------------------------------------------------
+
+/// Whether certificates are presented, and each one described (never its
+/// key). Like match and replace, this is the user's alone.
+async fn client_certs(State(s): State<AppState>, caller: MaybeCaller) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    let enabled = this_project(&s).and_then(|p| p.settings(clientcert::SETTINGS_SECTION).get("enabled").and_then(Value::as_bool)).unwrap_or(true);
+    match s.engine.client_cert_list() {
+        Ok(certs) => Json(json!({ "enabled": enabled, "certs": certs })).into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+/// Adds a certificate: `{"host": "*.example.com", "cert_pem": "...", "key_pem": "..."}`,
+/// or `{"host": ..., "pkcs12_base64": "...", "password": "..."}`.
+async fn add_client_cert(State(s): State<AppState>, caller: MaybeCaller, Json(b): Json<CertInput>) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    let engine = s.engine.clone();
+    let done = tokio::task::spawn_blocking(move || match b.into_stored(now_ms()) {
+        Ok(cert) => engine.add_client_cert(&cert).map(Ok),
+        Err(e) => Ok(Err(e)),
+    })
+    .await;
+    match done {
+        Ok(Ok(Ok(info))) => Json(info).into_response(),
+        Ok(Ok(Err(e))) => err(StatusCode::BAD_REQUEST, "bad_cert", &e),
+        Ok(Err(e)) => internal(e),
+        Err(e) => internal(e.into()),
+    }
+}
+
+async fn delete_client_cert(State(s): State<AppState>, caller: MaybeCaller, Path(id): Path<i64>) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    match s.engine.remove_client_cert(id) {
+        Ok(true) => Json(json!({ "deleted": id })).into_response(),
+        Ok(false) => err(StatusCode::NOT_FOUND, "not_found", &format!("no client certificate {id}")),
         Err(e) => internal(e),
     }
 }
@@ -1742,6 +2003,11 @@ async fn put_settings(State(s): State<AppState>, Path(id): Path<String>, Json(b)
     }
     if id == replace::SETTINGS_SECTION
         && let Err(e) = s.engine.set_replace_on(values.get("enabled").and_then(Value::as_bool).unwrap_or(true))
+    {
+        return internal(e);
+    }
+    if id == clientcert::SETTINGS_SECTION
+        && let Err(e) = s.engine.set_client_certs_on(values.get("enabled").and_then(Value::as_bool).unwrap_or(true))
     {
         return internal(e);
     }

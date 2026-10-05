@@ -55,6 +55,9 @@ pub fn exchange(v: &Value, max_body: usize) -> String {
         v["source"].as_str().unwrap_or("proxy"),
         v["initiator"].as_str().map(|i| format!(" by {i}")).unwrap_or_default()
     ));
+    if let Some(c) = v["client_cert"].as_str() {
+        out.push_str(&format!("Client certificate: {c}\n\n"));
+    }
     let target = match v["query"].as_str().filter(|q| !q.is_empty()) {
         Some(q) => format!("{}?{}", v["path"].as_str().unwrap_or(""), q),
         None => v["path"].as_str().unwrap_or("").to_string(),
