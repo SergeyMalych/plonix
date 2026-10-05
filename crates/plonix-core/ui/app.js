@@ -1707,8 +1707,14 @@ function rowMenu(e, ex) {
     { label: 'Show only ' + what, run: () => addFilter(term, 'include') },
     { label: 'Hide ' + what, run: () => addFilter(term, 'exclude') },
   ];
+  const idT = idTargetOf(ex);
+  const actions = [{ label: 'Send to Bench', run: () => sendToBench(ex.id) }, { label: 'Copy as curl', run: () => copyCurl(ex.id) }];
+  if (decide(ex.host) === 'accepted' && toolOn('access-check')) {
+    if (idT) actions.push({ label: 'Check this id across users', run: () => startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}` }) });
+    actions.push({ label: 'Replay signed out', run: () => startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}`, onlyAnon: true }) });
+  }
   const groups = [
-    [{ label: 'Copy as curl', run: () => copyCurl(ex.id) }],
+    actions,
     both('host:' + ex.host, ex.host),
     seg && seg !== ex.path ? both('path:' + seg, seg + '/…') : both('path:' + ex.path, ex.path),
     both('status:' + cls, cls === 'none' ? 'no response' : cls + ' responses'),
@@ -2314,6 +2320,125 @@ function findingHint(ex, list) {
   return null;
 }
 
+/* ======================================================================
+   Mind Reader — context-aware quick actions
+   Each reader looks at one exchange and works out the single most useful
+   next move for what the researcher is looking at, or returns nothing. The
+   chips they drive only SUGGEST: nothing is sent until a click, and anything
+   that sends is scope-gated by the engine. Surfaced in the Lens "Suggested"
+   row and the Traffic row menu.
+   ====================================================================== */
+
+const REDIRECT_PARAMS = /^(url|uri|next|returnurl|return_to|return|redirect_uri|redirect_url|redirect|dest|destination|continue|goto|forward|callback|rurl)$/i;
+const LOGIN_PATH = /log-?in|sign-?in|sign-?on|\/auth|session|token|oauth|sso/i;
+const SESSION_COOKIE = /^(sess|sid|session|auth|token|jwt|connect\.sid|jsessionid|phpsessid|asp\.net|_session)/i;
+
+/** The name=value pairs of a request's query string. */
+function queryPairsOf(ex) {
+  const out = [];
+  const q = ex.query || (ex.url && ex.url.includes('?') ? ex.url.split('?')[1] : '') || '';
+  for (const part of q.split('&')) {
+    if (!part) continue;
+    const i = part.indexOf('=');
+    const dec = (s) => { try { return decodeURIComponent(s.replace(/\+/g, ' ')); } catch (_) { return s; } };
+    out.push([dec(i < 0 ? part : part.slice(0, i)), i < 0 ? '' : dec(part.slice(i + 1))]);
+  }
+  return out;
+}
+
+/** An id-shaped value in the path or query — the "could I read someone else's?" smell. */
+function idTargetOf(ex) {
+  for (const s of (ex.path || '').split('/').filter(Boolean)) {
+    if (/^\d{1,15}$/.test(s)) return { kind: 'number', value: s, where: 'the path' };
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return { kind: 'uuid', value: s, where: 'the path' };
+  }
+  for (const [k, v] of queryPairsOf(ex)) {
+    if (/(^id$|_id$|^uid$|^uuid$|guid)/i.test(k) && v) return { kind: 'param', value: v, where: `the "${k}" parameter`, name: k };
+  }
+  return null;
+}
+
+/** Request values that come straight back in an HTML/text response, verbatim. */
+function reflectedValues(ex) {
+  const body = ex.resp_text;
+  if (!body || body.length > 2_000_000) return [];
+  if (!/html|xml|text\/plain/i.test(header(ex.resp_headers, 'content-type') || '')) return [];
+  const hits = [];
+  const seen = new Set();
+  const consider = (name, value, where) => {
+    const v = (value || '').trim();
+    if (v.length < 5 || v.length > 200 || seen.has(v)) return;
+    if (/^[\d.\s,-]+$/.test(v)) return; // bare numbers reflect everywhere
+    if (body.includes(v)) { hits.push({ name, value: v, where }); seen.add(v); }
+  };
+  for (const [k, v] of queryPairsOf(ex)) consider(k, v, 'query');
+  const rb = ex.req_text || '';
+  if (rb.length < 100_000 && /[=&]/.test(rb) && !/^[[{]/.test(rb.trim())) {
+    for (const part of rb.split('&')) {
+      const i = part.indexOf('=');
+      if (i <= 0) continue;
+      const dec = (s) => { try { return decodeURIComponent(s.replace(/\+/g, ' ')); } catch (_) { return s; } };
+      consider(dec(part.slice(0, i)), dec(part.slice(i + 1)), 'body');
+    }
+  }
+  return hits.slice(0, 3);
+}
+
+/** A permissive cross-origin policy on the response. */
+function corsIssue(ex) {
+  const acao = (header(ex.resp_headers, 'access-control-allow-origin') || '').trim();
+  if (!acao) return null;
+  const creds = /true/i.test(header(ex.resp_headers, 'access-control-allow-credentials') || '');
+  const origin = (header(ex.req_headers, 'origin') || '').trim();
+  if (acao === '*' && creds) return { severity: 'medium', note: 'The response sets Access-Control-Allow-Origin to * while allowing credentials, so any site could read it on behalf of a signed-in user.' };
+  if (origin && acao === origin && creds) return { severity: 'medium', note: `The response echoes the request Origin (${origin}) into Access-Control-Allow-Origin with credentials allowed, so an attacker-chosen origin may be trusted.` };
+  if (acao === '*') return { severity: 'low', note: 'The response sets Access-Control-Allow-Origin to *, so any site can read it.' };
+  return null;
+}
+
+/** A parameter that carries a URL or path the server might follow. */
+function redirectParam(ex) {
+  for (const [k, v] of queryPairsOf(ex)) {
+    if (REDIRECT_PARAMS.test(k) && /^(https?:\/\/|\/\/|\/)[^\s]/i.test(v)) return { name: k, value: v };
+  }
+  return null;
+}
+
+/** Whether this request looks like GraphQL. */
+function isGraphql(ex) {
+  if (/\/graphql\b|\/gql\b/i.test(ex.path || '')) return true;
+  if (/application\/graphql/i.test(header(ex.req_headers, 'content-type') || '')) return true;
+  const rb = ex.req_text || '';
+  return /"query"\s*:/.test(rb) && /\b(query|mutation|subscription)\b/.test(rb);
+}
+
+/** A login/session handed back in a response — the makings of a saved user. */
+function sessionGrant(ex) {
+  const sc = (ex.resp_headers || []).filter(([k]) => /^set-cookie$/i.test(k)).map(([, v]) => v);
+  if (!sc.length) return null;
+  const sessiony = sc.some((v) => SESSION_COOKIE.test(v));
+  if (!LOGIN_PATH.test(ex.path || '') && !sessiony) return null;
+  const pairs = sc.map((v) => v.split(';')[0].trim()).filter(Boolean);
+  if (!pairs.length) return null;
+  return { cookie: pairs.join('; '), count: pairs.length };
+}
+
+/** A friendly default name for a user captured from a request. */
+function suggestUserName(ex) {
+  for (const [k, v] of queryPairsOf(ex)) if (/^(user|username|login|email|account|name)$/i.test(k) && v) return v.split('@')[0].slice(0, 40);
+  const rb = ex.req_text || '';
+  const m = rb.match(/"?(user(name)?|email|login)"?\s*[:=]\s*"?([^"&,}\s]{2,40})/i);
+  if (m) return m[3].split('@')[0];
+  return 'User from ' + (ex.host || 'capture');
+}
+
+/** Opens the Saved users sheet with a new user pre-filled from a captured login. */
+function saveUserFrom(ex) {
+  const g = sessionGrant(ex);
+  if (!g) return toast('No session cookie found on this response.', 'err');
+  manageUsers(() => toast('Saved — pick this user in the Bench “As…” menu.', 'ok'), { name: suggestUserName(ex), note: `Captured from ${ex.method} ${ex.path}`, headers: [['Cookie', g.cookie]] });
+}
+
 const IDEAS_QUESTION =
   'Suggest up to three things worth trying next on this endpoint. For each, say in plain words what to change, what result would mean there is a problem, and give the exact request to send from the Plonix Bench. Start with the most promising one.';
 
@@ -2332,6 +2457,46 @@ async function drawLensSuggestions(slot, ex, list) {
     chips.push(
       h('button', { class: 'chip k-warn', title: 'Record this as a finding, with this request as evidence. Claude can write it up for you.', onclick: () => findingForm(null, [ex.id], hint.title, hint) }, h('span', { text: '+ Finding: ' + hint.chip })),
     );
+  }
+  // An error or stack trace you're looking at usually isn't the only one.
+  if ((ex.status >= 500 || (list || []).some((i) => i.kind === 'stack-trace')) && ex.host) {
+    const cls = Math.floor((ex.status || 500) / 100) + 'xx';
+    chips.push(h('button', { class: 'chip', title: `Show every ${cls} response from ${ex.host} in Traffic, so you can see how far this reaches.`, onclick: () => setQuery(`host:${ex.host} status:${cls}`) }, h('span', { text: 'Find others like this' })));
+  }
+  // A permissive cross-origin policy — one header combo that's easy to miss.
+  const cors = corsIssue(ex);
+  if (cors) {
+    chips.push(h('button', { class: 'chip k-warn', title: cors.note + ' Record it as a finding.', onclick: () => findingForm(null, [ex.id], `Permissive cross-origin policy on ${ex.method} ${ex.path}`, { severity: cors.severity, note: cors.note }) }, h('span', { text: '+ Finding: open CORS policy' })));
+  }
+  // A login handed back a session — offer to save it as a user for the cookie jar.
+  if (toolOn('saved-users') && sessionGrant(ex)) {
+    chips.push(h('button', { class: 'chip k-user', title: 'Save the session this response just set as a reusable user, ready in the Bench “As…” picker and the Access check.', onclick: () => saveUserFrom(ex) }, h('span', { text: 'Save login as a user' })));
+  }
+  if (inScope) {
+    // An id in the path or a param — check whether other users' records answer too.
+    const id = idTargetOf(ex);
+    if (id && toolOn('access-check')) {
+      chips.push(h('button', { class: 'chip k-access', title: `Replay this request as each saved user and signed out, to see if ${id.where} (${id.value.slice(0, 24)}) lets you reach records that aren’t yours.`, onclick: () => startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}` }) }, h('span', { text: 'Check this id across users' })));
+    }
+    // An authenticated request — does it still work with the login removed?
+    if (toolOn('access-check') && authHeadersOf(ex.req_headers || []).length && ex.status >= 200 && ex.status < 300) {
+      chips.push(h('button', { class: 'chip k-access', title: 'Replay this request with your login removed, to see whether it needs you signed in at all.', onclick: () => startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}`, onlyAnon: true }) }, h('span', { text: 'Replay signed out' })));
+    }
+    // A value that comes straight back — set it up as a Bench experiment.
+    const refl = reflectedValues(ex);
+    if (refl.length) {
+      const r = refl[0];
+      chips.push(h('button', { class: 'chip k-bench', title: `The ${r.where} value “${r.value.slice(0, 32)}” comes back unescaped in the response. Open this request on the Bench to vary it and compare.`, onclick: () => benchWithNote(ex.id, `“${r.name}” is reflected in the response — vary it and compare.`) }, h('span', { text: 'Reflected value → Bench' })));
+    }
+    // A redirect-shaped parameter — open it ready to follow.
+    const rd = redirectParam(ex);
+    if (rd) {
+      chips.push(h('button', { class: 'chip k-bench', title: `The “${rd.name}” parameter carries a URL the server may follow. Open this request on the Bench to change it and watch where it lands.`, onclick: () => benchWithNote(ex.id, `“${rd.name}” carries a redirect target — change it and follow where it goes.`) }, h('span', { text: 'Trace this redirect' })));
+    }
+    // GraphQL — open it on the Bench like any other request to explore.
+    if (isGraphql(ex)) {
+      chips.push(h('button', { class: 'chip k-bench', title: 'Open this GraphQL request on the Bench to edit the operation and explore the schema.', onclick: () => benchWithNote(ex.id, 'GraphQL endpoint — edit the operation to explore what it exposes.') }, h('span', { text: 'GraphQL → Bench' })));
+    }
   }
   if (looksLikeApiSpec(ex)) {
     let spec = null;
@@ -2794,6 +2959,12 @@ async function sendToBench(id) {
   R.active = R.tabs.length - 1;
   saveBench();
   leaveTo('bench');
+}
+
+/** Sends a request to the Bench and shows a one-line note about why — used by the Mind Reader chips. */
+async function benchWithNote(id, note) {
+  await sendToBench(id);
+  if (note) toast(note, 'ok');
 }
 
 function newBlankTab() {
@@ -5372,8 +5543,9 @@ function parseHeaderLines(text) {
 const headerLines = (headers) => (headers || []).map(([k, v]) => `${k}: ${v}`).join('\n');
 
 /** The manage-users sheet: add, edit and remove the saved users. */
-async function manageUsers(afterSave) {
+async function manageUsers(afterSave, prefill) {
   const users = (await loadUsers(true)).map((u) => ({ ...u, headers: (u.headers || []).map((h) => [...h]) }));
+  if (prefill) users.push({ id: '', name: prefill.name || '', note: prefill.note || '', headers: prefill.headers || [] });
   const list = h('div', { class: 'userlist' });
   const draw = () => {
     clear(
@@ -5456,14 +5628,15 @@ function userSwitcher(tab, main) {
 const AC = { host: null, prefix: '/', targets: [], sourceLabel: '', anon: true, picks: null, running: false, report: null, err: null };
 
 /** Opens the Access check on a selection from Traffic or the Map. */
-function startAccessCheck({ targets = [], host = null, prefix = '/', sourceLabel = '' } = {}) {
+function startAccessCheck({ targets = [], host = null, prefix = '/', sourceLabel = '', onlyAnon = false } = {}) {
   AC.targets = targets;
   AC.host = host;
   AC.prefix = prefix || '/';
   AC.sourceLabel = sourceLabel;
   AC.report = null;
   AC.err = null;
-  AC.picks = null; // default: every saved user
+  AC.anon = onlyAnon ? true : AC.anon;
+  AC.picks = onlyAnon ? new Set() : null; // onlyAnon: signed-out only; otherwise every saved user
   leaveTo('access');
 }
 
