@@ -52,6 +52,9 @@ pub struct PlatformDoc {
     pub license: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub homepage: String,
+    /// The longer description on the platform's Market page: a few short paragraphs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub about: Vec<String>,
     /// The API's origin, `https://api.example.com`. Plonix sends nothing anywhere else.
     pub api: String,
     /// A program's page on the platform; `{handle}` is replaced.
@@ -224,6 +227,14 @@ pub fn parse(bytes: &[u8]) -> Result<PlatformPack, String> {
     ] {
         if let Err(e) = check_text(value, max, empty) {
             errors.push(format!("{field}: {e}"));
+        }
+    }
+    if doc.about.len() > 8 {
+        errors.push("about: at most 8 paragraphs".into());
+    }
+    for (i, para) in doc.about.iter().enumerate() {
+        if let Err(e) = check_text(para, 700, false) {
+            errors.push(format!("about[{i}]: {e}"));
         }
     }
     if let Err(e) = check_origin(&doc.api) {

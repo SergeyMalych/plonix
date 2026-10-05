@@ -274,22 +274,6 @@
         "Install it from the Market, then pick its lists in the Bench Run panel like any other.",
         "Data only: a list supplies values you choose to send, through the usual scope-gated send path."
       ]
-    },
-    {
-      "name": "hackerone",
-      "kind": "platform",
-      "version": "1.0.0",
-      "description": "Brings in the HackerOne programs you can hack on, with each program's scope and rules.",
-      "author": "Plonix contributors",
-      "url": "platforms/hackerone.json",
-      "sha256": "e762f9235cebe0e1752ff92b33a95014ba08b875d14148b8b9f87bd5bb37b657",
-      "homepage": "https://github.com/SergeyMalych/plonix",
-      "about": [
-        "Connect your HackerOne account once with an API token. The Programs screen then lists every program you can work on, and bringing one in sets this project's scope from the program's structured scope: in-scope assets are accepted, listed exclusions are rejected.",
-        "Plonix also reads the program's policy for its rules of engagement: a request rate, headers to add to every request, and whether automated testing or disruptive tests are banned. You review all of it before it applies, and from then on Plonix enforces it on everything it sends.",
-        "The token is kept in your Keychain and is only ever sent to api.hackerone.com. AI agents never see it.",
-        "Built in, so it is always available."
-      ]
     }
   ]
 }

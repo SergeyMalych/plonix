@@ -7,6 +7,12 @@
   "author": "Plonix contributors",
   "license": "Apache-2.0",
   "homepage": "https://hackerone.com",
+  "about": [
+    "Connect your HackerOne account once with an API token. Plonix then pulls every program you can work on, with each program's structured scope and policy, and lets you search them all by program or by asset.",
+    "Following a program sets this project's scope from it: in-scope assets are accepted, listed exclusions are rejected. Plonix also reads the policy for its rules of engagement: a request rate, headers to add to every request, and whether automated or disruptive testing is banned. You review all of it before it applies, and from then on Plonix enforces it on everything it sends.",
+    "The token is kept in your Keychain and is only ever sent to api.hackerone.com. AI agents never see it.",
+    "Built in, so it is always available."
+  ],
   "api": "https://api.hackerone.com",
   "program_url": "https://hackerone.com/{handle}",
   "auth": {

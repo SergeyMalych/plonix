@@ -170,7 +170,9 @@ impl Catalog {
     /// Downloads a package and checks it against the index: checksum,
     /// format, name and version. Nothing is installed.
     pub fn fetch(&self, p: &Package) -> Result<Vec<u8>> {
+        let builtin = (p.kind == Kind::Platform).then(|| platform::BUILTIN.iter().find(|(n, _)| *n == p.name)).flatten();
         let bytes = match &self.origin {
+            _ if builtin.is_some() => builtin.unwrap().1.as_bytes().to_vec(),
             Origin::Bundled => SNAPSHOT
                 .iter()
                 .find(|(path, _)| *path == p.url)
@@ -295,7 +297,36 @@ fn open_at(loc: &Location, trusted: &[TrustedKey], allow_unsigned: bool) -> Resu
              Market authors can test an unsigned index with --allow-unsigned."
         ),
     };
-    Ok(Catalog { origin: Origin::Remote(loc.clone()), index, trust, offline_reason: None })
+    Ok(with_builtin_platforms(Catalog { origin: Origin::Remote(loc.clone()), index, trust, offline_reason: None }))
+}
+
+/// Lists the platform packs built into Plonix in the official Market. They
+/// ship inside Plonix, so they are not in the signed index, and adding one
+/// needs no new signature. Other catalogs never get them.
+fn with_builtin_platforms(mut c: Catalog) -> Catalog {
+    if !matches!(&c.trust, Trust::Verified { key, .. } if key == registry::OFFICIAL_KEY) {
+        return c;
+    }
+    for (name, text) in platform::BUILTIN {
+        if c.index.get(name).is_some() {
+            continue;
+        }
+        let Ok(pack) = platform::parse(text.as_bytes()) else { continue };
+        let d = pack.doc;
+        c.index.packages.push(Package {
+            name: d.name,
+            kind: Kind::Platform,
+            version: d.version,
+            description: d.description,
+            author: d.author,
+            url: format!("platforms/{name}.json"),
+            sha256: pack.sha256,
+            homepage: d.homepage,
+            about: d.about,
+            requires: vec![],
+        });
+    }
+    c
 }
 
 /// The copy of the Plonix Market built into this Plonix.
@@ -304,7 +335,7 @@ pub fn bundled(trusted: &[TrustedKey]) -> Result<Catalog> {
     let bytes = file("index.json");
     let index = registry::parse(bytes).map_err(|e| anyhow!("built-in Market index: {e}"))?;
     let key = registry::verify(bytes, file("index.json.sig"), trusted).map_err(|e| anyhow!("built-in Market index: {e}"))?;
-    Ok(Catalog { origin: Origin::Bundled, index, trust: Trust::Verified { key: key.key, publisher: key.publisher }, offline_reason: None })
+    Ok(with_builtin_platforms(Catalog { origin: Origin::Bundled, index, trust: Trust::Verified { key: key.key, publisher: key.publisher }, offline_reason: None }))
 }
 
 /// Recently opened catalogs, so the window does not refetch on every click.
@@ -1027,6 +1058,20 @@ mod tests {
 
     fn official() -> Catalog {
         bundled(&registry::trusted_keys(&[])).unwrap()
+    }
+
+    #[test]
+    fn built_in_platforms_are_listed_only_in_the_official_market() {
+        let c = official();
+        let p = c.index.get("hackerone").expect("listed");
+        assert_eq!(p.kind, Kind::Platform);
+        assert!(!p.about.is_empty());
+        assert_eq!(c.fetch(p).unwrap(), platform::BUILTIN[0].1.as_bytes());
+
+        let mut other = official();
+        other.index.packages.retain(|p| p.kind != Kind::Platform);
+        other.trust = Trust::Verified { key: "ed25519:someone-else".into(), publisher: "Someone".into() };
+        assert!(with_builtin_platforms(other).index.get("hackerone").is_none());
     }
 
     #[test]
