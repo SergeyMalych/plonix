@@ -148,6 +148,8 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/replay", post(replay))
         .route("/api/run", post(run))
         .route("/api/run/lists", get(run_lists))
+        .route("/api/users", get(saved_users).put(set_saved_users))
+        .route("/api/access-check", post(access_check))
         .route("/api/findings", get(findings).post(add_finding))
         .route("/api/findings/export", get(export_findings))
         .route("/api/findings/{id}", get(finding).patch(edit_finding).delete(delete_finding))
@@ -313,6 +315,10 @@ async fn status(State(s): State<AppState>, caller: MaybeCaller) -> Response {
         "scope_rules": rules.rules.len(),
         "pending_suggestions": pending,
         "ca_fingerprint": s.engine.ca.fingerprint(),
+        // Which built-in tools the Market has switched on (see crate::tool),
+        // so the window shows the Access check tab and the Bench user
+        // switcher only once they are installed.
+        "tools": crate::tool::ToolLibrary::new(&s.home).enabled_features(),
     });
     // The window watches this to know when the held queue changes. Agents
     // learn nothing about Intercept.
@@ -1228,6 +1234,11 @@ async fn market_detail(State(s): State<AppState>, Path(name): Path<String>) -> R
                     let lists: Vec<_> = pack.doc.lists.iter().map(|l| json!({ "id": l.id, "title": l.title, "count": l.values.len() })).collect();
                     json!({ "lists": lists })
                 }
+                registry::Kind::Tool => {
+                    let t = crate::tool::parse(&bytes).map_err(|e| anyhow::anyhow!(e))?;
+                    let feat = crate::tool::feature(&t.doc.feature);
+                    json!({ "tool": { "feature": t.doc.feature, "title": feat.map(|f| f.title), "summary": feat.map(|f| f.summary) } })
+                }
                 registry::Kind::Bundle => unreachable!(),
             };
         }
@@ -1648,6 +1659,95 @@ async fn run_lists(State(s): State<AppState>) -> Response {
             Json(json!({ "lists": lists, "packs": set.packs, "problems": set.problems })).into_response()
         }
         Err(e) => internal(e.into()),
+    }
+}
+
+// ---- saved users (the cookie jar) and the access check --------------------
+
+#[derive(serde::Deserialize)]
+struct SavedUsersBody {
+    users: Vec<crate::users::SavedUser>,
+}
+
+/// The saved users for this project. User-only: these carry credentials, and
+/// agents are refused here as they are for everything that is not read-only.
+async fn saved_users(State(s): State<AppState>, caller: MaybeCaller) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    match s.engine.store.saved_users() {
+        Ok(users) => Json(json!({ "users": users })).into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+async fn set_saved_users(State(s): State<AppState>, caller: MaybeCaller, Json(body): Json<SavedUsersBody>) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    let clean = match crate::users::check(&body.users) {
+        Ok(u) => u,
+        Err(e) => return err(StatusCode::BAD_REQUEST, "bad_request", &e),
+    };
+    match s.engine.store.set_saved_users(&clean) {
+        Ok(()) => Json(json!({ "users": clean })).into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct AccessCheckBody {
+    #[serde(default)]
+    targets: Vec<i64>,
+    /// A whole branch of an application: every endpoint on this host whose
+    /// path starts with `prefix` is checked, one captured request each.
+    #[serde(default)]
+    host: Option<String>,
+    #[serde(default)]
+    prefix: Option<String>,
+    /// Which saved users to replay as. Empty means all of them.
+    #[serde(default)]
+    user_ids: Vec<String>,
+    #[serde(default = "default_true")]
+    include_anon: bool,
+    #[serde(default)]
+    delay_ms: Option<u64>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Replays the chosen requests as each saved user and once signed out.
+/// User-only, and every replay is scope-gated in the engine.
+async fn access_check(State(s): State<AppState>, caller: MaybeCaller, headers: HeaderMap, Json(body): Json<AccessCheckBody>) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    crate::usage::record("access_check");
+    // Resolve a host+prefix branch to one representative request per endpoint.
+    let mut targets = body.targets;
+    if targets.is_empty()
+        && let Some(host) = body.host.as_deref()
+    {
+        let prefix = body.prefix.as_deref().unwrap_or("/");
+        match s.engine.store.endpoints(host) {
+            Ok(eps) => targets = eps.into_iter().filter(|e| e.path.starts_with(prefix)).map(|e| e.sample_id).collect(),
+            Err(e) => return internal(e),
+        }
+    }
+    let all = match s.engine.store.saved_users() {
+        Ok(u) => u,
+        Err(e) => return internal(e),
+    };
+    let users = if body.user_ids.is_empty() { all } else { all.into_iter().filter(|u| body.user_ids.contains(&u.id)).collect() };
+    let req = crate::authcheck::AuthCheckRequest { targets, users, include_anon: body.include_anon, delay_ms: body.delay_ms };
+    match s.engine.access_check(req, &initiator(&headers)).await {
+        Ok(report) => Json(report).into_response(),
+        Err(e @ SendError::OutOfScope { .. }) => err(StatusCode::FORBIDDEN, "out_of_scope", &e.to_string()),
+        Err(e @ SendError::BadRequest(_)) => err(StatusCode::BAD_REQUEST, "bad_request", &e.to_string()),
+        Err(SendError::Other(e)) => internal(e),
+        Err(e) => err(StatusCode::BAD_REQUEST, "bad_request", &e.to_string()),
     }
 }
 

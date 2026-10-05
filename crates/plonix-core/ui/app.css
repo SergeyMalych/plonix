@@ -1025,3 +1025,49 @@ button.tag.edited { cursor: pointer; }
 .tfoot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--line-2); padding-top: 14px; }
 .tfoot .err { color: var(--crit); font-size: 12px; margin-right: auto; }
 .tfoot .btn { padding: 6px 18px; }
+
+/* ---- Saved users (Bench switcher) and the Access check ---- */
+.asbox { display: inline-flex; align-items: center; gap: 4px; }
+.asbox .aslbl { color: var(--fg-3); font-size: 13px; }
+.assel { height: 28px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 0 6px; max-width: 170px; }
+
+.acpane { display: flex; flex-direction: column; gap: 12px; padding: 12px; overflow: auto; }
+.accard { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 12px 14px; }
+.aclbl { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--fg-2); margin-bottom: 8px; }
+.acsource { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.achost { height: 30px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 0 8px; min-width: 200px; }
+.acprefix { height: 30px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 0 8px; width: 160px; }
+.acids { display: flex; flex-wrap: wrap; gap: 8px; }
+.acid { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px 5px 9px; background: var(--surface-2); }
+.acid.anon { margin-top: 8px; }
+.acid .acname { font-weight: 500; }
+.acid .achdr { color: var(--fg-3); font-size: 11px; }
+.acrun { display: flex; align-items: center; gap: 12px; }
+
+.aclead { margin: 4px 0 10px; color: var(--fg-2); }
+.aclead .acflag { color: var(--warn); }
+.actable { width: 100%; border-collapse: collapse; }
+.actable th, .actable td { border-bottom: 1px solid var(--line-2); padding: 7px 8px; text-align: left; vertical-align: middle; }
+.actable th.acidcol { text-align: center; white-space: nowrap; }
+.actable th.acidcol.anon { color: var(--fg-3); font-style: italic; }
+.actable .actarget { display: flex; align-items: center; gap: 8px; max-width: 420px; }
+.actable .acpath { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.accell { text-align: center; }
+.acbtn { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; min-width: 62px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 4px 8px; }
+.acbtn:hover { border-color: var(--accent); }
+.acbtn.ok { background: var(--ok-soft); border-color: transparent; }
+.acbtn.err { background: var(--crit-soft); border-color: transparent; }
+.acbtn .aclen { color: var(--fg-3); font-size: 11px; }
+tr.acnote td { border-bottom: none; }
+.acnoterow td { padding-top: 0; padding-bottom: 9px; }
+.acnotechip { display: inline-block; margin: 2px 8px 2px 0; padding: 2px 9px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-size: 12px; }
+
+/* manage-users sheet */
+.usersheet { width: min(560px, 86vw); display: flex; flex-direction: column; gap: 10px; }
+.userlist { display: flex; flex-direction: column; gap: 10px; max-height: 52vh; overflow: auto; }
+.usercard { border: 1px solid var(--line); border-radius: 9px; padding: 10px; background: var(--surface-2); display: flex; flex-direction: column; gap: 6px; }
+.usercard .urow { display: flex; gap: 8px; align-items: center; }
+.usercard .uname { flex: 1; height: 30px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 0 8px; font-weight: 600; }
+.usercard .unote { height: 28px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 0 8px; }
+.usercard .ulbl { color: var(--fg-3); font-size: 11px; }
+.usercard .uhead { border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: 6px 8px; font-family: var(--mono); font-size: 12px; resize: vertical; }

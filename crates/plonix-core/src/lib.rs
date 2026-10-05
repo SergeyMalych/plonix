@@ -10,6 +10,7 @@
 pub mod access;
 pub mod api;
 pub mod ask;
+pub mod authcheck;
 pub mod assistant;
 pub mod browser;
 pub mod browser_crawl;
@@ -56,9 +57,11 @@ pub mod session;
 pub mod settings;
 pub mod store;
 pub mod terms;
+pub mod tool;
 pub mod trust;
 pub mod ui;
 pub mod upstream;
+pub mod users;
 pub mod usage;
 pub mod websocket;
 

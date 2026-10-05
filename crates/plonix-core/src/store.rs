@@ -521,6 +521,21 @@ impl Store {
         Ok(f)
     }
 
+    // ---- saved users (the cookie jar) ------------------------------------
+
+    /// The saved users for this project, in the order the person arranged
+    /// them. Stored in the project database next to everything else it holds.
+    pub fn saved_users(&self) -> Result<Vec<crate::users::SavedUser>> {
+        let Some(v) = self.view_state("users")? else { return Ok(vec![]) };
+        Ok(v.get("users").and_then(|u| serde_json::from_value(u.clone()).ok()).unwrap_or_default())
+    }
+
+    /// Replaces the saved users. The caller validates them with
+    /// [`crate::users::check`] first.
+    pub fn set_saved_users(&self, users: &[crate::users::SavedUser]) -> Result<()> {
+        self.set_view_state("users", &serde_json::json!({ "users": users }))
+    }
+
     // ---- saved view state -------------------------------------------------
 
     /// Saved UI state of a view (e.g. its active filters), as JSON.
