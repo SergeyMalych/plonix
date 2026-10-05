@@ -11,7 +11,9 @@
 //! A conversation is driven by polling: [`start`](Conversations::start) spawns
 //! `claude -p` and returns a run id, a background task parses its streamed JSON
 //! into [`Event`]s, and the UI calls [`poll`](Conversations::poll) for whatever
-//! is new. Follow-up turns resume the same Claude session with
+//! is new, along with a live [`Progress`] (the current step, tokens read and
+//! written so far, elapsed time) so the UI is never a silent spinner while
+//! Claude works. Follow-up turns resume the same Claude session with
 //! `--resume <session_id>`, so the conversation keeps its context.
 
 use std::collections::HashMap;
@@ -19,6 +21,7 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -30,6 +33,14 @@ use crate::paths::Home;
 /// How far a single answer may run before it is cut off, a guard against a
 /// stuck or runaway `claude` process holding a child open forever.
 const MAX_SECS: u64 = 300;
+
+/// How long `claude` may go without printing anything before it is treated
+/// as stuck. While it thinks or writes it streams constantly, so a long
+/// silence means it has stalled (e.g. waiting on the network).
+const QUIET_SECS: u64 = 120;
+
+/// The longest live draft kept for the UI; the final text arrives whole.
+const MAX_DRAFT: usize = 16 * 1024;
 
 /// Finished conversations kept around for late polls; older ones are dropped.
 const KEEP_FINISHED: usize = 32;
@@ -44,6 +55,71 @@ pub struct Run {
     abort: Option<tokio::task::AbortHandle>,
     /// Monotonic id for pruning finished runs oldest-first.
     ord: u64,
+    progress: Progress,
+}
+
+impl Run {
+    fn new(ord: u64) -> Self {
+        Run { events: Vec::new(), status: Status::Running, session_id: None, abort: None, ord, progress: Progress::new() }
+    }
+}
+
+/// What Claude is doing right now, kept up to date from its streamed output.
+struct Progress {
+    started: Instant,
+    /// When `claude` last printed anything.
+    heard: Instant,
+    /// Set when the run ends, so elapsed time stops counting.
+    finished: Option<Instant>,
+    step: String,
+    /// The size of what Claude is reading: the context of its latest call.
+    tokens_in: u64,
+    /// Tokens written by calls that have finished.
+    out_done: u64,
+    /// Tokens written so far by the call in flight (estimated until it ends).
+    out_cur: u64,
+    /// Characters streamed in the call in flight, for the estimate above.
+    chars_cur: u64,
+    /// Answer text as it is being written, before the finished block lands.
+    draft: String,
+    /// The last tool Claude called, to say whose result it is reading.
+    tool: String,
+}
+
+impl Progress {
+    fn new() -> Self {
+        let now = Instant::now();
+        Progress { started: now, heard: now, finished: None, step: "Starting Claude Code".into(), tokens_in: 0, out_done: 0, out_cur: 0, chars_cur: 0, draft: String::new(), tool: String::new() }
+    }
+
+    fn view(&self) -> ProgressView {
+        let end = self.finished.unwrap_or_else(Instant::now);
+        ProgressView {
+            step: self.step.clone(),
+            elapsed_ms: end.duration_since(self.started).as_millis() as u64,
+            idle_ms: if self.finished.is_some() { 0 } else { self.heard.elapsed().as_millis() as u64 },
+            tokens_in: self.tokens_in,
+            tokens_out: self.out_done + self.out_cur,
+            draft: self.draft.clone(),
+        }
+    }
+}
+
+/// The live progress the UI shows under the conversation while it runs.
+#[derive(Serialize)]
+pub struct ProgressView {
+    /// A short phrase for the current step, e.g. "Thinking" or "Using traffic".
+    pub step: String,
+    pub elapsed_ms: u64,
+    /// How long since `claude` last said anything; a long gap means it is slow.
+    pub idle_ms: u64,
+    /// Tokens Claude is reading (its current context).
+    pub tokens_in: u64,
+    /// Tokens Claude has written so far, thinking included.
+    pub tokens_out: u64,
+    /// The answer as it is being written; empty when nothing is in flight.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub draft: String,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize)]
@@ -88,6 +164,7 @@ pub struct Snapshot {
     pub status: Status,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    pub progress: ProgressView,
 }
 
 /// Why a conversation could not be started.
@@ -120,7 +197,7 @@ impl Conversations {
         let ord = self.next.fetch_add(1, Ordering::Relaxed);
         let id = format!("c{ord}");
 
-        let run = std::sync::Arc::new(Mutex::new(Run { events: Vec::new(), status: Status::Running, session_id: None, abort: None, ord }));
+        let run = std::sync::Arc::new(Mutex::new(Run::new(ord)));
         let mcp = mcp_config(home);
         let cwd = run_dir(home);
         let task_run = run.clone();
@@ -141,6 +218,7 @@ impl Conversations {
             events: run.events.iter().filter(|e| e.seq >= since).cloned().collect(),
             status: run.status,
             session_id: run.session_id.clone(),
+            progress: run.progress.view(),
         })
     }
 
@@ -153,7 +231,7 @@ impl Conversations {
                 a.abort();
             }
             push(&mut run, Kind::Error, "The conversation was stopped.".into());
-            run.status = Status::Error;
+            end(&mut run, Status::Error, "Stopped");
         }
         true
     }
@@ -183,6 +261,17 @@ fn push(run: &mut Run, kind: Kind, text: String) {
     run.events.push(Event { seq, kind, text });
 }
 
+/// Marks the run finished and freezes its progress.
+fn end(run: &mut Run, status: Status, step: &str) {
+    run.status = status;
+    let p = &mut run.progress;
+    p.finished = Some(Instant::now());
+    p.step = step.into();
+    p.draft.clear();
+    p.out_done += p.out_cur;
+    p.out_cur = 0;
+}
+
 /// Runs `claude -p` and streams its output into `run` until it exits.
 async fn drive(bin: PathBuf, mcp: Value, cwd: PathBuf, prompt: String, resume: Option<String>, run: std::sync::Arc<Mutex<Run>>) {
     let mut cmd = Command::new(&bin);
@@ -194,6 +283,11 @@ async fn drive(bin: PathBuf, mcp: Value, cwd: PathBuf, prompt: String, resume: O
         // The Plonix MCP server is read-only by design; allow all its tools
         // and nothing else, so `claude` never stops to ask about a tool.
         .args(["--allowedTools", "mcp__plonix"]);
+    // Token-by-token output, so the panel can show Claude thinking and
+    // writing instead of sitting silent until a whole block is done.
+    if partial_messages(&bin).await {
+        cmd.arg("--include-partial-messages");
+    }
     if let Some(sid) = &resume {
         cmd.args(["--resume", sid]);
     }
@@ -230,13 +324,18 @@ async fn drive(bin: PathBuf, mcp: Value, cwd: PathBuf, prompt: String, resume: O
     if let Some(out) = stdout {
         let mut lines = BufReader::new(out).lines();
         loop {
+            let quiet = tokio::time::sleep(tokio::time::Duration::from_secs(QUIET_SECS));
             tokio::select! {
                 line = lines.next_line() => match line {
                     Ok(Some(l)) => on_line(&run, &l),
                     _ => break,
                 },
                 _ = &mut deadline => {
-                    finish_err(&run, "Claude Code took too long and was stopped.".into());
+                    finish_err(&run, format!("Claude Code was still working after {} minutes, so it was stopped. Try a narrower question or share less.", MAX_SECS / 60));
+                    return;
+                }
+                _ = quiet => {
+                    finish_err(&run, format!("Claude Code stopped responding (nothing for {} minutes), so it was stopped. Check your connection and that `claude` works in a terminal, then try again.", QUIET_SECS / 60));
                     return;
                 }
             }
@@ -248,7 +347,7 @@ async fn drive(bin: PathBuf, mcp: Value, cwd: PathBuf, prompt: String, resume: O
     if ok {
         let mut r = run.lock().unwrap();
         if r.status == Status::Running {
-            r.status = Status::Done;
+            end(&mut r, Status::Done, "Done");
         }
     } else {
         let stderr = match err_task {
@@ -266,9 +365,26 @@ fn on_line(run: &std::sync::Arc<Mutex<Run>>, line: &str) {
         return;
     }
     let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+    let mut r = run.lock().unwrap();
+    r.progress.heard = Instant::now();
     match v.get("type").and_then(Value::as_str) {
+        Some("system") if v.get("subtype").and_then(Value::as_str) == Some("init") => {
+            r.progress.step = "Connected, sending your question".into();
+        }
+        Some("stream_event") => {
+            if let Some(ev) = v.get("event") {
+                on_stream(&mut r.progress, ev);
+            }
+        }
+        Some("user") => {
+            // Tool results flow back to Claude as a user message.
+            let has_result = v.pointer("/message/content").and_then(Value::as_array).is_some_and(|c| c.iter().any(|b| b.get("type").and_then(Value::as_str) == Some("tool_result")));
+            if has_result {
+                let p = &mut r.progress;
+                p.step = if p.tool.is_empty() { "Reading the results".into() } else { format!("Reading {}", p.tool) };
+            }
+        }
         Some("assistant") => {
-            let mut r = run.lock().unwrap();
             if let Some(blocks) = v.pointer("/message/content").and_then(Value::as_array) {
                 for b in blocks {
                     match b.get("type").and_then(Value::as_str) {
@@ -276,6 +392,8 @@ fn on_line(run: &std::sync::Arc<Mutex<Run>>, line: &str) {
                             if let Some(t) = b.get("text").and_then(Value::as_str).map(str::trim).filter(|t| !t.is_empty()) {
                                 push(&mut r, Kind::Text, t.to_string());
                             }
+                            // The finished block replaces its live draft.
+                            r.progress.draft.clear();
                         }
                         Some("tool_use") => {
                             let name = b.get("name").and_then(Value::as_str).unwrap_or("a tool");
@@ -291,7 +409,12 @@ fn on_line(run: &std::sync::Arc<Mutex<Run>>, line: &str) {
             }
         }
         Some("result") => {
-            let mut r = run.lock().unwrap();
+            // The final tally is exact; prefer it to the running estimate.
+            if let Some(out) = v.pointer("/usage/output_tokens").and_then(Value::as_u64) {
+                let p = &mut r.progress;
+                p.out_done = (p.out_done + p.out_cur).max(out);
+                p.out_cur = 0;
+            }
             if let Some(sid) = v.get("session_id").and_then(Value::as_str) {
                 r.session_id = Some(sid.to_string());
             }
@@ -299,7 +422,53 @@ fn on_line(run: &std::sync::Arc<Mutex<Run>>, line: &str) {
             if v.get("subtype").and_then(Value::as_str).is_some_and(|s| s != "success") {
                 let msg = v.get("result").and_then(Value::as_str).unwrap_or("Claude Code could not finish the turn.");
                 push(&mut r, Kind::Error, msg.to_string());
-                r.status = Status::Error;
+                end(&mut r, Status::Error, "Stopped");
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Follows one raw API streaming event: what Claude is doing and how many
+/// tokens it has read and written.
+fn on_stream(p: &mut Progress, ev: &Value) {
+    match ev.get("type").and_then(Value::as_str) {
+        Some("message_start") => {
+            p.out_done += p.out_cur;
+            p.out_cur = 0;
+            p.chars_cur = 0;
+            if let Some(u) = ev.pointer("/message/usage") {
+                let n = |k: &str| u.get(k).and_then(Value::as_u64).unwrap_or(0);
+                p.tokens_in = n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
+                p.out_cur = n("output_tokens");
+            }
+            p.step = "Reading what you shared".into();
+        }
+        Some("content_block_start") => {
+            let block = ev.get("content_block");
+            p.step = match block.and_then(|b| b.get("type")).and_then(Value::as_str) {
+                Some("thinking") | Some("redacted_thinking") => "Thinking".into(),
+                Some("tool_use") => {
+                    let name = block.and_then(|b| b.get("name")).and_then(Value::as_str).unwrap_or("a tool");
+                    p.tool = tool_label(name);
+                    if name.ends_with("propose_bench_edit") { "Drafting an edit to the request".into() } else { format!("Looking at {}", p.tool) }
+                }
+                _ => "Writing the answer".into(),
+            };
+        }
+        Some("content_block_delta") => {
+            let d = ev.get("delta");
+            let piece = ["text", "thinking", "partial_json"].iter().find_map(|k| d.and_then(|d| d.get(*k)).and_then(Value::as_str)).unwrap_or("");
+            p.chars_cur += piece.len() as u64;
+            // About four characters to a token, until the real count lands.
+            p.out_cur = p.out_cur.max(p.chars_cur.div_ceil(4));
+            if d.and_then(|d| d.get("type")).and_then(Value::as_str) == Some("text_delta") && p.draft.len() < MAX_DRAFT {
+                p.draft.push_str(piece);
+            }
+        }
+        Some("message_delta") => {
+            if let Some(out) = ev.pointer("/usage/output_tokens").and_then(Value::as_u64) {
+                p.out_cur = p.out_cur.max(out);
             }
         }
         _ => {}
@@ -310,14 +479,18 @@ fn finish_err(run: &std::sync::Arc<Mutex<Run>>, msg: String) {
     let mut r = run.lock().unwrap();
     if r.status == Status::Running {
         push(&mut r, Kind::Error, msg);
-        r.status = Status::Error;
+        end(&mut r, Status::Error, "Stopped");
     }
 }
 
 /// A short, human label for a Plonix MCP tool name like `mcp__plonix__traffic`.
 fn friendly_tool(name: &str) -> String {
-    let bare = name.rsplit("__").next().unwrap_or(name).replace('_', " ");
-    format!("Looked at {bare}")
+    format!("Looked at {}", tool_label(name))
+}
+
+/// `mcp__plonix__scope_suggest` → `scope suggest`.
+fn tool_label(name: &str) -> String {
+    name.rsplit("__").next().unwrap_or(name).replace('_', " ")
 }
 
 /// Turns a child's failure into a message the user can act on.
@@ -366,6 +539,18 @@ fn is_default_home(home: &Home) -> bool {
     std::env::var_os("PLONIX_HOME").is_none() && std::env::var_os("HOME").map(PathBuf::from).map(|h| h.join(".plonix")) == Some(home.root.clone())
 }
 
+/// Whether this `claude` can stream token by token. Older versions reject the
+/// flag outright, which would fail every run, so ask its help text once.
+async fn partial_messages(bin: &PathBuf) -> bool {
+    static SUPPORTED: tokio::sync::OnceCell<bool> = tokio::sync::OnceCell::const_new();
+    *SUPPORTED
+        .get_or_init(|| async {
+            let out = Command::new(bin).arg("--help").stdin(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true).output();
+            matches!(tokio::time::timeout(tokio::time::Duration::from_secs(15), out).await, Ok(Ok(o)) if String::from_utf8_lossy(&o.stdout).contains("--include-partial-messages"))
+        })
+        .await
+}
+
 /// `$PLONIX_CLAUDE` (for tests), else `claude` on the PATH.
 fn claude_bin() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("PLONIX_CLAUDE") {
@@ -405,7 +590,7 @@ mod tests {
 
     #[test]
     fn parses_assistant_text_and_tools() {
-        let run = std::sync::Arc::new(Mutex::new(Run { events: Vec::new(), status: Status::Running, session_id: None, abort: None, ord: 0 }));
+        let run = std::sync::Arc::new(Mutex::new(Run::new(0)));
         on_line(&run, r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Hi"},{"type":"tool_use","name":"mcp__plonix__hosts"}]}}"#);
         on_line(&run, r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__plonix__propose_bench_edit","input":{}}]}}"#);
         on_line(&run, r#"{"type":"result","subtype":"success","session_id":"abc123"}"#);
@@ -413,5 +598,34 @@ mod tests {
         assert_eq!(r.events.len(), 3);
         assert!(matches!(r.events[2].kind, Kind::Proposal));
         assert_eq!(r.session_id.as_deref(), Some("abc123"));
+    }
+
+    #[test]
+    fn tracks_progress_from_the_stream() {
+        let run = std::sync::Arc::new(Mutex::new(Run::new(0)));
+        let step = || run.lock().unwrap().progress.view();
+        assert_eq!(step().step, "Starting Claude Code");
+        on_line(&run, r#"{"type":"system","subtype":"init"}"#);
+        on_line(&run, r#"{"type":"stream_event","event":{"type":"message_start","message":{"usage":{"input_tokens":2,"cache_read_input_tokens":30000,"cache_creation_input_tokens":8000,"output_tokens":1}}}}"#);
+        assert_eq!(step().tokens_in, 38002);
+        on_line(&run, r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}}"#);
+        assert_eq!(step().step, "Thinking");
+        on_line(&run, r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"0123456789abcdef0123456789abcdef"}}}"#);
+        assert_eq!(step().tokens_out, 8);
+        assert!(step().draft.is_empty(), "thinking is not part of the answer");
+        on_line(&run, r#"{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","name":"mcp__plonix__traffic"}}}"#);
+        assert_eq!(step().step, "Looking at traffic");
+        on_line(&run, r#"{"type":"stream_event","event":{"type":"message_delta","usage":{"output_tokens":40}}}"#);
+        on_line(&run, r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"..."}]}}"#);
+        assert_eq!(step().step, "Reading traffic");
+        on_line(&run, r#"{"type":"stream_event","event":{"type":"message_start","message":{"usage":{"input_tokens":900,"cache_read_input_tokens":38000,"output_tokens":1}}}}"#);
+        on_line(&run, r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}"#);
+        on_line(&run, r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"The login "}}}"#);
+        let v = step();
+        assert_eq!((v.step.as_str(), v.tokens_in, v.tokens_out, v.draft.as_str()), ("Writing the answer", 38900, 43, "The login "));
+        on_line(&run, r#"{"type":"assistant","message":{"content":[{"type":"text","text":"The login form has no rate limit."}]}}"#);
+        assert!(step().draft.is_empty(), "the finished text replaces the draft");
+        on_line(&run, r#"{"type":"result","subtype":"success","session_id":"s","usage":{"output_tokens":60}}"#);
+        assert_eq!(step().tokens_out, 60);
     }
 }
