@@ -920,7 +920,7 @@ function rawPre({ lines, body }) {
    Traffic
    ====================================================================== */
 
-const T = { text: '', filters: [], items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: store('plonix.inspH'), picked: new Set(), pickAnchor: null, group: !!store('plonix.groupAlike'), open: new Set(), visible: null };
+const T = { text: '', filters: [], items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: store('plonix.inspH'), picked: new Set(), pickAnchor: null, group: store('plonix.groupAlike') !== false, open: new Set(), visible: null };
 
 /** A path with its ids folded to {id}, the same way the Map groups endpoints. */
 function foldPath(path) {
@@ -946,9 +946,21 @@ function alikeGroups(items) {
 function setGrouping(on) {
   T.group = on;
   T.open.clear();
-  store('plonix.groupAlike', on || null);
-  renderChips();
+  // Grouped is the default, so only turning it off is remembered.
+  store('plonix.groupAlike', on ? null : false);
+  drawGroupToggle();
   drawRows(Infinity);
+}
+
+/** Grouped (repeats and look-alikes folded into one row each) or every request on its own row. */
+function drawGroupToggle() {
+  const box = $('#groupseg');
+  if (!box) return;
+  clear(
+    box,
+    h('button', { class: T.group ? 'on' : '', text: 'Grouped', title: 'Fold repeated requests, and ones that differ only by an id, into one row each. Click a row to see them all.', onclick: () => setGrouping(true) }),
+    h('button', { class: T.group ? '' : 'on', text: 'Every request', title: 'Show every request on its own row', onclick: () => setGrouping(false) }),
+  );
 }
 
 /* ---------- include / exclude filters ----------
@@ -1273,6 +1285,7 @@ function renderTraffic(main) {
         backButton(),
         h('div', { class: 'search', id: 'searchbox' }, h('span', { class: 'mg', text: '⌕' }), input, h('kbd', { text: '/' })),
         h('span', { class: 'count', id: 'tcount' }),
+        h('span', { class: 'seg groupseg', id: 'groupseg' }),
         liveBtn,
         interceptButton(),
         h('button', { class: 'btn sm', id: 'harbtn', text: 'HAR ▾', title: 'Import a HAR file, or export traffic as one', onclick: (e) => harMenu(e.currentTarget) }),
@@ -1285,6 +1298,7 @@ function renderTraffic(main) {
     ),
   ]);
   renderChips();
+  drawGroupToggle();
   renderBanner();
   IC.drawn = null;
   drawInterceptPanel();
@@ -1516,14 +1530,6 @@ function renderChips() {
   if (!box) return;
   const active = (term) => T.filters.some((f) => f.term.toLowerCase() === term.toLowerCase());
   const sugg = suggestedFilters(S.facets).filter((c) => !active(c.term));
-  // Many requests that differ only by an id: offer to fold them into one row each.
-  let alike = null;
-  if (!T.group && T.items.length) {
-    const g = alikeGroups(T.items);
-    const saved = T.items.length - g.size;
-    const biggest = Math.max(...[...g.values()].map((x) => x.length));
-    if (saved >= 5 && biggest >= 3) alike = saved;
-  }
   const inc = T.filters.filter((f) => f.mode === 'include');
   const exc = T.filters.filter((f) => f.mode === 'exclude');
   const q = fullQuery();
@@ -1543,25 +1549,9 @@ function renderChips() {
           }),
         ]
       : null,
-    T.group
-      ? h(
-          'span',
-          { class: 'fgroup' },
-          h('span', { class: 'chipslbl', text: 'View' }),
-          h('span', { class: 'fchip include' }, h('span', { class: 'fbody' }, h('span', { class: 'fv', text: 'Look-alikes grouped' })), h('button', { class: 'fx', title: 'Show every request on its own row', 'aria-label': 'Stop grouping look-alikes', text: '×', onclick: () => setGrouping(false) })),
-        )
-      : null,
-    sugg.length || alike ? h('span', { class: 'fsep' }) : null,
+    sugg.length ? h('span', { class: 'fsep' }) : null,
     // Labelled so one-click suggestions are not mistaken for active filters.
-    sugg.length || alike ? h('span', { class: 'chipslbl', text: 'Suggested' }) : null,
-    alike
-      ? h(
-          'button',
-          { class: 'chip k-alike', title: 'Fold requests that differ only by an id (like /orders/1041 and /orders/1042) into one row each. Nothing is hidden: expand a row to see them all.', onclick: () => setGrouping(true) },
-          h('span', { text: 'Group look-alikes' }),
-          h('span', { class: 'n', text: '−' + alike + ' rows' }),
-        )
-      : null,
+    sugg.length ? h('span', { class: 'chipslbl', text: 'Suggested' }) : null,
     sugg.map((c) =>
       h(
         'button',
@@ -1784,7 +1774,6 @@ async function refreshTraffic(userAction) {
   T.total = data.total;
   T.maxId = Math.max(prevMax, ...data.items.map((i) => i.id), 0);
   $('#tcount').textContent = data.total > data.items.length ? `${data.items.length} of ${data.total}` : `${data.total} request${data.total === 1 ? '' : 's'}`;
-  if (!T.group) renderChips();
   drawRows(userAction ? Infinity : prevMax);
 }
 
@@ -1832,8 +1821,11 @@ function drawRows(freshAbove) {
   for (const ex of T.items) {
     const g = groups && groups.get(alikeKey(ex));
     if (!g || g.length < 2) shown.push({ ex });
-    else if (g[0] === ex) shown.push({ ex, group: g });
-    else if (T.open.has(alikeKey(ex))) shown.push({ ex, member: true });
+    else if (g[0] === ex) {
+      // An open group lists its members right under its first row.
+      shown.push({ ex, group: g });
+      if (T.open.has(alikeKey(ex))) for (const m of g.slice(1)) shown.push({ ex: m, member: true });
+    }
   }
   T.visible = groups ? shown.map((r) => r.ex.id) : null;
   const rows = shown.map(({ ex, group, member }) => {
@@ -1863,7 +1855,15 @@ function drawRows(freshAbove) {
       {
         'data-id': ex.id,
         class: [ex.id === T.sel ? 'sel' : '', T.picked.has(ex.id) ? 'picked' : '', ex.in_scope ? '' : 'out', ex.id > freshAbove ? 'fresh' : '', member ? 'member' : ''].join(' ').trim(),
-        onclick: (e) => (e.metaKey || e.ctrlKey || e.shiftKey ? pickRow(ex.id, e.shiftKey) : openInspector(ex.id)),
+        onclick: (e) => {
+          if (e.metaKey || e.ctrlKey || e.shiftKey) return pickRow(ex.id, e.shiftKey);
+          // Clicking a folded group opens it, so its members show right under it.
+          if (group && !T.open.has(alikeKey(ex))) {
+            T.open.add(alikeKey(ex));
+            drawRows(Infinity);
+          }
+          openInspector(ex.id);
+        },
         ondblclick: () => sendToBench(ex.id),
         oncontextmenu: (e) => rowMenu(e, ex),
       },
@@ -2504,6 +2504,39 @@ function sideBySide(cls, key, left, right) {
   return append(wrap, [left, bar, right]);
 }
 
+/** A handle that drags `box`'s height: moving it up makes `box` taller.
+ *  `get`/`set` read and apply the height so the caller decides what it
+ *  means (a fixed height or a cap); the last size is remembered under `key`
+ *  and a double-click forgets it so the box fits its content again. */
+function heightGrip(key, { get, set, fit, min = 80, max }) {
+  return h('div', {
+    class: 'hgrip',
+    title: 'Drag to resize · double-click to fit',
+    ondblclick: () => {
+      store(key, null);
+      fit();
+    },
+    onmousedown: (e) => {
+      e.preventDefault();
+      const startY = e.clientY;
+      const startH = get();
+      document.body.classList.add('rowresize');
+      const move = (ev) => {
+        const px = Math.round(Math.max(min, Math.min(max(), startH - (ev.clientY - startY))));
+        set(px);
+        store(key, px);
+      };
+      const up = () => {
+        document.body.classList.remove('rowresize');
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    },
+  });
+}
+
 function startResize(e, insp) {
   e.preventDefault();
   const startY = e.clientY;
@@ -2909,6 +2942,7 @@ function renderBench(main) {
     { class: 'rcol' },
     h('div', { class: 'lbl' }, 'Request', binaryNote),
     editWrap,
+    lensStrip ? lensGrip(lensStrip) : null,
     lensStrip,
   );
   if (lensStrip) wireBenchLens(tab, editor, editWrap, lensStrip, main);
@@ -3147,7 +3181,58 @@ function wireBenchLens(tab, editor, editWrap, strip, main) {
   redraw();
 }
 
+/* ---- sizing ----
+   An open value card gets room to show all of it: the strip grows to fit its
+   content, leaving the request editor a few lines, unless the user dragged
+   it to a size of their own, which is kept from then on. */
+const LENS_H = 'plonix.bench.lensH';
+const EDITOR_MIN = 110;
+function lensRoom(strip) {
+  const col = strip.parentElement;
+  if (!col) return 400;
+  const lbl = col.querySelector('.lbl');
+  return Math.max(120, col.clientHeight - (lbl ? lbl.offsetHeight : 0) - EDITOR_MIN);
+}
+function lensOpen(strip) {
+  strip.classList.add('open');
+  strip.parentElement?.classList.add('lensopen');
+  requestAnimationFrame(() => {
+    for (const ta of strip.querySelectorAll('textarea.blv')) fitText(ta);
+    strip.style.height = 'auto';
+    const want = store(LENS_H) || strip.scrollHeight + 1;
+    // Short of room: make the Request and Response columns taller (the Bench
+    // scrolls) rather than squeeze the card, up to most of the window.
+    const split = strip.closest('.rsplit');
+    const short = want - lensRoom(strip);
+    if (split && short > 0) split.style.minHeight = Math.min(split.clientHeight + short, Math.round(window.innerHeight * 0.85)) + 'px';
+    strip.style.height = Math.min(want, lensRoom(strip)) + 'px';
+    strip.scrollIntoView({ block: 'nearest' });
+  });
+}
+function lensClose(strip) {
+  strip.classList.remove('open');
+  strip.parentElement?.classList.remove('lensopen');
+  strip.style.height = '';
+  const split = strip.closest('.rsplit');
+  if (split) split.style.minHeight = '';
+}
+function lensGrip(strip) {
+  return heightGrip(LENS_H, {
+    get: () => strip.getBoundingClientRect().height,
+    set: (px) => (strip.style.height = px + 'px'),
+    fit: () => lensOpen(strip),
+    min: 90,
+    max: () => lensRoom(strip),
+  });
+}
+/** Grow a textarea to show all of its text, so it never scrolls on its own. */
+function fitText(ta) {
+  ta.style.height = 'auto';
+  ta.style.height = ta.scrollHeight + 2 + 'px';
+}
+
 function drawBenchLens(tab, editor, strip, main) {
+  lensClose(strip);
   const items = scanDraft(editor.value);
   const slot = h('div', { class: 'blslot' });
   const chips = items.length
@@ -3166,9 +3251,10 @@ function benchChip(it, tab, editor, strip, slot, main) {
       onclick: () => {
         const was = chip.classList.contains('on');
         for (const c of strip.querySelectorAll('.spot')) c.classList.remove('on');
-        if (was) return clear(slot);
+        if (was) return clear(slot), lensClose(strip);
         chip.classList.add('on');
         clear(slot, buildValueCard(it, { start: it.start, end: it.end }, editor, tab, strip, main, true));
+        lensOpen(strip);
       },
     },
     h('i'),
@@ -3199,7 +3285,16 @@ function buildValueCard(it, span, editor, tab, strip, main, editable) {
     h('b', { text: it.label }),
     h('span', { class: 'muted', text: ' in ' + (it.loc || 'selection') }),
     h('span', { class: 'sdact' }, needle.length >= 4 ? h('button', { class: 'btn sm', text: 'Find in traffic', onclick: () => setQuery('"' + needle + '"') }) : null, askDraftButton(tab, editor, it.value)),
-    h('button', { class: 'blx', text: '✕', title: 'Close', onclick: () => clear(strip._slot) }),
+    h('button', {
+      class: 'blx',
+      text: '✕',
+      title: 'Close',
+      onclick: () => {
+        clear(strip._slot);
+        for (const c of strip.querySelectorAll('.spot.on')) c.classList.remove('on');
+        lensClose(strip);
+      },
+    }),
   );
   const notes = it.notes && it.notes.length ? h('div', { class: 'sdnotes' }, it.notes.map((n) => h('span', { class: 'sdnote' + (/^(unsigned|expired)/.test(n) ? ' warn' : ''), text: n }))) : null;
   if (it.kind === 'jwt') return h('div', { class: 'spotdetail' }, head, notes, jwtEditor(it, span, editor, tab));
@@ -3207,6 +3302,7 @@ function buildValueCard(it, span, editor, tab, strip, main, editable) {
   const ta = h('textarea', { class: 'sdv blv', spellcheck: 'false', value: it.decode() });
   if (!editable) ta.readOnly = true;
   ta.addEventListener('input', () => {
+    fitText(ta);
     try {
       spliceEditor(editor, tab, span, it.encode(ta.value));
       blFlash(live);
@@ -3224,7 +3320,10 @@ function jwtEditor(it, span, editor, tab) {
   const st = { part: 'payload', key: '' };
   const live = h('span', { class: 'bllive' });
   const ta = h('textarea', { class: 'sdv blv bljwt', spellcheck: 'false' });
-  const load = () => (ta.value = JSON.stringify(st.part === 'payload' ? it.jwt.payload : it.jwt.header, null, 2));
+  const load = () => {
+    ta.value = JSON.stringify(st.part === 'payload' ? it.jwt.payload : it.jwt.header, null, 2);
+    if (ta.isConnected) fitText(ta);
+  };
   load();
   const mk = (p, label) =>
     h('button', {
@@ -3258,6 +3357,7 @@ function jwtEditor(it, span, editor, tab) {
     blFlash(live);
   };
   ta.addEventListener('input', () => {
+    fitText(ta);
     const obj = bl_tryJson(ta.value);
     if (!obj) return;
     if (st.part === 'payload') it.jwt.payload = obj;
@@ -3484,7 +3584,7 @@ function buildQbar(tab, editor, strip, main) {
     it.value = t;
     it.loc = 'selection';
     clear(strip._slot, buildValueCard(it, { start: editor.selectionStart, end: editor.selectionEnd }, editor, tab, strip, main, editable));
-    strip.scrollIntoView({ block: 'nearest' });
+    lensOpen(strip);
   };
   const applyEnc = (fn, label) => {
     const t = sel();
@@ -4477,9 +4577,21 @@ function historyPanel(tab, main) {
     ),
   );
   const picks = tab.picks || [];
+  // Shows up to a dozen sends at once; drag the top edge for more or fewer.
+  const list = h('div', { class: 'histrows' }, rows.length ? rows : h('div', { class: 'histrow muted', text: 'No sends yet.' }));
+  const saved = store(HIST_H);
+  if (saved) list.style.maxHeight = saved + 'px';
+  const grip = heightGrip(HIST_H, {
+    get: () => list.getBoundingClientRect().height,
+    set: (px) => (list.style.maxHeight = px + 'px'),
+    fit: () => (list.style.maxHeight = ''),
+    min: 40,
+    max: () => Math.max(120, window.innerHeight - 260),
+  });
   return h(
     'div',
     { class: 'hist' },
+    rows.length > 1 ? grip : null,
     h(
       'div',
       { class: 'histhead' },
@@ -4491,9 +4603,10 @@ function historyPanel(tab, main) {
         h('button', { class: 'btn sm', text: picks.length === 2 ? 'Compare ✓' : `Compare (${picks.length}/2)`, disabled: tab.history.length < 2, onclick: () => compareLatest(tab, main) }),
       ),
     ),
-    h('div', { class: 'histrows' }, rows.length ? rows : h('div', { class: 'histrow muted', text: 'No sends yet.' })),
+    list,
   );
 }
+const HIST_H = 'plonix.bench.histH';
 
 function compareLatest(tab, main) {
   if ((tab.picks || []).length !== 2) tab.picks = tab.history.slice(0, 2).map((e) => e.id).reverse();

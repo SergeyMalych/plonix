@@ -308,6 +308,13 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .qmenu button:hover { background: var(--surface-2); }
 
 .benchlens { flex: 0 0 auto; max-height: 46%; overflow: auto; border-top: 1px solid var(--line-2); background: var(--chrome-2); }
+.benchlens.open { max-height: calc(100% - 140px); border-top: 0; }
+.rcol .hgrip { display: none; background: var(--chrome-2); border-top: 1px solid var(--line-2); }
+.rcol.lensopen .hgrip { display: flex; }
+.hgrip { flex: 0 0 auto; height: 9px; display: flex; align-items: center; justify-content: center; cursor: row-resize; }
+.hgrip::before { content: ''; width: 34px; height: 3px; border-radius: 3px; background: var(--line); transition: background .15s; }
+.hgrip:hover::before, .rowresize .hgrip::before { background: var(--accent); }
+.rowresize, .rowresize * { cursor: row-resize !important; user-select: none; }
 .blspots { padding: 7px 10px; }
 .benchlens .spot { max-width: 100%; }
 .benchlens .spot .sw { max-width: 120px; }
@@ -316,8 +323,8 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .blempty { font-size: 11px; color: var(--fg-3); padding: 2px 0; }
 .blask { margin-left: auto; }
 .blslot:empty { display: none; }
-.blv { display: block; width: calc(100% - 20px); margin: 0 10px 9px; padding: 8px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); color: var(--fg); font-family: var(--mono); font-size: 11.5px; line-height: 1.5; resize: vertical; min-height: 58px; white-space: pre; }
-.blv:focus { outline: 2px solid var(--accent); outline-offset: -1px; background: var(--surface); }
+.blv, .rcol textarea.blv { flex: 0 0 auto; resize: none; overflow: auto; display: block; width: calc(100% - 20px); margin: 0 10px 9px; padding: 8px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); color: var(--fg); font-family: var(--mono); font-size: 11.5px; line-height: 1.5; min-height: 58px; white-space: pre; }
+.blv:focus, .rcol textarea.blv:focus { outline: 2px solid var(--accent); outline-offset: -1px; background: var(--surface); }
 .bljwt { min-height: 112px; }
 .bljwtbox { display: flex; flex-direction: column; }
 .blseg { margin-right: 8px; border: 1px solid var(--line-2); border-radius: 6px; overflow: hidden; }
@@ -364,7 +371,8 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .rerr { padding: 12px; color: var(--crit); font-size: 12px; }
 .hist, .card { border: 1px solid var(--line-2); border-radius: 11px; background: var(--surface); overflow: hidden; }
 .hist { flex: 0 0 auto; }
-.histrows { max-height: 168px; overflow: auto; }
+.histrows { max-height: min(34vh, 320px); overflow: auto; }
+.hist .hgrip { height: 8px; background: var(--surface-2); }
 .histhead { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line-2); background: var(--surface-2); }
 .histhead .t { font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--fg-3); }
 .histhead .hint { font-size: 11px; color: var(--fg-3); }
@@ -1145,6 +1153,8 @@ tr.acnote > td { border-bottom: none; }
 .tag.alike:hover, .tag.alike.on { background: var(--accent); color: var(--surface); }
 .ttable tr.member td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 .ttable tr.member td.url { padding-left: 22px; }
+.groupseg { flex: 0 0 auto; }
+.groupseg button { flex: 0 0 auto; padding: 2px 9px; white-space: nowrap; }
 /* Programs */
 .progs { max-width: 1100px; }
 .progs .card > .top { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line-2); flex-wrap: wrap; }
