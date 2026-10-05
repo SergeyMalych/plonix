@@ -913,7 +913,36 @@ function rawPre({ lines, body }) {
    Traffic
    ====================================================================== */
 
-const T = { text: '', filters: [], items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: store('plonix.inspH'), picked: new Set(), pickAnchor: null };
+const T = { text: '', filters: [], items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: store('plonix.inspH'), picked: new Set(), pickAnchor: null, group: !!store('plonix.groupAlike'), open: new Set(), visible: null };
+
+/** A path with its ids folded to {id}, the same way the Map groups endpoints. */
+function foldPath(path) {
+  return (path || '/')
+    .split('/')
+    .map((seg) => (/^\d+$/.test(seg) || (seg.length >= 16 && /^[0-9a-f-]+$/i.test(seg)) ? '{id}' : seg))
+    .join('/');
+}
+
+const alikeKey = (ex) => `${ex.method} ${ex.host}:${ex.port} ${foldPath(ex.path)}`;
+
+/** Look-alike requests in the current page: same method, host and path once ids are folded. */
+function alikeGroups(items) {
+  const groups = new Map();
+  for (const ex of items) {
+    const k = alikeKey(ex);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(ex);
+  }
+  return groups;
+}
+
+function setGrouping(on) {
+  T.group = on;
+  T.open.clear();
+  store('plonix.groupAlike', on || null);
+  renderChips();
+  drawRows(Infinity);
+}
 
 /* ---------- include / exclude filters ----------
  * The search box holds free text (and accepts the full query syntax). Filters
@@ -1480,6 +1509,14 @@ function renderChips() {
   if (!box) return;
   const active = (term) => T.filters.some((f) => f.term.toLowerCase() === term.toLowerCase());
   const sugg = suggestedFilters(S.facets).filter((c) => !active(c.term));
+  // Many requests that differ only by an id: offer to fold them into one row each.
+  let alike = null;
+  if (!T.group && T.items.length) {
+    const g = alikeGroups(T.items);
+    const saved = T.items.length - g.size;
+    const biggest = Math.max(...[...g.values()].map((x) => x.length));
+    if (saved >= 5 && biggest >= 3) alike = saved;
+  }
   const inc = T.filters.filter((f) => f.mode === 'include');
   const exc = T.filters.filter((f) => f.mode === 'exclude');
   const q = fullQuery();
@@ -1499,9 +1536,25 @@ function renderChips() {
           }),
         ]
       : null,
-    sugg.length ? h('span', { class: 'fsep' }) : null,
+    T.group
+      ? h(
+          'span',
+          { class: 'fgroup' },
+          h('span', { class: 'chipslbl', text: 'View' }),
+          h('span', { class: 'fchip include' }, h('span', { class: 'fbody' }, h('span', { class: 'fv', text: 'Look-alikes grouped' })), h('button', { class: 'fx', title: 'Show every request on its own row', 'aria-label': 'Stop grouping look-alikes', text: '×', onclick: () => setGrouping(false) })),
+        )
+      : null,
+    sugg.length || alike ? h('span', { class: 'fsep' }) : null,
     // Labelled so one-click suggestions are not mistaken for active filters.
-    sugg.length ? h('span', { class: 'chipslbl', text: 'Suggested' }) : null,
+    sugg.length || alike ? h('span', { class: 'chipslbl', text: 'Suggested' }) : null,
+    alike
+      ? h(
+          'button',
+          { class: 'chip k-alike', title: 'Fold requests that differ only by an id (like /orders/1041 and /orders/1042) into one row each. Nothing is hidden: expand a row to see them all.', onclick: () => setGrouping(true) },
+          h('span', { text: 'Group look-alikes' }),
+          h('span', { class: 'n', text: '−' + alike + ' rows' }),
+        )
+      : null,
     sugg.map((c) =>
       h(
         'button',
@@ -1654,6 +1707,7 @@ function rowMenu(e, ex) {
     { label: 'Hide ' + what, run: () => addFilter(term, 'exclude') },
   ];
   const groups = [
+    [{ label: 'Copy as curl', run: () => copyCurl(ex.id) }],
     both('host:' + ex.host, ex.host),
     seg && seg !== ex.path ? both('path:' + seg, seg + '/…') : both('path:' + ex.path, ex.path),
     both('status:' + cls, cls === 'none' ? 'no response' : cls + ' responses'),
@@ -1723,6 +1777,7 @@ async function refreshTraffic(userAction) {
   T.total = data.total;
   T.maxId = Math.max(prevMax, ...data.items.map((i) => i.id), 0);
   $('#tcount').textContent = data.total > data.items.length ? `${data.items.length} of ${data.total}` : `${data.total} request${data.total === 1 ? '' : 's'}`;
+  if (!T.group) renderChips();
   drawRows(userAction ? Infinity : prevMax);
 }
 
@@ -1765,8 +1820,34 @@ function drawRows(freshAbove) {
     clear(tbody, h('tr', null, h('td', { colspan: 9, style: { height: 'auto', whiteSpace: 'normal' } }, msg)));
     return;
   }
-  const rows = T.items.map((ex) => {
+  const groups = T.group ? alikeGroups(T.items) : null;
+  const shown = [];
+  for (const ex of T.items) {
+    const g = groups && groups.get(alikeKey(ex));
+    if (!g || g.length < 2) shown.push({ ex });
+    else if (g[0] === ex) shown.push({ ex, group: g });
+    else if (T.open.has(alikeKey(ex))) shown.push({ ex, member: true });
+  }
+  T.visible = groups ? shown.map((r) => r.ex.id) : null;
+  const rows = shown.map(({ ex, group, member }) => {
     const tags = [];
+    if (group) {
+      const k = alikeKey(ex);
+      const isOpen = T.open.has(k);
+      tags.push(
+        h('button', {
+          class: 'tag alike' + (isOpen ? ' on' : ''),
+          text: (isOpen ? '▾ ' : '▸ ') + '×' + group.length,
+          title: `${group.length} look-alike requests to ${foldPath(ex.path)}. Click to ${isOpen ? 'fold them' : 'show them all'}.`,
+          onclick: (e) => {
+            e.stopPropagation();
+            if (isOpen) T.open.delete(k);
+            else T.open.add(k);
+            drawRows(Infinity);
+          },
+        }),
+      );
+    }
     if (ex.source === 'replay') tags.push(h('span', { class: 'tag replay', text: 'sent' }));
     if (ex.source === 'import') tags.push(h('span', { class: 'tag imported', text: 'har', title: 'Imported from a HAR file' }));
     if (ex.edited) tags.push(h('span', { class: 'tag edited', text: 'edited', title: 'Changed in Intercept before it went on' }));
@@ -1774,7 +1855,7 @@ function drawRows(freshAbove) {
       'tr',
       {
         'data-id': ex.id,
-        class: [ex.id === T.sel ? 'sel' : '', T.picked.has(ex.id) ? 'picked' : '', ex.in_scope ? '' : 'out', ex.id > freshAbove ? 'fresh' : ''].join(' ').trim(),
+        class: [ex.id === T.sel ? 'sel' : '', T.picked.has(ex.id) ? 'picked' : '', ex.in_scope ? '' : 'out', ex.id > freshAbove ? 'fresh' : '', member ? 'member' : ''].join(' ').trim(),
         onclick: (e) => (e.metaKey || e.ctrlKey || e.shiftKey ? pickRow(ex.id, e.shiftKey) : openInspector(ex.id)),
         ondblclick: () => sendToBench(ex.id),
         oncontextmenu: (e) => rowMenu(e, ex),
@@ -1782,7 +1863,7 @@ function drawRows(freshAbove) {
       h('td', { class: 'num', text: ex.id }),
       h('td', null, h('span', { class: 'meth m-' + ex.method, text: ex.method })),
       h('td', { class: 'host c-host', text: ex.host + (ex.port !== 443 && ex.port !== 80 ? ':' + ex.port : ''), title: ex.host }),
-      h('td', { class: 'url', title: target(ex) }, tags, tags.length ? ' ' : '', target(ex)),
+      h('td', { class: 'url', title: target(ex) }, tags, tags.length ? ' ' : '', group && !T.open.has(alikeKey(ex)) ? foldPath(ex.path) : target(ex)),
       h('td', null, h('span', { class: statusClass(ex.status), text: ex.status == null ? 'ERR' : ex.status })),
       h('td', null, ex.in_scope ? null : h('span', { class: 'tag out', text: 'out' }), ' ', h('span', { class: 'mime', text: shortMime(ex.mime) })),
       h('td', { class: 'num c-size', text: fmtSize(ex.resp_len) }),
@@ -1795,11 +1876,12 @@ function drawRows(freshAbove) {
 }
 
 function selectRow(delta) {
-  if (!T.items.length) return;
-  let i = T.items.findIndex((x) => x.id === T.sel);
-  i = i < 0 ? 0 : Math.max(0, Math.min(T.items.length - 1, i + delta));
-  openInspector(T.items[i].id);
-  const tr = document.querySelector(`#rows tr[data-id="${T.items[i].id}"]`);
+  const ids = T.visible || T.items.map((x) => x.id);
+  if (!ids.length) return;
+  let i = ids.indexOf(T.sel);
+  i = i < 0 ? 0 : Math.max(0, Math.min(ids.length - 1, i + delta));
+  openInspector(ids[i]);
+  const tr = document.querySelector(`#rows tr[data-id="${ids[i]}"]`);
   if (tr) tr.scrollIntoView({ block: 'nearest' });
 }
 
@@ -1938,6 +2020,7 @@ async function openInspector(id) {
   }
   if (T.sel !== id || !$('#inspslot')) return;
   const insp = h('div', { class: 'inspector', id: 'inspector', 'aria-label': 'Lens' });
+  const suggSlot = h('div', { class: 'lenssugg', hidden: true });
   if (T.inspH) insp.style.height = T.inspH + 'px';
   const enc = header(ex.resp_headers, 'content-encoding');
   const isJson = /json/.test(header(ex.resp_headers, 'content-type') || '');
@@ -1992,17 +2075,21 @@ async function openInspector(id) {
         h('span', { class: 'tag ' + scopeTag(decide(ex.host)), text: scopeLabel(decide(ex.host)) }),
       ),
       h('button', { class: 'btn sm primary', text: 'Send to Bench', title: 'Edit and re-send on the Bench (b, or double-click a row)', onclick: () => sendToBench(id) }),
+      h('button', { class: 'btn sm', text: 'Copy curl', title: 'Copy this request as a curl command', onclick: () => copyCurl(id) }),
       h('button', { class: 'btn sm', text: 'New finding', onclick: () => newFinding([id], `${ex.method} ${ex.path}`) }),
       askButton({ kind: 'request', id }),
       h('button', { class: 'iconbtn', text: '✕', title: 'Close (Esc)', onclick: closeInspector }),
     ),
+    suggSlot,
     sideBySide('split', 'lens', reqCol, respCol),
   ]);
   const splitter = h('div', { class: 'splitter', onmousedown: (e) => startResize(e, insp) });
   clear(slot, splitter, insp);
   slot.style.display = 'contents';
   loadInsights(ex).then((list) => {
-    if (T.sel !== id || !list) return;
+    if (T.sel !== id) return;
+    drawLensSuggestions(suggSlot, ex, list || []);
+    if (!list) return;
     drawInsights(reqCol, list.filter((i) => i.side === 'request'));
     drawInsights(respCol, list.filter((i) => i.side === 'response'));
   });
@@ -2130,6 +2217,199 @@ function showInsight(box, ins) {
     ins.notes && ins.notes.length ? h('div', { class: 'sdnotes' }, ins.notes.map((n) => h('span', { class: 'sdnote' + (/^(unsigned|expired|encoded twice|username)/.test(n) ? ' warn' : ''), text: n }))) : null,
     ins.decoded != null ? [h('div', { class: 'sdk', text: 'Decoded' }), h('pre', { class: 'sdv', text: ins.decoded })] : [h('div', { class: 'sdk', text: 'Value' }), h('pre', { class: 'sdv', text: ins.value.length > 600 ? ins.value.slice(0, 600) + '…' : ins.value })],
   );
+}
+
+/* ---------- Lens suggestions: one-click next steps for the open request ---------- */
+
+/** Why this exchange may be worth recording as a finding, if anything stands out. */
+function findingHint(ex, list) {
+  const ok = ex.status >= 200 && ex.status < 300;
+  const where = `${ex.method} ${ex.path}`;
+  const req = list.filter((i) => i.side === 'request');
+  const resp = list.filter((i) => i.side === 'response');
+  const noted = (i, word) => (i.notes || []).some((n) => n.startsWith(word));
+  const secret = resp.find((i) => i.category === 'secret');
+  if (secret) return { chip: secret.label + ' exposed', title: `${secret.label} exposed in ${where}`, severity: 'high', note: `Plonix spotted a ${secret.label} in the ${secret.location}.` };
+  const unsigned = ok && req.find((i) => noted(i, 'unsigned'));
+  if (unsigned) return { chip: 'Unsigned token accepted', title: `Unsigned token accepted by ${where}`, severity: 'high', note: `The request carries an unsigned token in the ${unsigned.location}, and the server answered ${ex.status}.` };
+  const expired = ok && req.find((i) => noted(i, 'expired'));
+  if (expired) return { chip: 'Expired token accepted', title: `Expired token still accepted by ${where}`, severity: 'medium', note: `The token in the ${expired.location} has expired, and the server still answered ${ex.status}.` };
+  const card = resp.find((i) => i.kind === 'card-number');
+  if (card) return { chip: 'Card number in response', title: `Card number returned by ${where}`, severity: 'medium', note: `The response contains a card number in the ${card.location}.` };
+  const emails = resp.filter((i) => i.kind === 'email');
+  if (emails.length >= 3) return { chip: `${emails.length} email addresses`, title: `Several people's email addresses returned by ${where}`, severity: 'medium', note: `The response lists ${emails.length} different email addresses.` };
+  const trace = resp.find((i) => i.kind === 'stack-trace');
+  if (trace) return { chip: 'Stack trace in response', title: `Stack trace exposed by ${where}`, severity: 'low', note: `The response shows a stack trace: ${trace.value.slice(0, 160)}` };
+  const ip = resp.find((i) => i.kind === 'private-ip');
+  if (ip && ex.status >= 500) return { chip: 'Error shows an internal address', title: `Error on ${where} shows an internal address`, severity: 'low', note: `The ${ex.status} response shows the internal address ${ip.value}.` };
+  if (ex.status >= 500) return { chip: 'Server error', title: `Server error on ${where}`, severity: 'low', note: `The server answered ${ex.status}.` };
+  return null;
+}
+
+const IDEAS_QUESTION =
+  'Suggest up to three things worth trying next on this endpoint. For each, say in plain words what to change, what result would mean there is a problem, and give the exact request to send from the Plonix Bench. Start with the most promising one.';
+
+/** A quick look at whether a response is an API description (OpenAPI or Swagger). */
+function looksLikeApiSpec(ex) {
+  const t = ex.resp_text;
+  return !!t && t.length < 8_000_000 && /"(openapi|swagger)"\s*:/.test(t.slice(0, 4000)) && /"paths"\s*:/.test(t);
+}
+
+/** The "Suggested" row under the Lens header. Every chip is one click to act on, and nothing is sent until clicked. */
+async function drawLensSuggestions(slot, ex, list) {
+  const chips = [];
+  const inScope = decide(ex.host) === 'accepted';
+  const hint = inScope ? findingHint(ex, list) : null;
+  if (hint) {
+    chips.push(
+      h('button', { class: 'chip k-warn', title: 'Record this as a finding, with this request as evidence. Claude can write it up for you.', onclick: () => findingForm(null, [ex.id], hint.title, hint) }, h('span', { text: '+ Finding: ' + hint.chip })),
+    );
+  }
+  if (looksLikeApiSpec(ex)) {
+    let spec = null;
+    try {
+      spec = await api(`/api/traffic/${ex.id}/spec`);
+    } catch (_) {}
+    if (spec && spec.endpoints.length && slot.isConnected) {
+      const todo = spec.endpoints.filter((e) => !e.visited).length;
+      chips.push(
+        h(
+          'button',
+          { class: 'chip k-path', title: `${spec.title || 'API description'}: ${spec.endpoints.length} endpoints for ${spec.host}. Show them in the Map.`, onclick: () => showSpecInMap(spec.host) },
+          h('span', { text: 'API description' }),
+          h('span', { class: 'n', text: todo ? `${todo} not visited` : `${spec.endpoints.length} endpoints` }),
+        ),
+      );
+    }
+  }
+  if (agentsOn() && inScope) {
+    chips.push(h('button', { class: 'chip k-ai', title: 'Ask Claude Code what to try next here. You see what is shared first.', onclick: () => askClaude({ kind: 'request', id: ex.id }, { question: IDEAS_QUESTION }) }, h('span', { text: '✦ Ideas for this endpoint' })));
+  }
+  if (!slot.isConnected) return;
+  slot.hidden = !chips.length;
+  clear(slot, chips.length ? [h('span', { class: 'chipslbl', text: 'Suggested' }), chips] : null);
+}
+
+function showSpecInMap(host) {
+  M.sel = host;
+  M.specOpen = host;
+  leaveTo('map');
+}
+
+/* ---------- Claude writes the finding ---------- */
+
+function findingQuestion(ids, note) {
+  return [
+    'Write this up as a security finding for a report.',
+    note ? 'What Plonix noticed: ' + note : '',
+    ids.length > 1 ? `More evidence: requests ${ids.slice(1).map((i) => '#' + i).join(', ')}. Read them with get_request.` : '',
+    'Use simple, plain words a developer who is new to security can follow. Answer with only a JSON object and no other text:',
+    '{"title": "a short title, under 90 characters", "severity": "info, low, medium, high or critical", "severity_reason": "one or two sentences on why this severity", "what_happens": "two or three sentences", "why_it_matters": "one or two sentences on the impact", "steps": ["each step to reproduce it, in order"]}',
+    'If the evidence does not show a real issue, say so in what_happens and use info.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** Pulls the JSON object out of Claude's answer. */
+function parseFindingAnswer(text) {
+  const a = text.indexOf('{');
+  const b = text.lastIndexOf('}');
+  if (a < 0 || b <= a) return null;
+  try {
+    const o = JSON.parse(text.slice(a, b + 1));
+    return o && typeof o.title === 'string' ? o : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function findingDescription(o, curl) {
+  const out = [];
+  if (o.what_happens) out.push('What happens\n' + o.what_happens);
+  if (o.why_it_matters) out.push('Why it matters\n' + o.why_it_matters);
+  if (o.severity_reason) out.push('Why this severity\n' + o.severity_reason);
+  const steps = Array.isArray(o.steps) ? o.steps.filter((x) => typeof x === 'string' && x.trim()) : [];
+  if (steps.length) out.push('How to reproduce\n' + steps.map((x, i) => `${i + 1}. ${x.trim()}`).join('\n'));
+  if (curl) out.push('The request, as curl\n' + curl);
+  return out.join('\n\n');
+}
+
+/**
+ * Asks Claude Code to write a finding from its evidence requests. Uses the
+ * same context bundle and in-app conversation as Ask Claude, then fills the
+ * form; nothing is saved until the user presses Save.
+ */
+async function writeFindingWithClaude(ids, note, onProgress, signal) {
+  let bundle = await api('/api/agents/ask', { method: 'POST', body: { kind: 'request', id: ids[0], question: findingQuestion(ids, note) } });
+  if (bundle.over_budget) bundle = await api('/api/agents/ask', { method: 'POST', body: { kind: 'request', id: ids[0], question: findingQuestion(ids, note), max_body_chars: 2000 } });
+  if (bundle.over_budget) throw new Error('This request is too large to send as is. Use Ask Claude to choose what to share.');
+  const { id } = await api('/api/agents/run', { method: 'POST', body: { prompt: bundle.prompt } });
+  signal.run = id;
+  let since = 0;
+  let text = '';
+  for (;;) {
+    if (signal.stop) return null;
+    const snap = await api(`/api/agents/run/${id}?since=${since}`);
+    for (const ev of snap.events) {
+      since = ev.seq + 1;
+      if (ev.type === 'text') text += ev.text + '\n';
+      else if (ev.type === 'tool') onProgress('Reading ' + ev.text.replace(/^mcp__plonix__/, '').replace(/_/g, ' ') + '…');
+      else if (ev.type === 'error') throw new Error(ev.text);
+    }
+    if (snap.status !== 'running') break;
+    await new Promise((r) => setTimeout(r, 600));
+  }
+  const o = parseFindingAnswer(text);
+  if (!o) throw new Error('Claude did not answer in the expected shape. Try again, or use Ask Claude.');
+  let curl = '';
+  try {
+    curl = curlForExchange(await getExchange(ids[0]));
+  } catch (_) {}
+  return { title: o.title.trim().slice(0, 200), severity: SEVERITIES.includes(String(o.severity).toLowerCase()) ? String(o.severity).toLowerCase() : null, description: findingDescription(o, curl) };
+}
+
+/* ---------- copy as curl ---------- */
+
+const shq = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
+
+/**
+ * A curl command that sends this request again. Headers curl works out by
+ * itself (Content-Length, HTTP/2 pseudo-headers, a Host matching the URL)
+ * are left out; a binary body is noted rather than pasted.
+ */
+function curlFor(method, url, headers, body, binary) {
+  const host = hostOf(url);
+  const parts = ['curl'];
+  const m = (method || 'GET').toUpperCase();
+  if (m !== 'GET' || (body && m !== 'POST')) parts.push('-X ' + m);
+  parts.push(shq(url));
+  let compressed = false;
+  for (const [k, v] of headers || []) {
+    const name = k.toLowerCase();
+    if (name.startsWith(':') || name === 'content-length' || name === 'connection') continue;
+    if (name === 'host' && v.split(':')[0].toLowerCase() === host) continue;
+    if (name === 'accept-encoding' && /gzip|br|deflate/.test(v)) compressed = true;
+    parts.push('-H ' + shq(`${k}: ${v}`));
+  }
+  if (compressed) parts.push('--compressed');
+  if (body) parts.push('--data-raw ' + shq(body));
+  let cmd = parts.join(' \\\n  ');
+  if (binary) cmd += '\n# The body is binary and is not included.';
+  return cmd;
+}
+
+function curlForExchange(ex) {
+  const binary = ex.req_text == null && b64len(ex.req_body) > 0;
+  return curlFor(ex.method, ex.url, ex.req_headers, binary ? '' : ex.req_text || '', binary);
+}
+
+async function copyCurl(id) {
+  try {
+    await copyText(curlForExchange(await getExchange(id)));
+  } catch (e) {
+    toast(e.message, 'err');
+  }
 }
 
 async function copyText(text) {
@@ -2593,7 +2873,20 @@ function renderBench(main) {
     ? h('span', { class: 'r', text: `binary body (${fmtSize(b64len(tab.bodyB64))}) is sent unchanged unless you type a body` })
     : runMode
       ? h('span', { class: 'r' }, h('button', { class: 'btn sm', text: '+ Mark position', title: 'Wrap the selected text as a payload position', onclick: () => marker('editor') }))
-      : h('span', { class: 'r', text: 'headers, blank line, body' });
+      : h(
+          'span',
+          { class: 'r' },
+          'headers, blank line, body · ',
+          h('button', {
+            class: 'link',
+            text: 'Copy curl',
+            title: 'Copy this request as a curl command',
+            onclick: () => {
+              const { headers, body } = parseRaw(editor.value);
+              copyText(curlFor(method.value.trim() || 'GET', url.value.trim(), headers, body, !!tab.bodyB64 && !body));
+            },
+          }),
+        );
   // Lens on the Bench: reads the request being edited and lets its encoded
   // values (JWTs, URL-encoding, Base64) be edited in decoded form, plus quick
   // actions on any selected text. Send mode only, to stay clear of the Run
@@ -4005,11 +4298,109 @@ async function drawBenchResponse(tab, col) {
         clientCertTag(ex),
       ),
     ),
+    h('div', { class: 'authslot' }),
     h('div', { class: 'spotslot' }),
     rawPre(responseText(ex, pretty)),
   );
+  checkLoggedOut(tab, ex, col.querySelector('.authslot'));
   const list = await loadInsights(ex);
   if (list && col.isConnected) drawInsights(col, list.filter((i) => i.side === 'response'));
+}
+
+/* ----- Session expired: offer the newest captured login ----- */
+
+const AUTH_HEADER = /^(authorization|cookie|x-[\w-]*(token|csrf|xsrf|session|auth)[\w-]*|[\w-]*(csrf|xsrf)[\w-]*)$/i;
+
+/** True when a response reads as "you are not logged in". */
+function looksLoggedOut(ex) {
+  if ([401, 419, 440].includes(ex.status)) return true;
+  if (ex.status >= 300 && ex.status < 400) return /log-?in|sign-?in|logon|\/auth|sso|session/i.test(header(ex.resp_headers, 'location') || '');
+  return false;
+}
+
+function authHeadersOf(headers) {
+  return headers.filter(([k, v]) => AUTH_HEADER.test(k) && v);
+}
+
+/**
+ * When a Bench send comes back logged out but the same request worked
+ * before, the saved login has probably expired. Plonix looks for a newer
+ * login in captured traffic and offers to swap it in, here and in the
+ * other Bench tabs for the same host. Nothing is sent until Send.
+ */
+async function checkLoggedOut(tab, ex, slot) {
+  if (!slot || !looksLoggedOut(ex)) return;
+  const host = hostOf(tab.url);
+  let worked = tab.history.some((e) => e.id !== ex.id && e.status >= 200 && e.status < 300);
+  if (!worked && tab.from) {
+    try {
+      const orig = await getExchange(tab.from);
+      worked = orig.status >= 200 && orig.status < 300;
+    } catch (_) {}
+  }
+  if (!worked || !host) return;
+  const mine = new Map(authHeadersOf(parseRaw(tab.raw).headers).map(([k, v]) => [k.toLowerCase(), v]));
+  let fresh = null;
+  try {
+    const page = await api('/api/traffic?limit=40&q=' + encodeURIComponent(`host:${host} status:2xx -source:replay`));
+    for (const item of page.items.filter((i) => i.id !== tab.from).slice(0, 15)) {
+      const cand = await getExchange(item.id);
+      const auth = authHeadersOf(cand.req_headers);
+      if (auth.some(([k, v]) => mine.has(k.toLowerCase()) && mine.get(k.toLowerCase()) !== v)) {
+        fresh = { ex: cand, auth };
+        break;
+      }
+    }
+  } catch (_) {}
+  if (!slot.isConnected) return;
+  // Other tabs still on the same old login; a tab whose token was changed on purpose is left alone.
+  const same = (t) => {
+    const theirs = new Map(authHeadersOf(parseRaw(t.raw).headers).map(([k, v]) => [k.toLowerCase(), v]));
+    const changed = fresh.auth.map(([k]) => k.toLowerCase()).filter((k) => mine.has(k) && mine.get(k) !== fresh.auth.find(([n]) => n.toLowerCase() === k)[1]);
+    return changed.length > 0 && changed.every((k) => theirs.get(k) === mine.get(k));
+  };
+  const others = fresh ? R.tabs.filter((t) => t !== tab && hostOf(t.url) === host && same(t)) : [];
+  const apply = (all) => {
+    for (const t of all ? [tab, ...others] : [tab]) t.raw = swapAuth(t.raw, fresh.auth);
+    saveBench();
+    toast(all && others.length ? `Newest login used in ${others.length + 1} Bench tabs` : 'Newest login used. Press Send to try again.', 'ok');
+    renderBench($('#main'));
+  };
+  clear(
+    slot,
+    h(
+      'div',
+      { class: 'authhint' },
+      h('b', { text: 'Your login looks expired. ' }),
+      fresh
+        ? [
+            `This request worked before. A newer login for ${host} was captured at ${fmtTime(fresh.ex.ts)} (#${fresh.ex.id}).`,
+            h('span', { class: 'acts' }, h('button', { class: 'btn sm primary', text: 'Use the newest login', onclick: () => apply(false) }), others.length ? h('button', { class: 'btn sm', text: `Use it in all ${others.length + 1} tabs`, onclick: () => apply(true) }) : null),
+          ]
+        : [
+            'This request worked before. Log in again in the capture browser, then check again to use the new login here.',
+            h('span', { class: 'acts' }, h('button', { class: 'btn sm', text: 'Check again', onclick: () => checkLoggedOut(tab, ex, slot) })),
+          ],
+    ),
+  );
+}
+
+/** Replaces the login headers in a Bench request with fresh ones; values elsewhere stay as they are. */
+function swapAuth(raw, auth) {
+  const text = raw.replace(/\r\n/g, '\n');
+  const cut = text.indexOf('\n\n');
+  const head = cut < 0 ? text : text.slice(0, cut);
+  const rest = cut < 0 ? '' : text.slice(cut);
+  const fresh = new Map(auth.map(([k, v]) => [k.toLowerCase(), v]));
+  const lines = head.split('\n').map((line) => {
+    const c = line.indexOf(':');
+    const name = c > 0 ? line.slice(0, c).trim() : '';
+    if (!name || !fresh.has(name.toLowerCase())) return line;
+    const v = fresh.get(name.toLowerCase());
+    fresh.delete(name.toLowerCase());
+    return `${name}: ${v}`;
+  });
+  return lines.join('\n') + rest;
 }
 
 function historyPanel(tab, main) {
@@ -4623,8 +5014,13 @@ async function drawHostDetail() {
   clear(box, h('div', { class: 'empty', text: 'Loading ' + host + '…' }));
   let eps;
   let tech;
+  let spec;
   try {
-    [eps, tech] = await Promise.all([api('/api/hosts/' + encodeURIComponent(host) + '/endpoints'), api('/api/tech/' + encodeURIComponent(host))]);
+    [eps, tech, spec] = await Promise.all([
+      api('/api/hosts/' + encodeURIComponent(host) + '/endpoints'),
+      api('/api/tech/' + encodeURIComponent(host)),
+      api('/api/hosts/' + encodeURIComponent(host) + '/spec').catch(() => null),
+    ]);
   } catch (e) {
     return clear(box, h('div', { class: 'rerr', text: e.message }));
   }
@@ -4661,6 +5057,7 @@ async function drawHostDetail() {
           ),
         )
       : h('div', { class: 'muted', style: { padding: '8px 12px' }, text: 'No technologies detected yet.' }),
+    spec ? specSection(spec) : null,
     h('div', { class: 'lbl', style: { padding: '12px 12px 6px' }, text: 'Endpoints' }),
     h(
       'table',
@@ -4683,6 +5080,76 @@ async function drawHostDetail() {
       ),
     ),
   );
+}
+
+/** Endpoints an API description lists that captured traffic has not visited yet, each one click from the Bench. */
+function specSection(spec) {
+  const todo = spec.endpoints.filter((e) => !e.visited);
+  const open = M.specOpen === spec.host;
+  M.specOpen = null;
+  const body = h(
+    'div',
+    { hidden: !open },
+    todo.length
+      ? h(
+          'table',
+          { class: 'grid' },
+          h('thead', null, h('tr', null, h('th', { text: 'Method' }), h('th', { text: 'Path' }), h('th', { text: 'What it does' }), h('th', { text: 'Parameters' }), h('th'))),
+          h(
+            'tbody',
+            null,
+            todo.map((e) =>
+              h(
+                'tr',
+                null,
+                h('td', null, h('span', { class: 'meth m-' + e.method, text: e.method })),
+                h('td', { class: 'mono', text: e.path }),
+                h('td', { class: 'muted', text: e.summary }),
+                h('td', null, e.params.map((p) => h('span', { class: 'param', text: p }))),
+                h('td', { class: 'num' }, h('button', { class: 'btn sm', text: 'Open on Bench', title: 'Start a request for this endpoint on the Bench. Nothing is sent until you press Send.', onclick: () => specToBench(spec, e) })),
+              ),
+            ),
+          ),
+        )
+      : h('div', { class: 'muted', style: { padding: '4px 12px 8px' }, text: 'Every endpoint it lists has been visited.' }),
+  );
+  const toggle = h('button', {
+    class: 'link',
+    text: open ? 'Hide' : 'Show',
+    onclick: () => {
+      body.hidden = !body.hidden;
+      toggle.textContent = body.hidden ? 'Show' : 'Hide';
+    },
+  });
+  return h(
+    'div',
+    { class: 'specsec' },
+    h(
+      'div',
+      { class: 'lbl', style: { padding: '12px 12px 6px' } },
+      `Not visited yet (${todo.length} of ${spec.endpoints.length})`,
+      h(
+        'span',
+        { class: 'r' },
+        'from the API description ',
+        h('button', { class: 'link', text: '#' + spec.source_id, title: (spec.title || 'API description') + (spec.version ? ' ' + spec.version : ''), onclick: () => showExchange(spec.source_id) }),
+        ' · ',
+        toggle,
+      ),
+    ),
+    body,
+  );
+}
+
+function specToBench(spec, e) {
+  const url = `${spec.scheme || 'https'}://${spec.host}${e.path}`;
+  const query = e.params.filter((p) => p.startsWith('query:')).map((p) => p.slice(6) + '=');
+  const json = /^(POST|PUT|PATCH)$/.test(e.method);
+  const head = ['Accept: */*', 'User-Agent: Plonix', json ? 'Content-Type: application/json' : null].filter(Boolean).join('\n');
+  R.tabs.push({ name: `${e.method} ${e.path}`.slice(0, 60), method: e.method, url: url + (query.length ? '?' + query.join('&') : ''), raw: head + '\n\n' + (json ? '{}' : ''), bodyB64: null, history: [], cur: null, picks: [] });
+  R.active = R.tabs.length - 1;
+  saveBench();
+  leaveTo('bench');
 }
 
 /* ======================================================================
@@ -4858,11 +5325,52 @@ function newFinding(ids, title) {
 }
 
 /** Records a new finding, or edits `f`. */
-function findingForm(f, ids = [], title = '') {
+function findingForm(f, ids = [], title = '', hint = null) {
   const t = h('input', { value: f ? f.title : title || '', placeholder: 'e.g. IDOR on /v2/orders/{id} exposes other users’ addresses' });
-  const sev = h('select', null, SEVERITIES.map((s) => h('option', { value: s, text: s, selected: s === (f ? f.severity : 'medium') })));
+  const sev = h('select', null, SEVERITIES.map((s) => h('option', { value: s, text: s, selected: s === (f ? f.severity : (hint && hint.severity) || 'medium') })));
   const desc = h('textarea', { placeholder: 'What happens, how to reproduce it, and why it matters.', value: f ? f.description : '' });
-  const ex = f ? null : h('input', { value: ids.join(', '), placeholder: 'Request ids, e.g. 14, 22' });
+  const ex = f ? null : h('input', { value: ids.join(', '), placeholder: 'Request ids, e.g. 14, 22', oninput: () => !job.busy && writeIdle() });
+  // Claude can write the title, severity and description from the evidence.
+  const job = {};
+  const writeNote = h('span', { class: 'muted fine' });
+  const writeBtn = h('button', { class: 'btn sm askbtn', type: 'button' }, h('span', { class: 'askico', text: '✦' }), ' Write it with Claude');
+  const evidence = () => (f ? f.exchange_ids : ex.value.split(/[\s,]+/).filter(Boolean).map((x) => Number(x.replace('#', '')))).filter((n) => Number.isInteger(n) && n > 0);
+  const writeIdle = () => {
+    writeBtn.disabled = false;
+    writeBtn.lastChild.textContent = ' Write it with Claude';
+    const n = evidence();
+    writeNote.textContent = n.length ? `Shares request #${n[0]} and its response with Claude Code on this Mac.` : 'Add an evidence request first.';
+  };
+  writeBtn.onclick = async () => {
+    if (job.busy) {
+      job.stop = true;
+      if (job.run) api(`/api/agents/run/${job.run}`, { method: 'DELETE' }).catch(() => {});
+      job.busy = false;
+      return writeIdle();
+    }
+    const n = evidence();
+    if (!n.length) return (m.err.textContent = 'Add the request that shows the issue as evidence first.');
+    Object.assign(job, { busy: true, stop: false, run: null });
+    m.err.textContent = '';
+    writeBtn.lastChild.textContent = ' Stop';
+    writeNote.textContent = 'Claude is writing the finding…';
+    try {
+      const out = await writeFindingWithClaude(n, hint && hint.note, (msg) => (writeNote.textContent = msg), job);
+      if (!out || job.stop || !m.el.isConnected) return;
+      t.value = out.title;
+      if (out.severity) sev.value = out.severity;
+      desc.value = out.description;
+      writeNote.textContent = 'Written by Claude. Check it, edit anything, then save.';
+    } catch (e) {
+      if (!job.stop) m.err.textContent = e.message;
+      writeIdle();
+    } finally {
+      job.busy = false;
+      writeBtn.disabled = false;
+      writeBtn.lastChild.textContent = ' Write it with Claude';
+    }
+  };
+  writeIdle();
   const save = async () => {
     if (!t.value.trim()) return (m.err.textContent = 'Give the finding a title.');
     if (f) {
@@ -4894,7 +5402,14 @@ function findingForm(f, ids = [], title = '') {
   };
   const m = modal(
     f ? `Edit finding #${f.id}` : 'New finding',
-    [h('label', null, 'Title', t), h('label', null, 'Severity', sev), h('label', null, 'Description', desc), ex ? h('label', null, 'Evidence (request ids)', ex) : null],
+    [
+      hint ? h('div', { class: 'fhint', text: 'Plonix noticed: ' + hint.note }) : null,
+      agentsOn() ? h('div', { class: 'fwrite' }, writeBtn, writeNote) : null,
+      h('label', null, 'Title', t),
+      h('label', null, 'Severity', sev),
+      h('label', null, 'Description', desc),
+      ex ? h('label', null, 'Evidence (request ids)', ex) : null,
+    ],
     [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), h('button', { class: 'btn primary', text: f ? 'Save' : 'Save finding', onclick: save })],
   );
   m.el.addEventListener('keydown', (e) => {
@@ -5877,13 +6392,13 @@ const fmtTok = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' 
  * the user edit the question, drop parts and shorten bodies, and asks for
  * an explicit confirmation when it is larger than their limit.
  */
-async function askClaude(subject) {
-  const st = { exclude: [], question: null, max: null, bundle: null, confirmBig: false };
+async function askClaude(subject, opts = {}) {
+  const st = { exclude: [], question: opts.question || null, max: null, bundle: null, confirmBig: false };
   // The live in-app conversation, if one has been started.
   const convo = { id: null, since: 0, sessionId: null, running: false, proposed: false };
 
   /* ---- compose view (what gets shared) ---- */
-  const q = h('textarea', { class: 'askq', rows: 3 });
+  const q = h('textarea', { class: 'askq', rows: 3, value: opts.question || '' });
   const partsBox = h('div', { class: 'askparts' });
   const meter = h('div', { class: 'askmeter' });
   const warn = h('div', { class: 'askwarn', hidden: true });
