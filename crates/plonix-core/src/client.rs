@@ -126,6 +126,20 @@ impl Client {
         }
     }
 
+    /// Streams a document route (a HAR export) into `out` as it arrives.
+    /// Returns the number of bytes written.
+    pub fn download(&self, path: &str, out: &mut impl std::io::Write) -> Result<u64> {
+        match self.request("GET", path).call() {
+            Ok(resp) => Ok(std::io::copy(&mut resp.into_reader(), out)?),
+            Err(e) => self.handle(Err(e)).map(|_| 0),
+        }
+    }
+
+    /// Posts raw bytes (a file) and reads a JSON answer.
+    pub fn post_bytes(&self, path: &str, body: &[u8]) -> Result<Value> {
+        self.handle(self.request("POST", path).set("Content-Type", "application/json").send_bytes(body))
+    }
+
     fn request(&self, method: &str, path: &str) -> ureq::Request {
         self.agent.request(method, &format!("{}{path}", self.base)).set("Authorization", &self.auth()).set("X-Plonix-Client", &self.initiator)
     }
