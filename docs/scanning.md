@@ -76,11 +76,42 @@ following links would, bounded.
 
 ### Crawl with browser
 
-The same, but driven through the existing headless browser (`browser.rs`) so
-JavaScript-rendered links, SPA routes and XHR/fetch endpoints are reached.
-Discovered requests still flow through the proxy and scope enforcement. This is
-the slower, more complete discovery mode; the user chooses it when an app is
-JS-heavy.
+For apps that build their pages with JavaScript, a plain crawl sees an almost
+empty page. A browser crawl renders each page first:
+
+- It uses a Chromium-based browser already on your computer (Google Chrome,
+  Chromium, Brave or Microsoft Edge; set `PLONIX_BROWSER` to pick one). It
+  runs headless, on a throwaway profile that is deleted afterwards, so your
+  own browser's cookies and history are never touched.
+- Every request the browser makes goes through the Plonix proxy, so pages,
+  scripts and the API calls they make all land in **Traffic** and on the
+  **Map**, like anything you browse yourself.
+- It starts at the URL you give (on a host accepted into scope) and visits
+  pages breadth-first, waiting on each until its network goes quiet. Links
+  come from the rendered page: anchors, frames, router links, and the routes
+  the app pushes onto the browser history.
+- **Scope is enforced inside the browser.** Before any request leaves, its
+  host is checked; requests to a host that is not accepted are blocked, so
+  redirects, scripts and links cannot take the crawl elsewhere. The report
+  lists the blocked hosts: if the app needs one (a CDN, say), accept it in
+  Scope and crawl again.
+- **It only reads.** Forms are listed, never submitted (even ones a script
+  tries to submit), popups do not open, and confirmation dialogs are
+  answered "no". With **Click buttons too**, it also clicks buttons and
+  script links outside forms, skipping anything whose label looks like
+  logging out, deleting, removing, paying, sending or the like.
+- It stops at the page budget (100), the depth budget (4) or the time limit
+  (3 minutes), whichever comes first.
+
+If no Chromium-based browser is found, the crawl says so and runs nothing;
+install one (or point `PLONIX_BROWSER` at it) and try again.
+
+```
+plonix crawl --browser https://app.example.com/
+plonix crawl --browser --click --max-seconds 300 app.example.com/dashboard
+```
+
+In the app: **Scans → Crawl → Use a browser (for JavaScript apps)**.
 
 ### Active scan
 
@@ -227,6 +258,11 @@ A new **Scans** screen (⌘7), with a simple left-to-right flow:
   never leaves accepted scope or submits a form. API `POST /api/crawl`
   (user-only); CLI `plonix crawl`.
 
-Still to come: crawl-with-browser (needs a headless browser driver; the plain
-crawl runs meanwhile and the report says so), the Scans UI area, and installed
-scan-pack pinning in the store.
+- Crawl with browser: `browser_crawl.rs` launches the detected Chromium-based
+  browser headless (`browser::headless_args`) through the proxy and drives it
+  over the DevTools protocol (`cdp.rs`, a small WebSocket client). Every
+  request is paused and checked against scope (`crawl::blocked_host`) before
+  it goes out; links are followed only with `crawl::follow` (same host,
+  accepted). Same API and CLI with `browser: true` / `--browser`.
+
+Still to come: installed scan-pack pinning in the store.

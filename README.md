@@ -66,7 +66,7 @@ Plonix has a handful of tools, each with its own name. They are the same in the 
 - **Intercept** in the Traffic toolbar (or `i`, or `plonix intercept on`) holds requests passing through the proxy so you can look at each one before it goes on. Held items wait in a panel above the traffic list: edit the request as text (start line, headers, body) and **Forward** (⌘↵ or `f`), **Drop** it (`d`; the browser gets an error page), or **Forward all**. A count on the button and on Traffic in the sidebar says how many are waiting.
 - By default only in-scope hosts are held; Settings › Intercept switches to everything, narrows it with a Traffic search such as `method:POST path:/api`, and turns on **responses** too, so you can edit what the browser gets. Compressed response bodies are shown decoded and sent uncompressed when changed.
 - Nothing waits forever: an item nobody answers goes on unchanged after 5 minutes (configurable), and turning Intercept off sends everything held on. Intercept is off whenever a project opens.
-- HTTP/2 requests are shown and edited in HTTP/1.1 form. A body longer than the body limit, still arriving, or not text cannot be edited: its start line and headers can, and the body goes through as it is. WebSocket messages, hosts that are never decrypted, the proxy's own pages and Plonix's own requests (Bench, scans, crawls) are never held.
+- HTTP/2 requests are shown and edited in HTTP/1.1 form. A body longer than the body limit, still arriving, or not text cannot be edited: its start line and headers can, and the body goes through as it is. WebSocket messages, hosts that are never decrypted, the proxy's own pages and Plonix's own requests (Bench, scans, crawls without a browser) are never held. A browser crawl goes through the proxy, so with Intercept on its requests wait like the rest.
 - The record shows what was actually sent, marked **edited**, with the original kept: the Lens shows it on click, and `GET /api/traffic/{id}` returns it as `original_request` / `original_response`.
 - Intercept is yours alone: agents cannot see the queue or hold, edit, forward or drop anything.
 
@@ -174,6 +174,7 @@ claude                       # then ask:
 
 ### Scanning and crawl
 - **Crawl** a host to discover its endpoints, parameters and forms (`plonix crawl example.com`). It starts from the traffic you captured, follows same-host links within a page and depth budget, and never submits a form.
+- **Crawl with a browser** for JavaScript apps (`plonix crawl --browser https://app.example.com/`, or **Use a browser** on the Scans screen). Pages render in a headless copy of your Chrome, Chromium, Brave or Edge, on a throwaway profile, routed through Plonix so every request lands in Traffic and on the Map. Links come from the rendered page and the app's own routes; requests to hosts outside scope are blocked inside the browser, forms are never submitted, and with `--click` it also clicks buttons that do not look destructive (never log out, delete, pay and the like).
 - **Active scans** run checks chosen from the target's fingerprint: a check only runs where its detector found something it applies to, so checks that cannot apply are never sent. `plonix scan suggest example.com` shows the suggested profile without sending anything, and `plonix scan run example.com` runs it.
 - The built-in checks are benign (exposed `.git/config` and `.env`, `server-status`, a harmless reflection marker). Intrusive checks are off unless you turn them on for a scan, and every scan is capped by a request budget.
 - Every scan and crawl request goes through the same scope choke point as a replay, so it can only reach hosts you accepted, and it is recorded in Traffic. Nothing scans on its own: a person starts every scan, and agents cannot. Findings land in Findings with the requests that prove them. See [docs/scanning.md](docs/scanning.md).
@@ -243,6 +244,7 @@ plonix watch scope:in                      # print new traffic as it arrives
 plonix hosts                               # every host seen, busiest first
 plonix tech                                # technologies detected on each host, with evidence
 plonix crawl example.com                   # discover endpoints, parameters and forms (accepted hosts only)
+plonix crawl --browser example.com/app     # the same in a headless browser, for JavaScript apps
 plonix scan suggest example.com            # the checks that apply to this host; sends nothing
 plonix scan run example.com                # run them
 
@@ -408,11 +410,11 @@ docs/             detection rules, agents and MCP, extension design
 - [x] Ask Claude Code from a request, finding, host or scope suggestion, with scoped context you review first
 - [x] Scanning foundation: detectors, checks and scan packs, fingerprint-driven suggestions, and active scans with benign built-in checks (`plonix scan`)
 - [x] Crawl to discover endpoints, parameters and forms (`plonix crawl`)
+- [x] Crawl with a browser for JavaScript-heavy apps (`plonix crawl --browser`), and a Scans screen in the window
 
 **Coming**
 - [ ] Opt-in active mode for agents: replay and send within accepted scope, switched on by you ([design](docs/agents.md#later-an-opt-in-active-mode))
 - [ ] Signed and notarized app downloads (the pipeline is ready; see [docs/releasing.md](docs/releasing.md))
-- [ ] Crawl with a browser for JavaScript-heavy apps, and a Scans screen in the window
 - [ ] Sandboxed WebAssembly extensions with a closed capability list that can never bypass scope ([design](docs/extensions.md))
 
 Deliberately out of scope: token-randomness analysis, and scans that run unattended or reach beyond accepted scope. Scanning in Plonix is something you start, against a host you accepted, with checks chosen from what it runs. Plonix stays small on purpose.

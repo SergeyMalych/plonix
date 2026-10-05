@@ -37,9 +37,9 @@ pub struct RunArgs {
 
 #[derive(Args)]
 pub struct CrawlArgs {
-    /// The host to crawl (must be accepted into scope)
-    pub host: String,
-    /// Where to start, as a path
+    /// The host or URL to crawl (its host must be accepted into scope)
+    pub target: String,
+    /// Where to start, as a path (a URL target already says where)
     #[arg(long, value_name = "PATH")]
     pub start: Option<String>,
     /// Most pages to fetch
@@ -48,30 +48,57 @@ pub struct CrawlArgs {
     /// How deep to follow links
     #[arg(long, value_name = "N")]
     pub max_depth: Option<usize>,
-    /// Use the browser driver for JS-rendered pages (not available yet)
+    /// Render pages in a headless Chromium-based browser, for JavaScript apps
     #[arg(long)]
     pub browser: bool,
+    /// With --browser: also click buttons that do not look destructive
+    #[arg(long, requires = "browser")]
+    pub click: bool,
+    /// With --browser: stop after this many seconds
+    #[arg(long, value_name = "SECONDS", requires = "browser")]
+    pub max_seconds: Option<u64>,
 }
 
 pub fn crawl_cmd(ctx: &Ctx, a: CrawlArgs) -> Result<()> {
     let c = ctx.client()?;
+    let target = a.target.trim();
+    // A URL names the host and where to start; a bare host starts at --start.
+    let (host, start) = if target.contains("://") || target.contains('/') {
+        let t = plonix_core::browser::parse_target(target)?;
+        (t.host, a.start.clone().or(Some(t.url)))
+    } else {
+        (target.to_string(), a.start.clone())
+    };
     let body = json!({
-        "host": a.host.trim(),
-        "start": a.start,
+        "host": host,
+        "start": start,
         "browser": a.browser,
+        "click": a.click,
         "max_pages": a.max_pages,
         "max_depth": a.max_depth,
+        "max_seconds": a.max_seconds,
     });
+    if a.browser && !ctx.json {
+        eprintln!("Crawling {host} in a headless browser; this can take a few minutes…");
+    }
     let v = c.post("/api/crawl", body)?;
     if ctx.json {
         return ctx.print_json(&v);
     }
     println!(
-        "Crawled {} — {} page(s) fetched, {} URL(s) found (all in scope).",
-        a.host.trim(),
+        "Crawled {host}{} — {} page(s) visited, {} URL(s) found (all in scope){}.",
+        v["browser"].as_str().map(|b| format!(" with {b}")).unwrap_or_default(),
         v["pages_fetched"].as_u64().unwrap_or(0),
-        v["urls_found"].as_u64().unwrap_or(0)
+        v["urls_found"].as_u64().unwrap_or(0),
+        match v["clicks"].as_u64() {
+            Some(n) if n > 0 => format!(", {n} click(s)"),
+            _ => String::new(),
+        }
     );
+    let blocked: Vec<&str> = v["blocked_hosts"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default();
+    if !blocked.is_empty() {
+        println!("\nBlocked (not in scope): {}", blocked.join(", "));
+    }
     let forms = v["forms"].as_array().cloned().unwrap_or_default();
     if !forms.is_empty() {
         println!("\nForms:");

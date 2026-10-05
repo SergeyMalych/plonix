@@ -919,6 +919,8 @@ input.num { width: 72px; }
 .cbnote { font-size: 11px; margin: 2px 0 0; }
 .crawlreport { margin-top: 10px; border-top: 1px solid var(--line-2); padding-top: 10px; }
 .crawlreport h4 { margin: 0; font-size: 12px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--fg-3); }
+.crawlblocked { font-size: 11.5px; margin: 8px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.crawlblocked code { font-family: var(--mono); font-size: 11px; color: var(--fg-2); background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 5px; padding: 1px 6px; }
 .scanforms { margin-top: 8px; }
 
 /* intercept */
