@@ -148,6 +148,10 @@ pub enum EvidenceKind {
     SharesSession,
     /// The host's TLS certificate also covers an in-scope host, or vice versa.
     SharesCertificate,
+    /// An extension enumerated it as a subdomain of an in-scope domain. Unlike
+    /// the other kinds this comes from a tool the user ran, not from captured
+    /// traffic, so it carries no originating exchange.
+    Discovered,
 }
 
 impl EvidenceKind {
@@ -158,6 +162,7 @@ impl EvidenceKind {
             EvidenceKind::LinkedFrom => "linked_from",
             EvidenceKind::SharesSession => "shares_session",
             EvidenceKind::SharesCertificate => "shares_certificate",
+            EvidenceKind::Discovered => "discovered",
         }
     }
     pub fn parse(s: &str) -> Option<Self> {
@@ -167,6 +172,7 @@ impl EvidenceKind {
             "linked_from" => EvidenceKind::LinkedFrom,
             "shares_session" => EvidenceKind::SharesSession,
             "shares_certificate" => EvidenceKind::SharesCertificate,
+            "discovered" => EvidenceKind::Discovered,
             _ => return None,
         })
     }
@@ -174,7 +180,7 @@ impl EvidenceKind {
         match self {
             EvidenceKind::SharesSession => 5,
             EvidenceKind::SharesCertificate | EvidenceKind::RedirectedFrom => 3,
-            EvidenceKind::RequestedFrom => 2,
+            EvidenceKind::RequestedFrom | EvidenceKind::Discovered => 2,
             EvidenceKind::LinkedFrom => 1,
         }
     }
@@ -185,6 +191,7 @@ impl EvidenceKind {
             EvidenceKind::LinkedFrom => format!("referenced by {via}"),
             EvidenceKind::SharesSession => format!("receives a session token issued to {via}"),
             EvidenceKind::SharesCertificate => format!("shares a TLS certificate with {via}"),
+            EvidenceKind::Discovered => format!("found while enumerating subdomains of {via}"),
         }
     }
 }

@@ -1,0 +1,11 @@
+{
+  "plonix_extension": 1,
+  "name": "js-endpoints",
+  "version": "0.1.0",
+  "description": "Reads captured JavaScript and pulls out the API paths and URLs it references, so endpoints nothing has visited yet stand out.",
+  "author": "Plonix contributors",
+  "homepage": "https://github.com/SergeyMalych/plonix/tree/main/examples/extensions/js-endpoints",
+  "runtime": "wasm",
+  "entry": "js_endpoints.wasm",
+  "capabilities": ["read-traffic", "passive-analysis"]
+}
