@@ -955,6 +955,24 @@ impl Engine {
         Ok(self.scan_catalog().suggest(&tech, &exchanges))
     }
 
+    /// Analyzes a host and returns a reviewable scan plan: the active signals
+    /// and the gated tactics turned into concrete, justified `TestProposal`s
+    /// over the host's discovered endpoints, grouped by OWASP category.
+    /// Read-only — sends nothing — so it works for any host and is safe to
+    /// expose to an advising agent, exactly like `scan_suggest`.
+    pub fn scan_plan(&self, host: &str) -> Result<scan::ScanPlan> {
+        let host = scope::normalize_host(host);
+        let tech = self.detect_host(&host)?;
+        let exchanges = self.store.exchanges_for_host(&host, detect::HOST_SAMPLE)?;
+        let endpoints: Vec<scan::PlanEndpoint> = self
+            .store
+            .endpoints(&host)?
+            .into_iter()
+            .map(|e| scan::PlanEndpoint { method: e.method, path: e.path, params: e.params, sample_id: e.sample_id })
+            .collect();
+        Ok(self.scan_catalog().plan(&host, &tech, &exchanges, &endpoints))
+    }
+
     /// Runs an active scan against one accepted host. Every request goes through
     /// `send`, so the scan can only ever reach a host in accepted scope, and
     /// each request is recorded like any replay. Findings are recorded against

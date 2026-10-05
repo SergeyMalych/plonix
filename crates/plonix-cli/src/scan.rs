@@ -14,6 +14,12 @@ pub enum ScanCmd {
         /// The host to profile
         host: String,
     },
+    /// Show the reviewable scan plan for a host: proposed tests with reasons,
+    /// grouped by OWASP category (sends nothing)
+    Plan {
+        /// The host to analyze
+        host: String,
+    },
     /// List the available scan detectors and tactics
     Catalog,
     /// Run an active scan against a host that is accepted into scope
@@ -119,6 +125,7 @@ pub fn crawl_cmd(ctx: &Ctx, a: CrawlArgs) -> Result<()> {
 pub fn scan_cmd(ctx: &Ctx, cmd: ScanCmd) -> Result<()> {
     match cmd {
         ScanCmd::Suggest { host } => suggest(ctx, &host),
+        ScanCmd::Plan { host } => plan(ctx, &host),
         ScanCmd::Catalog => catalog(ctx),
         ScanCmd::Run(a) => run(ctx, a),
     }
@@ -146,6 +153,53 @@ fn suggest(ctx: &Ctx, host: &str) -> Result<()> {
         println!("\n{skipped} tactic(s) not applicable to this target and skipped.");
     }
     println!("\nRun it: `plonix scan run {host}`  (add --intrusive for the optional checks).");
+    Ok(())
+}
+
+fn plan(ctx: &Ctx, host: &str) -> Result<()> {
+    let c = ctx.client()?;
+    let v = c.get(&format!("/api/scan/plan/{}", encode(host.trim())))?;
+    if ctx.json {
+        return ctx.print_json(&v);
+    }
+    let groups = v["groups"].as_array().cloned().unwrap_or_default();
+    if groups.is_empty() {
+        println!("No tests to propose for {host} yet. Browse the target so Plonix can fingerprint it and see its endpoints, then try again.");
+        return Ok(());
+    }
+    println!(
+        "Scan plan for {host} — {} proposed test(s), {} recommended. Nothing runs until you choose.\n",
+        v["total"].as_u64().unwrap_or(0),
+        v["recommended"].as_u64().unwrap_or(0)
+    );
+    for g in &groups {
+        println!("[{}]", g["category"].as_str().unwrap_or("other"));
+        for p in g["proposals"].as_array().cloned().unwrap_or_default() {
+            let ins = &p["insertion"];
+            let where_ = match (ins["param"].as_str().unwrap_or(""), ins["path"].as_str().unwrap_or("")) {
+                ("", path) => path.to_string(),
+                (param, path) => format!("{path} [{param}]"),
+            };
+            println!(
+                "  {} {:<8} {:<10} {} {}",
+                if p["recommended"].as_bool().unwrap_or(false) { "[x]" } else { "[ ]" },
+                p["severity"].as_str().unwrap_or(""),
+                p["id"].as_str().unwrap_or(""),
+                ins["method"].as_str().unwrap_or(""),
+                where_
+            );
+            println!("        {}", p["rationale"].as_str().unwrap_or(""));
+        }
+        println!();
+    }
+    let skipped = v["skipped"].as_u64().unwrap_or(0);
+    if skipped > 0 {
+        println!("{skipped} tactic(s) not applicable to this target.");
+    }
+    if v["truncated"].as_bool().unwrap_or(false) {
+        println!("Plan truncated: more endpoints exist than were expanded into proposals.");
+    }
+    println!("\nRun the recommended set: `plonix scan run {host}`.");
     Ok(())
 }
 
