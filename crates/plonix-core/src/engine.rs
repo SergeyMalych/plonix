@@ -1436,7 +1436,7 @@ fn probe_request(url: &str, param: Option<&str>, marker: &str) -> SendRequest {
         Some(p) => format!("{url}{}{p}={marker}", if url.contains('?') { '&' } else { '?' }),
         None => url.to_string(),
     };
-    SendRequest { method: "GET".into(), url, headers: vec![], body: None, body_base64: None }
+    SendRequest { method: "GET".into(), url, headers: vec![], body: None, body_base64: None, as_user: None }
 }
 
 impl Engine {
