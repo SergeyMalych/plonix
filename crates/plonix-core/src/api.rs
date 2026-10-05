@@ -101,9 +101,11 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/traffic/{id}", get(exchange))
         .route("/api/traffic/{id}/insights", get(insights))
         .route("/api/traffic/{id}/messages", get(messages))
+        .route("/api/traffic/{id}/spec", get(exchange_spec))
         .route("/api/views/{view}", get(view_state).put(set_view_state))
         .route("/api/hosts", get(hosts))
         .route("/api/hosts/{host}/endpoints", get(endpoints))
+        .route("/api/hosts/{host}/spec", get(host_spec))
         .route("/api/tech", get(tech_all))
         .route("/api/tech/{host}", get(tech_host))
         .route("/api/rules", get(rule_packs))
@@ -991,6 +993,67 @@ async fn endpoints(State(s): State<AppState>, caller: MaybeCaller, Path(host): P
     match s.engine.store.endpoints(&host) {
         Ok(e) => Json(e).into_response(),
         Err(e) => internal(e),
+    }
+}
+
+/// The API description an exchange's response holds, with the endpoints
+/// captured traffic already visited marked.
+async fn exchange_spec(State(s): State<AppState>, caller: MaybeCaller, Path(id): Path<i64>) -> Response {
+    let engine = s.engine.clone();
+    let found = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<crate::apispec::ApiSpec>> {
+        let Some(ex) = engine.store.get_exchange(id)? else { return Ok(None) };
+        let Some(mut spec) = crate::apispec::parse(&ex) else { return Ok(None) };
+        let seen = engine.store.endpoints(&spec.host)?;
+        crate::apispec::mark_visited(&mut spec, &seen);
+        Ok(Some(spec))
+    })
+    .await;
+    match found {
+        Ok(Ok(Some(spec))) => {
+            if agent_in_scope_only(&s, &caller) && !s.engine.rules().in_scope(&spec.host) {
+                return outside_agent_data();
+            }
+            Json(spec).into_response()
+        }
+        Ok(Ok(None)) => err(StatusCode::NOT_FOUND, "not_found", &format!("exchange {id} is not an API description")),
+        Ok(Err(e)) => internal(e),
+        Err(e) => internal(e.into()),
+    }
+}
+
+/// The newest API description captured for a host (served by it, or
+/// describing it), or null.
+async fn host_spec(State(s): State<AppState>, caller: MaybeCaller, Path(host): Path<String>) -> Response {
+    if agent_in_scope_only(&s, &caller) && !s.engine.rules().in_scope(&host) {
+        return outside_agent_data();
+    }
+    let engine = s.engine.clone();
+    let found = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<crate::apispec::ApiSpec>> {
+        let host = host.to_ascii_lowercase();
+        let mut spec = engine.store.spec_candidates(&host, 50)?.iter().find_map(crate::apispec::parse);
+        if spec.is_none() {
+            // Described here but served from another host, e.g. a docs site.
+            let rules = engine.rules();
+            for other in engine.store.hosts(&rules)?.into_iter().take(100) {
+                if other.host == host {
+                    continue;
+                }
+                spec = engine.store.spec_candidates(&other.host, 10)?.iter().filter_map(crate::apispec::parse).find(|s| s.host == host);
+                if spec.is_some() {
+                    break;
+                }
+            }
+        }
+        let Some(mut spec) = spec else { return Ok(None) };
+        let seen = engine.store.endpoints(&spec.host)?;
+        crate::apispec::mark_visited(&mut spec, &seen);
+        Ok(Some(spec))
+    })
+    .await;
+    match found {
+        Ok(Ok(spec)) => Json(spec).into_response(),
+        Ok(Err(e)) => internal(e),
+        Err(e) => internal(e.into()),
     }
 }
 

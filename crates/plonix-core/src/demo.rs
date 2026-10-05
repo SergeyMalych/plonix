@@ -504,6 +504,33 @@ export async function api(path, opts = {{}}) {{
     s.add(api_get("https://api.brightcart.example/v1/products/1002"), resp(200, "application/json").api().json(product(1002, "Merino hoodie", 7400)))?;
     s.add(api_get("https://api.brightcart.example/v1/products/9999"), resp(404, "application/json").api().json(json!({ "error": "not_found", "message": "No product 9999" })))?;
 
+    // The API describes itself: the Map lists what it offers that nobody has
+    // visited yet.
+    let op = |summary: &str| json!({ "summary": summary });
+    s.add(
+        api_get("https://api.brightcart.example/v1/openapi.json"),
+        resp(200, "application/json").api().json(json!({
+            "openapi": "3.0.3",
+            "info": { "title": "Brightcart API", "version": "1.8.2" },
+            "servers": [ { "url": "https://api.brightcart.example/v1" } ],
+            "paths": {
+                "/me": { "get": op("The signed-in customer") },
+                "/products": { "get": op("List products") },
+                "/products/{productId}": { "get": op("One product") },
+                "/products/{productId}/reviews": { "get": op("Reviews of a product"), "post": op("Write a review") },
+                "/search": { "get": { "summary": "Search products", "parameters": [ { "in": "query", "name": "q" }, { "in": "query", "name": "limit" } ] } },
+                "/orders": { "get": op("Your orders") },
+                "/orders/{orderId}": { "get": op("One order"), "delete": op("Cancel an order") },
+                "/orders/{orderId}/invoice.pdf": { "get": op("An order's invoice") },
+                "/addresses": { "get": op("Saved addresses"), "post": op("Add an address") },
+                "/addresses/{addressId}": { "put": op("Change an address"), "delete": op("Remove an address") },
+                "/admin/orders": { "get": op("Every customer's orders (staff only)") },
+                "/admin/users/{userId}/role": { "put": { "summary": "Change a user's role (staff only)", "parameters": [ { "in": "path", "name": "userId" } ] } },
+                "/coupons/{code}/redeem": { "post": op("Redeem a coupon") }
+            }
+        })),
+    )?;
+
     // Search: the payload in `q` is URL-encoded twice, and a malformed
     // query makes the server print a stack trace.
     s.add(

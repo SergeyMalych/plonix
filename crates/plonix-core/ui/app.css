@@ -1027,3 +1027,19 @@ button.tag.edited { cursor: pointer; }
 .tfoot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--line-2); padding-top: 14px; }
 .tfoot .err { color: var(--crit); font-size: 12px; margin-right: auto; }
 .tfoot .btn { padding: 6px 18px; }
+
+/* Suggested next steps under the Lens header, and Claude-written findings */
+.lenssugg { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 14px; border-bottom: 1px solid var(--line-2); }
+.lenssugg[hidden] { display: none; }
+.chip.k-ai span:first-child { color: var(--violet); }
+.fhint { font-size: 12px; color: var(--fg-2); background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 8px; padding: 7px 10px; margin-bottom: 10px; }
+.fwrite { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.fwrite .muted { min-width: 0; }
+.authhint { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 12px; color: var(--fg-2); background: var(--surface-2); border: 1px solid var(--line-2); border-left: 3px solid var(--orange); border-radius: 8px; padding: 8px 10px; margin: 0 0 8px; }
+.authhint b { color: var(--fg); }
+.authhint .acts { display: inline-flex; gap: 6px; margin-left: auto; }
+.specsec .lbl .r { font-weight: 400; text-transform: none; letter-spacing: 0; }
+.tag.alike { background: var(--accent-soft); color: var(--accent); font-family: var(--mono); letter-spacing: 0; text-transform: none; cursor: pointer; border: 0; }
+.tag.alike:hover, .tag.alike.on { background: var(--accent); color: var(--surface); }
+.ttable tr.member td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+.ttable tr.member td.url { padding-left: 22px; }

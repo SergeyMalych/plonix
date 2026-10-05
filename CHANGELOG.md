@@ -5,6 +5,13 @@ What changed in each Plonix release. The newest release is at the top.
 ## [Unreleased]
 
 ### Added
+- Claude writes findings: one click fills in a plain-words title, severity with the reason for it, what happens, why it matters, steps to reproduce and the request as curl. Nothing is saved until you press Save.
+- Copy any request as a curl command, from the Lens, the Traffic right-click menu and the Bench.
+- The Lens suggests next steps for the open request: record a finding when something stands out (a leaked secret, an unsigned or expired token that still works, a card number, many people's emails, a stack trace, a server error), and ask Claude for ideas on the endpoint.
+- The Lens spots stack traces in responses.
+- API descriptions (OpenAPI and Swagger) found in traffic: the Map lists the endpoints nobody has visited yet, each one click from the Bench.
+- When a Bench send comes back logged out but worked before, Plonix offers the newest login captured for that host, in that tab or in every tab still on the old one.
+- Traffic offers to group look-alike requests (the same path with different ids) into one row each, expandable.
 - secret-sweep in the Market: finds API keys, tokens and passwords for hundreds of services in captured traffic and shows each one in the Lens. It runs trufflehog, which you install yourself (`brew install trufflehog`), on your Mac only.
 
 ## [0.1.0] - 2026-10-05
