@@ -1,6 +1,15 @@
 # Plonix website
 
-The site at https://plonix.io. A static page with no build step: `index.html` and the images in `assets/`.
+The site at https://plonix.io. A static site with no build step: `index.html`, the images in `assets/`, and the documentation pages in `docs/`.
+
+The pages in `docs/` are generated from the Markdown in the repository's `docs/` folder, and committed. After changing a doc, regenerate them (Node, no dependencies):
+
+```sh
+node scripts/build-docs.mjs           # writes site/docs/
+node scripts/build-docs.mjs --check   # what CI runs: fails if site/docs/ is out of date
+```
+
+Links between docs become links between pages, and links to other files in the repository go to GitHub.
 
 Preview it locally:
 

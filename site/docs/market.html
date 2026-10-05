@@ -1,0 +1,138 @@
+<!doctype html>
+<!-- Generated from docs/market.md by scripts/build-docs.mjs. Edit the Markdown, not this file. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The Market and skills · Plonix docs</title>
+<meta name="description" content="The Market is where Plonix gets everything modular, in one catalog:">
+<meta property="og:title" content="The Market and skills · Plonix docs">
+<meta property="og:description" content="The Market is where Plonix gets everything modular, in one catalog:">
+<meta property="og:url" content="https://plonix.io/docs/market">
+<meta property="og:image" content="https://plonix.io/assets/window.webp">
+<link rel="canonical" href="https://plonix.io/docs/market">
+<meta name="theme-color" content="#f5f5fa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0e13" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../assets/plonix-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="docs.css">
+<script>try{const t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <nav class="nav-links" aria-label="Site">
+      <a href="../#features">Features</a>
+      <a href="../#scope">Scope</a>
+      <a href="../#agents">AI</a>
+      <a href="./" aria-current="page">Docs</a>
+    </nav>
+    <button type="button" class="theme-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button>
+    <a class="btn small" href="https://github.com/SergeyMalych/plonix"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+  </div>
+</header>
+<div class="wrap docs">
+<aside class="side">
+<details class="side-menu" open>
+<summary>Documentation</summary>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="bench.html">The Bench</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="agents.html">Agents and MCP</a></li><li class="here"><a href="market.html" aria-current="page">The Market and skills</a><ul class="toc"><li><a href="#validated-packages">Validated packages</a></li><li><a href="#other-markets">Other Markets</a></li><li><a href="#skills">Skills</a></li><li><a href="#adding-things-from-outside-the-market">Adding things from outside the Market</a></li><li><a href="#item-pages">Item pages</a></li></ul></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li><a href="updates.html">Updates</a></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
+</details>
+</aside>
+<main class="doc">
+<article>
+<h1 id="the-market-and-skills">The Market and skills</h1>
+<p>The Market is where Plonix gets everything modular, in one catalog:</p>
+<div class="table"><table><thead><tr><th>Kind</th><th>What it is</th><th>Installs into</th></tr></thead><tbody><tr><td><strong>Skill</strong></td><td>A playbook an AI agent follows for one job in Plonix</td><td><code>$PLONIX_HOME/skills</code></td></tr><tr><td><strong>Rule pack</strong></td><td>Technology detection rules (<a href="detection-rules.html">format</a>)</td><td><code>$PLONIX_HOME/rules</code></td></tr><tr><td><strong>Filter pack</strong></td><td>Named Traffic filters such as <code>is:auth</code> (<a href="filters.html">format</a>)</td><td><code>$PLONIX_HOME/filters</code></td></tr><tr><td><strong>List pack</strong></td><td>Named payload lists for the Bench (<a href="bench.html">format</a>)</td><td><code>$PLONIX_HOME/lists</code></td></tr><tr><td><strong>Bundle</strong></td><td>A set of other packages, installed and removed together</td><td><code>$PLONIX_HOME/market/bundles.json</code></td></tr><tr><td><strong>Extension</strong></td><td>A sandboxed extension (<a href="extensions.html">design</a>)</td><td>listed only, until the runtime exists</td></tr></tbody></table></div>
+<p>Open it from the sidebar (⌘7 in the app), or use the CLI:</p>
+<pre><code class="language-sh">plonix market                         # everything, with what is installed
+plonix market --kind skill            # one kind
+plonix market show api-kit            # what a package is and what it includes
+plonix market install api-kit         # installs the bundle and everything in it
+plonix market update                  # newer versions of what you installed
+plonix market remove api-kit          # removes the bundle and what it added</code></pre>
+<h2 id="validated-packages">Validated packages<a class="anchor" href="#validated-packages" aria-label="Link to this section">#</a></h2>
+<p>Nothing is installed unless it can be traced to a signature you trust:</p>
+<ol><li>The catalog is an <code>index.json</code> with a signature file next to it, <code>index.json.sig</code>. Plonix checks the Ed25519 signature against the keys it trusts: the Plonix maintainers' key, which is built in, plus any you add.</li><li>The index lists the SHA-256 of every package file. Each download must match it exactly, validate in full for its kind, and carry the name and version the index lists.</li><li>A bundle has no file of its own: what it includes is part of the signed index.</li><li>Every package is downloaded and checked before anything is installed, so a bad file changes nothing.</li></ol>
+<p>Packages in the Plonix Market are reviewed by the maintainers before the index is signed. A changed index, a swapped file or a key you do not trust is refused with a message that says which.</p>
+<p>Nothing from the Market runs code. Skills are text, packs are data, and extensions that need code cannot be installed until the sandboxed runtime exists (<a href="extensions.html">extensions.md</a>).</p>
+<p>A copy of the Plonix Market is built into Plonix, signed with the same key. When the online index cannot be fetched or verified, the Market shows that copy and says so, so it works offline.</p>
+<h2 id="other-markets">Other Markets<a class="anchor" href="#other-markets" aria-label="Link to this section">#</a></h2>
+<p>A team can host its own Market anywhere: an https address or a folder. Point Plonix at it in <strong>Settings › Market</strong>, or with <code>--index</code> or <code>$PLONIX_MARKET_INDEX</code>.</p>
+<pre><code class="language-sh">plonix market keygen ~/secrets/acme-market.key     # once; keep the private key secret
+plonix market check store/index.json               # every package matches and validates
+plonix market sign store/index.json --key ~/secrets/acme-market.key</code></pre>
+<p>People who use it trust the publisher's public key once:</p>
+<pre><code class="language-sh">plonix market trust ed25519:…        # or add it in Settings › Market</code></pre>
+<p><code>--allow-unsigned</code> lets a Market author try an index before signing it. The window never installs from an unsigned index.</p>
+<h2 id="skills">Skills<a class="anchor" href="#skills" aria-label="Link to this section">#</a></h2>
+<p>A skill tells an agent how to do one job with Plonix's read-only tools: get to know a host, explain a request, review sign-in and sessions, check scope suggestions, draft a finding, inventory an API. Five are built in; more come from the Market.</p>
+<p>Agents connected with <code>plonix connect claude</code> (or any MCP client running <code>plonix mcp</code>) get skills two ways:</p>
+<ul><li>as <strong>MCP prompts</strong>: in Claude Code, type <code>/mcp__plonix__triage-host api.example.com</code>;</li><li>as the <strong><code>list_skills</code></strong> and <strong><code>get_skill</code></strong> tools, so the agent can pick a skill itself when a request matches one.</li></ul>
+<p>Skills never widen what an agent can do. A skill declares which data it reads (<code>uses</code>), and when any of it is switched off in <strong>Settings › AI agents</strong>, agents are not offered the skill and the engine refuses to hand it out. Agents cannot install anything from the Market.</p>
+<pre><code class="language-sh">plonix skills                                    # skills, and which ones agents are offered
+plonix skills show explain-request --arg id=42   # exactly what the agent receives
+plonix skills add ./my-skill.md                  # your own, from a file or https URL
+plonix skills check ./my-skill.md                # validate before sharing</code></pre>
+<h3 id="writing-a-skill">Writing a skill<a class="anchor" href="#writing-a-skill" aria-label="Link to this section">#</a></h3>
+<p>A skill is Markdown with a short header:</p>
+<pre><code class="language-markdown">---
+plonix_skill: 1
+name: triage-host
+version: 1.0.0
+title: Get to know a host
+description: Summarize what a host does, how it is built and where to look first.
+author: Your name
+uses: [map, traffic, scope]
+argument: host: The host to look at, such as api.example.com
+---
+Build a short briefing on {{host}} for the user...</code></pre>
+<ul><li><code>uses</code> is what the skill reads: any of <code>traffic</code>, <code>insights</code>, <code>map</code>, <code>scope</code>, <code>findings</code>, <code>scan</code>.</li><li><code>argument: name: description</code> declares a required argument; <code>optional_argument:</code> an optional one. At most five. <code>{{name}}</code> in the instructions is replaced with the value.</li><li>Name the Plonix tools the agent should call (<code>search_traffic</code>, <code>get_request</code>, <code>list_endpoints</code>…). Agents cannot send requests, change scope or record findings, so a skill asks the user to do those in Plonix.</li><li>Instructions are at most 20,000 characters.</li></ul>
+<p>To publish one in the Plonix Market, add it to <code>store/skills/</code> and its entry to <code>store/index.json</code> (see <a href="https://github.com/SergeyMalych/plonix/blob/main/store/README.md" rel="noopener">store/README.md</a>).</p>
+<h2 id="adding-things-from-outside-the-market">Adding things from outside the Market<a class="anchor" href="#adding-things-from-outside-the-market" aria-label="Link to this section">#</a></h2>
+<p>You can add a skill, rule pack or filter pack from a file or a link that is not in a signed Market:</p>
+<pre><code>plonix market add ./my-skill.md            # shows what it is and what it does
+plonix market add ./my-skill.md --yes      # adds it
+plonix market add https://example.com/pack.json --yes</code></pre>
+<p>In the app, use <strong>Add from a file or link</strong> on the Market screen. Plonix reads the file in full, shows its name, author, what it does and its checksum, and adds it only after you confirm.</p>
+<p>Anything added this way is marked <strong>Not verified</strong>: nobody has signed or reviewed it. It is still checked and cannot run code, and agents cannot add anything themselves. A skill that is not verified carries a note saying so when an agent uses it.</p>
+<p>To use a Market list that is not signed, turn on <strong>Allow unsigned Market lists</strong> in Settings › Market. Everything from it is then marked Not verified.</p>
+<h2 id="item-pages">Item pages<a class="anchor" href="#item-pages" aria-label="Link to this section">#</a></h2>
+<p>Selecting anything in the Market opens its own page: a description written for people, what it does and what it needs, who made it, its version and checksum, the bundles it is part of, and whether it is verified. Index authors add the description with an <code>about</code> list of short paragraphs (at most 8 of 700 characters) on each package.</p>
+</article>
+<p class="edit">This page is <a href="https://github.com/SergeyMalych/plonix/blob/main/docs/market.md">docs/market.md</a> in the Plonix repository. Spotted something wrong? <a href="https://github.com/SergeyMalych/plonix/edit/main/docs/market.md">Suggest a change</a>.</p>
+</main>
+</div>
+<footer>
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <span>Open-source web security workbench for macOS. Apache-2.0.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/SergeyMalych/plonix">GitHub</a>
+      <a href="./">Docs</a>
+      <a href="https://github.com/SergeyMalych/plonix/releases">Releases</a>
+      <a href="https://github.com/SergeyMalych/plonix/issues">Issues</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(() => {
+  const root = document.documentElement, btn = document.getElementById('theme');
+  const sys = matchMedia('(prefers-color-scheme: dark)');
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+  const current = () => root.dataset.theme || (sys.matches ? 'dark' : 'light');
+  const paint = () => { const d = current() === 'dark'; btn.innerHTML = d ? SUN : MOON; btn.setAttribute('aria-label', d ? 'Switch to light mode' : 'Switch to dark mode'); };
+  paint();
+  sys.addEventListener('change', paint);
+  btn.addEventListener('click', () => {
+    const next = current() === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next; paint();
+    try { localStorage.setItem('plonix-theme', next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>

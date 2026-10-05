@@ -1,0 +1,93 @@
+<!doctype html>
+<!-- Generated from docs/crash-reports.md by scripts/build-docs.mjs. Edit the Markdown, not this file. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Crash reports · Plonix docs</title>
+<meta name="description" content="If Plonix crashes, it writes a report on your computer and sends nothing. There is no crash-reporting service: you decide whether a report goes anywhere, and you see it first.">
+<meta property="og:title" content="Crash reports · Plonix docs">
+<meta property="og:description" content="If Plonix crashes, it writes a report on your computer and sends nothing. There is no crash-reporting service: you decide whether a report goes anywhere, and you see it first.">
+<meta property="og:url" content="https://plonix.io/docs/crash-reports">
+<meta property="og:image" content="https://plonix.io/assets/window.webp">
+<link rel="canonical" href="https://plonix.io/docs/crash-reports">
+<meta name="theme-color" content="#f5f5fa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0e13" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../assets/plonix-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="docs.css">
+<script>try{const t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <nav class="nav-links" aria-label="Site">
+      <a href="../#features">Features</a>
+      <a href="../#scope">Scope</a>
+      <a href="../#agents">AI</a>
+      <a href="./" aria-current="page">Docs</a>
+    </nav>
+    <button type="button" class="theme-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button>
+    <a class="btn small" href="https://github.com/SergeyMalych/plonix"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+  </div>
+</header>
+<div class="wrap docs">
+<aside class="side">
+<details class="side-menu" open>
+<summary>Documentation</summary>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="bench.html">The Bench</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li><a href="updates.html">Updates</a></li><li class="here"><a href="crash-reports.html" aria-current="page">Crash reports</a><ul class="toc"><li><a href="#what-happens-when-plonix-crashes">What happens when Plonix crashes</a></li><li><a href="#what-a-report-contains">What a report contains</a></li><li><a href="#what-is-removed">What is removed</a></li></ul></li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
+</details>
+</aside>
+<main class="doc">
+<article>
+<h1 id="crash-reports">Crash reports</h1>
+<p>If Plonix crashes, it writes a report on your computer and sends nothing. There is no crash-reporting service: you decide whether a report goes anywhere, and you see it first.</p>
+<h2 id="what-happens-when-plonix-crashes">What happens when Plonix crashes<a class="anchor" href="#what-happens-when-plonix-crashes" aria-label="Link to this section">#</a></h2>
+<p>The app, the <code>plonix</code> command and every engine thread (the proxy, the recorder, the local API) write a report when they hit an internal error. Reports go in <code>~/.plonix/crashes/</code> (or <code>$PLONIX_HOME/crashes/</code>), one text file per crash, readable only by you. Plonix keeps the 20 newest and writes at most three per run, so an error that repeats doesn't fill the folder.</p>
+<ul><li><strong>In the app</strong>, the next time Plonix starts it asks once: <em>Plonix quit unexpectedly last time. Report it?</em>
+<ul><li><strong>View Report</strong> opens the report in your text editor, then asks again.</li><li><strong>Report on GitHub</strong> opens a new issue on <a href="https://github.com/SergeyMalych/plonix/issues" rel="noopener">github.com/SergeyMalych/plonix</a> in your browser, with the report filled in. Nothing is submitted until you read it and press <strong>Submit</strong>. Very long reports are cut to fit in the link; the full one stays in the file.</li><li><strong>Dismiss</strong>, or closing the dialog, means no. Plonix doesn't ask about that report again.</li></ul></li><li><strong>In a terminal</strong>, <code>plonix</code> prints where it saved the report. A project running in the background (<code>plonix start</code>) prints it to <code>~/.plonix/logs/engine.log</code>. To report it, read the file and paste it into a <a href="https://github.com/SergeyMalych/plonix/issues/new" rel="noopener">new issue</a>.</li></ul>
+<h2 id="what-a-report-contains">What a report contains<a class="anchor" href="#what-a-report-contains" aria-label="Link to this section">#</a></h2>
+<ul><li>the Plonix version, which part crashed (app or command line), the operating system and processor type, and the time</li><li>the name of the thread, the error message and where in the Plonix source it happened</li><li>the backtrace: the chain of functions that led there</li></ul>
+<p>Plonix adds nothing else: no captured traffic, settings or files. Only the error message can quote what Plonix was working on, which is why the next step cleans it.</p>
+<h2 id="what-is-removed">What is removed<a class="anchor" href="#what-is-removed" aria-label="Link to this section">#</a></h2>
+<p>Before a report is written, Plonix removes anything in it that looks like:</p>
+<ul><li>the query and fragment of a URL (<code>https://shop.example/orders?id=7</code> becomes <code>https://shop.example/orders?&lt;redacted&gt;</code>), and user names and passwords in URLs</li><li>header values (<code>(&quot;Cookie&quot;, &quot;&lt;redacted&gt;&quot;)</code>), cookies, <code>Authorization</code> values and bearer tokens</li><li>values of anything named like a token, secret, password, key, session or signature (<code>api_key=&lt;redacted&gt;</code>)</li><li>JSON Web Tokens and other long strings of mixed letters and digits</li><li>email addresses</li><li>your home folder and user name (<code>/Users/you/…</code> becomes <code>~/…</code>)</li></ul>
+<p>The removal errs on the side of hiding too much. The report is plain text, so you can read every word before deciding to share it, and edit the issue before you submit it.</p>
+</article>
+<p class="edit">This page is <a href="https://github.com/SergeyMalych/plonix/blob/main/docs/crash-reports.md">docs/crash-reports.md</a> in the Plonix repository. Spotted something wrong? <a href="https://github.com/SergeyMalych/plonix/edit/main/docs/crash-reports.md">Suggest a change</a>.</p>
+</main>
+</div>
+<footer>
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <span>Open-source web security workbench for macOS. Apache-2.0.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/SergeyMalych/plonix">GitHub</a>
+      <a href="./">Docs</a>
+      <a href="https://github.com/SergeyMalych/plonix/releases">Releases</a>
+      <a href="https://github.com/SergeyMalych/plonix/issues">Issues</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(() => {
+  const root = document.documentElement, btn = document.getElementById('theme');
+  const sys = matchMedia('(prefers-color-scheme: dark)');
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+  const current = () => root.dataset.theme || (sys.matches ? 'dark' : 'light');
+  const paint = () => { const d = current() === 'dark'; btn.innerHTML = d ? SUN : MOON; btn.setAttribute('aria-label', d ? 'Switch to light mode' : 'Switch to dark mode'); };
+  paint();
+  sys.addEventListener('change', paint);
+  btn.addEventListener('click', () => {
+    const next = current() === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next; paint();
+    try { localStorage.setItem('plonix-theme', next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>

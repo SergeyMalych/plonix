@@ -52,6 +52,18 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D clippy::correctness -D clippy::suspicious
 
+  # plonix.io/docs is generated from docs/ and committed (site/ has no build
+  # step); this fails when a doc changed without regenerating the pages.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: site/docs is up to date
+        run: node scripts/build-docs.mjs --check
+
   deny:
     runs-on: ubuntu-latest
     steps:

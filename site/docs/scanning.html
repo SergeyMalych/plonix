@@ -1,0 +1,239 @@
+<!doctype html>
+<!-- Generated from docs/scanning.md by scripts/build-docs.mjs. Edit the Markdown, not this file. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scanning · Plonix docs</title>
+<meta name="description" content="Scanning in Plonix turns captured traffic and a fingerprinted application into discovered targets and reproducible findings. It is built for authorized research on applications…">
+<meta property="og:title" content="Scanning · Plonix docs">
+<meta property="og:description" content="Scanning in Plonix turns captured traffic and a fingerprinted application into discovered targets and reproducible findings. It is built for authorized research on applications…">
+<meta property="og:url" content="https://plonix.io/docs/scanning">
+<meta property="og:image" content="https://plonix.io/assets/window.webp">
+<link rel="canonical" href="https://plonix.io/docs/scanning">
+<meta name="theme-color" content="#f5f5fa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0e13" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../assets/plonix-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="docs.css">
+<script>try{const t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <nav class="nav-links" aria-label="Site">
+      <a href="../#features">Features</a>
+      <a href="../#scope">Scope</a>
+      <a href="../#agents">AI</a>
+      <a href="./" aria-current="page">Docs</a>
+    </nav>
+    <button type="button" class="theme-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button>
+    <a class="btn small" href="https://github.com/SergeyMalych/plonix"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+  </div>
+</header>
+<div class="wrap docs">
+<aside class="side">
+<details class="side-menu" open>
+<summary>Documentation</summary>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="bench.html">The Bench</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li class="here"><a href="scanning.html" aria-current="page">Scanning</a><ul class="toc"><li><a href="#detectors-and-tactics">Detectors and tactics</a></li><li><a href="#scan-types">Scan types</a></li><li><a href="#signature-packages">Signature packages</a></li><li><a href="#smart-suggestions">Smart suggestions</a></li><li><a href="#ai-guided-optional">AI-guided (optional)</a></li><li><a href="#ux-the-scans-area">UX: the Scans area</a></li><li><a href="#guardrails">Guardrails</a></li><li><a href="#build-order">Build order</a></li><li><a href="#what-is-built">What is built</a></li></ul></li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li><a href="updates.html">Updates</a></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
+</details>
+</aside>
+<main class="doc">
+<article>
+<h1 id="scanning">Scanning</h1>
+<p>Scanning in Plonix turns captured traffic and a fingerprinted application
+into discovered targets and reproducible findings. It is built for authorized
+research on applications the user controls or is permitted to test: <strong>every
+request a scan sends goes through the engine's single scope choke point</strong>
+(<code>engine.send</code>), so a scan can only ever reach a host the user has explicitly
+accepted into scope. Nothing fires on its own; a scan runs only when a person
+starts it.</p>
+<p>Scanning has three layers, each building on infrastructure that already
+exists:</p>
+<pre><code>                 fingerprint (detect.rs tech + rules)
+                              │
+        ┌─────────────────────┴─────────────────────┐
+        ▼                                            ▼
+    Detectors  ── relevant? ──►  Tactics  ── run ──► Findings
+   (passive,                   (active, in                (existing
+    data-only)                  scope only)                Findings screen)
+        ▲                           ▲
+        │                           │
+   Crawl / Crawl-with-browser   Signature packages
+   (discover targets)           (store-installable, variants)</code></pre>
+<ol><li><strong>Discovery</strong> (crawl, crawl-with-browser) finds the endpoints, parameters
+and forms an application exposes.</li><li><strong>Relevance</strong> (detectors) decides, from the fingerprint, which classes of
+checks make sense for this application.</li><li><strong>Checks</strong> (tactics, shipped in signature packages) run only where their
+detector is active, and record findings.</li></ol>
+<h2 id="detectors-and-tactics">Detectors and tactics<a class="anchor" href="#detectors-and-tactics" aria-label="Link to this section">#</a></h2>
+<p>The core idea, kept deliberately separate:</p>
+<ul><li>A <strong>detector</strong> is passive. It reads only data Plonix already has — captured
+exchanges, detected technologies (<code>detect.rs</code>), discovered endpoints and
+parameters — and emits <strong>signals</strong>: typed, evidence-backed statements such
+as <code>jwt-present</code>, <code>php</code>, <code>graphql-endpoint</code>, <code>reflected-parameter</code>,
+<code>set-cookie-no-secure</code>. A detector never sends a request. It is the same
+kind of data-only, regex-driven matcher as a detection rule, so detectors
+are declarative and can ship in packs.</li><li>A <strong>tactic</strong> is an active check. It is <strong>gated by one or more detector
+signals</strong> and runs only when all of them are present for a target. A tactic
+describes requests to send (through <code>engine.send</code>, so scope-enforced and
+recorded) and how to judge the responses into a finding.</li></ul>
+<p>This is what makes scanning <em>smart</em>: a JWT tactic is gated on <code>jwt-present</code>,
+so it never runs against an application with no JWT; a PHP-oriented tactic is
+gated on <code>php</code>, so it is skipped entirely on a Node.js site. The user never
+waits on, and the target never receives, checks that cannot apply.</p>
+<p>Signals carry evidence (which exchange, which header/parameter) exactly as
+scope suggestions and Lens insights do, so the UI can always show <em>why</em> a
+check was suggested.</p>
+<h2 id="scan-types">Scan types<a class="anchor" href="#scan-types" aria-label="Link to this section">#</a></h2>
+<h3 id="crawl-no-browser">Crawl (no browser)<a class="anchor" href="#crawl-no-browser" aria-label="Link to this section">#</a></h3>
+<p>Discovers structure from what Plonix can see without rendering:</p>
+<ul><li>seeds from captured in-scope traffic (links, forms, redirects, and the same
+<code>Location</code>/CSP/referrer evidence <code>scope.rs</code> already extracts);</li><li>fetches in-scope pages through <code>engine.send</code> and parses links, forms (method,
+action, fields) and obvious parameters;</li><li>stays within accepted scope, honors a depth/page budget, and dedupes by a
+normalized endpoint signature (path with parameter names, values stripped).</li></ul>
+<p>Output: a target set of endpoints and parameters, feeding the Map and the
+detectors. Crawl is non-destructive — it only issues the requests a browser
+following links would, bounded.</p>
+<h3 id="crawl-with-browser">Crawl with browser<a class="anchor" href="#crawl-with-browser" aria-label="Link to this section">#</a></h3>
+<p>The same, but driven through the existing headless browser (<code>browser.rs</code>) so
+JavaScript-rendered links, SPA routes and XHR/fetch endpoints are reached.
+Discovered requests still flow through the proxy and scope enforcement. This is
+the slower, more complete discovery mode; the user chooses it when an app is
+JS-heavy.</p>
+<h3 id="active-scan">Active scan<a class="anchor" href="#active-scan" aria-label="Link to this section">#</a></h3>
+<p>Runs tactics against discovered targets. For each target:</p>
+<ol><li>run detectors over the fingerprint + captured data → active signals;</li><li>select tactics whose gating signals are all present (intersected with the
+user's chosen profile);</li><li>execute each tactic's bounded request plan through <code>engine.send</code>;</li><li>evaluate responses into findings, recorded with evidence and the exact
+requests/responses so every finding is reproducible.</li></ol>
+<h2 id="signature-packages">Signature packages<a class="anchor" href="#signature-packages" aria-label="Link to this section">#</a></h2>
+<p>Active-scan content lives in <strong>signature packages</strong>, an extension of the
+existing data-driven pack model (<code>rulepack.rs</code> / <code>store.rs</code>): one JSON
+document, strictly schema-checked, size-limited, SHA-256-pinned in the lock
+file, installable and updatable from the store, community-authorable. A new
+format tag <code>plonix_scanpack: 1</code> sits alongside <code>plonix_pack: 1</code>.</p>
+<p>A scan pack contains:</p>
+<ul><li><strong>detectors</strong>: id, the signal it emits, and conditions (the same condition
+grammar as detection rules — header/cookie/param/path/body/tech regexes,
+plus a <code>tech:</code> condition that references a detected technology id);</li><li><strong>tactics</strong>: id, title, <code>requires</code> (the signal ids that gate it), a
+<strong>severity</strong>, an <strong>intrusiveness</strong> level, a <strong>variant</strong> label, a bounded
+<strong>request template</strong> (method, path/param transform relative to a discovered
+target, a small fixed set of payload tokens from the pack), and a
+<strong>match</strong> describing what in the response indicates the finding (status,
+header, body regex, timing, reflection) and what finding to record.</li></ul>
+<p><strong>Variants</strong> let one logical check carry several request shapes (e.g.
+encodings or phrasings) that update independently; the user or a profile picks
+which variants to run. Packs are versioned, so the community or a scan type
+can update signatures without a Plonix release.</p>
+<h3 id="beyond-data-the-bounded-check-interface">Beyond data: the bounded check interface<a class="anchor" href="#beyond-data-the-bounded-check-interface" aria-label="Link to this section">#</a></h3>
+<p>Most useful checks are expressible as template-plus-match data. For checks
+that genuinely need logic (multi-step, response-derived next request), we reuse
+the <strong>extension seam</strong> in <code>extension.rs</code>: a WebAssembly component in the
+engine's sandbox with a closed capability list. A tactic extension gets
+<strong><code>ScopedRequests</code></strong> (every request still goes through <code>engine.send</code>, so still
+scope-enforced and recorded) and <strong><code>ProposeFindings</code></strong> (findings land
+unconfirmed until a person confirms). It gets no socket, no filesystem, no
+scope-changing capability — the sandbox cannot reach a host outside accepted
+scope even if it tries. This is the existing, not-yet-built WASM runtime; data
+tactics work today, logic tactics arrive with the sandbox.</p>
+<h2 id="smart-suggestions">Smart suggestions<a class="anchor" href="#smart-suggestions" aria-label="Link to this section">#</a></h2>
+<p>When the user opens Scans for a target, Plonix fingerprints it (existing tech
+detection over the host's captured traffic) and runs detectors, then proposes a
+<strong>suggested scan profile</strong>: the detectors that lit up and the tactics they
+gate, ranked, with the irrelevant ones hidden (shown behind &quot;show all&quot; so the
+user is never surprised by what's excluded). The user confirms or edits the
+selection before anything runs. This is the &quot;don't run PHP checks on a Node
+site&quot; behavior, made explicit and reviewable.</p>
+<h2 id="ai-guided-optional">AI-guided (optional)<a class="anchor" href="#ai-guided-optional" aria-label="Link to this section">#</a></h2>
+<p>Both choosing and running scans can be AI-assisted, through the existing
+read-only agent layer:</p>
+<ul><li><strong>Advising</strong> is read-only and available now. New read-only MCP tools let an
+agent such as Claude Code read the fingerprint, the available
+detectors/tactics and a scan's status/findings, and <em>recommend</em> a profile.
+It cannot start a scan or send a request.</li><li><strong>Acting</strong> (an agent starting a scan) stays behind the same line as
+agent send/replay: it requires the user's explicit opt-in to active agent
+mode and is still scope-gated at <code>engine.send</code>. Off by default.</li></ul>
+<p>AI assistance is always optional and additive; scanning is fully usable
+without it.</p>
+<h2 id="ux-the-scans-area">UX: the Scans area<a class="anchor" href="#ux-the-scans-area" aria-label="Link to this section">#</a></h2>
+<p>A new <strong>Scans</strong> screen (⌘7), with a simple left-to-right flow:</p>
+<ol><li><strong>Target</strong> — pick from in-scope hosts/endpoints only (out-of-scope targets
+are not selectable). Shows the fingerprint for context.</li><li><strong>Mode</strong> — Crawl, Crawl with browser, or Active scan.</li><li><strong>Profile</strong> — for active scan: the suggested detectors/tactics from the
+fingerprint, each toggleable, grouped by detector, with intrusiveness and
+variant visible. An &quot;AI suggest&quot; affordance (optional) that fills the
+selection from the agent's recommendation for the user to review.</li><li><strong>Run</strong> — explicit start. A live progress view: targets covered, requests
+sent (and that they stayed in scope), signals found, findings so far.</li><li><strong>Review</strong> — findings flow into the existing <strong>Findings</strong> screen, each with
+its reproducing request/response, so there is one place for results.</li></ol>
+<h2 id="guardrails">Guardrails<a class="anchor" href="#guardrails" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Scope.</strong> Every scan request goes through <code>engine.send</code>; a target outside
+accepted scope is refused there. Discovery and active checks alike cannot
+reach an un-accepted host.</li><li><strong>Explicit initiation.</strong> Scans never auto-fire on capture. A person starts
+every scan.</li><li><strong>Intrusiveness.</strong> The foundation (crawl, crawl-with-browser, the
+detector/tactic framework, the pack model, suggestions, and safe/benign
+checks) is non-destructive. Any genuinely intrusive tactic is bounded,
+labeled with its intrusiveness, off by default, and must be turned on
+deliberately per scan.</li><li><strong>Reproducibility.</strong> Every finding records the exact requests and responses
+that produced it.</li><li><strong>Auditability.</strong> Every request a scan sends is recorded in traffic with its
+initiator, like any replay.</li></ul>
+<h2 id="build-order">Build order<a class="anchor" href="#build-order" aria-label="Link to this section">#</a></h2>
+<ol><li>Engine: <code>scan</code> module — Signal/Detector/Tactic types, the detector pass over
+fingerprint + captured data, the scan runner that drives discovery and
+gated tactics through <code>engine.send</code>, findings recording.</li><li><code>scanpack</code> module + store integration: <code>plonix_scanpack: 1</code> format,
+validation, SHA-256 pinning, built-in starter packs (benign checks only),
+<code>plonix scan ...</code> CLI and <code>/api/scan*</code> routes.</li><li>Crawl, then crawl-with-browser.</li><li>Scans UI area + smart suggestions.</li><li>Read-only MCP tools for advising.</li><li>(Later, with the WASM sandbox) logic tactics via the bounded check
+interface.</li></ol>
+<h2 id="what-is-built">What is built<a class="anchor" href="#what-is-built" aria-label="Link to this section">#</a></h2>
+<ul><li><p>The detector/tactic framework, the <code>plonix_scanpack: 1</code> pack model, and
+fingerprint-driven suggestions (<code>Catalog::suggest</code>).</p></li><li><p>The active-scan runner (<code>Engine::scan</code>): it selects gated tactics, plans
+bounded requests, sends each one through <code>engine::send</code> (the scope choke
+point) so the scan can only reach accepted hosts, evaluates responses, and
+records findings against the existing Findings store. It never fires on its
+own and is bounded by a request budget.</p></li><li><p>Benign built-in content: relevance detectors (<code>baseline</code>) and
+non-destructive checks (<code>probes</code>: exposed <code>.git/config</code> and <code>.env</code>,
+<code>server-status</code>, and a harmless reflected-parameter marker).</p></li><li><p>API: <code>GET /api/scan/catalog</code>, <code>GET /api/scan/suggest/{host}</code> (both
+read-only, so the advising agent layer may call them), and <code>POST /api/scan</code>
+(user-only; agents cannot start scans).</p></li><li><p>CLI: <code>plonix scan suggest|catalog|run</code>.</p></li><li><p>Crawl (no browser): <code>Engine::crawl</code> seeds from the host's captured traffic
+and a start path, fetches in-scope pages through <code>engine::send</code>, extracts
+links and forms, follows same-host links within a page/depth budget, and
+never leaves accepted scope or submits a form. API <code>POST /api/crawl</code>
+(user-only); CLI <code>plonix crawl</code>.</p></li></ul>
+<p>Still to come: crawl-with-browser (needs a headless browser driver; the plain
+crawl runs meanwhile and the report says so), the Scans UI area, and installed
+scan-pack pinning in the store.</p>
+</article>
+<p class="edit">This page is <a href="https://github.com/SergeyMalych/plonix/blob/main/docs/scanning.md">docs/scanning.md</a> in the Plonix repository. Spotted something wrong? <a href="https://github.com/SergeyMalych/plonix/edit/main/docs/scanning.md">Suggest a change</a>.</p>
+</main>
+</div>
+<footer>
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <span>Open-source web security workbench for macOS. Apache-2.0.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/SergeyMalych/plonix">GitHub</a>
+      <a href="./">Docs</a>
+      <a href="https://github.com/SergeyMalych/plonix/releases">Releases</a>
+      <a href="https://github.com/SergeyMalych/plonix/issues">Issues</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(() => {
+  const root = document.documentElement, btn = document.getElementById('theme');
+  const sys = matchMedia('(prefers-color-scheme: dark)');
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+  const current = () => root.dataset.theme || (sys.matches ? 'dark' : 'light');
+  const paint = () => { const d = current() === 'dark'; btn.innerHTML = d ? SUN : MOON; btn.setAttribute('aria-label', d ? 'Switch to light mode' : 'Switch to dark mode'); };
+  paint();
+  sys.addEventListener('change', paint);
+  btn.addEventListener('click', () => {
+    const next = current() === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next; paint();
+    try { localStorage.setItem('plonix-theme', next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>

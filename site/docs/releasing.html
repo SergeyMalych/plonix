@@ -1,0 +1,148 @@
+<!doctype html>
+<!-- Generated from docs/releasing.md by scripts/build-docs.mjs. Edit the Markdown, not this file. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Releasing Plonix · Plonix docs</title>
+<meta name="description" content="This page is for maintainers. It covers the one-time setup that lets CI sign and notarize Plonix.app, and how to cut a release.">
+<meta property="og:title" content="Releasing Plonix · Plonix docs">
+<meta property="og:description" content="This page is for maintainers. It covers the one-time setup that lets CI sign and notarize Plonix.app, and how to cut a release.">
+<meta property="og:url" content="https://plonix.io/docs/releasing">
+<meta property="og:image" content="https://plonix.io/assets/window.webp">
+<link rel="canonical" href="https://plonix.io/docs/releasing">
+<meta name="theme-color" content="#f5f5fa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0e13" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../assets/plonix-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="docs.css">
+<script>try{const t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <nav class="nav-links" aria-label="Site">
+      <a href="../#features">Features</a>
+      <a href="../#scope">Scope</a>
+      <a href="../#agents">AI</a>
+      <a href="./" aria-current="page">Docs</a>
+    </nav>
+    <button type="button" class="theme-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button>
+    <a class="btn small" href="https://github.com/SergeyMalych/plonix"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+  </div>
+</header>
+<div class="wrap docs">
+<aside class="side">
+<details class="side-menu" open>
+<summary>Documentation</summary>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="bench.html">The Bench</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li><a href="updates.html">Updates</a></li><li><a href="crash-reports.html">Crash reports</a></li><li class="here"><a href="releasing.html" aria-current="page">Releasing Plonix</a><ul class="toc"><li><a href="#contents">Contents</a></li><li><a href="#how-signing-works">How signing works</a></li><li><a href="#one-time-setup">One-time setup</a></li><li><a href="#github-secrets">GitHub secrets</a></li><li><a href="#cutting-a-release">Cutting a release</a></li><li><a href="#signing-by-hand">Signing by hand</a></li><li><a href="#troubleshooting">Troubleshooting</a></li></ul></li></ul></nav>
+</details>
+</aside>
+<main class="doc">
+<article>
+<h1 id="releasing-plonix">Releasing Plonix</h1>
+<p>This page is for maintainers. It covers the one-time setup that lets CI sign and notarize Plonix.app, and how to cut a release.</p>
+<h2 id="contents">Contents<a class="anchor" href="#contents" aria-label="Link to this section">#</a></h2>
+<ul><li><a href="#how-signing-works">How signing works</a></li><li><a href="#one-time-setup">One-time setup</a></li><li><a href="#github-secrets">GitHub secrets</a></li><li><a href="#cutting-a-release">Cutting a release</a></li><li><a href="#signing-by-hand">Signing by hand</a></li><li><a href="#troubleshooting">Troubleshooting</a></li></ul>
+<h2 id="how-signing-works">How signing works<a class="anchor" href="#how-signing-works" aria-label="Link to this section">#</a></h2>
+<p>macOS only opens downloaded apps without warnings when they are signed with a <strong>Developer ID Application</strong> certificate, use the <strong>hardened runtime</strong>, and are <strong>notarized</strong> by Apple, with the notarization ticket <strong>stapled</strong> to the app.</p>
+<p>Tauri does all of that during <code>tauri build</code> when the right environment variables are set:</p>
+<ul><li><code>crates/plonix-app/tauri.conf.json</code> turns on the hardened runtime (<code>bundle.macOS.hardenedRuntime</code>) and points at <code>crates/plonix-app/entitlements.plist</code> (<code>bundle.macOS.entitlements</code>).</li><li>The entitlements file asks for one exception only: Apple Events, so that <strong>Ask Claude Code</strong> can open Terminal. macOS still asks the user first, with the text in <code>crates/plonix-app/Info.plist</code>. Plonix is not sandboxed and needs no JIT entitlement: the web view's JavaScript runs in WebKit's own process.</li><li>With <code>APPLE_CERTIFICATE</code>, <code>APPLE_CERTIFICATE_PASSWORD</code> and <code>APPLE_SIGNING_IDENTITY</code> set, Tauri imports the certificate into a temporary keychain and signs the app. With the notarization variables also set, it submits the app to Apple's notary service, waits for the result and staples the ticket.</li></ul>
+<p><code>scripts/macos/sign-and-notarize.sh</code> is the explicit fallback. Given a built <code>Plonix.app</code> and the same variables, it imports the certificate into a temporary keychain, signs with the hardened runtime and the entitlements, notarizes with <code>xcrun notarytool submit --wait</code>, staples, verifies with <code>codesign --verify --deep --strict</code> and <code>spctl</code>, and deletes the keychain. With <code>--verify</code> it only checks a bundle someone else signed, which is how CI checks what Tauri produced. Run it with <code>--help</code> for the options.</p>
+<p>Where it happens:</p>
+<div class="table"><table><thead><tr><th>Workflow</th><th>When</th><th>Result</th></tr></thead><tbody><tr><td>CI (<code>.github/workflows/ci.yml</code>, job <code>macos-app</code>)</td><td>Pull requests, forks, or no signing secrets</td><td>Unsigned <code>Plonix-macOS</code> artifact, as before</td></tr><tr><td>CI, job <code>macos-app</code></td><td>Pushes to <code>main</code> with the signing secrets set</td><td>Signed, notarized and stapled <code>Plonix-macOS</code> artifact; the job fails if any check fails</td></tr><tr><td>Release (<code>.github/workflows/release.yml</code>)</td><td>Pushing a <code>v*</code> tag</td><td>A signed, notarized GitHub release with the app and the update package (see <a href="#cutting-a-release">Cutting a release</a>)</td></tr></tbody></table></div>
+<p>Secrets are never given to workflows triggered by pull requests from forks, and CI only signs on pushes to <code>main</code>, so code from a pull request never runs with the certificate.</p>
+<h2 id="one-time-setup">One-time setup<a class="anchor" href="#one-time-setup" aria-label="Link to this section">#</a></h2>
+<p>You need a Mac with Xcode or the Command Line Tools (<code>xcode-select --install</code>).</p>
+<h3 id="1-join-the-apple-developer-program">1. Join the Apple Developer Program<a class="anchor" href="#1-join-the-apple-developer-program" aria-label="Link to this section">#</a></h3>
+<p>Enroll at <a href="https://developer.apple.com/programs/" rel="noopener">developer.apple.com/programs</a> as an individual or an organization (USD 99 a year). Only the <strong>Account Holder</strong> can create Developer ID certificates. Once enrolled, note your <strong>Team ID</strong>: a 10-character code shown under Membership details at <a href="https://developer.apple.com/account" rel="noopener">developer.apple.com/account</a>.</p>
+<h3 id="2-create-a-developer-id-application-certificate">2. Create a Developer ID Application certificate<a class="anchor" href="#2-create-a-developer-id-application-certificate" aria-label="Link to this section">#</a></h3>
+<ol><li><p>On your Mac, open <strong>Keychain Access</strong>, then <strong>Keychain Access › Certificate Assistant › Request a Certificate From a Certificate Authority…</strong>. Enter your email and name, choose <strong>Saved to disk</strong>, and save the <code>.certSigningRequest</code> file.</p></li><li><p>At <a href="https://developer.apple.com/account/resources/certificates/list" rel="noopener">developer.apple.com/account/resources/certificates</a>, click <strong>+</strong>, choose <strong>Developer ID Application</strong>, pick the <strong>G2 Sub-CA</strong> profile, upload the request and download the <code>.cer</code> file.</p></li><li><p>Double-click the <code>.cer</code> to add it to your login keychain. Check it is there and copy its exact name, which is your <strong>signing identity</strong>:</p>
+<pre><code class="language-sh">security find-identity -v -p codesigning
+#   1) 3F2A…  &quot;Developer ID Application: Jane Doe (AB12CD34EF)&quot;</code></pre></li></ol>
+<p>Developer ID certificates are valid for five years. Keep a backup of the exported <code>.p12</code> (next step) somewhere safe: you can't download the private key again.</p>
+<h3 id="3-export-the-certificate-as-a-p12">3. Export the certificate as a .p12<a class="anchor" href="#3-export-the-certificate-as-a-p12" aria-label="Link to this section">#</a></h3>
+<ol><li><p>In Keychain Access, under <strong>login › My Certificates</strong>, find <strong>Developer ID Application: …</strong>, expand it to check the private key is there, right-click the certificate and choose <strong>Export…</strong>.</p></li><li><p>Save it as <code>DeveloperID.p12</code> in <strong>Personal Information Exchange (.p12)</strong> format and set a strong password.</p></li><li><p>Encode it for GitHub:</p>
+<pre><code class="language-sh">base64 -i DeveloperID.p12 | pbcopy     # now on the clipboard</code></pre></li></ol>
+<h3 id="4-create-notarization-credentials">4. Create notarization credentials<a class="anchor" href="#4-create-notarization-credentials" aria-label="Link to this section">#</a></h3>
+<p>Pick one.</p>
+<p><strong>A. Apple ID with an app-specific password</strong> (simplest)</p>
+<ol><li>Sign in at <a href="https://account.apple.com" rel="noopener">account.apple.com</a>, open <strong>Sign-In and Security › App-Specific Passwords</strong> and create one called <code>Plonix notarization</code>.</li><li>You'll need your Apple ID email, that password and your Team ID.</li></ol>
+<p><strong>B. App Store Connect API key</strong> (not tied to a person's password)</p>
+<ol><li>In <a href="https://appstoreconnect.apple.com" rel="noopener">App Store Connect</a>, open <strong>Users and Access › Integrations › App Store Connect API</strong>, and under <strong>Team Keys</strong> click <strong>+</strong>. Name it <code>Plonix notarization</code> with the <strong>Developer</strong> role.</li><li>Download <code>AuthKey_&lt;KEYID&gt;.p8</code>. Apple only lets you download it once.</li><li>Note the <strong>Key ID</strong> (in the table) and the <strong>Issuer ID</strong> (above the table).</li></ol>
+<p>Check the credentials work before adding them to GitHub:</p>
+<pre><code class="language-sh">xcrun notarytool history --apple-id you@example.com --password abcd-efgh-ijkl-mnop --team-id AB12CD34EF
+# or
+xcrun notarytool history --key AuthKey_ABC123DEF4.p8 --key-id ABC123DEF4 --issuer 00000000-0000-0000-0000-000000000000</code></pre>
+<h3 id="5-create-the-update-signing-key">5. Create the update signing key<a class="anchor" href="#5-create-the-update-signing-key" aria-label="Link to this section">#</a></h3>
+<p>Plonix.app checks for updates and only installs packages signed with its own update key. This key is separate from the Apple certificate. Follow <a href="updates.html">docs/updates.md</a> to create it with <code>cargo tauri signer generate</code>, put the public key in <code>plugins.updater.pubkey</code> in <code>crates/plonix-app/tauri.conf.json</code>, and add the two secrets listed below.</p>
+<h3 id="6-add-the-github-secrets">6. Add the GitHub secrets<a class="anchor" href="#6-add-the-github-secrets" aria-label="Link to this section">#</a></h3>
+<p>In the repository, open <strong>Settings › Secrets and variables › Actions › New repository secret</strong> and add the secrets below. Names must match exactly.</p>
+<h2 id="github-secrets">GitHub secrets<a class="anchor" href="#github-secrets" aria-label="Link to this section">#</a></h2>
+<p>Signing (all required to sign):</p>
+<div class="table"><table><thead><tr><th>Secret</th><th>Value</th></tr></thead><tbody><tr><td><code>APPLE_CERTIFICATE</code></td><td>The base64 text of <code>DeveloperID.p12</code> (step 3)</td></tr><tr><td><code>APPLE_CERTIFICATE_PASSWORD</code></td><td>The password you set when exporting the <code>.p12</code></td></tr><tr><td><code>APPLE_SIGNING_IDENTITY</code></td><td>The identity name, e.g. <code>Developer ID Application: Jane Doe (AB12CD34EF)</code></td></tr></tbody></table></div>
+<p>Notarization, option A (Apple ID):</p>
+<div class="table"><table><thead><tr><th>Secret</th><th>Value</th></tr></thead><tbody><tr><td><code>APPLE_ID</code></td><td>Your Apple ID email</td></tr><tr><td><code>APPLE_PASSWORD</code></td><td>The app-specific password (not your Apple ID password)</td></tr><tr><td><code>APPLE_TEAM_ID</code></td><td>Your Team ID, e.g. <code>AB12CD34EF</code></td></tr></tbody></table></div>
+<p>Notarization, option B (API key):</p>
+<div class="table"><table><thead><tr><th>Secret</th><th>Value</th></tr></thead><tbody><tr><td><code>APPLE_API_KEY</code></td><td>The key ID, e.g. <code>ABC123DEF4</code></td></tr><tr><td><code>APPLE_API_ISSUER</code></td><td>The issuer ID (a UUID)</td></tr><tr><td><code>APPLE_API_PRIVATE_KEY</code></td><td>The full contents of <code>AuthKey_&lt;KEYID&gt;.p8</code>, including the <code>BEGIN</code> and <code>END</code> lines</td></tr></tbody></table></div>
+<p>The workflows write <code>APPLE_API_PRIVATE_KEY</code> to a temporary file and pass its path to Tauri and <code>notarytool</code> as <code>APPLE_API_KEY_PATH</code>. Set only one option; if both are set, the Apple ID is used.</p>
+<p>Updates (from the updater, see <a href="updates.html">docs/updates.md</a>):</p>
+<div class="table"><table><thead><tr><th>Secret</th><th>Value</th></tr></thead><tbody><tr><td><code>TAURI_SIGNING_PRIVATE_KEY</code></td><td>The contents of the update private key file</td></tr><tr><td><code>TAURI_SIGNING_PRIVATE_KEY_PASSWORD</code></td><td>Its password, if you set one</td></tr></tbody></table></div>
+<p>Once the signing and notarization secrets are in place, the next push to <code>main</code> produces a signed and notarized <code>Plonix-macOS</code> artifact. Check the <code>macos-app</code> job's <strong>Verify the signature and notarization</strong> step to confirm.</p>
+<h2 id="cutting-a-release">Cutting a release<a class="anchor" href="#cutting-a-release" aria-label="Link to this section">#</a></h2>
+<ol><li><p>Make sure <code>main</code> is green, including the signed <code>macos-app</code> build.</p></li><li><p>Bump the version in <code>crates/plonix-app/tauri.conf.json</code> (<code>version</code>), and in <code>Cargo.toml</code> files if you want the CLI to report the same version. Commit with a message like <code>Release 0.2.0</code>.</p></li><li><p>Tag the commit and push the tag:</p>
+<pre><code class="language-sh">git tag v0.2.0
+git push origin v0.2.0</code></pre></li><li><p>The <strong>Release</strong> workflow checks that the tag matches the version, builds a universal (Apple silicon and Intel) Plonix.app, signs and notarizes it, signs the update package, writes <code>latest.json</code> and publishes a GitHub release with all of them. It stops with an error if the tag and version differ or a key is missing.</p></li><li><p>Edit the release notes on GitHub if needed, then download <code>Plonix-macOS.zip</code> from the release and check it on a Mac:</p>
+<pre><code class="language-sh">ditto -x -k Plonix-macOS.zip . &amp;&amp; scripts/macos/sign-and-notarize.sh --verify Plonix.app</code></pre>
+<p>or simply double-click it: a notarized app opens without the &quot;unidentified developer&quot; warning.</p></li></ol>
+<h2 id="signing-by-hand">Signing by hand<a class="anchor" href="#signing-by-hand" aria-label="Link to this section">#</a></h2>
+<p>To sign a build on your own Mac, for example to test the entitlements:</p>
+<pre><code class="language-sh">cd crates/plonix-app
+cargo tauri build --bundles app
+cd ../..
+
+# Uses the identity in your login keychain:
+APPLE_SIGNING_IDENTITY=&quot;Developer ID Application: Jane Doe (AB12CD34EF)&quot; \
+APPLE_ID=you@example.com APPLE_PASSWORD=abcd-efgh-ijkl-mnop APPLE_TEAM_ID=AB12CD34EF \
+  scripts/macos/sign-and-notarize.sh --zip Plonix-macOS.zip target/release/bundle/macos/Plonix.app</code></pre>
+<p>Add <code>--no-notarize</code> to only sign, or set the variables before <code>cargo tauri build</code> to let Tauri do it all.</p>
+<h2 id="troubleshooting">Troubleshooting<a class="anchor" href="#troubleshooting" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Notarization rejected.</strong> The script prints Apple's log. For a submission made by Tauri, run <code>xcrun notarytool history</code> and <code>xcrun notarytool log &lt;id&gt;</code> with the same credentials. The usual causes are a missing secure timestamp, the hardened runtime being off, or a binary signed with a different identity.</li><li><strong>&quot;The specified item could not be found in the keychain&quot;.</strong> <code>APPLE_SIGNING_IDENTITY</code> doesn't match the certificate in <code>APPLE_CERTIFICATE</code>. Compare it with the output of <code>security find-identity -v -p codesigning</code>.</li><li><strong>Ask Claude Code does nothing in a signed build.</strong> Check the app has the Apple Events entitlement (<code>codesign -d --entitlements - Plonix.app</code>) and that Plonix is allowed under <strong>System Settings › Privacy &amp; Security › Automation</strong>.</li><li><strong>The certificate expires or leaks.</strong> Create a new one (step 2), update the three signing secrets, and if it leaked, revoke the old one in the developer portal. Apps already notarized keep working.</li></ul>
+</article>
+<p class="edit">This page is <a href="https://github.com/SergeyMalych/plonix/blob/main/docs/releasing.md">docs/releasing.md</a> in the Plonix repository. Spotted something wrong? <a href="https://github.com/SergeyMalych/plonix/edit/main/docs/releasing.md">Suggest a change</a>.</p>
+</main>
+</div>
+<footer>
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <span>Open-source web security workbench for macOS. Apache-2.0.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/SergeyMalych/plonix">GitHub</a>
+      <a href="./">Docs</a>
+      <a href="https://github.com/SergeyMalych/plonix/releases">Releases</a>
+      <a href="https://github.com/SergeyMalych/plonix/issues">Issues</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(() => {
+  const root = document.documentElement, btn = document.getElementById('theme');
+  const sys = matchMedia('(prefers-color-scheme: dark)');
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+  const current = () => root.dataset.theme || (sys.matches ? 'dark' : 'light');
+  const paint = () => { const d = current() === 'dark'; btn.innerHTML = d ? SUN : MOON; btn.setAttribute('aria-label', d ? 'Switch to light mode' : 'Switch to dark mode'); };
+  paint();
+  sys.addEventListener('change', paint);
+  btn.addEventListener('click', () => {
+    const next = current() === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next; paint();
+    try { localStorage.setItem('plonix-theme', next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>
