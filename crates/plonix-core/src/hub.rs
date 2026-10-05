@@ -69,6 +69,7 @@ pub struct HubInfo {
 /// the background.
 pub async fn start(home: &Home, port: Option<u16>) -> Result<Arc<Hub>> {
     home.ensure()?;
+    crate::usage::init(home, true);
     let token = home.load_or_create_token()?;
     let mut listener = None;
     for p in [port, Some(DEFAULT_HUB_PORT)].into_iter().flatten() {
@@ -189,6 +190,7 @@ impl Hub {
             let _ = self.close(&id).await;
         }
         self.stop.notify_waiters();
+        crate::usage::flush();
         if self.home.read_hub().is_some_and(|h| h.pid == std::process::id() && h.url == self.url()) {
             let _ = std::fs::remove_file(self.home.hub_file());
         }
@@ -267,6 +269,7 @@ fn router(hub: Arc<Hub>) -> Router {
         .route("/ui/session", post(ui_session))
         .route("/api/ui/launch", post(ui_launch))
         .route("/api/hub", get(about))
+        .route("/api/terms", get(terms).post(accept_terms))
         .route("/api/projects", get(projects).post(create))
         .route("/api/projects/add", post(add_existing))
         .route("/api/projects/demo", post(demo))
@@ -345,6 +348,43 @@ async fn about(State(hub): State<Arc<Hub>>) -> Response {
         "open_in_browser": interface.open_in_browser,
     }))
     .into_response()
+}
+
+/// The license and terms, and whether they still need accepting.
+async fn terms(State(hub): State<Arc<Hub>>) -> Response {
+    Json(json!({
+        "accepted": crate::terms::accepted(&hub.home),
+        "version": crate::terms::VERSION,
+        "terms": crate::terms::TERMS,
+        "license": crate::terms::LICENSE,
+        "terms_url": crate::terms::TERMS_URL,
+        "privacy_url": crate::terms::PRIVACY_URL,
+        "share_usage": crate::usage::sharing(&hub.home) || !crate::terms::accepted(&hub.home),
+        "usage_disabled_by_env": crate::usage::disabled_by_env(),
+    }))
+    .into_response()
+}
+
+#[derive(Deserialize)]
+struct AcceptBody {
+    accept: bool,
+    #[serde(default)]
+    share_usage: bool,
+}
+
+/// Records the first-launch answer: the terms, and whether to share usage statistics.
+async fn accept_terms(State(hub): State<Arc<Hub>>, Json(b): Json<AcceptBody>) -> Response {
+    if !b.accept {
+        return err(StatusCode::BAD_REQUEST, "bad_request", "accept the license and terms to continue");
+    }
+    let r = crate::usage::set_sharing(&hub.home, b.share_usage).and_then(|_| crate::terms::accept(&hub.home));
+    match r {
+        Ok(()) => {
+            crate::usage::flush();
+            Json(json!({ "accepted": true, "share_usage": crate::usage::sharing(&hub.home) })).into_response()
+        }
+        Err(e) => internal(e),
+    }
 }
 
 /// Known projects, with the session serving each one, if any.

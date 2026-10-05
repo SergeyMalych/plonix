@@ -126,14 +126,116 @@ async function boot() {
   }
   L.token = store('plonix.hubtoken');
   if (!L.token) return showLock();
+  let terms;
   try {
-    L.about = await api('/api/hub');
+    [L.about, terms] = await Promise.all([api('/api/hub'), api('/api/terms')]);
   } catch (e) {
     if (e.status !== 401) showLock(e.message);
     return;
   }
+  if (!terms.accepted) return showTerms(terms);
   renderShell();
   refresh();
+}
+
+/* ---------- first launch: license and terms ---------- */
+
+const REPO = 'https://github.com/SergeyMalych/plonix/blob/main/';
+
+/** Inline Markdown of TERMS.md: links and `code`, everything else as text. */
+function inline(text) {
+  const out = [];
+  const re = /\[([^\]]+)\]\(([^)\s]+)\)|`([^`]+)`/g;
+  let at = 0;
+  for (let m; (m = re.exec(text)); at = re.lastIndex) {
+    if (m.index > at) out.push(text.slice(at, m.index));
+    if (m[3]) out.push(h('code', { text: m[3] }));
+    else out.push(h('a', { href: /^https:\/\//.test(m[2]) ? m[2] : REPO + m[2], target: '_blank', rel: 'noopener', text: m[1] }));
+  }
+  out.push(text.slice(at));
+  return out;
+}
+
+/** TERMS.md as headings and paragraphs. Its title is the card's own. */
+function termsDoc(md) {
+  const blocks = md.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
+  return blocks.slice(1).map((b) => (b.startsWith('## ') ? h('h4', { text: b.slice(3) }) : h('p', null, inline(b.replace(/\s*\n\s*/g, ' ')))));
+}
+
+function showTerms(t) {
+  clearTimeout(L.timer);
+  const doc = h('div', { class: 'tdoc', tabindex: 0 });
+  const tabs = h('div', { class: 'seg-ctl', role: 'tablist' });
+  const showDoc = (which) => {
+    for (const b of tabs.querySelectorAll('button')) b.classList.toggle('on', b.dataset.v === which);
+    doc.scrollTop = 0;
+    doc.replaceChildren(...(which === 'license' ? [h('pre', { text: t.license })] : termsDoc(t.terms)));
+  };
+  tabs.append(
+    h('button', { class: 'segbtn', 'data-v': 'terms', text: 'Terms of use', onclick: () => showDoc('terms') }),
+    h('button', { class: 'segbtn', 'data-v': 'license', text: 'License (Apache 2.0)', onclick: () => showDoc('license') }),
+  );
+  const off = t.usage_disabled_by_env;
+  const go = h('button', { class: 'btn primary', text: 'Continue', disabled: true });
+  const accept = h('input', { type: 'checkbox', id: 't-accept', onchange: () => (go.disabled = !accept.checked) });
+  const share = h('input', { type: 'checkbox', id: 't-share', checked: t.share_usage && !off, disabled: off });
+  const err = h('span', { class: 'err' });
+  go.addEventListener('click', async () => {
+    go.disabled = true;
+    err.textContent = '';
+    try {
+      await api('/api/terms', { method: 'POST', body: { accept: accept.checked, share_usage: share.checked } });
+      renderShell();
+      refresh();
+    } catch (e) {
+      err.textContent = e.message;
+      go.disabled = false;
+    }
+  });
+  $('#app').replaceChildren(
+    h(
+      'div',
+      { class: 'terms' },
+      h(
+        'div',
+        { class: 'tcard', role: 'dialog', 'aria-labelledby': 't-title' },
+        h(
+          'div',
+          { class: 'thead' },
+          h('img', { src: '/ui/icon.svg', alt: '' }),
+          h('div', null, h('h1', { id: 't-title', text: 'Welcome to Plonix' }), h('p', { text: 'Free and open source. Before you start, please read the license and the terms of use.' })),
+        ),
+        tabs,
+        doc,
+        h(
+          'div',
+          { class: 'tchecks' },
+          h('label', { class: 'tcheck', for: 't-accept' }, accept, h('span', null, h('b', { text: 'I accept the license and terms' }))),
+          h(
+            'label',
+            { class: 'tcheck', for: 't-share' },
+            share,
+            h(
+              'span',
+              null,
+              h('b', { text: 'Share anonymous usage statistics' }),
+              h(
+                'small',
+                null,
+                off
+                  ? 'Off: PLONIX_NO_ANALYTICS or DO_NOT_TRACK is set on this computer. '
+                  : 'Once a day: how often features are used, the Plonix version, OS and CPU type. Never URLs, traffic, project names or anything you type. Change it any time in Settings. ',
+                h('a', { href: t.privacy_url, target: '_blank', rel: 'noopener', text: 'Exactly what is sent' }),
+              ),
+            ),
+          ),
+        ),
+        h('div', { class: 'tfoot' }, err, go),
+      ),
+    ),
+  );
+  showDoc('terms');
+  accept.focus();
 }
 
 function showLock(message) {

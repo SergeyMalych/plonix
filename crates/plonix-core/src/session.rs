@@ -53,6 +53,7 @@ pub struct Session {
 /// Opens a project: takes its lock, starts its engine and announces it.
 pub async fn open(home: &Home, mut project: Project, options: OpenOptions) -> Result<Session> {
     home.ensure()?;
+    crate::usage::init(home, true);
     let lock = project.lock()?;
     let storage = StorageSettings::from_values(&project.settings(settings::STORAGE));
     let ca = Arc::new(CertAuthority::load_or_create(home)?);
@@ -106,6 +107,7 @@ pub async fn open(home: &Home, mut project: Project, options: OpenOptions) -> Re
     project::remember(home, &project, true)?;
     let session = Session { engine, project, api_addr, token, home: home.clone(), _lock: lock };
     session.announce()?;
+    crate::usage::record(if session.project.file.demo { "demo_opened" } else { "project_opened" });
     tracing::info!("{}: proxy {}, API {}", session.project.name(), session.proxy_addr(), api_addr);
     Ok(session)
 }

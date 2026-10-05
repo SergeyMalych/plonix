@@ -153,6 +153,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/bench/proposals", get(list_proposals).post(add_proposal))
         .route("/api/bench/proposals/{id}", axum::routing::delete(discard_proposal))
         .route("/api/bench/proposals/{id}/diff", post(proposal_diff))
+        .route("/api/usage", post(usage_screen))
         .route("/api/shutdown", post(shutdown))
         .layer(middleware::from_fn_with_state(state.clone(), guard))
         .with_state(state)
@@ -359,6 +360,9 @@ struct InterceptBody {
 async fn put_intercept(State(s): State<AppState>, caller: MaybeCaller, Json(b): Json<InterceptBody>) -> Response {
     if let Some(r) = user_only(&caller) {
         return r;
+    }
+    if b.on == Some(true) {
+        crate::usage::record("intercept_used");
     }
     let current = s.engine.intercept.options();
     let mut values = current.to_values();
@@ -755,6 +759,7 @@ async fn scan_suggest(State(s): State<AppState>, Path(host): Path<String>) -> Re
 }
 
 async fn scan_run(State(s): State<AppState>, headers: HeaderMap, Json(req): Json<crate::scan::ScanRequest>) -> Response {
+    crate::usage::record("scan_run");
     match s.engine.scan(req, &initiator(&headers)).await {
         Ok(report) => Json(report).into_response(),
         Err(e @ SendError::OutOfScope { .. }) => err(StatusCode::FORBIDDEN, "out_of_scope", &e.to_string()),
@@ -764,6 +769,7 @@ async fn scan_run(State(s): State<AppState>, headers: HeaderMap, Json(req): Json
 }
 
 async fn crawl_run(State(s): State<AppState>, headers: HeaderMap, Json(req): Json<crate::crawl::CrawlRequest>) -> Response {
+    crate::usage::record("crawl_run");
     match s.engine.crawl(req, &initiator(&headers)).await {
         Ok(report) => Json(report).into_response(),
         Err(e @ SendError::OutOfScope { .. }) => err(StatusCode::FORBIDDEN, "out_of_scope", &e.to_string()),
@@ -1017,6 +1023,7 @@ async fn market_add(State(s): State<AppState>, Json(b): Json<MarketAddBody>) -> 
 }
 
 async fn market_install(State(s): State<AppState>, Json(b): Json<MarketBody>) -> Response {
+    crate::usage::record("market_install");
     market_change(s, Some(b.name), "install").await
 }
 
@@ -1180,6 +1187,9 @@ async fn open_browser(State(s): State<AppState>, Json(b): Json<OpenBody>) -> Res
     };
     let profile = browser::profile_dir(&s.home, s.engine.project_ref.get().map(|p| p.dir.as_path()));
     let launched = browser::launch(&profile, &found, &s.proxy_addr(), &s.engine.ca.spki_sha256(), &target.url);
+    if launched.is_ok() {
+        crate::usage::record("capture_started");
+    }
     match launched {
         Ok(_) => Json(json!({
             "url": target.url,
@@ -1207,11 +1217,13 @@ fn send_result(s: &AppState, r: Result<Exchange, SendError>) -> Response {
 }
 
 async fn send(State(s): State<AppState>, headers: HeaderMap, Json(req): Json<SendRequest>) -> Response {
+    crate::usage::record("bench_send");
     let r = s.engine.send(req, &initiator(&headers)).await;
     send_result(&s, r)
 }
 
 async fn replay(State(s): State<AppState>, headers: HeaderMap, Json(req): Json<ReplayRequest>) -> Response {
+    crate::usage::record("bench_send");
     let r = s.engine.replay(req, &initiator(&headers)).await;
     send_result(&s, r)
 }
@@ -1219,6 +1231,7 @@ async fn replay(State(s): State<AppState>, headers: HeaderMap, Json(req): Json<R
 /// Runs payloads through the marked positions of a request. User-only: this
 /// route is in no agent mode's capabilities, so agents cannot start a run.
 async fn run(State(s): State<AppState>, headers: HeaderMap, Json(req): Json<crate::runs::RunRequest>) -> Response {
+    crate::usage::record("bench_run");
     match s.engine.run(req, &initiator(&headers)).await {
         Ok(report) => Json(report).into_response(),
         Err(e @ SendError::OutOfScope { .. }) => err(StatusCode::FORBIDDEN, "out_of_scope", &e.to_string()),
@@ -1265,7 +1278,10 @@ async fn add_finding(State(s): State<AppState>, headers: HeaderMap, Json(mut f):
         Err(e) => return err(StatusCode::BAD_REQUEST, "bad_request", &e),
     };
     match s.engine.store.add_finding(&f, &initiator(&headers)) {
-        Ok(f) => (StatusCode::CREATED, Json(f)).into_response(),
+        Ok(f) => {
+            crate::usage::record("finding_added");
+            (StatusCode::CREATED, Json(f)).into_response()
+        }
         Err(e) => internal(e),
     }
 }
@@ -1328,6 +1344,7 @@ async fn export_findings(State(s): State<AppState>, caller: MaybeCaller, Query(p
     let Some(format) = report::Format::parse(&p.format) else {
         return err(StatusCode::BAD_REQUEST, "bad_request", "format must be md, html or json");
     };
+    crate::usage::record("report_exported");
     let sel = match report::Selection::parse(&p.ids, &p.status) {
         Ok(sel) => sel,
         Err(e) => return err(StatusCode::BAD_REQUEST, "bad_request", &e),
@@ -1403,6 +1420,7 @@ async fn agent_ask(State(s): State<AppState>, Json(req): Json<AskRequest>) -> Re
     if !settings.enabled {
         return err(StatusCode::FORBIDDEN, "agents_disabled", "agent access is turned off in Settings › AI agents");
     }
+    crate::usage::record("ask_claude");
     let engine = s.engine.clone();
     match tokio::task::spawn_blocking(move || ask::build(&engine, &req, &settings)).await {
         Ok(Ok(bundle)) => Json(bundle).into_response(),
@@ -1422,6 +1440,7 @@ async fn agent_launch(State(s): State<AppState>, Json(b): Json<LaunchBody>) -> R
     if b.prompt.trim().is_empty() {
         return err(StatusCode::BAD_REQUEST, "bad_request", "the prompt is empty");
     }
+    crate::usage::record("agent_launch");
     let home = s.home.clone();
     match tokio::task::spawn_blocking(move || ask::launch_in_terminal(&home, &b.prompt)).await {
         Ok(Ok(_)) => Json(json!({ "ok": true })).into_response(),
@@ -1524,6 +1543,20 @@ async fn discard_proposal(State(s): State<AppState>, Path(id): Path<u64>) -> Res
         Some(_) => Json(json!({ "ok": true })).into_response(),
         None => err(StatusCode::NOT_FOUND, "not_found", "that suggestion is gone"),
     }
+}
+
+#[derive(Deserialize)]
+struct UsageBody {
+    event: String,
+}
+
+/// Counts a screen the window opened, for anonymous usage statistics (see
+/// [`crate::usage`]). Only screen names are taken here.
+async fn usage_screen(caller: MaybeCaller, Json(b): Json<UsageBody>) -> Response {
+    if is_user(&caller) && b.event.starts_with("screen_") {
+        crate::usage::record(&b.event);
+    }
+    StatusCode::NO_CONTENT.into_response()
 }
 
 async fn shutdown(State(s): State<AppState>) -> Response {

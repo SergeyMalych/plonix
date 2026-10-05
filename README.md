@@ -134,6 +134,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - **Match and replace** (per project): the rules, and one switch that turns them all off.
 - **Storage** (per project): keep only in-scope traffic, with a count of what it would delete and a button to delete it now.
 - **Interface** (all projects): open projects in a Plonix window or in your web browser.
+- **Usage statistics** (all projects): share anonymous feature counts once a day, or not. See [Privacy](#privacy).
 - Settings are a registry: a feature adds a section by describing its fields, and the Settings screens draw it with validation and storage included (see [docs/projects.md](docs/projects.md#adding-a-settings-section)).
 
 ### The Plonix app
@@ -220,7 +221,7 @@ Each CI run on `main` and on pull requests also builds `Plonix.app` and attaches
 plonix open example.com
 ```
 
-That one command creates your local certificate authority (first run only), starts the engine in the background, puts `example.com` and its subdomains in scope, opens a browser at the target with capture running, and opens the Plonix window next to it:
+The very first `plonix` command asks you to accept the license and terms (see [Privacy](#privacy)). Then that one command creates your local certificate authority (first run only), starts the engine in the background, puts `example.com` and its subdomains in scope, opens a browser at the target with capture running, and opens the Plonix window next to it:
 
 ```text
 Plonix · https://example.com/
@@ -440,6 +441,12 @@ Rule packs and **skills** need no Rust either. See [docs/detection-rules.md](doc
 
 Use Plonix only against systems you are authorized to test.
 
+## Privacy
+
+Your traffic, projects and findings stay on your computer. On first launch Plonix shows its license and [terms of use](TERMS.md) and asks whether to share anonymous usage statistics: a random install id, the version, OS and CPU type, and how often features are used, at most once a day. Never URLs, hosts, traffic, project names, paths or anything you type. Turn it off any time in Settings › Usage statistics, with `plonix usage off`, or with `PLONIX_NO_ANALYTICS=1` / `DO_NOT_TRACK=1`. [docs/privacy.md](docs/privacy.md) lists exactly what is sent.
+
+The CLI asks the same once, in a terminal. Scripts and CI pass `--accept-terms` or set `PLONIX_ACCEPT_TERMS=1` instead, which records nothing and never shares statistics.
+
 ## License
 
-Plonix is licensed under the [Apache License, Version 2.0](LICENSE). Unless you state otherwise, any contribution you submit for inclusion in Plonix is licensed under the same terms, without any additional terms or conditions.
+Plonix is licensed under the [Apache License, Version 2.0](LICENSE), with short [terms of use](TERMS.md). Unless you state otherwise, any contribution you submit for inclusion in Plonix is licensed under the same terms, without any additional terms or conditions.

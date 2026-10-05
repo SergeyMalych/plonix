@@ -76,6 +76,10 @@ struct Cli {
     #[arg(long, short = 'p', global = true, value_name = "PROJECT")]
     project: Option<String>,
 
+    /// Accept the license and terms of use (TERMS.md) for this run, for scripts and CI [env: PLONIX_ACCEPT_TERMS=1]
+    #[arg(long, global = true)]
+    accept_terms: bool,
+
     #[command(subcommand)]
     command: Cmd,
 }
@@ -195,6 +199,11 @@ enum Cmd {
     },
     /// Run the read-only MCP server on stdin/stdout (started by your agent)
     Mcp,
+    /// Anonymous usage statistics: see the next report, turn them on or off
+    Usage {
+        #[command(subcommand)]
+        cmd: Option<UsageCmd>,
+    },
     /// The local certificate authority
     Ca {
         #[command(subcommand)]
@@ -357,6 +366,16 @@ struct DomainArgs {
 }
 
 #[derive(Subcommand)]
+enum UsageCmd {
+    /// Whether statistics are on, and the next report exactly as it would be sent (the default)
+    Show,
+    /// Share anonymous usage statistics
+    On,
+    /// Stop sharing, and delete the counts and install id kept so far
+    Off,
+}
+
+#[derive(Subcommand)]
 enum CaCmd {
     /// Where the certificate is and how to trust it (the default)
     Show,
@@ -409,7 +428,20 @@ impl Ctx {
 fn run(cli: Cli) -> Result<ExitCode> {
     let project = cli.project.or_else(|| std::env::var("PLONIX_PROJECT").ok()).filter(|p| !p.trim().is_empty());
     let ctx = Ctx { home: Home::resolve(cli.home.as_deref())?, json: cli.json, project };
-    match cli.command {
+    // Background processes and the MCP server never ask; they run for someone who already did.
+    let background = matches!(cli.command, Cmd::Engine(_) | Cmd::Hub { .. } | Cmd::Mcp);
+    plonix_core::usage::init(&ctx.home, matches!(cli.command, Cmd::Engine(_) | Cmd::Hub { .. }));
+    if !background && !matches!(cli.command, Cmd::Usage { .. }) {
+        ensure_terms(&ctx, cli.accept_terms)?;
+        plonix_core::usage::record("cli_used");
+    }
+    let code = dispatch(ctx, cli.command);
+    plonix_core::usage::flush();
+    code
+}
+
+fn dispatch(ctx: Ctx, command: Cmd) -> Result<ExitCode> {
+    match command {
         Cmd::Open(a) => open_cmd(&ctx, a)?,
         Cmd::Ui(a) => ui_cmd(&ctx, a)?,
         Cmd::Start(a) => start_cmd(&ctx, a)?,
@@ -471,6 +503,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
         Cmd::Skills { cmd } => market::skills_cmd(&ctx, cmd.unwrap_or(market::SkillsCmd::List))?,
         Cmd::Connect { cmd } => connect::connect_cmd(&ctx, cmd)?,
         Cmd::Mcp => mcp::serve(ctx.home.clone())?,
+        Cmd::Usage { cmd } => usage_cmd(&ctx, cmd.unwrap_or(UsageCmd::Show))?,
         Cmd::Ca { cmd } => ca_cmd(&ctx, cmd.unwrap_or(CaCmd::Show))?,
         Cmd::Engine(a) => engine_ctl::run_foreground(
             ctx.home.clone(),
@@ -603,6 +636,7 @@ fn projects_cmd(ctx: &Ctx, cmd: ProjectsCmd) -> Result<()> {
 
 /// Opens the Start screen, starting it in the background if needed.
 fn launcher_cmd(ctx: &Ctx, no_open: bool) -> Result<()> {
+    plonix_core::usage::record("web_launcher_opened");
     let url = engine_ctl::launcher_url(&ctx.home)?;
     let opened = !no_open && open::open_url(&url).is_ok();
     if ctx.json {
@@ -947,6 +981,84 @@ fn ui_cmd(ctx: &Ctx, a: UiArgs) -> Result<()> {
     if c.status["exchanges"].as_i64() == Some(0) {
         println!("\nNothing captured yet. Start with `plonix open <target>`, or point a browser at the proxy {}.", c.status["proxy"].as_str().unwrap_or(""));
     }
+    Ok(())
+}
+
+/// Asks once for the license and terms, the first time Plonix runs in this
+/// home. Scripts pass `--accept-terms` or set `PLONIX_ACCEPT_TERMS=1`, which
+/// lets the command run without recording an answer.
+fn ensure_terms(ctx: &Ctx, flag: bool) -> Result<()> {
+    use plonix_core::{terms, usage};
+    if flag || terms::accepted_by_env() || terms::accepted(&ctx.home) {
+        return Ok(());
+    }
+    if !std::io::stdin().is_terminal() {
+        bail!(
+            "Plonix needs its license and terms accepted once. Run a plonix command in a terminal to read and accept them, \
+             or pass --accept-terms (or set PLONIX_ACCEPT_TERMS=1) in scripts and CI. Terms: {}",
+            terms::TERMS_URL
+        );
+    }
+    eprintln!(
+        "Welcome to Plonix. It is free software under the Apache License 2.0, with short terms of use:\n  {}\n\n\
+         In short:\n\
+         \x20 - Test only systems you own or have permission to test.\n\
+         \x20 - You are responsible for what you test. Plonix comes with no warranty.\n\
+         \x20 - Your traffic, projects and findings stay on this computer.\n",
+        terms::TERMS_URL
+    );
+    let ask = |q: &str| -> Result<String> {
+        eprint!("{q}");
+        std::io::stderr().flush()?;
+        let mut line = String::new();
+        std::io::stdin().lock().read_line(&mut line)?;
+        Ok(line.trim().to_ascii_lowercase())
+    };
+    if !matches!(ask("Type yes to accept the license and terms: ")?.as_str(), "yes" | "y") {
+        bail!("the license and terms were not accepted; nothing was changed");
+    }
+    let share = if usage::disabled_by_env() {
+        false
+    } else {
+        eprintln!(
+            "\nPlonix can share anonymous usage statistics once a day: a random install id, the version, your OS and CPU type,\n\
+             and how often features were used. Never URLs, hosts, traffic, project names or anything you type.\n  {}",
+            terms::PRIVACY_URL
+        );
+        !matches!(ask("Share anonymous usage statistics? [Y/n] ")?.as_str(), "n" | "no")
+    };
+    usage::set_sharing(&ctx.home, share)?;
+    terms::accept(&ctx.home)?;
+    eprintln!("Thanks. Change this any time with `plonix usage on|off` or in Settings › Usage statistics.\n");
+    Ok(())
+}
+
+fn usage_cmd(ctx: &Ctx, cmd: UsageCmd) -> Result<()> {
+    use plonix_core::usage;
+    match cmd {
+        UsageCmd::Show => {}
+        UsageCmd::On => usage::set_sharing(&ctx.home, true)?,
+        UsageCmd::Off => usage::set_sharing(&ctx.home, false)?,
+    }
+    let v = usage::preview(&ctx.home);
+    if ctx.json {
+        return ctx.print_json(&v);
+    }
+    let state = if v["sharing"] == true {
+        "on"
+    } else if v["disabled_by_env"] == true {
+        "off (PLONIX_NO_ANALYTICS or DO_NOT_TRACK is set)"
+    } else if v["terms_accepted"] != true {
+        "off until the terms are accepted"
+    } else {
+        "off"
+    };
+    println!("Anonymous usage statistics: {state}");
+    if v["sharing"] == true {
+        println!("Sent at most once a day to {}. The next report, exactly as it would be sent:\n", v["endpoint"].as_str().unwrap_or(""));
+        println!("{}", serde_json::to_string_pretty(&v["next_report"])?);
+    }
+    println!("\nWhat is sent and why: {}", plonix_core::terms::PRIVACY_URL);
     Ok(())
 }
 
