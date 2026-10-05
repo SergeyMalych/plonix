@@ -7,6 +7,7 @@
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Subcommand};
 use plonix_core::access::{AgentSettings, Group};
+use plonix_core::profile;
 use plonix_core::market::{self, Action, Catalog, Change, Market, OpenOptions, Status, Trust, TrustLevel, Verification};
 use plonix_core::registry::{self, Kind};
 use plonix_core::settings;
@@ -42,8 +43,11 @@ enum MarketCmd {
     Show { name: String },
     /// Install packages and what they require (verified before installing)
     Install {
-        #[arg(required = true)]
+        #[arg(required_unless_present = "starter")]
         names: Vec<String>,
+        /// Install the starter set for your kind of work (see `plonix market recommend`)
+        #[arg(long, conflicts_with = "names")]
+        starter: bool,
         /// For an extension: also grant a sensitive capability it asks for (read-out-of-scope, run-program); repeatable
         #[arg(long, value_name = "CAPABILITY")]
         grant: Vec<String>,
@@ -51,6 +55,14 @@ enum MarketCmd {
         #[arg(long)]
         yes: bool,
     },
+    /// Items that suit your kind of work: bug hunter, red teamer or security researcher
+    Recommend {
+        /// Show another profile without saving it
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Show or set your kind of work (`none` clears it)
+    Profile { id: Option<String> },
     /// Install newer versions of everything installed from the Market
     Update,
     /// Remove installed packages; removing a bundle removes what it added
@@ -178,6 +190,10 @@ fn print_changes(changes: &[Change], requested: &str) {
     }
 }
 
+fn profile_ids() -> String {
+    profile::profiles().iter().map(|p| p.id.as_str()).collect::<Vec<_>>().join("|")
+}
+
 pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
     let opts = OpenOptions { index: a.index.clone(), allow_unsigned: a.allow_unsigned };
     let m = Market::new(&ctx.home);
@@ -283,7 +299,69 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
                 println!("Homepage: {}", p.homepage);
             }
         }
-        MarketCmd::Install { names, grant, yes } => {
+        MarketCmd::Install { starter: true, .. } => {
+            let p = profile::current(&ctx.home, None).ok_or_else(|| anyhow!("pick your kind of work first: `plonix market profile <{}>`", profile_ids()))?;
+            let cat = market::open(&ctx.home, &opts)?;
+            let r = profile::install_starter(&m, &cat, p);
+            if ctx.json {
+                return ctx.print_json(&json!({ "profile": p.id, "result": r }));
+            }
+            println!("Starter set for {}:", p.title);
+            print_changes(&r.changes, "");
+            for w in &r.waiting {
+                println!("{} is an extension: see what it may do with `plonix market show {}`, then install it by name.", w.name, w.name);
+            }
+            for (name, why) in &r.failed {
+                println!("{name} was not installed: {why}");
+            }
+            if r.changes.iter().all(|c| c.action == Action::Unchanged) && r.waiting.is_empty() && r.failed.is_empty() {
+                println!("Everything in it is already installed.");
+            }
+        }
+        MarketCmd::Recommend { profile: peek } => {
+            let p = match peek.as_deref() {
+                Some(id) => profile::get(id).ok_or_else(|| anyhow!("`{id}` is not a profile ({})", profile_ids()))?,
+                None => profile::current(&ctx.home, None).ok_or_else(|| anyhow!("pick your kind of work first: `plonix market profile <{}>`", profile_ids()))?,
+            };
+            let cat = market::open(&ctx.home, &opts)?;
+            let r = profile::recommend_from(&m, &cat, p);
+            if ctx.json {
+                return ctx.print_json(&json!({ "profile": p.id, "recommendation": r }));
+            }
+            println!("{} · {}", p.title, p.line);
+            let section = |title: &str, picks: &[profile::Pick]| {
+                if picks.is_empty() {
+                    return;
+                }
+                println!("\n{title}");
+                for k in picks {
+                    println!("  {:<18} {:<9} {}", k.name, kind_label(k.kind), clip(&k.why, 90));
+                }
+            };
+            section("Starter set", &r.starter);
+            section("You already have", &r.included);
+            section("Also for you", &r.also);
+            if r.starter.is_empty() {
+                println!("\nYou have everything in the starter set.");
+            } else if peek.is_none() {
+                println!("\nInstall the starter set with `plonix market install --starter`.");
+            }
+        }
+        MarketCmd::Profile { id } => {
+            if let Some(id) = id {
+                let id = if id == "none" { String::new() } else { id };
+                profile::set_global(&ctx.home, &id)?;
+            }
+            let p = profile::current(&ctx.home, None);
+            if ctx.json {
+                return ctx.print_json(&json!({ "profile": p.map(|p| &p.id), "profiles": profile::summaries() }));
+            }
+            match p {
+                Some(p) => println!("Your work: {} ({}). {}", p.title, p.id, p.line),
+                None => println!("Your work is not set. Choose one with `plonix market profile <{}>`.", profile_ids()),
+            }
+        }
+        MarketCmd::Install { names, grant, yes, .. } => {
             let cat = market::open(&ctx.home, &opts)?;
             if !cat.verified() {
                 eprintln!("warning: installing from an unsigned Market index ({})", cat.location());

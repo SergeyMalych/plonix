@@ -74,6 +74,7 @@ pub fn settings_section() -> Section {
     Section::new(SETTINGS, "Market", Level::Global)
         .describe("Where Plonix finds skills, rules, filters, bundles and extensions. Applies to all projects.")
         .order(40)
+        .field(crate::profile::global_field())
         .field(
             Field::text("index", "Market address", "")
                 .placeholder(registry::DEFAULT_INDEX)

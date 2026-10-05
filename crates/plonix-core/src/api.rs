@@ -36,7 +36,7 @@ use crate::replace;
 use crate::model::{Exchange, FindingEdit, NewFinding, check_severity, now_ms};
 use crate::report;
 use crate::paths::Home;
-use crate::{market, registry, skill};
+use crate::{market, profile, registry, skill};
 use crate::project::Project;
 use crate::proposal::{self, DraftRequest, NewProposal, Proposals};
 use crate::settings::{self, Level};
@@ -117,6 +117,8 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/market/remove", post(market_remove))
         .route("/api/market/update", post(market_update))
         .route("/api/market/add", post(market_add))
+        .route("/api/market/recommended", get(market_recommended))
+        .route("/api/market/profile", post(market_profile))
         .route("/api/market/{name}", get(market_detail))
         .route("/api/extensions", get(extensions_list))
         .route("/api/extensions/{name}/enabled", put(extension_enabled))
@@ -1244,6 +1246,58 @@ async fn market_list(State(s): State<AppState>, Query(p): Query<MarketParams>) -
         Ok(Ok(v)) => Json(v).into_response(),
         Ok(Err(e)) => market_error(e),
         Err(e) => internal(e.into()),
+    }
+}
+
+#[derive(Deserialize)]
+struct RecommendParams {
+    /// Peek at another profile without changing the saved one.
+    #[serde(default)]
+    profile: Option<String>,
+}
+
+/// Market items that suit the user's kind of work.
+async fn market_recommended(State(s): State<AppState>, Query(q): Query<RecommendParams>) -> Response {
+    let home = s.home.clone();
+    let project = this_project(&s);
+    let out = tokio::task::spawn_blocking(move || -> anyhow::Result<Value> {
+        let saved = profile::current(&home, project.as_ref());
+        let shown = match q.profile.as_deref().filter(|p| !p.is_empty()) {
+            Some(id) => Some(profile::get(id).ok_or_else(|| anyhow::anyhow!("no profile `{}`", crate::detect::clean(id, 40)))?),
+            None => saved,
+        };
+        let recommendation = match shown {
+            Some(p) => {
+                let cat = market::open_cached(&home, false)?;
+                Some(profile::recommend_from(&market::Market::new(&home), &cat, p))
+            }
+            None => None,
+        };
+        Ok(json!({
+            "profile": saved.map(|p| &p.id),
+            "shown": shown.map(|p| json!({ "id": p.id, "title": p.title, "line": p.line })),
+            "profiles": profile::summaries(),
+            "recommendation": recommendation,
+        }))
+    })
+    .await;
+    match out {
+        Ok(Ok(v)) => Json(v).into_response(),
+        Ok(Err(e)) => market_error(e),
+        Err(e) => internal(e.into()),
+    }
+}
+
+#[derive(Deserialize)]
+struct ProfileBody {
+    profile: String,
+}
+
+/// Saves the kind of work in Settings › Market.
+async fn market_profile(State(s): State<AppState>, Json(b): Json<ProfileBody>) -> Response {
+    match profile::set_global(&s.home, &b.profile) {
+        Ok(()) => Json(json!({ "profile": b.profile })).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, "bad_profile", &format!("{e:#}")),
     }
 }
 

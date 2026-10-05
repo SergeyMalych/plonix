@@ -39,6 +39,7 @@ pub mod hub;
 pub mod model;
 pub mod paths;
 pub mod project;
+pub mod profile;
 pub mod program;
 pub mod proposal;
 pub mod proxy;
