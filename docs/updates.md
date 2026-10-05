@@ -52,6 +52,11 @@ installing it.
 
 ### One-time setup
 
+The key pair exists: its public key is in `tauri.conf.json`, and the
+maintainers keep the private key outside the repository. To set it up again
+(for example after a leak, which also means installed copies must download the
+next version by hand):
+
 1. Create the signing key pair on your own machine and keep the private key
    out of the repository:
 
@@ -71,9 +76,12 @@ any later release and their users have to download the next version by hand.
 ### Publishing a release
 
 1. Bump `version` in `crates/plonix-app/tauri.conf.json` (for example to
-   `0.2.0`).
+   `0.2.0`) and add a section for it to `CHANGELOG.md`.
 2. Push a matching tag: `git tag v0.2.0 && git push origin v0.2.0`.
 
 The Release workflow builds a universal Plonix.app, signs the update package,
-writes `latest.json` and publishes the GitHub release with all three. It stops
-with a clear error if the tag and version differ or the key is missing.
+writes `latest.json` and publishes the GitHub release with them. It stops with
+a clear error if the tag and version differ. Without the
+`TAURI_SIGNING_PRIVATE_KEY` secret it still publishes the app but leaves out
+the update package and `latest.json`, with a warning, so installed copies don't
+see that release.

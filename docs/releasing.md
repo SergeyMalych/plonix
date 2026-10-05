@@ -29,7 +29,7 @@ Where it happens:
 | --- | --- | --- |
 | CI (`.github/workflows/ci.yml`, job `macos-app`) | Pull requests, forks, or no signing secrets | Unsigned `Plonix-macOS` artifact, as before |
 | CI, job `macos-app` | Pushes to `main` with the signing secrets set | Signed, notarized and stapled `Plonix-macOS` artifact; the job fails if any check fails |
-| Release (`.github/workflows/release.yml`) | Pushing a `v*` tag | A signed, notarized GitHub release with the app and the update package (see [Cutting a release](#cutting-a-release)) |
+| Release (`.github/workflows/release.yml`) | Pushing a `v*` tag | A GitHub release with `Plonix-macOS.dmg`, `Plonix-macOS.zip` and the update package, signed and notarized when the signing secrets are set (see [Cutting a release](#cutting-a-release)) |
 
 Secrets are never given to workflows triggered by pull requests from forks, and CI only signs on pushes to `main`, so code from a pull request never runs with the certificate.
 
@@ -135,7 +135,7 @@ Once the signing and notarization secrets are in place, the next push to `main` 
 ## Cutting a release
 
 1. Make sure `main` is green, including the signed `macos-app` build.
-2. Bump the version in `crates/plonix-app/tauri.conf.json` (`version`), and in `Cargo.toml` files if you want the CLI to report the same version. Commit with a message like `Release 0.2.0`.
+2. Bump the version in `crates/plonix-app/tauri.conf.json` (`version`), and in `Cargo.toml` files if you want the CLI to report the same version. Move the `Unreleased` entries in `CHANGELOG.md` under a heading for the new version (`## [0.2.0] - <date>`): that section becomes the release notes. Commit with a message like `Release 0.2.0`.
 3. Tag the commit and push the tag:
 
    ```sh
@@ -143,11 +143,13 @@ Once the signing and notarization secrets are in place, the next push to `main` 
    git push origin v0.2.0
    ```
 
-4. The **Release** workflow checks that the tag matches the version, builds a universal (Apple silicon and Intel) Plonix.app, signs and notarizes it, signs the update package, writes `latest.json` and publishes a GitHub release with all of them. It stops with an error if the tag and version differ or a key is missing.
-5. Edit the release notes on GitHub if needed, then download `Plonix-macOS.zip` from the release and check it on a Mac:
+4. The **Release** workflow checks that the tag matches the version, builds a universal (Apple silicon and Intel) Plonix.app, signs and notarizes it, packages it as a disk image and a zip, signs the update package, writes `latest.json` and publishes a GitHub release with all of them and the notes from `CHANGELOG.md`. It stops with an error if the tag and version differ or the changelog has no section for the version.
+
+   Without the Developer ID secrets the release is still published: the app is signed ad hoc instead of with a Developer ID, is not notarized, and the release notes explain how to open it the first time (**System Settings › Privacy & Security › Open Anyway**). Once the secrets are added, the next release is notarized with no other change.
+5. Edit the release notes on GitHub if needed, then download `Plonix-macOS.dmg` from the release and check it on a Mac:
 
    ```sh
-   ditto -x -k Plonix-macOS.zip . && scripts/macos/sign-and-notarize.sh --verify Plonix.app
+   hdiutil attach Plonix-macOS.dmg && scripts/macos/sign-and-notarize.sh --verify /Volumes/Plonix/Plonix.app
    ```
 
    or simply double-click it: a notarized app opens without the "unidentified developer" warning.

@@ -184,6 +184,14 @@ claude                       # then ask:
 
 ## Quickstart
 
+### Download
+
+Download **[Plonix for Mac](https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-macOS.dmg)** (Apple silicon and Intel, macOS 11 or later), open it and drag Plonix to Applications. Every release is listed on the [releases page](https://github.com/SergeyMalych/plonix/releases), with what changed in [CHANGELOG.md](CHANGELOG.md).
+
+Releases are not notarized by Apple yet, so macOS asks before opening Plonix the first time: open it, click **Done**, then go to **System Settings › Privacy & Security** and click **Open Anyway** next to Plonix. Or run `xattr -dr com.apple.quarantine /Applications/Plonix.app` once.
+
+### Build from source
+
 Requirements: Rust (stable, edition 2024) and a C toolchain. On macOS, `xcode-select --install` is enough. SQLite is bundled.
 
 ```sh
@@ -191,8 +199,6 @@ git clone https://github.com/SergeyMalych/plonix.git
 cd plonix
 cargo install --path crates/plonix-cli    # installs the `plonix` command
 ```
-
-### Plonix for Mac
 
 Build and open the app (needs the Rust toolchain above):
 
@@ -408,11 +414,13 @@ docs/             detection rules, agents and MCP, extension design
 - [x] Ask Claude Code from a request, finding, host or scope suggestion, with scoped context you review first
 - [x] Scanning foundation: detectors, checks and scan packs, fingerprint-driven suggestions, and active scans with benign built-in checks (`plonix scan`)
 - [x] Crawl to discover endpoints, parameters and forms (`plonix crawl`)
+- [x] The Scans screen in the window (⌘8)
+- [x] Downloadable releases: a disk image for Apple silicon and Intel, with updates you approve
 
 **Coming**
 - [ ] Opt-in active mode for agents: replay and send within accepted scope, switched on by you ([design](docs/agents.md#later-an-opt-in-active-mode))
-- [ ] Signed and notarized app downloads (the pipeline is ready; see [docs/releasing.md](docs/releasing.md))
-- [ ] Crawl with a browser for JavaScript-heavy apps, and a Scans screen in the window
+- [ ] Notarized app downloads (releases are signed ad hoc for now; the pipeline is ready, see [docs/releasing.md](docs/releasing.md))
+- [ ] Crawl with a browser for JavaScript-heavy apps
 - [ ] Sandboxed WebAssembly extensions with a closed capability list that can never bypass scope ([design](docs/extensions.md))
 
 Deliberately out of scope: token-randomness analysis, and scans that run unattended or reach beyond accepted scope. Scanning in Plonix is something you start, against a host you accepted, with checks chosen from what it runs. Plonix stays small on purpose.
@@ -423,7 +431,7 @@ Plonix is early, and this is a good time to shape it. Issues and discussions abo
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test and send changes, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for how we work together. Found a security problem in Plonix itself? Please report it privately as described in [SECURITY.md](SECURITY.md), not in a public issue.
 
-The easiest way to contribute is a **detection rule pack** or a **skill**: no Rust needed. See [docs/detection-rules.md](docs/detection-rules.md#contributing-a-pack) and [docs/market.md](docs/market.md#writing-a-skill).
+Rule packs and **skills** need no Rust either. See [docs/detection-rules.md](docs/detection-rules.md#contributing-a-pack) and [docs/market.md](docs/market.md#writing-a-skill).
 
 Use Plonix only against systems you are authorized to test.
 
