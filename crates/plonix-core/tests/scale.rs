@@ -108,7 +108,7 @@ fn exchange(i: u64, rng: &mut Rng) -> Exchange {
     };
     let mut resp_headers = vec![("Content-Type".to_string(), mime.to_string()), ("Server".to_string(), "nginx".to_string())];
     // One exchange in 997 carries a rare value that full-text search must find.
-    if i % 997 == 0 {
+    if i.is_multiple_of(997) {
         resp_headers.push(("X-Trace".to_string(), format!("needle-in-the-haystack-{i}")));
     }
     if path == "/login" {
@@ -125,7 +125,7 @@ fn exchange(i: u64, rng: &mut Rng) -> Exchange {
         resp_body: body.into_bytes(),
         duration_ms: rng.below(800) as i64,
         tls_sans: if host.ends_with("target.test") { vec!["target.test".into(), "*.target.test".into()] } else { vec![] },
-        source: Some(if i % 50 == 0 { Source::Replay } else { Source::Proxy }),
+        source: Some(if i.is_multiple_of(50) { Source::Replay } else { Source::Proxy }),
         http_version: "HTTP/2".into(),
         host,
         path,
