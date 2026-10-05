@@ -114,6 +114,10 @@ code, .mono { font-family: var(--mono); }
 .chip.k-bad span:first-child::before, .chip.k-warn span:first-child::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--crit); }
 .chip.k-warn span:first-child::before { background: var(--orange); }
 .chip.k-neg { color: var(--fg-3); }
+.chip.k-access span:first-child::before, .chip.k-bench span:first-child::before, .chip.k-user span:first-child::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+.chip.k-access span:first-child::before { background: var(--info); }
+.chip.k-bench span:first-child::before { background: var(--accent); }
+.chip.k-user span:first-child::before { background: var(--ok); }
 .chip:hover { color: var(--fg); border-color: var(--line); }
 .chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .chip.on .n { color: var(--accent); }

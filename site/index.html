@@ -357,6 +357,41 @@ footer a:hover { color: var(--fg); }
 .reveal { transition: opacity .7s ease, transform .7s ease; }
 .reveal.pre { opacity: .001; transform: translateY(18px); }
 @media (prefers-reduced-motion: reduce) { .reveal, .reveal.pre { opacity: 1; transform: none; transition: none; } }
+
+/* ---- Mind Reader: quick actions that read the room ---- */
+.mr { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 22px; margin-top: 30px; }
+@media (max-width: 760px) { .mr { grid-template-columns: 1fr; } }
+.mr-pick { display: flex; flex-direction: column; gap: 8px; }
+@media (max-width: 760px) { .mr-pick { flex-direction: row; flex-wrap: wrap; } }
+.mr-pick button { display: flex; align-items: center; gap: 11px; text-align: left; font: 500 1rem/1.3 var(--body); color: var(--muted); background: var(--ink-2); border: 1px solid var(--line); border-radius: 13px; padding: 13px 15px; cursor: pointer; transition: border-color .18s, color .18s, background .18s; }
+.mr-pick button .mi { flex: none; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; background: var(--ink-3); color: var(--faint); }
+.mr-pick button:hover { color: var(--fg); border-color: color-mix(in srgb, var(--indigo) 45%, var(--line)); }
+.mr-pick button[aria-selected="true"] { color: var(--fg); background: color-mix(in srgb, var(--indigo) 9%, var(--ink-2)); border-color: var(--indigo); }
+.mr-pick button[aria-selected="true"] .mi { background: color-mix(in srgb, var(--indigo) 18%, var(--ink-3)); color: var(--indigo); }
+@media (max-width: 760px) { .mr-pick button { flex: 1 1 auto; } .mr-pick button .mi { display: none; } }
+
+.mr-stage { background: var(--ink-2); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 1px 2px #0000000d, 0 18px 40px var(--shadow); overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+.mr-bar { display: flex; align-items: center; gap: 10px; padding: 11px 16px; border-bottom: 1px solid var(--line); background: var(--chrome); font: 500 .82rem/1 var(--mono); color: var(--muted); }
+.mr-bar b { color: var(--indigo); letter-spacing: .1em; font-weight: 600; }
+.mr-bar .mr-where { color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mr-bar .mr-st { margin-left: auto; color: var(--green); white-space: nowrap; }
+.mr-bar .mr-st.warn { color: var(--tag); }
+.mr-code { margin: 0; padding: 18px 18px 16px; font: 400 .86rem/1.7 var(--mono); color: var(--code-fg); white-space: pre-wrap; word-break: break-word; overflow-x: auto; min-height: 150px; }
+.mr-code .k { color: var(--code-key); }
+.mr-code mark { background: color-mix(in srgb, var(--amber) 32%, transparent); color: inherit; border-radius: 4px; padding: 0 3px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--amber) 55%, transparent); }
+.mr-sugg { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 18px; border-top: 1px dashed color-mix(in srgb, var(--line) 80%, transparent); }
+.mr-lbl { font: 600 .66rem/1 var(--body); letter-spacing: .09em; text-transform: uppercase; color: var(--faint); }
+.mr-chip { display: inline-flex; align-items: center; gap: 8px; font: 500 .92rem/1 var(--body); color: var(--indigo); background: color-mix(in srgb, var(--indigo) 10%, var(--ink-2)); border: 1px solid color-mix(in srgb, var(--indigo) 55%, var(--line)); border-radius: 999px; padding: 8px 15px; cursor: pointer; transition: transform .12s, box-shadow .18s; }
+.mr-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.mr-chip.warn { color: var(--tag); background: color-mix(in srgb, var(--amber) 14%, var(--ink-2)); border-color: color-mix(in srgb, var(--amber) 60%, var(--line)); }
+.mr-chip:hover { box-shadow: 0 4px 14px var(--ring-glow); transform: translateY(-1px); }
+.mr-chip:active { transform: translateY(0); }
+.mr-does { padding: 0 18px 15px; color: var(--muted); font-size: .98rem; }
+.mr-does b { color: var(--fg); font-weight: 600; }
+.mr-result { margin: 0 18px 18px; padding: 11px 14px; border-radius: 11px; background: color-mix(in srgb, var(--green) 12%, var(--ink-2)); border: 1px solid color-mix(in srgb, var(--green) 40%, var(--line)); color: var(--fg); font-size: .94rem; display: flex; align-items: center; gap: 10px; }
+.mr-result::before { content: "✓"; color: var(--green); font-weight: 700; }
+.mr-result[hidden] { display: none; }
+.mr-note { margin-top: 14px; color: var(--faint); font-size: .9rem; text-align: center; }
 </style>
 </head>
 <body>
@@ -371,6 +406,7 @@ footer a:hover { color: var(--fg); }
       <a href="#features">Features</a>
       <a href="#scope">Scope</a>
       <a href="#search">Filtering</a>
+      <a href="#actions">Actions</a>
       <a href="#agents">AI</a>
       <a href="#market">Market</a>
       <a href="docs/">Docs</a>
@@ -552,6 +588,27 @@ footer a:hover { color: var(--fg); }
       </div>
       <ul class="qparse" id="qparse" aria-live="polite"></ul>
     </div>
+  </div>
+</section>
+
+<section class="block" id="actions">
+  <div class="wrap">
+    <div class="head reveal">
+      <span class="eyebrow">Quick actions</span>
+      <h2>Quick actions that read the room.</h2>
+      <p class="lede">A set of one-click actions that surface the single most useful next step for whatever is on screen — the right chip, in the right pane, at the moment you notice something. Nothing fires on its own: you click to run, and anything that sends stays in scope.</p>
+    </div>
+    <div class="mr reveal" id="mr">
+      <div class="mr-pick" role="tablist" aria-label="Pick a moment"></div>
+      <div class="mr-stage" role="tabpanel" aria-label="What Plonix suggests">
+        <div class="mr-bar"><b>LENS</b> <span class="mr-where"></span> <span class="mr-st"></span></div>
+        <pre class="mr-code" id="mrcode" aria-live="polite"></pre>
+        <div class="mr-sugg"><span class="mr-lbl">Suggested</span> <button type="button" class="mr-chip" id="mrchip"></button></div>
+        <p class="mr-does" id="mrdoes"></p>
+        <div class="mr-result" id="mrresult" hidden></div>
+      </div>
+    </div>
+    <p class="mr-note">Pick a moment, then click the chip to see what one click does. This is a preview — the real actions live in the app.</p>
   </div>
 </section>
 
@@ -807,6 +864,79 @@ footer a:hover { color: var(--fg); }
   btns.forEach((b) => b.addEventListener('click', () => { q.value = b.textContent; render(); }));
   q.addEventListener('input', render);
   render();
+
+  /* ---- Mind Reader: quick actions that read the room ---- */
+  (() => {
+    const pick = document.querySelector('.mr-pick');
+    if (!pick) return;
+    const whereEl = document.querySelector('.mr-where'), stEl = document.querySelector('.mr-st');
+    const codeEl = document.getElementById('mrcode'), chip = document.getElementById('mrchip');
+    const does = document.getElementById('mrdoes'), result = document.getElementById('mrresult');
+    // Each moment: what's on screen (code, with the spotted part in <mark>), the chip that surfaces,
+    // what one click does, and the result the researcher sees. Content is authored, so the HTML is trusted.
+    const SCENES = [
+      { key: 'token', label: 'A session comes back', icon: '🔑',
+        where: 'POST api.acme.test/login', st: '200 · in scope', ok: true,
+        code: '<span class="k">HTTP/1.1</span> 200 OK\n<span class="k">Set-Cookie:</span> <mark>sid=S3yJ9f…; HttpOnly; Secure</mark>\n<span class="k">Content-Type:</span> application/json\n\n{ "user": "maya", "role": "member" }',
+        chip: 'Save login as a user', cls: '',
+        does: 'Captures the session this response just set as a <b>reusable identity</b>, ready in the Bench “As…” picker and the Access check.',
+        result: 'Saved “maya” — now switch to her in one click, or replay anything as her.' },
+      { key: 'idor', label: 'A tell-tale id', icon: '#',
+        where: 'GET api.acme.test/v2/orders/1041', st: '200 · in scope', ok: true,
+        code: '<span class="k">GET</span> /v2/orders/<mark>1041</mark> HTTP/1.1\n<span class="k">Cookie:</span> sid=S3yJ9f…\n\n<span class="k">HTTP/1.1</span> 200 OK\n{ "id": 1041, "total": "$84.00", "name": "Maya R." }',
+        chip: 'Check this id across users', cls: '',
+        does: 'Replays this request as <b>every saved user and signed out</b>, then lines up who can read record <b>1041</b> — the “can I see someone else’s?” question, answered.',
+        result: 'Replayed as 3 identities and signed out. Dana and signed-out both got 200 — flagged.' },
+      { key: 'reflect', label: 'A value echoes back', icon: '↩',
+        where: 'GET shop.acme.test/search', st: '200 · in scope', ok: true,
+        code: '<span class="k">GET</span> /search?q=<mark>plonix-test</mark> HTTP/1.1\n\n<span class="k">HTTP/1.1</span> 200 OK\n<span class="k">Content-Type:</span> text/html\n\n&lt;h2&gt;No results for <mark>plonix-test</mark>&lt;/h2&gt;',
+        chip: 'Reflected value → Bench', cls: '',
+        does: 'Opens this request on the <b>Bench</b> with the reflected value marked, ready to vary it and compare how the page changes.',
+        result: 'Opened on the Bench — “q” marked as a position, response ready to compare.' },
+      { key: 'redirect', label: 'A redirect target', icon: '→',
+        where: 'GET acme.test/go', st: '302 · in scope', ok: true,
+        code: '<span class="k">GET</span> /go?next=<mark>//elsewhere.test/dash</mark> HTTP/1.1\n\n<span class="k">HTTP/1.1</span> 302 Found\n<span class="k">Location:</span> <mark>//elsewhere.test/dash</mark>',
+        chip: 'Trace this redirect', cls: '',
+        does: 'Opens it on the <b>Bench</b> with the “next” parameter marked, so you can change where it points and watch where the server actually sends you.',
+        result: 'Opened on the Bench — change “next”, send, and the Location it follows is shown.' },
+      { key: 'cors', label: 'A cross-origin header', icon: '◎',
+        where: 'GET api.acme.test/v2/me', st: '200 · look closer', ok: false,
+        code: '<span class="k">HTTP/1.1</span> 200 OK\n<span class="k">Access-Control-Allow-Origin:</span> <mark>*</mark>\n<span class="k">Access-Control-Allow-Credentials:</span> <mark>true</mark>\n\n{ "email": "maya@acme.test" }',
+        chip: '+ Finding: open CORS policy', cls: 'warn',
+        does: 'Spots that any origin can read this response on a signed-in user’s behalf, and <b>drafts the finding</b> with this request as evidence — Claude can write it up.',
+        result: 'Finding drafted: “Permissive cross-origin policy on /v2/me”, evidence attached.' },
+      { key: 'trace', label: 'A verbose error', icon: '!',
+        where: 'GET api.acme.test/v2/report', st: '500 · look closer', ok: false,
+        code: '<span class="k">HTTP/1.1</span> 500 Internal Server Error\n\n<mark>Traceback (most recent call last):\n  File "app/report.py", line 88, in build\n    rows = db.query(sql)</mark>',
+        chip: 'Find others like this', cls: 'warn',
+        does: 'Jumps to <b>every matching error</b> from this host in Traffic, so one leaked trace shows you the whole class of endpoints that behave the same.',
+        result: 'Traffic filtered to api.acme.test · 500s — 7 more endpoints leak the same trace.' },
+    ];
+    let active = SCENES[0];
+    SCENES.forEach((s, i) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.setAttribute('role', 'tab'); b.dataset.key = s.key;
+      b.setAttribute('aria-selected', String(i === 0));
+      b.innerHTML = `<span class="mi" aria-hidden="true">${s.icon}</span><span>${s.label}</span>`;
+      b.addEventListener('click', () => select(s));
+      pick.appendChild(b);
+    });
+    function select(s) {
+      active = s;
+      [...pick.children].forEach((b) => b.setAttribute('aria-selected', String(b.dataset.key === s.key)));
+      whereEl.textContent = s.where;
+      stEl.textContent = s.st; stEl.className = 'mr-st' + (s.ok ? '' : ' warn');
+      codeEl.innerHTML = s.code;
+      chip.className = 'mr-chip' + (s.cls ? ' ' + s.cls : '');
+      chip.innerHTML = `<span>${s.chip}</span>`;
+      does.innerHTML = s.does;
+      result.hidden = true; result.textContent = '';
+    }
+    chip.addEventListener('click', () => {
+      result.textContent = active.result; result.hidden = false;
+    });
+    select(SCENES[0]);
+  })();
 
   /* ---- CLI / API tabs + copy ---- */
   const tabs = [...document.querySelectorAll('[data-tab]')];
