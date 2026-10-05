@@ -374,21 +374,23 @@ impl ClientCerts {
     }
 }
 
-/// Presents one certificate when the server asks, and remembers that it did.
+/// Presents the host's certificate, if it has one, when the server asks, and
+/// remembers that the server asked. A server that asks and gets nothing may
+/// only say so after the handshake, by closing the connection.
 #[derive(Debug)]
 pub(crate) struct Offer {
-    pub key: Arc<CertifiedKey>,
-    pub used: Arc<std::sync::atomic::AtomicBool>,
+    pub key: Option<Arc<CertifiedKey>>,
+    pub asked: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl rustls::client::ResolvesClientCert for Offer {
     fn resolve(&self, _hints: &[&[u8]], _schemes: &[rustls::SignatureScheme]) -> Option<Arc<CertifiedKey>> {
-        self.used.store(true, std::sync::atomic::Ordering::SeqCst);
-        Some(self.key.clone())
+        self.asked.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.key.clone()
     }
 
     fn has_certs(&self) -> bool {
-        true
+        self.key.is_some()
     }
 }
 

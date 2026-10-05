@@ -890,9 +890,6 @@ impl Store {
         Ok(self.conn.lock().unwrap().execute("DELETE FROM findings WHERE id = ?1", [id])? > 0)
     }
 
-    // ---- match and replace -------------------------------------------------
-
-    /// Every match-and-replace rule, in the order they apply.
     // ---- client certificates ---------------------------------------------
 
     /// Client certificates with their keys, oldest first. Only the engine
@@ -919,6 +916,9 @@ impl Store {
         Ok(self.conn.lock().unwrap().execute("DELETE FROM client_certs WHERE id = ?1", [id])? > 0)
     }
 
+    // ---- match and replace -------------------------------------------------
+
+    /// Every match-and-replace rule, in the order they apply.
     pub fn replace_rules(&self) -> Result<Vec<ReplaceRule>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(&format!("SELECT {RULE_COLS} FROM replace_rules ORDER BY id"))?;
