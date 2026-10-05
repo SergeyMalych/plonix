@@ -270,6 +270,7 @@ fn router(hub: Arc<Hub>) -> Router {
         .route("/api/ui/launch", post(ui_launch))
         .route("/api/hub", get(about))
         .route("/api/terms", get(terms).post(accept_terms))
+        .route("/api/starter", get(starter).post(install_starter))
         .route("/api/projects", get(projects).post(create))
         .route("/api/projects/add", post(add_existing))
         .route("/api/projects/demo", post(demo))
@@ -384,6 +385,36 @@ async fn accept_terms(State(hub): State<Arc<Hub>>, Json(b): Json<AcceptBody>) ->
             Json(json!({ "accepted": true, "share_usage": crate::usage::sharing(&hub.home) })).into_response()
         }
         Err(e) => internal(e),
+    }
+}
+
+/// The kinds of work, and the one picked.
+async fn starter(State(hub): State<Arc<Hub>>) -> Response {
+    let picked = crate::profile::current(&hub.home, None).map(|p| p.id.clone());
+    Json(json!({ "profile": picked, "profiles": crate::profile::summaries() })).into_response()
+}
+
+#[derive(Deserialize)]
+struct StarterBody {
+    profile: String,
+}
+
+/// Saves the kind of work and installs its starter set (extensions wait in
+/// the Market, where the user sees what each one may do first).
+async fn install_starter(State(hub): State<Arc<Hub>>, Json(b): Json<StarterBody>) -> Response {
+    let home = hub.home.clone();
+    let out = tokio::task::spawn_blocking(move || -> Result<Value> {
+        crate::profile::set_global(&home, &b.profile)?;
+        let Some(p) = crate::profile::get(&b.profile) else { return Ok(json!({ "profile": "" })) };
+        let cat = crate::market::open_cached(&home, false)?;
+        let r = crate::profile::install_starter(&crate::market::Market::new(&home), &cat, p);
+        Ok(json!({ "profile": p.id, "title": p.title, "result": r }))
+    })
+    .await;
+    match out {
+        Ok(Ok(v)) => Json(v).into_response(),
+        Ok(Err(e)) => err(StatusCode::BAD_REQUEST, "starter_failed", &format!("{e:#}")),
+        Err(e) => internal(e.into()),
     }
 }
 

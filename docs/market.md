@@ -22,6 +22,25 @@ plonix market update                  # newer versions of what you installed
 plonix market remove api-kit          # removes the bundle and what it added
 ```
 
+## Suggestions for your work
+
+Pick the kind of work you do and the Market suggests a short starter set, with one line on why each item is there:
+
+- **Bug hunter**: public programs for rewards. Access checks, leaked secrets, APIs and clear write-ups. Items that send many requests are suggested but never pre-picked.
+- **Red teamer**: an engagement against one organization. Recon, things left open, identities and cloud services. Only items that read captured traffic are pre-picked.
+- **Security researcher**: one app, its cloud setup or a protocol, taken apart. Analysis across traffic, cloud services and decoding.
+
+You choose on the Start screen the first time (one tap; skills, packs and bundles install right away, extensions wait in the Market so you see what each may do first), at the top of the Market under *Recommended for you*, or in Settings › Market › Your work. A project can use a different one in its own settings. Changing it never removes anything. It stays on your computer and is not part of usage statistics.
+
+```sh
+plonix market profile researcher      # set it (none clears it)
+plonix market recommend               # the starter set, what you have, and more
+plonix market recommend --profile red-teamer   # look at another without changing yours
+plonix market install --starter       # install the starter set (extensions are listed, not installed)
+```
+
+Profiles never name items. Each one weighs a fixed list of tags, and each item carries a few tags and a noise level (`passive`, `light` or `active`) in [`store/profiles.json`](../store/profiles.json). An item's score is the sum of the profile's weights for its tags; items scoring 4 or more are suggested, best first. A bundle replaces the items inside it unless one of them scores higher on its own, and items noisier than the profile allows are listed under *Also for you* without being picked. To make a new Market item show up for the right people, add its tags there; `cargo test` fails if a Market item has no entry.
+
 ## Validated packages
 
 Nothing is installed unless it can be traced to a signature you trust:

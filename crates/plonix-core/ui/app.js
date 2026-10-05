@@ -6224,7 +6224,7 @@ const KIND_INFO = {
 const GROUP_LABELS = { traffic: 'Traffic', insights: 'Insights', map: 'Map', scope: 'Scope', findings: 'Findings', scan: 'Scans' };
 const groupLabel = (g) => GROUP_LABELS[g] || g;
 
-const MK = { data: null, kind: 'all', q: '', sel: null, busy: null, ext: {} };
+const MK = { data: null, kind: 'all', q: '', sel: null, busy: null, ext: {}, rec: null, peek: '' };
 
 function renderMarket(main) {
   const q = h('input', {
@@ -6255,7 +6255,7 @@ function renderMarket(main) {
       ),
       h('div', { class: 'mtrust', id: 'mtrust' }),
       h('div', { class: 'filterchips mkinds', id: 'mkinds' }),
-      h('div', { class: 'mbody', id: 'mbody' }, h('div', { class: 'pane' }, h('div', { class: 'mgrid', id: 'mgrid' }, h('div', { class: 'muted', text: 'Loading the Market…' }))), h('div', { id: 'mdetail' })),
+      h('div', { class: 'mbody', id: 'mbody' }, h('div', { class: 'pane' }, h('div', { class: 'mrec', id: 'mrec', hidden: true }), h('div', { class: 'mgrid', id: 'mgrid' }, h('div', { class: 'muted', text: 'Loading the Market…' }))), h('div', { id: 'mdetail' })),
     ),
   );
   loadMarket(false);
@@ -6266,6 +6266,7 @@ async function loadMarket(refresh) {
     MK.data = await api('/api/market' + (refresh ? '?refresh=true' : ''));
     const ex = await api('/api/extensions').catch(() => ({ extensions: [] }));
     MK.ext = Object.fromEntries((ex.extensions || []).map((x) => [x.name, x]));
+    MK.rec = await api('/api/market/recommended' + (MK.peek ? '?profile=' + encodeURIComponent(MK.peek) : '')).catch(() => null);
   } catch (e) {
     const grid = $('#mgrid');
     if (grid) clear(grid, h('div', { class: 'empty' }, h('h3', { text: 'The Market is not available' }), h('p', { text: e.message })));
@@ -6322,6 +6323,7 @@ function drawMarket() {
       h('button', { class: 'chip' + (MK.kind === key ? ' on' : ''), onclick: () => ((MK.kind = key), drawMarket()) }, h('span', { text: label }), h('span', { class: 'n', text: counts[key] || 0 }));
     clear(kinds, chip('all', 'All'), Object.entries(KIND_INFO).map(([k, v]) => chip(k, v.label)), h('span', { class: 'fsep' }), chip('installed', 'Installed'), counts.unverified ? chip('unverified', 'Not verified') : null);
   }
+  drawRecommended();
   const updates = d.packages.filter((p) => p.status.state === 'update');
   const ub = $('#mupdate');
   if (ub) {
@@ -6356,6 +6358,80 @@ function drawMarket() {
         ),
       );
     }),
+  );
+}
+
+/** "Recommended for you": Market items that suit the user's kind of work, with why. */
+function drawRecommended() {
+  const box = $('#mrec');
+  const r = MK.rec;
+  if (!box) return;
+  box.hidden = !r || MK.kind !== 'all' || !!MK.q.trim();
+  if (box.hidden) return;
+  const pick = (id) => {
+    MK.peek = '';
+    api('/api/market/profile', { method: 'POST', body: { profile: id } })
+      .then(() => loadMarket(false))
+      .catch((e) => toast(e.message, 'err'));
+  };
+  if (!r.shown) {
+    return clear(
+      box,
+      h('div', { class: 'mrech' }, h('b', { text: 'Get suggestions for your work' }), h('span', { class: 'muted', text: 'Plonix picks Market items that suit it, and says why.' })),
+      h('div', { class: 'mrecprofiles' }, r.profiles.map((p) => h('button', { class: 'chip', title: p.line, text: p.title, onclick: () => pick(p.id) }))),
+    );
+  }
+  const select = h(
+    'select',
+    {
+      id: 'mrecprofile',
+      class: 'mrecsel',
+      title: 'Your work',
+      onchange: (e) => {
+        if (e.target.value === r.profile) MK.peek = '';
+        else MK.peek = e.target.value;
+        loadMarket(false);
+      },
+    },
+    r.profiles.map((p) => h('option', { value: p.id, text: p.title + (p.id === r.profile ? ' (yours)' : ''), selected: p.id === r.shown.id })),
+  );
+  const rec = r.recommendation || { starter: [], included: [], also: [] };
+  const byName = Object.fromEntries((MK.data ? MK.data.packages : []).map((p) => [p.name, p]));
+  const card = (k) => {
+    const p = byName[k.name];
+    if (!p) return null;
+    const st = marketStatus(p);
+    const ki = KIND_INFO[p.kind] || { one: p.kind, ico: '•' };
+    return h(
+      'div',
+      { class: 'mpkg mrecpkg', tabindex: 0, onclick: () => showPackage(p.name), onkeydown: (e) => e.key === 'Enter' && showPackage(p.name) },
+      h('div', { class: 'mph' }, h('span', { class: 'mico k-' + p.kind, text: ki.ico }), h('div', { class: 'mpn' }, h('b', { text: p.name }), h('span', { class: 'muted', text: ki.one })), h('span', { class: st.cls, text: st.text })),
+      h('div', { class: 'mpd', text: k.why }),
+      h('div', { class: 'mpf' }, k.noise !== 'passive' ? h('span', { class: 'muted small', text: k.noise === 'active' ? 'Sends many requests' : 'Sends a few requests' }) : h('span'), st.action ? marketButton(p, st.action, true) : null),
+    );
+  };
+  const peeking = r.shown.id !== r.profile;
+  clear(
+    box,
+    h(
+      'div',
+      { class: 'mrech' },
+      h('b', { text: 'Recommended for you' }),
+      select,
+      peeking ? h('button', { class: 'btn sm ghost', text: 'Make this my work', onclick: () => pick(r.shown.id) }) : null,
+      h('span', { class: 'muted mrecline', text: r.shown.line }),
+    ),
+    rec.starter.length
+      ? h('div', { class: 'mgrid mrecgrid' }, rec.starter.map(card))
+      : h('div', { class: 'muted mrecdone', text: 'You have everything picked for this work. More shows up here as the Market grows.' }),
+    rec.included.length || rec.also.length
+      ? h(
+          'div',
+          { class: 'mrecmore muted' },
+          rec.included.length ? h('span', null, 'You already have ', rec.included.map((k, i) => [i ? ', ' : '', h('a', { href: '#', text: k.name, onclick: (e) => (e.preventDefault(), showPackage(k.name)) })]), '. ') : null,
+          rec.also.length ? h('span', null, 'Also for you: ', rec.also.map((k, i) => [i ? ', ' : '', h('a', { href: '#', text: k.name, title: k.why, onclick: (e) => (e.preventDefault(), showPackage(k.name)) })]), '.') : null,
+        )
+      : null,
   );
 }
 
