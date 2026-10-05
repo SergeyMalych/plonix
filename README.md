@@ -2,6 +2,19 @@
 
 # Plonix
 
+[![Website](https://img.shields.io/badge/website-plonix.io-blue)](https://plonix.io)
+[![CI](https://github.com/SergeyMalych/plonix/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SergeyMalych/plonix/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/SergeyMalych/plonix)](https://github.com/SergeyMalych/plonix/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/SergeyMalych/plonix/total)](https://github.com/SergeyMalych/plonix/releases)
+[![License: Apache 2.0](https://img.shields.io/github/license/SergeyMalych/plonix)](LICENSE)
+[![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey?logo=apple)](https://github.com/SergeyMalych/plonix/releases/latest)
+[![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange?logo=rust)](https://www.rust-lang.org)
+[![Docs](https://img.shields.io/badge/docs-plonix.io%2Fdocs-informational)](https://plonix.io/docs/)
+[![Last commit](https://img.shields.io/github/last-commit/SergeyMalych/plonix)](https://github.com/SergeyMalych/plonix/commits/main)
+[![Stars](https://img.shields.io/github/stars/SergeyMalych/plonix?style=flat)](https://github.com/SergeyMalych/plonix/stargazers)
+
+**🌐 [plonix.io](https://plonix.io)**
+
 **The open-source web security workbench for macOS. Fast, native, and scriptable from day one.**
 
 Plonix captures everything your browser does, learns the real shape of the target as you explore it, and lets you search, replay and prove what you find, from a GUI, a terminal, or an AI agent.
