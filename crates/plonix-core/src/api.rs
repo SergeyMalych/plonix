@@ -160,6 +160,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/sessions", get(sessions))
         .route("/api/scan/catalog", get(scan_catalog))
         .route("/api/scan/suggest/{host}", get(scan_suggest))
+        .route("/api/scan/plan/{host}", get(scan_plan))
         .route("/api/scan", post(scan_run))
         .route("/api/crawl", post(crawl_run))
         .route("/api/agents", get(agents))
@@ -1091,6 +1092,15 @@ async fn scan_suggest(State(s): State<AppState>, Path(host): Path<String>) -> Re
     let engine = s.engine.clone();
     match tokio::task::spawn_blocking(move || engine.scan_suggest(&host)).await {
         Ok(Ok(suggestion)) => Json(suggestion).into_response(),
+        Ok(Err(e)) => internal(e),
+        Err(e) => internal(e.into()),
+    }
+}
+
+async fn scan_plan(State(s): State<AppState>, Path(host): Path<String>) -> Response {
+    let engine = s.engine.clone();
+    match tokio::task::spawn_blocking(move || engine.scan_plan(&host)).await {
+        Ok(Ok(plan)) => Json(plan).into_response(),
         Ok(Err(e)) => internal(e),
         Err(e) => internal(e.into()),
     }
