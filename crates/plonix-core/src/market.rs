@@ -60,6 +60,10 @@ pub const SNAPSHOT: &[(&str, &str)] = &[
     ("skills/api-inventory.md", include_str!("../../../store/skills/api-inventory.md")),
     ("extensions/graphql-explorer.json", include_str!("../../../store/extensions/graphql-explorer.json")),
     ("extensions/security-headers.plonixext", include_str!("../../../store/extensions/security-headers.plonixext")),
+    ("extensions/secret-sweep.plonixext", include_str!("../../../store/extensions/secret-sweep.plonixext")),
+    ("extensions/js-endpoints.plonixext", include_str!("../../../store/extensions/js-endpoints.plonixext")),
+    ("extensions/subdomain-discovery.plonixext", include_str!("../../../store/extensions/subdomain-discovery.plonixext")),
+    ("extensions/parameter-probe.plonixext", include_str!("../../../store/extensions/parameter-probe.plonixext")),
 ];
 
 // ---- settings -------------------------------------------------------------------
@@ -632,6 +636,14 @@ pub fn capability_infos(caps: &[Capability]) -> Vec<CapabilityInfo> {
 pub const SANDBOX_NOTE: &str = "Its code runs in the Plonix sandbox: no network, files, processes or clock, limited CPU time and memory. \
      It is stopped and switched off if it misbehaves.";
 
+pub const PROGRAM_NOTE: &str = "It runs a program you install yourself, on this Mac only, over copies of captured requests and responses that are \
+     deleted when it finishes. Plonix runs it so it checks nothing with outside services and does not update itself.";
+
+/// What to tell someone about how an extension runs.
+pub fn runtime_note(m: &extension::Manifest) -> &'static str {
+    if m.runtime == extension::Runtime::Program { PROGRAM_NOTE } else { SANDBOX_NOTE }
+}
+
 /// Which kind of package a file is, from its contents.
 pub fn detect_kind(bytes: &[u8]) -> Result<Kind, String> {
     let text = std::str::from_utf8(bytes).map_err(|_| "that file is not text".to_string())?;
@@ -706,7 +718,7 @@ impl Market {
                 let p = extension::parse_package(&bytes)?;
                 capabilities = capability_infos(&p.manifest.capabilities);
                 let mut effects: Vec<String> = p.manifest.capabilities.iter().map(|c| format!("Can {}.", c.describe())).collect();
-                effects.push(SANDBOX_NOTE.into());
+                effects.push(runtime_note(&p.manifest).into());
                 (p.manifest.description, p.manifest.author, effects)
             }
             _ => unreachable!(),

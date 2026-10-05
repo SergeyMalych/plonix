@@ -1,0 +1,17 @@
+{
+  "plonix_extension_package": 1,
+  "manifest": {
+    "plonix_extension": 1,
+    "name": "subdomain-discovery",
+    "version": "0.1.0",
+    "description": "Enumerates an accepted domain's subdomains with a recon tool you install, and adds the ones it finds to Scope as suggestions to review. It never changes scope on its own.",
+    "author": "Plonix contributors",
+    "homepage": "https://github.com/SergeyMalych/plonix",
+    "runtime": "program",
+    "program": "subfinder",
+    "capabilities": [
+      "run-program",
+      "suggest-scope"
+    ]
+  }
+}
