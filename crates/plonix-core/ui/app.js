@@ -2354,10 +2354,11 @@ async function writeFindingWithClaude(ids, note, onProgress, signal) {
     for (const ev of snap.events) {
       since = ev.seq + 1;
       if (ev.type === 'text') text += ev.text + '\n';
-      else if (ev.type === 'tool') onProgress('Reading ' + ev.text.replace(/^mcp__plonix__/, '').replace(/_/g, ' ') + '…');
       else if (ev.type === 'error') throw new Error(ev.text);
     }
     if (snap.status !== 'running') break;
+    const p = snap.progress;
+    if (p) onProgress(`${p.step}… ${claudeStats(p)}` + (p.idle_ms > CLAUDE_QUIET_MS ? ' · waiting on Claude Code' : ''));
     await new Promise((r) => setTimeout(r, 600));
   }
   const o = parseFindingAnswer(text);
@@ -6401,6 +6402,133 @@ function askButton(subject, title) {
 }
 
 const fmtTok = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n));
+const fmtDur = (ms) => {
+  const s = Math.floor(ms / 1000);
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+};
+/** How much Claude has read and written so far, and for how long: "38k read · 120 written · 0:14". */
+const claudeStats = (p) => [p.tokens_in ? fmtTok(p.tokens_in) + ' tokens read' : null, p.tokens_out ? fmtTok(p.tokens_out) + ' written' : null, fmtDur(p.elapsed_ms)].filter(Boolean).join(' · ');
+/**
+ * Claude's Markdown answer as DOM nodes: headings, paragraphs, lists, quotes,
+ * tables, rules, fenced code (with Copy), and inline code, bold, italics and
+ * links. Built with text nodes only, never innerHTML, since answers quote
+ * captured traffic. An unclosed fence (mid-stream) runs to the end.
+ */
+function mdNodes(src) {
+  const lines = String(src).replace(/\r\n?/g, '\n').split('\n');
+  const out = [];
+  const isRule = (l) => /^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(l);
+  const isRow = (l) => /^\s*\|.*\|\s*$/.test(l);
+  const cells = (l) => l.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+  const listRe = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
+  const startsBlock = (l) => /^\s*(```|~~~|#{1,6}\s|>)/.test(l) || listRe.test(l) || isRule(l) || isRow(l);
+  let i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (!l.trim()) {
+      i++;
+      continue;
+    }
+    const fence = l.match(/^\s*(```|~~~)\s*([\w+-]*)/);
+    if (fence) {
+      const body = [];
+      for (i++; i < lines.length && !lines[i].trim().startsWith(fence[1]); i++) body.push(lines[i]);
+      i++;
+      const code = body.join('\n').replace(/\n+$/, '');
+      const copy = h('button', { class: 'mdcopy', text: 'Copy', title: 'Copy to the clipboard' });
+      copy.onclick = async () => {
+        await copyText(code);
+        copy.textContent = 'Copied';
+        setTimeout(() => (copy.textContent = 'Copy'), 1200);
+      };
+      out.push(h('div', { class: 'mdcode' }, copy, h('pre', null, h('code', { text: code }))));
+      continue;
+    }
+    const head = l.match(/^\s*(#{1,6})\s+(.*?)\s*#*\s*$/);
+    if (head) {
+      out.push(h('h' + Math.min(6, head[1].length + 2), { class: 'mdh' }, mdInline(head[2])));
+      i++;
+      continue;
+    }
+    if (isRule(l)) {
+      out.push(h('hr'));
+      i++;
+      continue;
+    }
+    if (/^\s*>/.test(l)) {
+      const body = [];
+      for (; i < lines.length && /^\s*>/.test(lines[i]); i++) body.push(lines[i].replace(/^\s*>\s?/, ''));
+      out.push(h('blockquote', null, mdNodes(body.join('\n'))));
+      continue;
+    }
+    if (isRow(l) && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i + 1]) && lines[i + 1].includes('-')) {
+      const headCells = cells(l);
+      const rows = [];
+      for (i += 2; i < lines.length && isRow(lines[i]); i++) rows.push(cells(lines[i]));
+      out.push(
+        h(
+          'div',
+          { class: 'mdtable' },
+          h('table', null, h('thead', null, h('tr', null, headCells.map((c) => h('th', null, mdInline(c))))), h('tbody', null, rows.map((r) => h('tr', null, r.map((c) => h('td', null, mdInline(c))))))),
+        ),
+      );
+      continue;
+    }
+    const li = l.match(listRe);
+    if (li) {
+      const ordered = /\d/.test(li[2]);
+      const indent = li[1].length;
+      const items = [];
+      while (i < lines.length) {
+        const m = lines[i].match(listRe);
+        if (m && m[1].length <= indent + 1 && /\d/.test(m[2]) === ordered) {
+          items.push({ text: [m[3]], start: Number.parseInt(m[2], 10) });
+          i++;
+        } else if (lines[i].trim() && items.length && (/^\s{2,}/.test(lines[i]) || !startsBlock(lines[i])) && !(m && m[1].length <= indent)) {
+          // A wrapped line or a nested item: it belongs to the last item.
+          items[items.length - 1].text.push(lines[i].replace(new RegExp('^\\s{0,' + (indent + 3) + '}'), ''));
+          i++;
+        } else if (!lines[i].trim() && i + 1 < lines.length && (/^\s{2,}\S/.test(lines[i + 1]) || ((lines[i + 1].match(listRe) || [])[1] || '').length === indent)) {
+          i++;
+        } else break;
+      }
+      const list = h(ordered ? 'ol' : 'ul', ordered && items[0].start !== 1 ? { start: items[0].start } : null);
+      for (const it of items) list.append(h('li', null, it.text.length > 1 ? mdNodes(it.text.join('\n')) : mdInline(it.text[0])));
+      out.push(list);
+      continue;
+    }
+    const para = [];
+    for (; i < lines.length && lines[i].trim() && (!para.length || !startsBlock(lines[i])); i++) para.push(lines[i].trim());
+    const p = h('p');
+    para.forEach((t, k) => {
+      if (k) p.append(h('br'));
+      append(p, mdInline(t));
+    });
+    out.push(p);
+  }
+  return out;
+}
+
+/** Inline Markdown: `code`, **bold**, *italics*, ~~strike~~ and [links](url). */
+function mdInline(t) {
+  const out = [];
+  const re = /(`+)([\s\S]*?[^`])\1(?!`)|\*\*([\s\S]+?)\*\*|__([\s\S]+?)__|~~([\s\S]+?)~~|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|(?<![\w*])\*(?!\s)([^*]+?)\*(?![\w*])|(?<!\w)_(?!\s)([^_]+?)_(?!\w)/g;
+  let last = 0;
+  for (let m; (m = re.exec(t)); ) {
+    if (m.index > last) out.push(t.slice(last, m.index));
+    if (m[1]) out.push(h('code', { text: m[2].replace(/^ (.*) $/, '$1') }));
+    else if (m[3] || m[4]) out.push(h('strong', null, mdInline(m[3] || m[4])));
+    else if (m[5]) out.push(h('s', null, mdInline(m[5])));
+    else if (m[6]) out.push(h('a', { href: m[7], target: '_blank', rel: 'noopener noreferrer', title: m[7] }, mdInline(m[6])));
+    else out.push(h('em', null, mdInline(m[8] || m[9])));
+    last = re.lastIndex;
+  }
+  if (last < t.length) out.push(t.slice(last));
+  return out;
+}
+
+/** Claude Code says nothing for this long: tell the user it is still waiting, not frozen. */
+const CLAUDE_QUIET_MS = 15000;
 
 /**
  * The Ask sheet: shows exactly what will be shared and how big it is, lets
@@ -6527,15 +6655,50 @@ async function askClaude(subject, opts = {}) {
 
   /* ---- transcript rendering ---- */
   const scroll = () => (transcript.scrollTop = transcript.scrollHeight);
+  // While Claude works: what it is doing, tokens read and written, time.
   let thinking = null;
+  let draft = null;
   const setThinking = (on) => {
     if (on && !thinking) {
-      thinking = h('div', { class: 'cthink' }, h('span', { class: 'dot' }), h('span', { class: 'dot' }), h('span', { class: 'dot' }));
+      thinking = h(
+        'div',
+        { class: 'cthink' },
+        h('span', { class: 'dots' }, h('span', { class: 'dot' }), h('span', { class: 'dot' }), h('span', { class: 'dot' })),
+        h('span', { class: 'cstep', text: 'Starting Claude Code' }),
+        h('span', { class: 'cstat' }),
+        h('div', { class: 'cquiet', hidden: true }),
+      );
       transcript.append(thinking);
       scroll();
     } else if (!on && thinking) {
       thinking.remove();
       thinking = null;
+    }
+    if (!on) dropDraft();
+  };
+  const dropDraft = () => {
+    if (draft) draft.remove();
+    draft = null;
+  };
+  const showProgress = (p) => {
+    if (!p || !thinking) return;
+    thinking.querySelector('.cstep').textContent = p.step;
+    thinking.querySelector('.cstat').textContent = claudeStats(p);
+    const quiet = thinking.querySelector('.cquiet');
+    quiet.hidden = p.idle_ms < CLAUDE_QUIET_MS;
+    quiet.textContent = `No word from Claude Code for ${Math.round(p.idle_ms / 1000)}s. It may be busy or slow to connect; it is stopped after 2 minutes of silence.`;
+    // The answer as it is being written, replaced by the finished text.
+    if (p.draft) {
+      if (!draft) {
+        draft = answer('', 'draft');
+        add(draft);
+      }
+      const atEnd = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 40;
+      if (draft.dataset.src !== p.draft) {
+        draft.dataset.src = p.draft;
+        clear(draft.firstChild, mdNodes(p.draft));
+      }
+      if (atEnd) scroll();
     }
   };
   const add = (node) => {
@@ -6544,6 +6707,8 @@ async function askClaude(subject, opts = {}) {
     scroll();
   };
   const bubble = (role, text) => h('div', { class: 'cmsg ' + role }, h('div', { class: 'cbub', text }));
+  // Claude answers in Markdown; show it formatted.
+  const answer = (text, extra = '') => h('div', { class: 'cmsg bot ' + extra }, h('div', { class: 'cbub md' }, mdNodes(text)));
   const sayError = (text) => add(h('div', { class: 'cerr', text }));
   const offerFallback = () => {
     copyBtn.hidden = termBtn.hidden = false;
@@ -6593,8 +6758,8 @@ async function askClaude(subject, opts = {}) {
       for (const ev of snap.events) {
         convo.since = ev.seq + 1;
         if (ev.type === 'text') {
-          setThinking(false);
-          add(bubble('bot', ev.text));
+          dropDraft();
+          add(answer(ev.text));
         } else if (ev.type === 'tool') {
           add(h('div', { class: 'ctool', text: '✦ ' + ev.text }));
         } else if (ev.type === 'proposal') {
@@ -6610,6 +6775,8 @@ async function askClaude(subject, opts = {}) {
       if (snap.status !== 'running') {
         convo.running = false;
         setThinking(false);
+        const p = snap.progress;
+        if (snap.status === 'done' && p) add(h('div', { class: 'cdone', text: `Answered in ${claudeStats(p).replace(/^(.*) · ([\d:]+)$/, '$2 · $1')}` }));
         if (convo.proposed) offerReview();
         if (snap.status === 'done') {
           followRow.hidden = false;
@@ -6619,6 +6786,7 @@ async function askClaude(subject, opts = {}) {
       }
       // Keep the working indicator alive between turns.
       if (!thinking) setThinking(true);
+      showProgress(snap.progress);
       await sleep(500);
     }
     stopBtn.hidden = true;
