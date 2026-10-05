@@ -1,4 +1,7 @@
 target/
+.env
+.env.*
+!.env.example
 .DS_Store
 macos/.build/
 macos/*.xcodeproj/xcuserdata/

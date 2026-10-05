@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use plonix_core::ca::CertAuthority;
 use plonix_core::engine::{Engine, extension_author};
-use plonix_core::extension::{self, Consent, ExtensionLibrary};
+use plonix_core::extension::{self, Capability, Consent, ExtensionLibrary};
 use plonix_core::insight::Category;
 use plonix_core::model::Exchange;
 use plonix_core::sandbox::Limits;
@@ -121,4 +121,44 @@ fn a_misbehaving_extension_is_stopped_and_switched_off() {
     // Turned back on by the user, it is loaded again.
     lib.set_enabled("crasher", true).unwrap();
     assert_eq!(engine.extensions().extensions.len(), 1);
+}
+
+const SUBDOMAIN: &[u8] = include_bytes!("../../../store/extensions/subdomain-discovery.plonixext");
+const PARAM_PROBE: &[u8] = include_bytes!("../../../store/extensions/parameter-probe.plonixext");
+
+// A subdomain finder cannot run its tool until the user grants the sensitive
+// run-program capability; Consent::default() withholds it.
+#[test]
+fn subdomain_discovery_needs_permission_to_run_its_tool() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = ExtensionLibrary::at(dir.path());
+    lib.install(SUBDOMAIN, "test", None, &Consent::default()).unwrap();
+    let engine = engine(dir.path());
+    let run = engine.run_extension_on_traffic("subdomain-discovery").unwrap();
+    assert!(run.problem.as_deref().unwrap_or("").contains("permission"), "{run:?}");
+    assert_eq!(run.exchanges, 0, "it does not read traffic");
+}
+
+// The parameter probe refuses an out-of-scope target: every request it would
+// send goes through the same scope choke point as replay.
+#[test]
+fn parameter_probe_refuses_out_of_scope_and_needs_permission() {
+    use plonix_core::engine::SendError;
+    let dir = tempfile::tempdir().unwrap();
+    let lib = ExtensionLibrary::at(dir.path());
+    // Granted its sensitive capabilities so we reach the scope check.
+    let consent = Consent { grant: vec![Capability::RunProgram, Capability::ScopedRequests], approve_new: true };
+    lib.install(PARAM_PROBE, "test", None, &consent).unwrap();
+    let eng = engine(dir.path());
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let err = rt.block_on(eng.run_param_probe("parameter-probe", "https://out-of-scope.test/api")).unwrap_err();
+    assert!(matches!(err, SendError::OutOfScope { .. }), "{err:?}");
+
+    // Without consent to send scoped requests it does not probe at all.
+    let dir2 = tempfile::tempdir().unwrap();
+    let lib2 = ExtensionLibrary::at(dir2.path());
+    lib2.install(PARAM_PROBE, "test", None, &Consent::default()).unwrap();
+    let eng2 = engine(dir2.path());
+    let err = rt.block_on(eng2.run_param_probe("parameter-probe", "https://shop.test/api")).unwrap_err();
+    assert!(matches!(err, SendError::BadRequest(m) if m.contains("permission")), "expected a permission error");
 }

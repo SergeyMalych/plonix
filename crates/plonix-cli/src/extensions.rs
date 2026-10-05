@@ -29,7 +29,7 @@ pub enum ExtensionsCmd {
         /// Install without asking again, approving what it asks for
         #[arg(long)]
         yes: bool,
-        /// Also grant a sensitive capability it asks for (read-out-of-scope); repeatable
+        /// Also grant a sensitive capability it asks for (read-out-of-scope, run-program); repeatable
         #[arg(long, value_name = "CAPABILITY")]
         grant: Vec<String>,
     },
@@ -43,8 +43,16 @@ pub enum ExtensionsCmd {
         #[arg(required = true)]
         names: Vec<String>,
     },
-    /// Run an extension over the traffic captured so far (needs a running engine)
+    /// Run an extension over the traffic captured so far, or (for a subdomain
+    /// finder) over your accepted scope domains (needs a running engine)
     Run { name: String },
+    /// Probe one in-scope endpoint for undocumented query parameters, sending
+    /// every request through Plonix's scope-gated path (needs a running engine)
+    Probe {
+        name: String,
+        /// The in-scope endpoint, e.g. https://api.example.com/v1/users
+        url: String,
+    },
     /// For authors: check a package or folder without installing it
     Check { source: String },
     /// For authors: pack a folder (plonix-extension.json and its module) into one .plonixext file
@@ -125,7 +133,17 @@ pub fn extensions_cmd(ctx: &Ctx, cmd: ExtensionsCmd) -> Result<()> {
                 let granted = i.state.granted.contains(c);
                 println!("  {} {}{}", if granted { "✓" } else { "✗" }, c.describe(), if granted { "" } else { " (not granted)" });
             }
-            println!("{}", market::SANDBOX_NOTE);
+            match &i.program {
+                Some(p) => {
+                    println!("{}", market::PROGRAM_NOTE);
+                    if p.found {
+                        println!("It runs {}, which is installed.", p.id);
+                    } else {
+                        println!("It runs {}, which is not installed yet: {}", p.id, p.install);
+                    }
+                }
+                None => println!("{}", market::SANDBOX_NOTE),
+            }
             println!("Source: {}\nsha256 {}", i.source, i.sha256);
         }
         ExtensionsCmd::Add { source, yes, grant } => {
@@ -150,7 +168,7 @@ pub fn extensions_cmd(ctx: &Ctx, cmd: ExtensionsCmd) -> Result<()> {
                     };
                     println!("  - {}{note}", c.what);
                 }
-                println!("{}", market::SANDBOX_NOTE);
+                println!("{}", ext.effects.last().map(String::as_str).unwrap_or(market::SANDBOX_NOTE));
                 println!("sha256 {}", ext.sha256);
                 println!("! NOT VERIFIED: it did not come from a signed Market, so nobody has vouched for it.");
             }
@@ -200,11 +218,34 @@ pub fn extensions_cmd(ctx: &Ctx, cmd: ExtensionsCmd) -> Result<()> {
             for l in r["logs"].as_array().into_iter().flatten().filter_map(|l| l.as_str()) {
                 println!("  log: {l}");
             }
-            if let Some(why) = r["stopped"].as_str() {
+            if let Some(why) = r["stopped"].as_str().or(r["problem"].as_str()) {
                 bail!("{name}: {why}");
             }
             if r["proposed"].as_u64().unwrap_or(0) > 0 {
                 println!("Proposed findings are open until you confirm them: `plonix findings`.");
+            }
+        }
+        ExtensionsCmd::Probe { name, url } => {
+            let c = ctx.client()?;
+            let r = c.post(&format!("/api/extensions/{}/probe", encode(&name)), json!({ "url": url }))?;
+            if ctx.json {
+                return ctx.print_json(&r);
+            }
+            let influential = r["influential"].as_array().map(|a| a.len()).unwrap_or(0);
+            println!(
+                "{} probed {}: sent {} candidate parameter(s); {} changed the response.",
+                name,
+                r["target"].as_str().unwrap_or(&url),
+                r["sent"].as_u64().unwrap_or(0),
+                influential
+            );
+            for p in r["influential"].as_array().into_iter().flatten().filter_map(|p| p.as_str()) {
+                println!("  parameter: {p}");
+            }
+            if r["proposed"].as_bool().unwrap_or(false) {
+                println!("Proposed an unconfirmed finding; review it with `plonix findings`.");
+            } else if influential > 0 {
+                println!("A finding for these was already open; see `plonix findings`.");
             }
         }
         ExtensionsCmd::Check { source } => {

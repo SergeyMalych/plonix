@@ -556,7 +556,7 @@ mod tests {
                 Kind::List => crate::listpack::parse(&data).map(|x| (x.doc.name, x.doc.version)),
                 Kind::Tool => crate::tool::parse(&data).map(|x| (x.doc.name, x.doc.version)),
                 Kind::Skill => crate::skill::parse(&data).map(|x| (x.name, x.version)),
-                Kind::Extension => crate::extension::parse_manifest(&data).map(|m| (m.name, m.version)),
+                Kind::Extension => crate::market::extension_manifest(&data).map(|m| (m.name, m.version)),
                 Kind::Bundle => unreachable!(),
             }
             .unwrap();
