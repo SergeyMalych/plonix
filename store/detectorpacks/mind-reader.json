@@ -69,6 +69,48 @@
         "title": "Cookie set without HttpOnly on {method} {path}",
         "note": "A Set-Cookie here has no HttpOnly flag, so page scripts can read it. Confirm it is a session or auth cookie before reporting — some cookies are meant to be readable."
       }
+    },
+    {
+      "id": "db-error",
+      "priority": 62,
+      "when": { "resp_body_regex": "you have an error in your sql syntax|sqlstate\\[|ORA-\\d{5}|unclosed quotation mark after the character string|supplied argument is not a valid mysql|pg::(syntax|undefined)|sqlite3::|odbc sql server driver|microsoft ole db provider for sql" },
+      "suggest": {
+        "chip": "Scan this endpoint for injection",
+        "handler": "scan",
+        "focus": "injection",
+        "categories": [],
+        "title": "possible injection on {method} {path}",
+        "why": "The response leaked a database error, which often means an input reaches a query. Open it in Scans to check how this endpoint handles its inputs.",
+        "note": "Plonix has no built-in injection check yet, so nothing is pre-picked here. Add one from the Market, or vary the inputs on the Bench and watch the response."
+      }
+    },
+    {
+      "id": "graphql-endpoint",
+      "priority": 48,
+      "when": { "path_regex": "/graphql(/|$)" },
+      "suggest": {
+        "chip": "Scan this GraphQL endpoint",
+        "handler": "scan",
+        "focus": "GraphQL surface",
+        "categories": [],
+        "title": "GraphQL surface on {method} {path}",
+        "why": "This is a GraphQL endpoint. Open it in Scans to check what it exposes — introspection, field suggestions, and whether it batches operations.",
+        "note": "Plonix has no built-in GraphQL check yet, so nothing is pre-picked here. Add one from the Market, or edit the operation on the Bench to explore the schema."
+      }
+    },
+    {
+      "id": "mass-assignment",
+      "priority": 45,
+      "when": {
+        "method": ["POST", "PUT", "PATCH"],
+        "req_content_type": "json",
+        "req_body_regex": "\"(role|roles|is_admin|isadmin|admin|is_staff|owner|permissions|user_id|account_id|verified|email_verified)\"\\s*:"
+      },
+      "suggest": {
+        "chip": "Try extra fields on the Bench",
+        "handler": "bench",
+        "note": "This JSON body carries a privileged-looking field (like role or admin). Open it on the Bench to try adding or changing fields the client should not be able to set, then compare the response."
+      }
     }
   ]
 }

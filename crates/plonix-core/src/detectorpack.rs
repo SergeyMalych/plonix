@@ -595,8 +595,8 @@ mod tests {
     fn builtin_pack_is_valid() {
         let set = DetectorLibrary::at(Path::new("/nonexistent")).load();
         assert!(set.problems.is_empty(), "{:?}", set.problems);
-        assert!(set.detectors.len() >= 5, "{:?}", set.detectors.iter().map(|d| &d.def.id).collect::<Vec<_>>());
-        for id in ["path-traversal", "xml-parsing", "jwt-token", "cookie-no-httponly", "admin-area"] {
+        assert!(set.detectors.len() >= 8, "{:?}", set.detectors.iter().map(|d| &d.def.id).collect::<Vec<_>>());
+        for id in ["path-traversal", "xml-parsing", "jwt-token", "cookie-no-httponly", "admin-area", "db-error", "graphql-endpoint", "mass-assignment"] {
             assert!(set.detectors.iter().any(|d| d.def.id == id), "missing {id}");
         }
         // Every built-in handler is one the app knows.
