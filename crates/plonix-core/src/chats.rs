@@ -151,6 +151,12 @@ fn load(store: &Store) -> Result<Vec<Chat>> {
     Ok(v.get("chats").and_then(|c| serde_json::from_value(c.clone()).ok()).unwrap_or_default())
 }
 
+/// Now, but later than any chat's last use, so the most recent order holds
+/// even for changes within the same millisecond.
+fn tick(chats: &[Chat]) -> i64 {
+    chats.iter().map(|c| c.updated_at + 1).max().unwrap_or(0).max(now_ms())
+}
+
 fn save(store: &Store, mut chats: Vec<Chat>) -> Result<()> {
     chats.sort_by_key(|c| std::cmp::Reverse(c.updated_at));
     chats.truncate(MAX_CHATS);
@@ -185,7 +191,7 @@ pub fn delete(store: &Store, id: &str) -> Result<bool> {
 /// session to resume, if the chat has one.
 pub fn begin(store: &Store, chat: Option<&str>, title: Option<&str>, subject: Option<Value>, ask: &str, run: &str) -> Result<(String, Option<String>)> {
     let mut chats = load(store)?;
-    let now = now_ms();
+    let now = tick(&chats);
     let idx = match chat.and_then(|id| chats.iter().position(|c| c.id == id)) {
         Some(i) => i,
         None => {
@@ -210,6 +216,7 @@ pub fn begin(store: &Store, chat: Option<&str>, title: Option<&str>, subject: Op
 /// Saves what the run answering a turn produced.
 pub fn finish(store: &Store, chat: &str, run: &str, out: Outcome) -> Result<()> {
     let mut chats = load(store)?;
+    let now = tick(&chats);
     let Some(c) = chats.iter_mut().find(|c| c.id == chat) else { return Ok(()) };
     let Some(t) = c.turns.iter_mut().rev().find(|t| t.run == run) else { return Ok(()) };
     t.answer = clip(out.answer.trim(), MAX_ANSWER);
@@ -219,7 +226,7 @@ pub fn finish(store: &Store, chat: &str, run: &str, out: Outcome) -> Result<()> 
     if out.session_id.is_some() {
         c.session_id = out.session_id;
     }
-    c.updated_at = now_ms();
+    c.updated_at = now;
     save(store, chats)
 }
 
