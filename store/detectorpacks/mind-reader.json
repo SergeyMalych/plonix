@@ -1,0 +1,74 @@
+{
+  "plonix_detectors": 1,
+  "name": "mind-reader",
+  "version": "1.0.0",
+  "description": "Spots a shape in the traffic and suggests the fitting next step in another tab.",
+  "author": "Plonix",
+  "license": "MIT",
+  "detectors": [
+    {
+      "id": "path-traversal",
+      "priority": 70,
+      "when": { "param": { "value_class": "path_or_file", "in": ["query", "body"] } },
+      "suggest": {
+        "chip": "Check this path in Scans",
+        "handler": "scan",
+        "focus": "path & file access",
+        "categories": [],
+        "title": "path & file access on {method} {path}",
+        "why": "The \"{param}\" input carries a file path (\"{value}\"). Open it in Scans to check whether it can be pointed at files it shouldn't reach.",
+        "note": "Plonix has no built-in path-traversal check yet, so nothing is pre-picked here. Add one from the Market, or change the path on the Bench and watch the response."
+      }
+    },
+    {
+      "id": "xml-parsing",
+      "priority": 65,
+      "when": { "req_content_type": "xml" },
+      "suggest": {
+        "chip": "Scan this XML endpoint",
+        "handler": "scan",
+        "focus": "XML parsing (XXE)",
+        "categories": [],
+        "title": "XML parsing on {method} {path}",
+        "why": "This endpoint parses XML ({ct}). Open it in Scans to check how the parser handles external entities and referenced documents.",
+        "note": "Plonix has no built-in XML-parsing check yet, so nothing is pre-picked here. Add one from the Market, or edit the body on the Bench and compare responses."
+      }
+    },
+    {
+      "id": "admin-area",
+      "priority": 55,
+      "when": {
+        "path_regex": "/(admin|administrator|internal|manage|console|dashboard|staff)(/|$)",
+        "status": { "min": 200, "max": 299 }
+      },
+      "suggest": {
+        "chip": "Open as each saved user",
+        "handler": "access",
+        "mode": "users",
+        "note": "This looks like an admin or internal area. Replay it as each saved user and signed out to see who can reach it."
+      }
+    },
+    {
+      "id": "jwt-token",
+      "priority": 50,
+      "when": { "req_header": { "name": "authorization", "regex": "bearer\\s+eyj[a-z0-9_-]+\\.eyj[a-z0-9_-]+\\." } },
+      "suggest": {
+        "chip": "Open the token on the Bench",
+        "handler": "bench",
+        "note": "This request carries a JWT. Open it on the Bench to decode and tweak the claims, then replay and compare."
+      }
+    },
+    {
+      "id": "cookie-no-httponly",
+      "priority": 35,
+      "when": { "resp_header": { "name": "set-cookie", "absent_regex": "httponly" } },
+      "suggest": {
+        "chip": "+ Finding: cookie without HttpOnly",
+        "handler": "finding",
+        "severity": "low",
+        "title": "Cookie set without HttpOnly on {method} {path}",
+        "note": "A Set-Cookie here has no HttpOnly flag, so page scripts can read it. Confirm it is a session or auth cookie before reporting — some cookies are meant to be readable."
+      }
+    }
+  ]
+}

@@ -24,6 +24,7 @@ use crate::insight::{Category as InsightCategory, Insight, Side as InsightSide};
 use crate::sandbox;
 use crate::model::{Exchange, Headers, Source, WsMessage, now_ms};
 use crate::paths::{EngineInfo, Home};
+use crate::detectorpack::{DetectorLibrary, DetectorSet};
 use crate::filterpack::{FilterLibrary, FilterSet};
 use crate::listpack::{ListLibrary, ListSet};
 use crate::intercept::{InterceptOptions, Interceptor};
@@ -61,6 +62,7 @@ pub struct Engine {
     recorder_rx: Mutex<Option<mpsc::UnboundedReceiver<Queued>>>,
     detection: Mutex<DetectionState>,
     filters: Mutex<FilterState>,
+    detectors: Mutex<DetectorState>,
     lists: Mutex<ListState>,
     /// The listen address last asked for in the settings.
     applied_listen: Mutex<Option<SocketAddr>>,
@@ -163,6 +165,14 @@ struct FilterState {
     library: Option<FilterLibrary>,
     loaded_stamp: Option<Option<std::time::SystemTime>>,
     set: Arc<FilterSet>,
+}
+
+/// Detector packs in effect (Mind Reader suggestions), reloaded when packs change.
+#[derive(Default)]
+struct DetectorState {
+    library: Option<DetectorLibrary>,
+    loaded_stamp: Option<Option<std::time::SystemTime>>,
+    set: Arc<DetectorSet>,
 }
 
 /// Payload lists in effect for the Bench, reloaded when list packs change.
@@ -278,6 +288,7 @@ impl Engine {
             project_ref: OnceLock::new(),
             detection: Mutex::new(DetectionState::default()),
             filters: Mutex::new(FilterState::default()),
+            detectors: Mutex::new(DetectorState::default()),
             lists: Mutex::new(ListState::default()),
             applied_listen: Mutex::new(None),
             overrides: Mutex::default(),
@@ -622,6 +633,32 @@ impl Engine {
             f.loaded_stamp = Some(stamp);
         }
         f.set.clone()
+    }
+
+    /// Loads installed detector packs from this library (the built-in pack is
+    /// always loaded).
+    pub fn set_detector_library(&self, library: DetectorLibrary) {
+        let mut d = self.detectors.lock().unwrap();
+        d.library = Some(library);
+        d.loaded_stamp = None;
+    }
+
+    /// Detectors in effect (Mind Reader suggestions), reloading if packs changed.
+    pub fn detectors(&self) -> Arc<DetectorSet> {
+        let mut d = self.detectors.lock().unwrap();
+        let stamp = d.library.as_ref().and_then(DetectorLibrary::stamp);
+        if d.loaded_stamp != Some(stamp) {
+            let set = match &d.library {
+                Some(lib) => lib.load(),
+                None => DetectorLibrary::at(std::path::Path::new("/nonexistent")).load(),
+            };
+            for p in &set.problems {
+                tracing::warn!("detectors: {p}");
+            }
+            d.set = Arc::new(set);
+            d.loaded_stamp = Some(stamp);
+        }
+        d.set.clone()
     }
 
     pub fn set_list_library(&self, library: ListLibrary) {
@@ -2105,6 +2142,7 @@ pub async fn start(config: &EngineConfig) -> Result<Running> {
     let engine = Engine::new(project.name(), store, ca, upstream)?;
     engine.set_rule_library(Library::new(&config.home));
     engine.set_filter_library(FilterLibrary::new(&config.home));
+    engine.set_detector_library(DetectorLibrary::new(&config.home));
     engine.set_list_library(ListLibrary::new(&config.home));
     engine.set_extension_library(ExtensionLibrary::new(&config.home));
     if project.file.demo {
