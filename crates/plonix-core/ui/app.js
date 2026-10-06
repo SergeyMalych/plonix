@@ -1713,6 +1713,10 @@ function rowMenu(e, ex) {
     if (idT) actions.push({ label: 'Check this id across users', run: () => startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}` }) });
     actions.push({ label: 'Replay signed out', run: () => startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}`, onlyAnon: true }) });
   }
+  if (decide(ex.host) === 'accepted') {
+    const leads = scanLeadsFor(ex);
+    actions.push({ label: leads.length ? leads[0].chip : 'Scan this endpoint', run: () => scanEndpoint(ex, leads[0] || null) });
+  }
   const groups = [
     actions,
     both('host:' + ex.host, ex.host),
@@ -2448,6 +2452,69 @@ function looksLikeApiSpec(ex) {
   return !!t && t.length < 8_000_000 && /"(openapi|swagger)"\s*:/.test(t.slice(0, 4000)) && /"paths"\s*:/.test(t);
 }
 
+/* ---------- Leads into the Scans tab ----------
+   Some endpoint shapes have a natural follow-up that lives in Scans: a file
+   upload, an endpoint that takes inputs. Rather than "scan the whole host",
+   these leads hand exactly the one endpoint to Scans with the fitting checks
+   pre-picked, so the researcher reviews and runs — the human decides, nothing
+   fires on its own. Each lead is a label plus the OWASP categories to focus;
+   coverage stays at the category level, concrete checks come from the Market. */
+
+const UPLOAD_PATH = /\/(upload|uploads|file|files|attachment|attachments|media|document|documents|import|avatar|avatars|photo|photos|image|images)(?:\/|$|\?)/i;
+
+/** An endpoint that takes a file — the "what does it accept, and what happens then?" smell. */
+function uploadTarget(ex) {
+  if (!/^(POST|PUT|PATCH)$/i.test(ex.method || '')) return null;
+  const ct = (header(ex.req_headers, 'content-type') || '').toLowerCase();
+  if (ct.includes('multipart/form-data')) return { how: 'sends a multipart form, the usual shape of a file upload' };
+  if (/\bfilename\s*=/.test(ex.req_text || '')) return { how: 'carries a filename in the body' };
+  if (ct.includes('application/octet-stream')) return { how: 'posts a raw file body' };
+  if (UPLOAD_PATH.test(ex.path || '')) return { how: 'is a write to an upload-shaped path' };
+  return null;
+}
+
+/** Whether a request carries inputs worth checking how the server handles. */
+function hasInputs(ex) {
+  if (queryPairsOf(ex).length) return true;
+  const rb = ex.req_text || '';
+  return rb.length < 200_000 && /[^&=]=[^&=]/.test(rb) && !/^[[{]/.test(rb.trim());
+}
+
+/**
+ * The follow-ups for this endpoint that belong in Scans. Each is self-describing
+ * so the chip and the Scans focus banner can explain exactly what will run.
+ * `categories` are OWASP ids to pre-pick; empty means "every check that fits".
+ */
+function scanLeadsFor(ex) {
+  if (!ex || decide(ex.host) !== 'accepted') return [];
+  const where = `${ex.method} ${ex.path}`;
+  const leads = [];
+  const up = uploadTarget(ex);
+  if (up) {
+    leads.push({
+      kind: 'upload',
+      chip: 'Check this upload in Scans',
+      focus: 'file handling',
+      categories: [],
+      title: `an upload endpoint (${where})`,
+      why: `This ${up.how}. Open it in Scans to check how the upload is handled — allowed types, where files land, what the server does with them.`,
+      note: 'Plonix has no built-in file-handling check yet, so nothing is pre-picked here. Add a file-handling check from the Market, or experiment with the upload field on the Bench.',
+    });
+  }
+  if (hasInputs(ex)) {
+    leads.push({
+      kind: 'inputs',
+      chip: "Scan this endpoint's inputs",
+      focus: 'input handling',
+      categories: ['A03'],
+      title: `input handling on ${where}`,
+      why: 'This endpoint takes inputs. Open it in Scans to run the input-handling checks that fit, scoped to just this endpoint.',
+      note: '',
+    });
+  }
+  return leads;
+}
+
 /** The "Suggested" row under the Lens header. Every chip is one click to act on, and nothing is sent until clicked. */
 async function drawLensSuggestions(slot, ex, list) {
   const chips = [];
@@ -2496,6 +2563,10 @@ async function drawLensSuggestions(slot, ex, list) {
     // GraphQL — open it on the Bench like any other request to explore.
     if (isGraphql(ex)) {
       chips.push(h('button', { class: 'chip k-bench', title: 'Open this GraphQL request on the Bench to edit the operation and explore the schema.', onclick: () => benchWithNote(ex.id, 'GraphQL endpoint — edit the operation to explore what it exposes.') }, h('span', { text: 'GraphQL → Bench' })));
+    }
+    // Something on this endpoint is worth taking into Scans, scoped to it.
+    for (const lead of scanLeadsFor(ex)) {
+      chips.push(h('button', { class: 'chip k-scan', title: lead.why, onclick: () => scanEndpoint(ex, lead) }, h('span', { text: lead.chip })));
     }
   }
   if (looksLikeApiSpec(ex)) {
@@ -6056,7 +6127,42 @@ function findingForm(f, ids = [], title = '', hint = null) {
  * of Plonix, so nothing ever leaves the hosts you accepted. Any issue a scan
  * records is a normal finding, editable on the Findings screen.
  */
-const SC = { host: null, hosts: [], suggest: null, suggestErr: null, picks: null, intrusive: false, running: false, report: null, crawl: null, crawling: false, crawlStart: '/', crawlBrowser: false, crawlClick: false };
+const SC = { host: null, hosts: [], suggest: null, suggestErr: null, picks: null, intrusive: false, running: false, report: null, focus: null, crawl: null, crawling: false, crawlStart: '/', crawlBrowser: false, crawlClick: false };
+
+/**
+ * Hands one endpoint to Scans, focused: the scan is narrowed to this endpoint
+ * (the engine aims injecting checks only here) and the checks that fit the
+ * lead are pre-picked. Nothing runs until the researcher presses Run scan.
+ */
+function scanEndpoint(ex, lead) {
+  SC.host = ex.host;
+  SC.focus = {
+    method: ex.method,
+    path: ex.path,
+    label: lead ? lead.focus : '',
+    // An array of OWASP ids pre-picks the checks that match (an empty array
+    // pre-picks none); null, for a plain "scan this endpoint", pre-picks every
+    // recommended check, aimed at this endpoint.
+    categories: lead ? lead.categories || [] : null,
+    title: lead ? lead.title : `${ex.method} ${ex.path}`,
+    note: lead ? lead.note : '',
+  };
+  SC.suggest = null;
+  SC.report = null;
+  SC.crawl = null;
+  SC.running = false;
+  leaveTo('scans');
+}
+
+/** Drops the endpoint focus and goes back to scanning the whole host. */
+function clearScanFocus() {
+  SC.focus = null;
+  if (SC.suggest) {
+    SC.picks = new Set(SC.suggest.recommended.map((t) => t.id));
+    SC.intrusive = false;
+  }
+  drawScans();
+}
 
 const INTRU_LABEL = { passive: 'Passive', safe: 'Safe', active: 'Active', intrusive: 'Intrusive' };
 const INTRU_TAG = { passive: 'in', safe: 'in', active: 'upd', intrusive: 'rej' };
@@ -6782,7 +6888,13 @@ async function loadSuggest() {
   if (SC.host !== host || S.view !== 'scans') return;
   SC.suggest = sug;
   // Recommended checks start selected; intrusive ones stay off until opted in.
-  SC.picks = new Set(sug.recommended.map((t) => t.id));
+  // Under a focus, `categories` is an array of OWASP ids to pre-pick (empty
+  // picks none — e.g. a shape Plonix has no built-in check for yet), or null
+  // for "every recommended check, aimed at this endpoint".
+  const cats = SC.focus ? SC.focus.categories : null;
+  const fits = (t) => (t.owasp || []).some((o) => (cats || []).some((c) => o === c || o.startsWith(c)));
+  const chosen = !SC.focus || cats === null ? sug.recommended : sug.recommended.filter(fits);
+  SC.picks = new Set(chosen.map((t) => t.id));
   SC.intrusive = false;
   drawScans();
 }
@@ -6815,6 +6927,7 @@ function drawScans() {
         SC.suggest = null;
         SC.report = null;
         SC.crawl = null;
+        SC.focus = null;
         loadSuggest();
       },
     },
@@ -6827,7 +6940,20 @@ function drawScans() {
     h('div', { class: 'scanrow' }, h('label', { class: 'muted', text: 'Host' }), sel),
     h('p', { class: 'muted', text: 'Only accepted, in-scope hosts appear here.' }),
   );
-  clear(box, targetCard, scanSuggestSection(), scanCrawlSection());
+  clear(box, scanFocusBanner(), targetCard, scanSuggestSection(), scanCrawlSection());
+}
+
+/** When a focus is set, a banner naming the one endpoint the scan is scoped to. */
+function scanFocusBanner() {
+  const f = SC.focus;
+  if (!f) return null;
+  return h(
+    'div',
+    { class: 'card scanfocus' },
+    h('div', { class: 'sechead' }, h('h3', { text: 'Focused on one endpoint' }), h('span', { class: 'shacts' }, h('button', { class: 'btn sm', text: 'Scan the whole host', onclick: clearScanFocus }))),
+    h('div', { class: 'focusrow' }, h('span', { class: 'focustag', text: f.method }), h('code', { class: 'focuspath', text: f.path }), f.label ? h('span', { class: 'focuscat', text: f.label }) : null),
+    h('p', { class: 'muted focusnote', text: f.note || 'The scan is aimed at this endpoint. The checks below are pre-picked for it — review and run.' }),
+  );
 }
 
 function scanSuggestSection() {
@@ -6954,8 +7080,10 @@ async function runScan() {
   SC.running = true;
   SC.report = null;
   drawScans();
+  const body = { host: SC.host, tactics, include_intrusive: SC.intrusive };
+  if (SC.focus) body.endpoints = [{ method: SC.focus.method, path: SC.focus.path }];
   try {
-    SC.report = await api('/api/scan', { method: 'POST', body: { host: SC.host, tactics, include_intrusive: SC.intrusive } });
+    SC.report = await api('/api/scan', { method: 'POST', body });
   } catch (e) {
     SC.running = false;
     drawScans();

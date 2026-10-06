@@ -1149,7 +1149,16 @@ impl Engine {
             })
             .collect();
 
-        let endpoints = self.store.endpoints(&host).map_err(SendError::Other)?;
+        let mut endpoints = self.store.endpoints(&host).map_err(SendError::Other)?;
+        // A focused scan aims injecting tactics at only the chosen endpoints.
+        // Selector paths are folded the same way the store folds discovered
+        // ones, so `/orders/123` matches the folded `/orders/{id}`. This only
+        // narrows the target set; scope is still checked on every send.
+        if !req.endpoints.is_empty() {
+            let want: std::collections::BTreeSet<(String, String)> =
+                req.endpoints.iter().map(|e| (e.method.to_ascii_uppercase(), crate::store::fold_path(&e.path))).collect();
+            endpoints.retain(|e| want.contains(&(e.method.to_ascii_uppercase(), e.path.clone())));
+        }
         // Build the authority from captured traffic so a non-default port is
         // kept; fall back to https:443 for a host with nothing captured yet.
         let (scheme, port) = exchanges.first().map(|e| (e.scheme.clone(), e.port)).unwrap_or_else(|| ("https".into(), 443));
