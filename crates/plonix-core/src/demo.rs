@@ -539,6 +539,13 @@ export async function api(path, opts = {{}}) {{
     s.add(api_get("https://api.brightcart.example/v1/products/1001/reviews?limit=5"), resp(200, "application/json").api().json(json!({ "items": [ { "rating": 5, "text": "Great grip on wet rock.", "author": "J." } ], "total": 42 })))?;
     s.add(api_get("https://api.brightcart.example/v1/products/1002"), resp(200, "application/json").api().json(product(1002, "Merino hoodie", 7400)))?;
     s.add(api_get("https://api.brightcart.example/v1/products/9999"), resp(404, "application/json").api().json(json!({ "error": "not_found", "message": "No product 9999" })))?;
+    // A link-preview endpoint: the server fetches whatever URL the client hands
+    // it. A parameter carrying a URL or hostname is the classic server-side
+    // request smell the Scans hand-off points at.
+    s.add(
+        api_get("https://api.brightcart.example/v1/preview?url=https%3A%2F%2Fmedia.brightcart.example%2Fp%2F1001%2Fmain.jpg"),
+        resp(200, "application/json").api().json(json!({ "title": "Trail running shoes", "image": "https://media.brightcart.example/p/1001/main.jpg", "width": 1200, "height": 800 })),
+    )?;
 
     // The API describes itself: the Map lists what it offers that nobody has
     // visited yet.

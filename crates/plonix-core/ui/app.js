@@ -2480,18 +2480,49 @@ function hasInputs(ex) {
   return rb.length < 200_000 && /[^&=]=[^&=]/.test(rb) && !/^[[{]/.test(rb.trim());
 }
 
+/** Does a value look like a hostname, URL or IP the server might fetch? */
+function looksLikeHostOrUrl(v) {
+  const s = (v || '').trim();
+  if (s.length < 4 || s.length > 2048 || /\s|@/.test(s)) return null;
+  if (/^(https?:)?\/\/[^/\s]/i.test(s)) return 'a URL';
+  if (/^\d{1,3}(\.\d{1,3}){3}(:\d+)?(\/|$)/.test(s)) return 'an IP address';
+  // A bare hostname: dotted, ending in an alphabetic label, not a file name.
+  if (/^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(:\d+)?(\/|$)/i.test(s) && !/\.(js|css|png|jpe?g|gif|svg|webp|woff2?|map|json|xml|txt|ico)$/i.test(s)) return 'a hostname';
+  return null;
+}
+
+/** An input whose value points at another server — the "does it fetch this?" smell. */
+function ssrfTarget(ex) {
+  for (const [k, v] of queryPairsOf(ex)) {
+    const what = looksLikeHostOrUrl(v);
+    if (what) return { name: k, where: `the "${k}" parameter`, what, value: v };
+  }
+  const rb = ex.req_text || '';
+  if (rb.length < 100_000 && /[=&]/.test(rb) && !/^[[{]/.test(rb.trim())) {
+    for (const part of rb.split('&')) {
+      const i = part.indexOf('=');
+      if (i <= 0) continue;
+      const dec = (s) => { try { return decodeURIComponent(s.replace(/\+/g, ' ')); } catch (_) { return s; } };
+      const k = dec(part.slice(0, i));
+      const what = looksLikeHostOrUrl(dec(part.slice(i + 1)));
+      if (what) return { name: k, where: `the "${k}" field`, what, value: dec(part.slice(i + 1)) };
+    }
+  }
+  return null;
+}
+
 /**
- * The follow-ups for this endpoint that belong in Scans. Each is self-describing
- * so the chip and the Scans focus banner can explain exactly what will run.
- * `categories` are OWASP ids to pre-pick; empty means "every check that fits".
+ * The single most specific follow-up for this endpoint that belongs in Scans,
+ * as a one-item list (or none). Self-describing so the chip and the Scans focus
+ * banner can explain exactly what will run. `categories` are OWASP ids to
+ * pre-pick; an empty array pre-picks none. Order: the most specific wins.
  */
 function scanLeadsFor(ex) {
   if (!ex || decide(ex.host) !== 'accepted') return [];
   const where = `${ex.method} ${ex.path}`;
-  const leads = [];
   const up = uploadTarget(ex);
   if (up) {
-    leads.push({
+    return [{
       kind: 'upload',
       chip: 'Check this upload in Scans',
       focus: 'file handling',
@@ -2499,10 +2530,22 @@ function scanLeadsFor(ex) {
       title: `an upload endpoint (${where})`,
       why: `This ${up.how}. Open it in Scans to check how the upload is handled — allowed types, where files land, what the server does with them.`,
       note: 'Plonix has no built-in file-handling check yet, so nothing is pre-picked here. Add a file-handling check from the Market, or experiment with the upload field on the Bench.',
-    });
+    }];
+  }
+  const ssrf = ssrfTarget(ex);
+  if (ssrf) {
+    return [{
+      kind: 'ssrf',
+      chip: 'Scan this input for SSRF',
+      focus: 'server-side requests (SSRF)',
+      categories: ['A10'],
+      title: `server-side requests on ${where}`,
+      why: `${ssrf.where} carries ${ssrf.what} ("${ssrf.value.slice(0, 40)}") that the server may fetch. Open it in Scans to check whether it can be pointed at somewhere it shouldn't reach.`,
+      note: 'Plonix has no built-in SSRF check yet, so nothing is pre-picked here. Add one from the Market, or change the value on the Bench and watch where the request goes.',
+    }];
   }
   if (hasInputs(ex)) {
-    leads.push({
+    return [{
       kind: 'inputs',
       chip: "Scan this endpoint's inputs",
       focus: 'input handling',
@@ -2510,9 +2553,9 @@ function scanLeadsFor(ex) {
       title: `input handling on ${where}`,
       why: 'This endpoint takes inputs. Open it in Scans to run the input-handling checks that fit, scoped to just this endpoint.',
       note: '',
-    });
+    }];
   }
-  return leads;
+  return [];
 }
 
 /** The "Suggested" row under the Lens header. Every chip is one click to act on, and nothing is sent until clicked. */
