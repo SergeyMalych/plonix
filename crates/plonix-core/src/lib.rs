@@ -17,6 +17,7 @@ pub mod browser;
 pub mod browser_crawl;
 pub mod ca;
 pub mod cdp;
+pub mod chats;
 pub mod chromium;
 pub mod client;
 pub mod clientcert;

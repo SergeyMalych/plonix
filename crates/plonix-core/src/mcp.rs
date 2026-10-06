@@ -438,6 +438,17 @@ pub fn tool_names() -> Vec<&'static str> {
     all_tools().map(|t| t.name).collect()
 }
 
+/// Set by Plonix for the MCP server of an Ask Claude run inside the app:
+/// the name the server reports itself under, whatever the client says.
+pub const CLIENT_ENV: &str = "PLONIX_MCP_CLIENT";
+/// The client name of Ask Claude runs inside the app, before `/<run id>`.
+pub const ASK_CLIENT: &str = "plonix-ask";
+
+/// The name this server starts under: [`CLIENT_ENV`] when set.
+fn fixed_name() -> Option<String> {
+    std::env::var(CLIENT_ENV).ok().map(|n| n.trim().chars().take(64).collect::<String>()).filter(|n| !n.is_empty())
+}
+
 struct Server {
     home: Home,
     /// The connected client's name, sent to the engine so the Agents screen
@@ -493,7 +504,7 @@ impl Server {
     }
 
     fn initialize(&self, params: &Value) -> Value {
-        if let Some(name) = params["clientInfo"]["name"].as_str().filter(|n| !n.trim().is_empty()) {
+        if let Some(name) = params["clientInfo"]["name"].as_str().filter(|n| !n.trim().is_empty() && fixed_name().is_none()) {
             *self.client_name.lock().unwrap() = name.trim().chars().take(32).collect();
         }
         let asked = params["protocolVersion"].as_str().unwrap_or("");
@@ -579,7 +590,7 @@ pub fn serve(home: Home) -> Result<()> {
     crate::usage::init(&home, false);
     crate::usage::record("mcp_session");
     crate::usage::flush();
-    let server = Server { home, client_name: Arc::new(Mutex::new("mcp".into())) };
+    let server = Server { home, client_name: Arc::new(Mutex::new(fixed_name().unwrap_or_else(|| "mcp".into()))) };
 
     // Keep the Agents screen's "connected" status fresh while the agent is idle.
     let (home, name) = (server.home.clone(), server.client_name.clone());
