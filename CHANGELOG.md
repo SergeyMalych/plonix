@@ -4,6 +4,9 @@ What changed in each Plonix release. The newest release is at the top.
 
 ## [Unreleased]
 
+### Added
+- A walkthrough of the demo project: the first time the demo opens, it offers a short tour that steps through every part of Plonix over the demo's own data, ringing each part on screen. Skip it, or take it again any time from **Take the tour** in the demo strip.
+
 ## [0.1.1] - 2026-10-05
 
 ### Added
