@@ -52,6 +52,8 @@ struct AppState {
     agents: Arc<AgentActivity>,
     agent_settings: Arc<SharedAgentSettings>,
     conversations: Arc<Conversations>,
+    /// The background watcher that fills the Agents inbox.
+    watch: Arc<crate::watch::Watch>,
     /// Serializes changes to the saved chats, which are read, changed and written whole.
     chats_lock: Arc<tokio::sync::Mutex<()>>,
     /// Edits agents suggested for Bench drafts, waiting for the user.
@@ -76,19 +78,27 @@ pub struct Tokens {
 }
 
 pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: Home) -> Router {
+    let conversations: Arc<Conversations> = Arc::default();
+    let watch = crate::watch::Watch::new(engine.clone(), home.clone(), conversations.clone());
     let state = AppState {
         engine,
         token: tokens.user,
         agent_token: tokens.agent,
         agents: Arc::default(),
         agent_settings: Arc::new(SharedAgentSettings::new(&home)),
-        conversations: Arc::default(),
+        conversations,
+        watch,
         chats_lock: Arc::default(),
         proposals: Arc::default(),
         api_addr,
         launch_codes: Arc::default(),
         home,
     };
+    // The watcher looks only while agent access is on.
+    if tokio::runtime::Handle::try_current().is_ok() {
+        let settings = state.agent_settings.clone();
+        tokio::spawn(state.watch.clone().run(move || settings.get().enabled));
+    }
     // A turn still marked running was cut off when the last engine stopped.
     if let Err(e) = chats::settle(&state.engine.store) {
         tracing::warn!("the saved conversations could not be read: {e:#}");
@@ -194,6 +204,9 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/agents/run", post(agent_run))
         .route("/api/agents/run/{id}", get(agent_run_poll).delete(agent_run_cancel))
         .route("/api/agents/activity", get(agent_activity))
+        .route("/api/agents/watch", get(watch_view).put(watch_settings))
+        .route("/api/agents/watch/look", post(watch_look))
+        .route("/api/agents/watch/items", post(watch_items))
         .route("/api/agents/chats", get(agent_chats))
         .route("/api/agents/chats/{id}", get(agent_chat).delete(delete_agent_chat))
         .route("/api/bench/proposals", get(list_proposals).post(add_proposal))
@@ -343,6 +356,8 @@ async fn status(State(s): State<AppState>, caller: MaybeCaller) -> Response {
         "exchanges": s.engine.store.count().unwrap_or(0),
         "scope_rules": rules.rules.len(),
         "pending_suggestions": pending,
+        // Unread notes and leads in the Agents inbox, for the sidebar badge.
+        "agent_inbox_unread": s.watch.unread(),
         "ca_fingerprint": s.engine.ca.fingerprint(),
         // Which built-in tools the Market has switched on (see crate::tool),
         // so the window shows the Access check tab and the Bench user
@@ -2233,6 +2248,41 @@ struct ActivityQuery {
 /// What agents read lately, newest first. User-only: agents cannot reach it.
 async fn agent_activity(State(s): State<AppState>, Query(q): Query<ActivityQuery>) -> Response {
     Json(json!({ "hits": s.agents.hits(q.since, q.limit.unwrap_or(200).min(access::MAX_HITS)), "clients": s.agents.clients() })).into_response()
+}
+
+/// The watcher: its settings, today's use and the inbox. User-only.
+async fn watch_view(State(s): State<AppState>) -> Response {
+    Json(s.watch.view()).into_response()
+}
+
+async fn watch_settings(State(s): State<AppState>, Json(new): Json<crate::watch::WatchSettings>) -> Response {
+    s.watch.set_settings(new);
+    Json(s.watch.view()).into_response()
+}
+
+/// Asks the watcher to look at the latest traffic now.
+async fn watch_look(State(s): State<AppState>) -> Response {
+    if !s.agent_settings.get().enabled {
+        return err(StatusCode::FORBIDDEN, "agents_disabled", "agent access is turned off in Settings › AI agents");
+    }
+    s.watch.look_now();
+    Json(json!({ "ok": true })).into_response()
+}
+
+#[derive(Deserialize)]
+struct WatchItemsBody {
+    /// Items to change; empty means all of them.
+    #[serde(default)]
+    ids: Vec<String>,
+    /// Remove them, and steer the watcher away from their like.
+    #[serde(default)]
+    dismiss: bool,
+}
+
+/// Marks inbox items read, or dismisses them.
+async fn watch_items(State(s): State<AppState>, Json(b): Json<WatchItemsBody>) -> Response {
+    let n = s.watch.mark(&b.ids, b.dismiss);
+    Json(json!({ "changed": n, "unread": s.watch.unread() })).into_response()
 }
 
 /// Saved Ask Claude conversations, most recent first. User-only.

@@ -443,6 +443,8 @@ pub fn tool_names() -> Vec<&'static str> {
 pub const CLIENT_ENV: &str = "PLONIX_MCP_CLIENT";
 /// The client name of Ask Claude runs inside the app, before `/<run id>`.
 pub const ASK_CLIENT: &str = "plonix-ask";
+/// The client name of the background watcher's runs, before `/<run id>`.
+pub const WATCH_CLIENT: &str = "plonix-watch";
 
 /// The name this server starts under: [`CLIENT_ENV`] when set.
 fn fixed_name() -> Option<String> {

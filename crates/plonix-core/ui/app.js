@@ -755,6 +755,14 @@ function updateChrome() {
   const rules = S.scope.rules || [];
   $('#ct-scope').title = rules.filter((r) => r.decision === 'accepted').length + ' in scope, ' + pending + ' suggested';
   $('#ct-findings').textContent = S.findingsCount || '';
+  // New notes and leads from Claude's watcher.
+  const unread = st.agent_inbox_unread || 0;
+  const ctAgents = $('#ct-agents');
+  if (ctAgents) {
+    ctAgents.textContent = unread || '';
+    ctAgents.classList.toggle('hot', unread > 0);
+    ctAgents.title = unread ? unread + ' new from Claude' : '';
+  }
   $('#ct-bench').textContent = R.tabs.length || '';
 }
 
@@ -775,7 +783,7 @@ async function poll() {
       if (S.view === 'scope') renderScopeBody();
       if (S.view === 'map' && st.exchanges !== prev.exchanges) M.dirty = true;
     }
-    if (S.view === 'agents' && Date.now() - (S.agentsAt || 0) > 4000) loadAgents();
+    if (S.view === 'agents' && (Date.now() - (S.agentsAt || 0) > 4000 || st.agent_inbox_unread !== prev.agent_inbox_unread)) loadAgents();
     if (st.intercept && st.intercept.seq !== IC.seq) loadIntercept();
   } catch (e) {
     if (e.code === 'unauthorized') return;
@@ -7089,7 +7097,7 @@ const STARTER_QUESTIONS = [
   'Summarize what this application does from its traffic.',
 ];
 
-const AG = { chat: null, cv: null, setup: null, chats: [], policy: null, hits: [], skills: [], arg: null };
+const AG = { chat: null, cv: null, setup: null, chats: [], policy: null, hits: [], skills: [], watch: null, inboxAll: false, lookAsked: 0 };
 
 function renderAgents(main) {
   AG.cv = null;
@@ -7106,7 +7114,7 @@ function renderAgents(main) {
         h(
           'div',
           { class: 'agws' },
-          h('div', { class: 'agmain' }, h('div', { class: 'card agask', id: 'agask' }), h('div', { id: 'agbody' })),
+          h('div', { class: 'agmain' }, h('div', { class: 'card aginbox', id: 'aginbox' }), h('div', { class: 'card agask', id: 'agask' }), h('div', { id: 'agbody' })),
           h('aside', { class: 'agside' }, h('div', { class: 'card agfeed', id: 'agfeed' }, h('div', { class: 'ab muted', text: 'Loading…' }))),
         ),
         h('div', { class: 'stack agsetup', id: 'agentsbody', hidden: true }),
@@ -7134,9 +7142,9 @@ function toggleAgentSetup(open) {
 /** Refreshes what changes on its own: who is connected, the feed, the conversations. */
 async function loadAgents(first) {
   S.agentsAt = Date.now();
-  let a, act, list;
+  let a, act, list, watch;
   try {
-    [a, act, list] = await Promise.all([api('/api/agents'), api('/api/agents/activity?limit=200'), api('/api/agents/chats')]);
+    [a, act, list, watch] = await Promise.all([api('/api/agents'), api('/api/agents/activity?limit=200'), api('/api/agents/chats'), api('/api/agents/watch')]);
   } catch (e) {
     return toast(e.message, 'err');
   }
@@ -7144,6 +7152,7 @@ async function loadAgents(first) {
   AG.policy = a;
   AG.hits = act.hits || [];
   AG.chats = list.chats || [];
+  AG.watch = watch;
   if (first) {
     // Nothing has ever happened here: show how to get started.
     if (AG.setup === null) AG.setup = !AG.chats.length && !(a.clients || []).length && a.ask_in_app === false;
@@ -7151,6 +7160,7 @@ async function loadAgents(first) {
     drawAgentAsk();
     loadAgentStarters();
   } else if (AG.setup) drawAgentSetup();
+  drawAgentInbox();
   drawAgentFeed();
   if (!AG.chat) drawAgentBody();
 }
@@ -7267,6 +7277,179 @@ async function runSkill(sk, values = {}) {
   if (!r.prompt) return toast(r.needs || 'This skill needs more to go on.', 'err');
   const detail = Object.values(values).join(', ');
   startAgentChat(r.prompt, sk.title + (detail ? ': ' + detail : ''));
+}
+
+/* ---- the inbox: what the background watcher found ---- */
+
+const INBOX_SHOW = 8;
+const ITEM_KIND = { lead: { label: 'Lead', cls: 'lead' }, note: { label: 'Note', cls: 'note' }, digest: { label: 'New', cls: 'digest' } };
+const NEXT_ACTION = {
+  lens: 'Open request',
+  bench: 'Open in Bench',
+  scan: 'Scan this host',
+  access: 'Check as other users',
+  finding: 'Write it up',
+  map: 'Open in Map',
+  scope: 'Open Scope',
+};
+
+/** Acts on an inbox item where it points: the request, the Bench, Scans, Access or a new finding. */
+async function actOnItem(it) {
+  markItems([it.id], false);
+  const id = it.request;
+  const next = it.next || 'lens';
+  if (next === 'map' || next === 'scope') {
+    if (next === 'map' && it.host) M.sel = it.host;
+    return leaveTo(next);
+  }
+  if (!id) return;
+  if (next === 'bench') return sendToBench(id);
+  if (next === 'finding') return newFinding([id], it.title);
+  if (next === 'access' && toolOn('access-check')) return startAccessCheck({ targets: [id], sourceLabel: it.title });
+  if (next === 'scan') {
+    try {
+      const ex = await api('/api/traffic/' + id);
+      SC.host = ex.host;
+      return leaveTo('scans');
+    } catch (_) {}
+  }
+  showExchange(id);
+}
+
+async function markItems(ids, dismiss) {
+  try {
+    const r = await api('/api/agents/watch/items', { method: 'POST', body: { ids, dismiss } });
+    if (S.status) S.status.agent_inbox_unread = r.unread;
+    updateChrome();
+  } catch (e) {
+    return toast(e.message, 'err');
+  }
+  if (dismiss || !ids.length) loadAgents();
+}
+
+async function saveWatch(patch) {
+  try {
+    AG.watch = await api('/api/agents/watch', { method: 'PUT', body: { ...AG.watch.settings, ...patch } });
+  } catch (e) {
+    return toast(e.message, 'err');
+  }
+  drawAgentInbox();
+}
+
+async function lookNow() {
+  try {
+    await api('/api/agents/watch/look', { method: 'POST' });
+  } catch (e) {
+    return toast(e.message, 'err');
+  }
+  AG.lookAsked = Date.now();
+  drawAgentInbox();
+  toast('Claude will look at your latest traffic in a moment', 'ok');
+}
+
+function drawAgentInbox() {
+  const box = $('#aginbox');
+  const w = AG.watch;
+  if (!box || !w) return;
+  const a = AG.policy;
+  const st = w.settings;
+  const items = w.items || [];
+  // Asked to look: show it as looking until the look starts and ends (or it gives up).
+  const asked = AG.lookAsked && Date.now() - AG.lookAsked < 30000 && !(w.state.last_look_at >= AG.lookAsked);
+  const looking = w.running || asked;
+  const used = w.state.tokens_today || 0;
+  const pct = Math.min(100, Math.round((used / st.daily_tokens) * 100));
+  const status = !st.enabled
+    ? 'Off'
+    : w.capped
+      ? 'Paused until tomorrow: today’s tokens are used up'
+      : looking
+        ? 'Looking at your traffic…'
+        : w.waiting
+          ? `${w.waiting} new request${w.waiting === 1 ? '' : 's'} waiting; Claude looks when you pause`
+          : 'Watching your traffic';
+  const toggle = h('input', { type: 'checkbox', checked: st.enabled, onchange: () => saveWatch({ enabled: toggle.checked }) });
+  const budget = h(
+    'select',
+    { title: 'Most tokens Claude may use per day watching this project', onchange: (e) => saveWatch({ daily_tokens: Number(e.target.value) }) },
+    w.budgets.map((n) => h('option', { value: n, text: fmtTok(n) + ' a day', selected: n === st.daily_tokens })),
+  );
+  const head = h(
+    'div',
+    { class: 'aghead' },
+    h('b', { text: 'From Claude' }),
+    w.unread ? h('span', { class: 'qn', text: w.unread }) : null,
+    h('span', { class: 'agstat' + (looking ? ' busy' : ''), text: status }),
+    h('span', { class: 'sp' }),
+    w.unread ? h('button', { class: 'btn sm ghost', text: 'Mark all read', onclick: () => markItems([], false) }) : null,
+    h('button', { class: 'btn sm', text: looking ? 'Looking…' : 'Look now', disabled: looking || !a || !a.enabled || a.ask_in_app === false, title: 'Have Claude look at the latest in-scope traffic now', onclick: lookNow }),
+    h('label', { class: 'agswitch', title: 'Let Claude read new in-scope traffic in the background and leave notes and leads here' }, toggle, h('span', { text: 'Watch my traffic' })),
+  );
+  let body;
+  if (!items.length && !st.enabled) {
+    body = h(
+      'div',
+      { class: 'agempty' },
+      h('div', { class: 'agbig', text: 'Let Claude watch while you browse' }),
+      h('p', { text: 'When you pause, Claude reads the new in-scope traffic and leaves notes and leads here: what stands out, what to check next, and where. It only reads. Nothing is sent unless you click.' }),
+      h('div', { class: 'agrowbtns' }, h('button', { class: 'btn primary', text: 'Turn on', onclick: () => saveWatch({ enabled: true }) }), h('span', { class: 'muted fine', text: 'Up to ' + fmtTok(st.daily_tokens) + ' tokens a day. You can change this or turn it off any time.' })),
+    );
+  } else if (!items.length) {
+    body = h('div', { class: 'ab muted', text: w.state.last_error || 'Nothing yet. Browse the target; when you pause, Claude looks at what is new. Or press Look now.' });
+  } else {
+    const shown = AG.inboxAll ? items : items.slice(0, INBOX_SHOW);
+    body = h(
+      'div',
+      { class: 'aglist' },
+      shown.map((it) => {
+        const k = ITEM_KIND[it.kind] || ITEM_KIND.note;
+        // Access needs its Market tool; without it the lead opens the request.
+        const next = it.next === 'access' && !toolOn('access-check') ? 'lens' : it.next || 'lens';
+        const act = it.kind === 'digest' ? null : NEXT_ACTION[next];
+        return h(
+          'div',
+          { class: 'agitem' + (it.read ? '' : ' unread') },
+          h('span', { class: 'agkind ' + k.cls, text: k.label }),
+          h(
+            'div',
+            { class: 'agimain' },
+            h('div', { class: 'agititle', text: it.title }),
+            it.detail ? h('div', { class: 'agidetail', text: it.detail }) : null,
+            h(
+              'div',
+              { class: 'agimeta' },
+              it.request ? h('button', { class: 'link', text: 'Request #' + it.request, onclick: () => (markItems([it.id], false), showExchange(it.request)) }) : null,
+              h('span', { text: agoText(it.at) }),
+            ),
+          ),
+          h(
+            'div',
+            { class: 'agiacts' },
+            act && (it.request || it.next === 'map' || it.next === 'scope') ? h('button', { class: 'btn sm' + (it.kind === 'lead' ? ' primary' : ''), text: act, onclick: () => actOnItem(it) }) : null,
+            !it.read ? h('button', { class: 'mini', text: '✓', title: 'Mark read', onclick: () => markItems([it.id], false) }) : null,
+            h('button', { class: 'mini', text: '✕', title: it.kind === 'digest' ? 'Remove' : 'Dismiss: not useful. Claude will suggest fewer like it.', onclick: () => markItems([it.id], true) }),
+          ),
+        );
+      }),
+      items.length > INBOX_SHOW
+        ? h('button', { class: 'link agmore', text: AG.inboxAll ? 'Show fewer' : `Show all ${items.length}`, onclick: () => ((AG.inboxAll = !AG.inboxAll), drawAgentInbox()) })
+        : null,
+    );
+  }
+  clear(
+    box,
+    head,
+    body,
+    st.enabled || used
+      ? h(
+          'div',
+          { class: 'agfoot' },
+          h('div', { class: 'askmeter' }, h('div', { class: 'bar' + (w.capped ? ' over' : '') }, h('i', { style: { width: pct + '%' } })), h('span', { text: `${fmtTok(used)} of ${fmtTok(st.daily_tokens)} tokens today` + (w.state.looks_today ? ` · ${w.state.looks_today} look${w.state.looks_today === 1 ? '' : 's'}` : '') })),
+          h('span', { class: 'sp' }),
+          budget,
+        )
+      : null,
+  );
 }
 
 /* ---- conversations ---- */
@@ -7414,6 +7597,7 @@ function hitInfo(x) {
 /** Who made a burst of requests: an Ask Claude conversation by its title, else the agent's name. */
 function hitWho(client) {
   const [name, run] = client.split('/');
+  if (name === 'plonix-watch') return { label: 'Watching your traffic', ask: true };
   if (name !== 'plonix-ask') return { label: name };
   const chat = run && AG.chats.find((c) => (c.runs || []).includes(run));
   return chat ? { label: chat.title, chat: chat.id, ask: true } : { label: 'Ask Claude', ask: true };
@@ -7424,7 +7608,7 @@ function drawAgentFeed() {
   const a = AG.policy;
   if (!box || !a) return;
   const now = Date.now();
-  const live = (a.clients || []).filter((c) => now - c.last_seen < AGENT_LIVE_MS && !c.name.startsWith('plonix-ask'));
+  const live = (a.clients || []).filter((c) => now - c.last_seen < AGENT_LIVE_MS && !c.name.startsWith('plonix-'));
   // Consecutive requests from one agent, close together, form one burst.
   const bursts = [];
   for (const x of AG.hits) {
@@ -7527,7 +7711,7 @@ function drawAgentSetup() {
               h(
                 'tr',
                 null,
-                h('td', { class: 'mono', text: c.name === 'plonix-ask' ? 'Ask Claude (in Plonix)' : c.name }),
+                h('td', { class: 'mono', text: c.name === 'plonix-ask' ? 'Ask Claude (in Plonix)' : c.name === 'plonix-watch' ? 'Watcher (in Plonix)' : c.name }),
                 h('td', { text: now - c.last_seen < AGENT_LIVE_MS ? 'connected' : 'last seen ' + agoText(c.last_seen) }),
                 h('td', { text: c.requests + (c.refused ? ` (${c.refused} refused)` : '') }),
                 h('td', { class: 'mono muted', text: c.last_request }),

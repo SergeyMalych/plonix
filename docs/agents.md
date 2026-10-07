@@ -109,11 +109,12 @@ The Plonix window has an **Ask Claude** button on a request (the Lens), a findin
 The Agents screen is where you work with Claude on the project as a whole:
 
 - **Ask box.** Ask about the whole project, such as what to look at next or which hosts belong to the target. Under the box, skills start with one click (a skill that needs a host or a request id asks for it first), and a few starter questions sit next to them.
+- **From Claude.** Turn on **Watch my traffic** and Claude keeps an eye on the project while you browse. When new in-scope traffic arrives and then goes quiet for a moment, Claude reads it and leaves a few items here: a short digest of what is new, notes on requests worth a look, and leads, each with one place to act on it (open the request, the Bench, a scan of that host, an access check, or a new finding). **Look now** asks Claude to look right away. Items you dismiss steer it away from suggesting similar ones. The sidebar shows how many items are unread. Claude only reads: nothing is sent unless you click. Looks stop for the day once they reach the daily token limit you choose (200k by default). The watcher is off until you turn it on.
 - **Conversations.** Every question you ask here, or with **Ask Claude** anywhere in the app, is saved with the project. Open a conversation to read it again, or ask a follow-up: Claude picks up the same session, so it remembers what was said. The newest 60 conversations are kept, and you can delete any of them.
 - **Activity.** Each request an agent makes appears in a feed in plain words, such as "Request #32", "Endpoints on api.example.com" or "Searched traffic for login". Click an entry to open it in Traffic, the Map, Scope or Findings. Requests an Ask Claude conversation makes appear under that conversation's title. Refused requests are marked. The feed is kept while the project is open.
 - **Setup** holds the rest: who is connected, the agent settings, how to connect Claude Code or another MCP client, what agents may do, and the skills. It opens on its own when nothing has been set up yet.
 
-Saved conversations and the activity feed are for you only. Agents cannot read either one.
+Saved conversations, the inbox and the activity feed are for you only. Agents cannot read any of them.
 
 ## Settings
 

@@ -193,13 +193,19 @@ impl Conversations {
     /// Starts a new turn. With `resume`, it continues that Claude session so
     /// the follow-up keeps the earlier context. Returns the run id to poll.
     pub fn start(&self, home: &Home, prompt: String, resume: Option<String>) -> Result<String, StartError> {
+        self.start_as(home, prompt, resume, crate::mcp::ASK_CLIENT)
+    }
+
+    /// Like [`start`](Self::start), with the MCP server named `<client>/<run>`
+    /// in the activity feed.
+    pub fn start_as(&self, home: &Home, prompt: String, resume: Option<String>, client: &str) -> Result<String, StartError> {
         let bin = claude_bin().ok_or(StartError::NoCli)?;
         let ord = self.next.fetch_add(1, Ordering::Relaxed);
         // Unique across engine restarts, since saved chats remember it.
         let id = format!("c{}-{ord}", started_tag());
 
         let run = std::sync::Arc::new(Mutex::new(Run::new(ord)));
-        let mcp = mcp_config(home, &id);
+        let mcp = mcp_config(home, &format!("{client}/{id}"));
         let cwd = run_dir(home);
         let task_run = run.clone();
         let handle = tokio::spawn(async move { drive(bin, mcp, cwd, prompt, resume, task_run).await });
@@ -239,6 +245,14 @@ impl Conversations {
             ok: run.status == Status::Done,
             session_id: run.session_id.clone(),
         }))
+    }
+
+    /// Whether a run is still going, and the tokens it has read and written.
+    pub fn usage(&self, id: &str) -> Option<(bool, u64)> {
+        let run = self.runs.lock().unwrap().get(id).cloned()?;
+        let run = run.lock().unwrap();
+        let p = run.progress.view();
+        Some((run.status == Status::Running, p.tokens_in + p.tokens_out))
     }
 
     /// Stops a running conversation; the child process is killed on drop.
@@ -550,10 +564,10 @@ fn started_tag() -> &'static str {
 /// via `Cmd::Mcp`, and the desktop app via a headless entry point in `main`
 /// (so it never opens a window). The server names itself after the run, so
 /// the Agents screen can show what each conversation looked at.
-fn mcp_config(home: &Home, run: &str) -> Value {
+fn mcp_config(home: &Home, name: &str) -> Value {
     let exe = std::env::current_exe().ok().map(|e| e.canonicalize().unwrap_or(e));
     let command = exe.map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "plonix".into());
-    let mut env = json!({ crate::mcp::CLIENT_ENV: format!("{}/{run}", crate::mcp::ASK_CLIENT) });
+    let mut env = json!({ crate::mcp::CLIENT_ENV: name });
     if !is_default_home(home) {
         env["PLONIX_HOME"] = json!(home.root);
     }
