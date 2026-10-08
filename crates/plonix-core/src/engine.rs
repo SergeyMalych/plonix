@@ -1005,17 +1005,6 @@ impl Engine {
     }
 
     async fn send_from(&self, mut req: SendRequest, initiator: &str, reach: Reach) -> Result<Exchange, SendError> {
-        // Sending as a saved user: its headers replace the auth headers the
-        // draft carried. The values come from the project database, so they
-        // are never round-tripped through the client.
-        if let Some(uid) = req.as_user.take().filter(|u| !u.is_empty()) {
-            let users = self.store.saved_users().map_err(SendError::Other)?;
-            let Some(user) = users.into_iter().find(|u| u.id == uid) else {
-                return Err(SendError::BadRequest(format!("there is no saved user '{uid}'")));
-            };
-            req.headers.retain(|(k, _)| !crate::users::is_auth_header(k));
-            req.headers.extend(user.headers);
-        }
         let url = req.url.trim();
         let (scheme, rest) = url
             .split_once("://")
@@ -1035,6 +1024,22 @@ impl Engine {
             .filter(|(h, _)| !h.contains(':') || h.ends_with(']'))
             .and_then(|(_, p)| p.parse().ok())
             .unwrap_or(if scheme == "https" { 443 } else { 80 });
+
+        // Sending as a saved user: its cookies and headers replace the auth
+        // headers the draft carried. The values come from the project
+        // database, so they are never round-tripped through the client.
+        let as_user = match req.as_user.take().filter(|u| !u.is_empty()) {
+            Some(uid) => {
+                let users = self.store.saved_users().map_err(SendError::Other)?;
+                let Some(user) = users.into_iter().find(|u| u.id == uid) else {
+                    return Err(SendError::BadRequest(format!("there is no saved user '{uid}'")));
+                };
+                req.headers.retain(|(k, _)| !crate::users::is_auth_header(k));
+                req.headers.extend(user.request_headers(&host, crate::users::now_secs()));
+                Some(user)
+            }
+            None => None,
+        };
 
         // The single choke point for active traffic: scope is enforced here.
         let decision = self.rules().decide(&host);
@@ -1124,6 +1129,12 @@ impl Engine {
             Err(e) => ex.error = Some(format!("{e:#}")),
         }
         ex.replaced = replaced;
+        if let Some(user) = &as_user {
+            ex.replaced.insert(0, format!("{}{}", crate::users::SENT_AS, user.name));
+            if let Err(e) = self.store.absorb_cookies(&user.id, &ex.host, &ex.resp_headers) {
+                tracing::warn!("saved user {}: could not keep its cookies: {e:#}", user.id);
+            }
+        }
         let id = self.record(ex.clone())?;
         ex.id = id;
         Ok(ex)
@@ -1309,7 +1320,7 @@ impl Engine {
                     report.requests_sent += 1;
                     let sent = self
                         .send_scan(
-                            SendRequest { method: planned.method.clone(), url: planned.url.clone(), headers: planned.headers.clone(), body: None, body_base64: None, as_user: None },
+                            SendRequest { method: planned.method.clone(), url: planned.url.clone(), headers: planned.headers.clone(), body: None, body_base64: None, as_user: req.as_user.clone() },
                             initiator,
                         )
                         .await;
@@ -1504,7 +1515,7 @@ impl Engine {
                 headers,
                 body: if body.is_empty() { None } else { Some(body) },
                 body_base64: None,
-                as_user: None,
+                as_user: req.as_user.clone(),
             };
             let n = report.rows.len() + 1;
             match self.send(send, initiator).await {
@@ -1590,11 +1601,8 @@ impl Engine {
                 // As a saved user: drop the known auth headers the capture
                 // carried, then set this user's own. Signed out: drop them and
                 // set nothing.
-                let set_headers = if ident.anon {
-                    Vec::new()
-                } else {
-                    req.users.iter().find(|u| u.id == ident.id).map(|u| u.headers.clone()).unwrap_or_default()
-                };
+                let user = if ident.anon { None } else { req.users.iter().find(|u| u.id == ident.id) };
+                let set_headers = user.map(|u| u.request_headers(&orig.host, crate::users::now_secs())).unwrap_or_default();
                 let replay = ReplayRequest {
                     id: tid,
                     method: None,
@@ -1606,6 +1614,11 @@ impl Engine {
                 let cell = match self.replay(replay, initiator).await {
                     Ok(ex) => {
                         report.sent += 1;
+                        if let Some(u) = user
+                            && let Err(e) = self.store.absorb_cookies(&u.id, &ex.host, &ex.resp_headers)
+                        {
+                            tracing::warn!("saved user {}: could not keep its cookies: {e:#}", u.id);
+                        }
                         authcheck::Cell {
                             identity: ident.id.clone(),
                             status: ex.status,

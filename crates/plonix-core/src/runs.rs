@@ -135,6 +135,9 @@ pub struct RunRequest {
     /// Send the unmodified request first, as a baseline to compare against.
     #[serde(default)]
     pub include_base: bool,
+    /// Send every request as this saved user (its cookies and headers).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub as_user: Option<String>,
 }
 
 fn get() -> String {

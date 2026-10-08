@@ -82,7 +82,7 @@ Plonix has a handful of tools, each with its own name. They are the same in the 
 | **Skills** | Playbooks AI agents follow for a job in Plonix, offered over MCP | `plonix skills` |
 | **Rules** | Change traffic as it passes: add, change or remove a header, or replace text, for browser traffic, the Bench and Scans, optionally only when a Traffic search matches | `plonix replace` |
 | **Rule packs** | Community packs that teach Plonix to recognise technologies | `plonix rules` |
-| **Saved users** | The cookies and tokens for each user of an application; the Bench sends as whichever one you pick (a Market tool) | Bench › As … |
+| **Saved users** | The cookies and tokens for each user of an application. Act as one from the title bar and your browser, the Bench and Scans send as them; see, edit and expire each cookie on the Users screen (a Market tool) | Title bar › Act as, Users |
 | **Access check** | Replays chosen requests as each saved user and signed out, side by side, so differences in what each one may see stand out (a Market tool) | Traffic or Map selection |
 | **Callbacks** | Hands out a unique host for each test and lists every DNS lookup, HTTP request or mail that reaches one (a Market tool) | Callbacks tab, Bench › Insert callback host |
 
@@ -240,7 +240,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - **Starter profiles:** pick bug hunter, red teamer or security researcher on the Start screen, at the top of the Market, in Settings or per project. The Market then shows **Recommended for you**, each item with one line on why, and `plonix market install --starter` installs the set. Pick none and everything stays neutral. See [docs/market.md](docs/market.md).
 
 ### Saved users and the Access check
-- **Saved users** keep each user's cookies and tokens per project. Pick **As …** on the Bench to send a request as one of them; switching never widens scope.
+- **Saved users** keep each user's cookies and tokens per project. **Act as** one from the title bar: browser traffic to in-scope hosts, the Bench and Scans are then sent with that user's cookies, and cookies the server sets for them are kept with the user instead of in your browser. A Bench tab can pick its own user with **As …**. The **Users** screen lists every cookie to edit, expire or remove. Switching sends nothing by itself and never widens scope.
 - The **Access check** replays the requests you select in Traffic or on the Map as each saved user and once signed out, then lines up status, size and content for each. It points out where a signed-out request still succeeds and where different users get the same response; it draws no conclusions, and you decide what they mean.
 
 ### Callbacks
@@ -510,7 +510,8 @@ The API listens on port 8090 when it is free; `plonix status` shows the actual a
 | GET | `/api/scan/catalog` · `/api/scan/suggest/{host}` | Scan detectors and checks, and the suggested profile for a host |
 | GET | `/api/scan/plan/{host}` | A reviewable scan plan for a host: proposed tests with reasons, grouped by OWASP category (sends nothing) |
 | POST | `/api/run` · GET `/api/run/lists` | Start a Bench run (user only), and the payload lists available to it |
-| GET / PUT | `/api/users` | Saved users for the project (user only) |
+| GET / PUT | `/api/users` | Saved users for the project, and the one being acted as (user only) |
+| PUT | `/api/users/acting` | Act as a saved user, or `null` for the browser's own session (user only) |
 | POST | `/api/access-check` | Replay requests as each saved user and signed out, and compare (user only) |
 | GET | `/api/hosts/{host}/spec` · `/api/traffic/{id}/spec` | API descriptions found in traffic, and the endpoints not visited yet |
 | GET | `/api/program` · POST `/api/program/preview` · `apply` · `clear` | The program this project follows; preview, follow or stop following one |

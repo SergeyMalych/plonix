@@ -5,7 +5,7 @@ What changed in each Plonix release. The newest release is at the top.
 ## [Unreleased]
 
 ### Added
-- **Test now!** on the demo walkthrough's stops: one press shows that part working for real on the demo's data, with a pointer that moves and clicks for you. You get another customer's order back from the Bench, two orders compared side by side, a run through 22 order ids, an access check as each saved user and signed out, and more. New stops for grouping, Ask Claude and comparing requests. Everything is answered locally by the demo's stand-in API.
+- **Test now!** on the demo walkthrough's stops: one press shows that part working for real on the demo's data, with a pointer that moves and clicks for you. You get another customer's order back from the Bench, two orders compared side by side, a run through 22 order ids, the same request sent as Maya and then as Dana, an access check as each saved user and signed out, and more. New stops for grouping, Ask Claude and comparing requests. Everything is answered locally by the demo's stand-in API.
 
 ## [0.1.1] - 2026-10-08
 
