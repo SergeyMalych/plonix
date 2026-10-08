@@ -177,6 +177,10 @@ async fn a_saved_user_gets_a_browser_window_of_their_own() {
     assert_eq!(cookie(&s, "maya", "s").as_deref(), Some("rotated"));
     assert_eq!(browse_with(window, &url("/"), Some("s=window")).await.0, "s=window; theme=dark");
     assert_eq!(browse(s.proxy_addr(), &url("/")).await.0, "s=browser");
+    // What the window sends is kept too: a cookie set from JavaScript.
+    browse_with(window, &url("/"), Some("s=window; js=1")).await;
+    assert_eq!(cookie(&s, "maya", "js").as_deref(), Some("1"));
+    assert_eq!(cookie(&s, "maya", "s").as_deref(), Some("window"));
     let mut rotate = None;
     for _ in 0..200 {
         rotate = s.engine.store.exchanges_after(0, 100).unwrap().into_iter().find(|e| e.path == "/rotate");

@@ -250,8 +250,8 @@ fn act_as_user(engine: &Arc<Engine>, outbound: &mut OutboundRequest, pending: &m
 
 /// Traffic from a saved user's own browser window, to in-scope hosts: the
 /// window's session goes out as it is, filled in from the user's saved
-/// headers and cookies, and is recorded as sent by the user. The window keeps
-/// the cookies servers set, and so does the user (see `respond`).
+/// headers and cookies, and is recorded as sent by the user. The user keeps
+/// what the window sends, and the cookies servers set there (see `respond`).
 fn window_user(engine: &Arc<Engine>, id: &str, outbound: &mut OutboundRequest, pending: &mut Pending) {
     if !engine.rules().in_scope(&pending.ex.host) {
         return;
@@ -266,6 +266,14 @@ fn window_user(engine: &Arc<Engine>, id: &str, outbound: &mut OutboundRequest, p
             return;
         }
     };
+    // What the window sends is the user's session now: a cookie set from
+    // JavaScript, a bearer token the page keeps in local storage.
+    if user.keep_fresh
+        && user.clone().learn_sent(&pending.ex.host, &outbound.headers, crate::users::now_secs())
+        && let Err(e) = engine.store.learn_sent(&user.id, &pending.ex.host, &outbound.headers)
+    {
+        tracing::warn!("saved user {id}: could not keep its session: {e:#}");
+    }
     outbound.headers = user.window_headers(&pending.ex.host, &outbound.headers, crate::users::now_secs());
     pending.ex.req_headers = outbound.headers.clone();
     pending.ex.replaced.push(format!("{}{}", crate::users::SENT_AS, user.name));

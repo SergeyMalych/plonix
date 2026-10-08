@@ -6,7 +6,7 @@ What changed in each Plonix release. The newest release is at the top.
 
 ### Added
 - **Test now!** on the demo walkthrough's stops: one press shows that part working for real on the demo's data, with a pointer that moves and clicks for you. You get another customer's order back from the Bench, two orders compared side by side, a run through 22 order ids, the same request sent as Maya and then as Dana, an access check as each saved user and signed out, and more. New stops for grouping, Ask Claude and comparing requests. Everything is answered locally by the demo's stand-in API.
-- **Open a browser as a saved user**, from the Users screen: a browser window of that user's own, with its own cookies, so you can sign in as Dana there and stay signed in as Maya in your usual capture browser. It starts with the cookies saved for the user, what you do there is recorded as sent by them, and cookies the site sets there are kept for them too.
+- **Open a browser as a saved user**, from the Users screen: a browser window of that user's own, with its own cookies, so you can sign in as Dana there and stay signed in as Maya in your usual capture browser. It starts with the cookies saved for the user, and what you do there is recorded as sent by them. The session it uses is saved for the user as you go: cookies the site sets, cookies set from JavaScript, and tokens such as a bearer header, so the Bench, the Access check and Scans send the same.
 
 ### Changed
 - Programs is now a tool you install from the Market, like Saved users and the Access check, so the sidebar shows it only once you want it. A project that already follows a program keeps the Programs screen and its rules, and the demo project still shows it. Bug hunters see it in *Recommended for you*.

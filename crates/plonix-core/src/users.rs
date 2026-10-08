@@ -150,6 +150,59 @@ impl SavedUser {
         out
     }
 
+    /// Takes in the session a user's own browser window sent to `host`: its
+    /// cookies, including ones set from JavaScript, and its auth headers,
+    /// such as a bearer token the page keeps in local storage. So the Bench,
+    /// the access check and Scans send what the window sends. Returns whether
+    /// anything changed.
+    pub fn learn_sent(&mut self, host: &str, sent: &[(String, String)], now: i64) -> bool {
+        let mut changed = false;
+        for (k, v) in sent {
+            if k.eq_ignore_ascii_case("cookie") {
+                for pair in v.split(';') {
+                    let Some((n, val)) = pair.split_once('=') else { continue };
+                    let (n, val) = (n.trim(), val.trim());
+                    if n.is_empty()
+                        || n.len() > MAX_COOKIE_NAME
+                        || val.len() > MAX_COOKIE_VALUE
+                        || n.bytes().any(|b| b.is_ascii_control() || b"=; ,".contains(&b))
+                        || val.bytes().any(|b| b.is_ascii_control())
+                    {
+                        continue;
+                    }
+                    let room = self.cookies.len() < MAX_COOKIES;
+                    match self.cookies.iter_mut().find(|c| c.name == n && c.sent_to(host)) {
+                        Some(c) if c.value != val || !c.live(now) => {
+                            (c.value, c.expires) = (val.to_string(), if c.live(now) { c.expires } else { None });
+                            changed = true;
+                        }
+                        Some(_) => {}
+                        None if room => {
+                            self.cookies.push(Cookie { name: n.into(), value: val.into(), domain: host.to_ascii_lowercase(), expires: None });
+                            changed = true;
+                        }
+                        None => {}
+                    }
+                }
+            } else if is_auth_header(k) && !k.is_empty() && k.len() <= MAX_HEADER_NAME && k.bytes().all(is_header_name_byte) && v.len() <= MAX_HEADER_VALUE {
+                let room = self.headers.len() < MAX_HEADERS;
+                match self.headers.iter_mut().find(|(h, _)| h.eq_ignore_ascii_case(k)) {
+                    Some((_, old)) if old != v => {
+                        *old = v.clone();
+                        changed = true;
+                    }
+                    Some(_) => {}
+                    None if room => {
+                        self.headers.push((k.clone(), v.clone()));
+                        changed = true;
+                    }
+                    None => {}
+                }
+            }
+        }
+        changed
+    }
+
     /// Moves any `Cookie` header into [`Self::cookies`], one entry per
     /// cookie, so cookies can be seen and changed one by one. Users saved
     /// before cookies were kept separately carry them as a header.
@@ -426,6 +479,21 @@ mod tests {
         // Signed in there: its own session wins, the user only fills the gaps.
         let own = user.window_headers("shop.test", &hv(&[("cookie", "s=window"), ("authorization", "Bearer window")]), 100);
         assert_eq!(own, hv(&[("cookie", "s=window; theme=dark"), ("authorization", "Bearer window"), ("X-Team", "red")]));
+    }
+
+    #[test]
+    fn a_users_window_session_is_kept_for_the_user() {
+        let mut user = SavedUser { cookies: vec![c("s", "old"), Cookie { expires: Some(50), ..c("gone", "x") }], ..u("A", &[("Authorization", "Bearer old")]) };
+        let sent: Headers = vec![
+            ("Cookie".into(), "s=new; gone=back; js=1".into()),
+            ("Authorization".into(), "Bearer fresh".into()),
+            ("X-Api-Key".into(), "k1".into()),
+            ("Accept".into(), "*/*".into()),
+        ];
+        assert!(user.learn_sent("shop.test", &sent, 100));
+        assert_eq!(user.cookies, vec![c("s", "new"), c("gone", "back"), Cookie { domain: "shop.test".into(), ..c("js", "1") }]);
+        assert_eq!(user.headers, vec![("Authorization".to_string(), "Bearer fresh".to_string()), ("X-Api-Key".to_string(), "k1".to_string())]);
+        assert!(!user.learn_sent("shop.test", &sent, 100), "nothing new the second time");
     }
 
     #[test]

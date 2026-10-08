@@ -1379,7 +1379,7 @@ function openTarget(user) {
       h('p', {
         class: 'muted mnote',
         text: user
-          ? `Opens a browser window of ${who}’s own, with its own cookies, so you can sign in as ${who} there and stay signed in as yourself here. ${(user.cookies || []).some(cookieLive) ? 'It starts with the cookies saved here' : 'Sign in once in that window'}; cookies the site sets there are kept for ${who} too.`
+          ? `Opens a browser window of ${who}’s own, with its own cookies, so you can sign in as ${who} there and stay signed in as yourself here. ${(user.cookies || []).some(cookieLive) ? 'It starts with the cookies saved here' : 'Sign in once in that window'}. The cookies and tokens it uses are saved for ${who} as you go, so the Bench, the Access check and Scans send the same.`
           : 'Opens a separate browser that captures through Plonix and trusts its certificate. The domain and its subdomains go into scope.',
       }),
     ],
@@ -1395,7 +1395,7 @@ async function launchTarget(target, user) {
     await loadScope();
     if (r.as_user) {
       const who = userShortName(r.as_user);
-      toast(`Opened ${r.url} in a ${r.browser} window of ${who}’s own. What you do there is sent as ${who}, and their cookies are kept here.`, 'ok');
+      toast(`Opened ${r.url} in a ${r.browser} window of ${who}’s own. What you do there is sent as ${who}, and their session is saved here as you go.`, 'ok');
     } else {
       toast(`Opened ${r.url} in ${r.browser}. Browse the site; requests appear in Traffic.`, 'ok');
       if (S.view !== 'traffic') go('traffic');
