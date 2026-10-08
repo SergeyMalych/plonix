@@ -1474,7 +1474,7 @@ tr.acnote > td { border-bottom: none; }
 
 /* the demo walkthrough */
 .tourspot { position: fixed; z-index: 40; border-radius: 10px; pointer-events: none; box-shadow: 0 0 0 2px var(--accent), 0 0 0 9999px color-mix(in srgb, var(--bg) 45%, transparent); transition: left 0.22s ease, top 0.22s ease, width 0.22s ease, height 0.22s ease; }
-.tourcard { position: fixed; z-index: 45; width: 340px; max-width: calc(100vw - 24px); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 14px 16px 12px; display: flex; flex-direction: column; gap: 8px; }
+.tourcard { position: fixed; z-index: 45; width: 340px; max-width: calc(100vw - 24px); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 14px 16px 12px; display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 24px); overflow-y: auto; overscroll-behavior: contain; }
 .tourcard.in { animation: tourin 0.18s ease; }
 @keyframes tourin { from { opacity: 0; transform: translateY(4px); } }
 .tourcard.center { width: 400px; }
@@ -1483,11 +1483,14 @@ tr.acnote > td { border-bottom: none; }
 .tourcard h4 { margin: 0; font-size: 15px; }
 .tourcard p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--fg-2); }
 .tourcard .taction { align-self: flex-start; padding: 0; font-size: 12.5px; color: var(--accent); }
-.tourcard .tourfoot { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
-.tourcard .tdots { display: flex; gap: 4px; margin-right: auto; }
-.tourcard .tdot { width: 5px; height: 5px; border-radius: 50%; background: var(--line); }
+/* The buttons always fit: the dots give way (and wrap) before they do, and
+   on a short window the footer stays in view while the text scrolls. */
+.tourcard .tourfoot { display: flex; align-items: center; gap: 6px; margin-top: 4px; position: sticky; bottom: -12px; padding-bottom: 12px; margin-bottom: -12px; background: var(--surface); }
+.tourcard .tourfoot .btn { flex: none; }
+.tourcard .tdots { display: flex; flex-wrap: wrap; gap: 3px; margin-right: auto; flex: 1 1 auto; min-width: 0; }
+.tourcard .tdot { flex: none; width: 4px; height: 4px; border-radius: 50%; background: var(--line); }
 .tourcard .tdot.done { background: color-mix(in srgb, var(--accent) 45%, var(--line)); }
-.tourcard .tdot.on { width: 14px; border-radius: 3px; background: var(--accent); }
+.tourcard .tdot.on { width: 12px; border-radius: 3px; background: var(--accent); }
 .tourspot.none { left: 0 !important; top: 0 !important; width: 100vw !important; height: 100vh !important; border-radius: 0; background: color-mix(in srgb, var(--bg) 45%, transparent); box-shadow: none; transition: none; }
 .tourcard .tourhead .iconbtn { width: 22px; height: 22px; padding: 0; border: 0; background: transparent; color: var(--fg-3); font-size: 12px; margin-right: -4px; }
 .tourcard .tourhead .iconbtn:hover { color: var(--fg); background: var(--surface-2); }
@@ -1616,6 +1619,8 @@ pre.rlcmp .d-add { background: var(--ok-soft); color: var(--ok); }
 pre.rlcmp .d-del { background: var(--crit-soft); color: var(--crit); }
 body:has(.modal.tourmodal) .tourspot { z-index: 52; }
 body:has(.modal.tourmodal) .tourcard { z-index: 55; }
+/* A toast never covers the walkthrough card's buttons. */
+body:has(.tourcard) .toasts { z-index: 44; }
 .ctxmenu .rlctxhead { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px 6px; max-width: 300px; }
 .ctxmenu .rlctxhead b { color: var(--fg); font-size: 12px; }
 .rlcmpgrid .rlhint { display: block; padding: 4px 12px 0; }
