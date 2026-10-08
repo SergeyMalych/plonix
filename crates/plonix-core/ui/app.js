@@ -9925,15 +9925,37 @@ async function marketAction(p, action, consent) {
   loadFacets();
 }
 
-/** Capabilities an extension asks for, with a checkbox for each sensitive one. Returns the boxes. */
+/** A small line icon for a permission row: ok (it gets this), warn (needs care) or off (not granted). */
+function capIcon(kind) {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const d of { ok: ['M4 8.5l2.5 2.5L12 5.5'], warn: ['M8 4.5v4.5', 'M8 11.6v.1'], off: ['M5 5l6 6', 'M11 5l-6 6'] }[kind]) {
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  }
+  return h('span', { class: 'mi ' + kind }, svg);
+}
+
+/** What an extension asks for: what it gets on install, then a checkbox for each sensitive one. Returns the boxes. */
 function capabilityList(caps) {
   const boxes = [];
-  const rows = caps.map((c) => {
-    if (!c.sensitive) return h('div', { class: 'mcap' }, h('span', { text: '✓' }), c.what);
-    const box = h('input', { type: 'checkbox', value: c.id });
-    boxes.push(box);
-    return h('div', { class: 'mcap warn' }, h('label', null, box, h('span', { text: '!' }), c.what + ' (only if you tick it)'));
-  });
+  const given = caps.filter((c) => !c.sensitive).map((c) => h('div', { class: 'mcap' }, capIcon('ok'), h('span', { text: c.what })));
+  const asks = caps
+    .filter((c) => c.sensitive)
+    .map((c) => {
+      const box = h('input', { type: 'checkbox', value: c.id });
+      boxes.push(box);
+      return h('label', { class: 'mcap ask' }, box, h('span', { text: c.what }));
+    });
+  const rows = h(
+    'div',
+    { class: 'mcaps' },
+    given.length ? [h('div', { class: 'mcaph', text: 'It will be allowed to' }), given] : null,
+    asks.length ? [h('div', { class: 'mcaph', text: 'Only if you tick it' }), asks, h('p', { class: 'muted fine', text: 'It installs either way. Whatever stays unticked does not run.' })] : null,
+  );
   return { rows, boxes };
 }
 
@@ -9951,7 +9973,7 @@ async function extensionConsent(p, action) {
   const go = h('button', { class: 'btn primary', text: action === 'update' ? 'Update' : 'Install' });
   modal(
     `${action === 'update' ? 'Update' : 'Install'} ${p.name}?`,
-    [h('p', { class: 'muted mnote', text: 'It will be allowed to:' }), rows, h('p', { class: 'muted fine', text: x.sandbox })],
+    [p.description ? h('p', { class: 'mnote', text: p.description }) : null, rows, h('div', { class: 'mhow' }, h('div', { class: 'mcaph', text: 'How it runs' }), h('p', { text: x.sandbox }))],
     [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), go],
   );
   go.onclick = () => {
@@ -9962,9 +9984,9 @@ async function extensionConsent(p, action) {
 
 /** The program an extension runs: installed on this Mac, or how to install it. */
 function programNeeds(pr) {
-  if (pr.found) return h('div', { class: 'mcap' }, h('span', { text: '✓' }), `${pr.id} is installed on this Mac.`);
+  if (pr.found) return h('div', { class: 'mcap' }, capIcon('ok'), h('span', { text: `${pr.id} is installed on this Mac.` }));
   return [
-    h('div', { class: 'mcap warn' }, h('span', { text: '!' }), `${pr.id} is not installed on this Mac yet. Install it in Terminal, then come back:`),
+    h('div', { class: 'mcap' }, capIcon('warn'), h('span', { text: `${pr.id} is not installed on this Mac yet. Install it in Terminal, then come back:` })),
     h('div', { class: 'mneeds' }, h('code', { text: pr.install }), h('button', { class: 'btn sm', text: 'Copy', onclick: () => copyText(pr.install) })),
   ];
 }
@@ -10068,7 +10090,7 @@ function addExternal() {
         preview,
         h('div', { class: 'xhead' }, h('b', { class: 'mono', text: f.name }), h('span', { class: 'muted', text: ` ${KIND_INFO[f.kind].one} · ${f.version} · ${f.author}` })),
         h('p', { text: f.description }),
-        f.kind === 'extension' ? [h('p', { class: 'muted', text: 'It will be allowed to:' }), caps.rows, h('p', { class: 'muted fine', text: f.effects[f.effects.length - 1] })] : f.effects.map((e) => h('div', { class: 'mcap' }, h('span', { text: '•' }), e)),
+        f.kind === 'extension' ? [caps.rows, h('div', { class: 'mhow' }, h('div', { class: 'mcaph', text: 'How it runs' }), h('p', { text: f.effects[f.effects.length - 1] }))] : f.effects.map((e) => h('div', { class: 'mcap' }, h('span', { class: 'mdot', text: '•' }), h('span', { text: e }))),
         f.replaces ? h('p', { class: 'muted', text: `This replaces ${f.name} ${f.replaces}, which is installed.` }) : null,
         h('div', { class: 'mtrustbox warn' }, h('span', { class: 'trust warn' }, h('i', { text: '!' }), 'Not verified'), h('p', { text: f.kind === 'extension' ? 'It did not come from a signed Market. Its code only runs in the sandbox, but nobody has reviewed what it does.' : 'It did not come from a signed Market. It is checked and cannot run code, but nobody has reviewed what it says or does.' })),
         h('p', { class: 'muted fine mono', text: 'sha256 ' + f.sha256 }),
@@ -10173,7 +10195,7 @@ async function showPackage(name) {
         granted ? 'Allowed to' : 'Would be allowed to',
         x.capabilities.map((c) => {
           const off = granted && !granted.includes(c.id);
-          return h('div', { class: 'mcap' + (off ? ' off' : c.sensitive ? ' warn' : '') }, h('span', { text: off ? '✗' : c.sensitive ? '!' : '✓' }), c.what + (off ? ' (not granted)' : c.sensitive && !granted ? ' (only if you say yes)' : ''));
+          return h('div', { class: 'mcap' + (off ? ' off' : '') }, capIcon(off ? 'off' : c.sensitive ? 'warn' : 'ok'), h('span', { text: c.what + (off ? ' (not granted)' : c.sensitive && !granted ? ' (asks for your OK when you install)' : '') }));
         }),
         h('p', { class: 'muted fine', text: x.installable ? x.sandbox : x.why_not ? 'Not installable in this version: ' + x.why_not : 'Listed so you can see what is coming; its code is not published yet.' }),
       ),

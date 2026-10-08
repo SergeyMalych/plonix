@@ -4,9 +4,10 @@
 //! a manifest names one by id, never a path or a command line. The program
 //! gets copies of requests and responses written to a private temporary
 //! folder, which is deleted when it finishes, and its output is read back
-//! as [`Hit`]s against the exchanges they came from. The flags Plonix passes
-//! keep it local: it checks nothing with outside services and does not
-//! update itself.
+//! as [`Hit`]s against the exchanges they came from. For a scan, the flags
+//! Plonix passes keep it local: it checks nothing with outside services and
+//! does not update itself. An enumeration program instead gets only an
+//! accepted scope domain and asks public sources about it.
 
 use std::collections::HashMap;
 use std::io::Read;

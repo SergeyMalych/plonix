@@ -131,11 +131,11 @@ pub fn extensions_cmd(ctx: &Ctx, cmd: ExtensionsCmd) -> Result<()> {
             println!("Allowed to:");
             for c in &i.requested {
                 let granted = i.state.granted.contains(c);
-                println!("  {} {}{}", if granted { "✓" } else { "✗" }, c.describe(), if granted { "" } else { " (not granted)" });
+                println!("  {} {}{}", if granted { "✓" } else { "✗" }, c.describe_for(i.program.as_ref().map(|p| p.id.as_str())), if granted { "" } else { " (not granted)" });
             }
             match &i.program {
                 Some(p) => {
-                    println!("{}", market::PROGRAM_NOTE);
+                    println!("{}", market::program_note(Some(&p.id)));
                     if p.found {
                         println!("It runs {}, which is installed.", p.id);
                     } else {
