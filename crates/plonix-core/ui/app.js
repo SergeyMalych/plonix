@@ -1500,18 +1500,21 @@ function renderTraffic(main) {
   const input = h('input', {
     id: 'q',
     value: T.text,
-    placeholder: 'Search any text, or type a filter such as host:example.com',
+    placeholder: 'Search any text, or start a filter: host, status, path, method…',
     spellcheck: 'false',
     autocomplete: 'off',
     oninput: () => {
       T.text = input.value;
       clearTimeout(T.qt);
       T.qt = setTimeout(() => {
+        // Half-typed field values wait for Tab or Enter, so the list does not flash empty.
+        if (qa.typingValue()) return;
         saveTrafficView();
         T.refresh(true);
       }, 220);
     },
     onkeydown: (e) => {
+      if (qa.key(e)) return;
       if (e.key === 'Enter') {
         liftTyped();
         T.refresh(true);
@@ -1519,6 +1522,13 @@ function renderTraffic(main) {
       if (e.key === 'Escape') input.blur();
     },
     onblur: () => liftTyped(),
+  });
+  const qa = queryAssist(input, {
+    anchor: () => $('#searchbox') || input,
+    apply: () => {
+      liftTyped();
+      T.refresh(true);
+    },
   });
   const liveBtn = h('button', {
     class: 'live iconbtn',
@@ -1829,34 +1839,329 @@ function renderChips() {
   );
 }
 
-/** Values to offer for a field, from what was captured. */
-function fieldValues(field) {
+/* ---------- search autocomplete ----------
+ * Suggests filter fields as the person types, then values for the field
+ * from this project's own traffic, so nobody has to remember the syntax.
+ * Tab completes the text, Enter applies, the arrows choose, Esc closes.
+ */
+const QA_FIELDS = [
+  ['host', 'Host and its subdomains', ['domain', 'site', 'server']],
+  ['status', 'Status code or class', ['code', 'response', 'error']],
+  ['method', 'Request method', ['verb', 'get', 'post']],
+  ['path', 'Path starts with', ['url', 'endpoint', 'route']],
+  ['mime', 'Response content type', ['type', 'content', 'json', 'html']],
+  ['ext', 'File extension', ['extension', 'file']],
+  ['kind', 'Static files', ['static', 'assets']],
+  ['scope', 'In scope or out of scope', ['target']],
+  ['source', 'Captured, sent from Bench or imported', ['bench', 'replay', 'har', 'import']],
+  ['is', 'Named filter from a filter pack', ['named', 'pack', 'filter']],
+];
+const QA_STATUS = { '1xx': 'Informational', '2xx': 'Success', '3xx': 'Redirects', '4xx': 'Client errors', '5xx': 'Server errors', none: 'No response' };
+const QA_ID = /^(\d+|[0-9a-f]{8,}|[0-9a-f-]{32,36})$/i;
+
+/** Values for a field with counts, from the traffic facets and the rows on screen. */
+function qaValues(field) {
   const f = S.facets || {};
-  const vals = (list) => (list || []).map((c) => c.value);
+  const items = T.items || [];
+  const out = new Map();
+  const add = (value, count, note) => {
+    if (value == null || value === '') return;
+    const k = String(value).toLowerCase();
+    const was = out.get(k);
+    if (was) {
+      if (!was.count && count) was.count = count;
+      if (!was.note && note) was.note = note;
+    } else out.set(k, { value: String(value), count: count || 0, note: note || '' });
+  };
+  const tally = (list) => {
+    const m = new Map();
+    for (const v of list) if (v) m.set(v, (m.get(v) || 0) + 1);
+    return [...m].sort((a, b) => b[1] - a[1]);
+  };
   switch (field) {
     case 'host':
-      return [...vals(f.hosts), ...vals(f.other_hosts)];
-    case 'path':
-      return vals(f.paths);
+      for (const c of f.hosts || []) add(c.value, c.count, 'in scope');
+      for (const c of f.other_hosts || []) add(c.value, c.count, 'out of scope');
+      for (const [v, n] of tally(items.map((i) => i.host))) add(v, n);
+      break;
+    case 'path': {
+      for (const c of f.paths || []) add(c.value, c.count);
+      // Prefixes of what is on screen, up to three segments, stopping at ids.
+      const prefixes = [];
+      for (const i of items) {
+        const segs = (i.path || '').split('?')[0].split('/').filter(Boolean);
+        let p = '';
+        for (const s of segs.slice(0, 3)) {
+          if (QA_ID.test(s) || s.length > 40) break;
+          p += '/' + s;
+          prefixes.push(p);
+        }
+      }
+      for (const [v, n] of tally(prefixes)) add(v, n);
+      break;
+    }
     case 'method':
-      return vals(f.methods);
+      for (const c of f.methods || []) add(c.value, c.count);
+      for (const m of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD']) add(m);
+      break;
     case 'status':
-      return [...vals(f.statuses).filter((s) => s !== 'other'), '200', '301', '302', '401', '403', '404', '500'];
+      for (const c of (f.statuses || []).filter((c) => c.value !== 'other')) add(c.value, c.count, QA_STATUS[c.value]);
+      for (const [v, n] of tally(items.map((i) => (i.status == null ? null : String(i.status))))) add(v, n);
+      for (const k of ['2xx', '3xx', '4xx', '5xx', 'none']) add(k, 0, QA_STATUS[k]);
+      break;
     case 'mime':
-      return vals(f.kinds);
+      for (const c of f.kinds || []) add(c.value, c.count);
+      for (const k of ['json', 'html', 'javascript', 'xml', 'css', 'image', 'font']) add(k);
+      break;
     case 'ext':
-      return ['js', 'css', 'png', 'svg', 'woff2', 'map', 'json', 'html', 'php'];
+      for (const [v, n] of tally(items.map((i) => ((i.path || '').split('?')[0].match(/\.([a-z0-9]{1,6})$/i) || [])[1]?.toLowerCase()))) add(v, n);
+      for (const x of ['js', 'css', 'json', 'html', 'png', 'svg', 'woff2', 'map', 'php']) add(x);
+      break;
     case 'kind':
-      return ['static'];
-    case 'is':
-      return S.named.map((n) => n.id);
+      add('static', 0, 'images, fonts, styles, scripts and media');
+      break;
     case 'scope':
-      return ['in', 'out'];
+      add('in', f.in_scope, 'in scope');
+      add('out', f.out_of_scope, 'out of scope');
+      break;
     case 'source':
-      return ['proxy', 'replay', 'import'];
-    default:
-      return [];
+      add('proxy', 0, 'captured');
+      add('replay', f.replays, 'sent from Bench');
+      add('import', 0, 'imported from HAR');
+      break;
+    case 'is':
+      for (const n of S.named) add(n.id, 0, n.label);
+      break;
   }
+  return [...out.values()];
+}
+
+/** Values that start with `partial` first, then values that contain it. */
+function qaMatch(list, partial, skip = []) {
+  const p = partial.toLowerCase();
+  const seen = new Set(skip.map((s) => s.toLowerCase()));
+  const ranked = [];
+  list.forEach((v, i) => {
+    const s = v.value.toLowerCase();
+    if (seen.has(s)) return;
+    const note = (v.note || '').toLowerCase();
+    const at = p ? s.indexOf(p) : 0;
+    const rank = !p ? 1 : s === p ? 0 : at === 0 ? 1 : at > 0 ? 2 : note.includes(p) ? 3 : -1;
+    if (rank >= 0) ranked.push({ ...v, rank, i });
+  });
+  return ranked.sort((a, b) => a.rank - b.rank || a.i - b.i);
+}
+
+/** The whitespace separated term the caret is in. */
+function qaToken(input) {
+  const v = input.value;
+  const caret = input.selectionStart ?? v.length;
+  const before = v.slice(0, caret);
+  // Inside a quoted phrase: that is text, nothing to suggest.
+  if ((before.match(/"/g) || []).length % 2) return null;
+  const start = before.search(/\S*$/);
+  const after = v.slice(caret).search(/\s|$/);
+  return { start, end: caret + after, text: v.slice(start, caret + after) };
+}
+
+/**
+ * Attaches the suggestion list to a search input.
+ * opts.field: a function naming the one field being typed (values only),
+ *   otherwise the input takes whole query terms.
+ * opts.apply(text): called after a value is picked with Enter or a click.
+ */
+function queryAssist(input, opts = {}) {
+  const menu = h('div', { class: 'qsugg', role: 'listbox', id: 'qsugg-' + Math.random().toString(36).slice(2, 8) });
+  const st = { items: [], active: -1, tok: null, mode: 'key' };
+  input.setAttribute('role', 'combobox');
+  input.setAttribute('aria-autocomplete', 'list');
+  input.setAttribute('aria-expanded', 'false');
+  input.setAttribute('aria-controls', menu.id);
+
+  const build = () => {
+    if (opts.field) {
+      // One field's value; a comma list completes its last value.
+      const field = opts.field();
+      const list = input.value.split(',');
+      const partial = list.pop().trim();
+      const prefix = list.length ? list.join(',') + ',' : '';
+      st.tok = { start: 0, end: input.value.length };
+      st.mode = 'value';
+      return qaMatch(qaValues(field), partial, list.map((x) => x.trim()))
+        .slice(0, 8)
+        .map((v) => ({ kind: 'value', key: '', shown: v.value, partial, note: v.note, count: v.count, text: prefix + v.value }));
+    }
+    const tok = qaToken(input);
+    st.tok = tok;
+    if (!tok) return [];
+    const neg = tok.text.startsWith('-') ? '-' : '';
+    const body = tok.text.slice(neg.length);
+    const colon = body.indexOf(':');
+    if (colon > 0) {
+      const field = body.slice(0, colon).toLowerCase();
+      if (!QA_FIELDS.some(([k]) => k === field)) return [];
+      const list = body.slice(colon + 1).replace(/^"|"$/g, '').split(',');
+      const partial = list.pop().trim();
+      const done = list.map((x) => x.trim()).filter(Boolean);
+      st.mode = 'value';
+      return qaMatch(qaValues(field), partial, done)
+        .slice(0, 8)
+        .map((v) => ({ kind: 'value', key: neg + field + ':', shown: v.value, partial, note: v.note, count: v.count, text: neg + field + ':' + [...done, v.value].join(',') }));
+    }
+    st.mode = 'key';
+    const p = body.toLowerCase();
+    const keys = QA_FIELDS.filter(([k, , alias]) => !p || k.startsWith(p) || alias.some((a) => a.startsWith(p)) || FILTER_FIELDS[k].toLowerCase().startsWith(p)).map(([k, hint]) => ({
+      kind: 'key',
+      key: '',
+      shown: neg + k + ':',
+      partial: neg + p,
+      note: hint,
+      text: neg + k + ':',
+    }));
+    // Two letters in: values anywhere that contain them, as whole filters.
+    const vals = [];
+    if (p.length >= 2) {
+      for (const field of ['host', 'path', 'status', 'method', 'mime', 'is']) {
+        for (const v of qaMatch(qaValues(field), p).filter((v) => v.rank < 3).slice(0, field === 'host' || field === 'path' ? 3 : 2)) {
+          vals.push({ kind: 'value', key: neg + field + ':', shown: v.value, partial: p, note: v.note, count: v.count, text: neg + field + ':' + v.value, rank: v.rank });
+        }
+      }
+      vals.sort((a, b) => a.rank - b.rank);
+    }
+    return [...keys.slice(0, p ? 4 : keys.length), ...vals.slice(0, 6)];
+  };
+
+  const close = () => {
+    menu.remove();
+    st.items = [];
+    st.active = -1;
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+  };
+
+  const mark = (text, partial) => {
+    const p = (partial || '').replace(/^-/, '').toLowerCase();
+    const at = p ? text.toLowerCase().indexOf(p) : -1;
+    if (at < 0) return text;
+    return [text.slice(0, at), h('b', { text: text.slice(at, at + p.length) }), text.slice(at + p.length)];
+  };
+
+  const draw = () => {
+    const rows = [];
+    let section = null;
+    st.items.forEach((it, i) => {
+      const sec = it.kind === 'key' ? 'Filter by' : st.mode === 'value' ? 'Values in this project' : 'Matching filters';
+      if (sec !== section) rows.push(h('div', { class: 'qmh', text: (section = sec) }));
+      rows.push(
+        h(
+          'div',
+          {
+            class: 'qrow' + (i === st.active ? ' on' : ''),
+            role: 'option',
+            id: menu.id + '-' + i,
+            'aria-selected': i === st.active ? 'true' : 'false',
+            onmousedown: (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              pick(it, 'enter');
+            },
+            onmousemove: () => {
+              if (st.active === i) return;
+              st.active = i;
+              draw();
+            },
+          },
+          h('span', { class: 'qterm' }, it.key ? h('span', { class: 'qk', text: it.key }) : null, h('span', { class: 'qv' }, mark(it.shown, it.partial))),
+          h('span', { class: 'qnote', text: it.note || '' }),
+          it.count ? h('span', { class: 'qn', text: it.count }) : null,
+        ),
+      );
+    });
+    const hint = (k, what) => h('span', { class: 'qhint' }, h('kbd', { text: k }), what);
+    clear(
+      menu,
+      h('div', { class: 'qlist' }, rows),
+      h(
+        'div',
+        { class: 'qfoot' },
+        hint('↑↓', 'choose'),
+        hint('Tab', 'complete'),
+        hint('↵', 'apply'),
+        hint('Esc', 'close'),
+        st.mode === 'key' && !opts.field ? h('span', { class: 'qtip', text: 'Start with − to hide' }) : null,
+      ),
+    );
+    if (!menu.isConnected) document.body.append(menu);
+    const box = (opts.anchor ? opts.anchor() : input).getBoundingClientRect();
+    menu.style.left = box.left + 'px';
+    menu.style.top = box.bottom + 4 + 'px';
+    menu.style.width = Math.max(opts.field ? box.width : Math.min(box.width, 520), opts.field ? 380 : 300) + 'px';
+    input.setAttribute('aria-expanded', 'true');
+    if (st.active >= 0) {
+      input.setAttribute('aria-activedescendant', menu.id + '-' + st.active);
+      $('#' + menu.id + '-' + st.active, menu)?.scrollIntoView({ block: 'nearest' });
+    } else input.removeAttribute('aria-activedescendant');
+  };
+
+  const update = () => {
+    if (document.activeElement !== input) return close();
+    st.items = build();
+    // Typing a field's value: the best match is ready for Enter.
+    st.active = st.items.length && st.mode === 'value' && st.items[0].kind === 'value' ? 0 : -1;
+    if (!st.items.length) return close();
+    draw();
+  };
+
+  const pick = (it, how) => {
+    const v = input.value;
+    const { start, end } = st.tok;
+    const tail = v.slice(end);
+    const done = it.kind === 'value';
+    const insert = it.text + (done && !opts.field && !/^\s/.test(tail) ? ' ' : '');
+    input.value = v.slice(0, start) + insert + tail;
+    const caret = start + insert.length;
+    input.setSelectionRange(caret, caret);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    if (done && how === 'enter' && opts.apply) {
+      close();
+      opts.apply(input.value);
+      return;
+    }
+    if (done) close();
+    else update();
+  };
+
+  // Clicks on headings or the key hints keep the caret in the box.
+  menu.addEventListener('mousedown', (e) => e.preventDefault());
+  input.addEventListener('input', update);
+  input.addEventListener('focus', update);
+  input.addEventListener('click', update);
+  input.addEventListener('blur', close);
+
+  return {
+    close,
+    update,
+    /** True while a field's value is being typed with suggestions showing. */
+    typingValue: () => menu.isConnected && st.mode === 'value',
+    /** Handles a keydown; true when the list used it. */
+    key(e) {
+      if (!st.items.length || !menu.isConnected) return false;
+      const n = st.items.length;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        st.active = e.key === 'ArrowDown' ? (st.active + 1) % n : (st.active <= 0 ? n : st.active) - 1;
+        draw();
+      } else if (e.key === 'Tab' && !e.shiftKey) {
+        pick(st.items[Math.max(st.active, 0)], 'tab');
+      } else if (e.key === 'Enter' && st.active >= 0) {
+        pick(st.items[st.active], 'enter');
+      } else if (e.key === 'Escape') {
+        close();
+      } else return false;
+      e.preventDefault();
+      e.stopPropagation();
+      return true;
+    },
+  };
 }
 
 /** A small popover to build one include or exclude filter. */
@@ -1869,8 +2174,7 @@ function openFilterBuilder(anchor, preset = {}) {
     Object.entries(FILTER_FIELDS).map(([k, label]) => h('option', { value: k, text: label })),
   );
   field.value = preset.field || 'host';
-  const list = h('datalist', { id: 'fvals' });
-  const value = h('input', { list: 'fvals', placeholder: 'value', spellcheck: 'false', autocomplete: 'off', value: preset.value || '' });
+  const value = h('input', { placeholder: 'value', spellcheck: 'false', autocomplete: 'off', value: preset.value || '' });
   const err = h('div', { class: 'perr', hidden: true });
   const seg = h('div', { class: 'seg' });
   const drawSeg = () =>
@@ -1881,7 +2185,6 @@ function openFilterBuilder(anchor, preset = {}) {
       ),
     );
   const fillValues = () => {
-    clear(list, fieldValues(field.value).map((v) => h('option', { value: v })));
     value.placeholder = { host: 'example.com or *.cdn.*', path: '/api', ext: 'js', status: '4xx or 404', mime: 'json', text: 'any text' }[field.value] || 'value';
   };
   field.onchange = () => {
@@ -1904,7 +2207,9 @@ function openFilterBuilder(anchor, preset = {}) {
     // "status:4xx,5xx" typed in the box makes one chip per value.
     for (const one of field.value === 'text' ? [term] : v.split(',').filter((x) => x.trim()).map((x) => field.value + ':' + x.trim())) addFilter(one, mode);
   };
-  value.addEventListener('keydown', (e) => e.key === 'Enter' && add());
+  // Values for the chosen field from this project's traffic; free text has none.
+  const qa = queryAssist(value, { field: () => (field.value === 'text' ? '' : field.value), apply: () => add() });
+  value.addEventListener('keydown', (e) => !qa.key(e) && e.key === 'Enter' && add());
   drawSeg();
   fillValues();
   // Named filters from filter packs: one click each, in the chosen mode.
@@ -1930,7 +2235,7 @@ function openFilterBuilder(anchor, preset = {}) {
     { class: 'popover', role: 'dialog', 'aria-label': 'Add filter' },
     seg,
     named,
-    h('div', { class: 'prow' }, field, value, list),
+    h('div', { class: 'prow' }, field, value),
     err,
     h('div', { class: 'pfoot' }, h('button', { class: 'btn sm', text: 'Cancel', onclick: closePopover }), h('button', { class: 'btn sm primary', text: 'Add filter', onclick: add })),
   );
@@ -1948,7 +2253,7 @@ function showPopover(pop, rect) {
 }
 
 function closePopover() {
-  for (const p of document.querySelectorAll('.popover, .ctxmenu')) p.remove();
+  for (const p of document.querySelectorAll('.popover, .ctxmenu, .qsugg')) p.remove();
   if (T.popOutside) document.removeEventListener('mousedown', T.popOutside);
   T.popOutside = null;
 }
