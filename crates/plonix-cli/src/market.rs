@@ -140,6 +140,7 @@ fn kind_label(k: Kind) -> &'static str {
         Kind::Skill => "skill",
         Kind::Rules => "rules",
         Kind::Filters => "filters",
+        Kind::Detectors => "detectors",
         Kind::List => "list",
         Kind::Bundle => "bundle",
         Kind::Extension => "ext",

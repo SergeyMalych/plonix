@@ -33,7 +33,14 @@ pub fn decode_whole(headers: &Headers, body: &[u8], max: usize) -> Option<Vec<u8
     let mut out = Vec::new();
     let done = match enc.as_str() {
         "gzip" | "x-gzip" => flate2::read::MultiGzDecoder::new(body).take(limit).read_to_end(&mut out),
-        "deflate" => flate2::read::ZlibDecoder::new(body).take(limit).read_to_end(&mut out),
+        "deflate" => match flate2::read::ZlibDecoder::new(body).take(limit).read_to_end(&mut out) {
+            // Some servers send raw deflate without the zlib header, as decode_body allows.
+            Err(_) => {
+                out.clear();
+                flate2::read::DeflateDecoder::new(body).take(limit).read_to_end(&mut out)
+            }
+            ok => ok,
+        },
         "br" => brotli::Decompressor::new(body, 4096).take(limit).read_to_end(&mut out),
         _ => return None,
     };
@@ -104,6 +111,14 @@ pub fn headers_text(headers: &Headers) -> String {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn raw_deflate_decodes_whole() {
+        let mut enc = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+        enc.write_all(b"hello").unwrap();
+        let h: Headers = vec![("Content-Encoding".into(), "deflate".into())];
+        assert_eq!(decode_whole(&h, &enc.finish().unwrap(), 100).unwrap(), b"hello");
+    }
 
     #[test]
     fn gzip_roundtrip_and_text() {

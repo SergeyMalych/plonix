@@ -193,12 +193,19 @@ impl Conversations {
     /// Starts a new turn. With `resume`, it continues that Claude session so
     /// the follow-up keeps the earlier context. Returns the run id to poll.
     pub fn start(&self, home: &Home, prompt: String, resume: Option<String>) -> Result<String, StartError> {
+        self.start_as(home, prompt, resume, crate::mcp::ASK_CLIENT)
+    }
+
+    /// Like [`start`](Self::start), with the MCP server named `<client>/<run>`
+    /// in the activity feed.
+    pub fn start_as(&self, home: &Home, prompt: String, resume: Option<String>, client: &str) -> Result<String, StartError> {
         let bin = claude_bin().ok_or(StartError::NoCli)?;
         let ord = self.next.fetch_add(1, Ordering::Relaxed);
-        let id = format!("c{ord}");
+        // Unique across engine restarts, since saved chats remember it.
+        let id = format!("c{}-{ord}", started_tag());
 
         let run = std::sync::Arc::new(Mutex::new(Run::new(ord)));
-        let mcp = mcp_config(home);
+        let mcp = mcp_config(home, &format!("{client}/{id}"));
         let cwd = run_dir(home);
         let task_run = run.clone();
         let handle = tokio::spawn(async move { drive(bin, mcp, cwd, prompt, resume, task_run).await });
@@ -220,6 +227,32 @@ impl Conversations {
             session_id: run.session_id.clone(),
             progress: run.progress.view(),
         })
+    }
+
+    /// What a finished run produced, for saving it with its chat. `None` for
+    /// an unknown run, `Some(None)` while it is still running.
+    pub fn outcome(&self, id: &str) -> Option<Option<crate::chats::Outcome>> {
+        let run = self.runs.lock().unwrap().get(id).cloned()?;
+        let run = run.lock().unwrap();
+        if run.status == Status::Running {
+            return Some(None);
+        }
+        let of = |k: fn(&Kind) -> bool| run.events.iter().filter(move |e| k(&e.kind)).map(|e| e.text.clone());
+        Some(Some(crate::chats::Outcome {
+            answer: of(|k| matches!(k, Kind::Text)).collect::<Vec<_>>().join("\n\n"),
+            tools: of(|k| matches!(k, Kind::Tool | Kind::Proposal)).collect(),
+            error: of(|k| matches!(k, Kind::Error)).next_back().unwrap_or_default(),
+            ok: run.status == Status::Done,
+            session_id: run.session_id.clone(),
+        }))
+    }
+
+    /// Whether a run is still going, and the tokens it has read and written.
+    pub fn usage(&self, id: &str) -> Option<(bool, u64)> {
+        let run = self.runs.lock().unwrap().get(id).cloned()?;
+        let run = run.lock().unwrap();
+        let p = run.progress.view();
+        Some((run.status == Status::Running, p.tokens_in + p.tokens_out))
     }
 
     /// Stops a running conversation; the child process is killed on drop.
@@ -519,18 +552,26 @@ fn run_dir(home: &Home) -> PathBuf {
     dir
 }
 
+/// A short tag for when this engine started, so run ids from different
+/// sessions never collide.
+fn started_tag() -> &'static str {
+    static TAG: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TAG.get_or_init(|| format!("{:x}", crate::model::now_ms() / 1000))
+}
+
 /// The `--mcp-config` payload wiring the read-only Plonix MCP server. The
 /// command is this executable run as `<exe> mcp`: the `plonix` CLI serves it
 /// via `Cmd::Mcp`, and the desktop app via a headless entry point in `main`
-/// (so it never opens a window).
-fn mcp_config(home: &Home) -> Value {
+/// (so it never opens a window). The server names itself after the run, so
+/// the Agents screen can show what each conversation looked at.
+fn mcp_config(home: &Home, name: &str) -> Value {
     let exe = std::env::current_exe().ok().map(|e| e.canonicalize().unwrap_or(e));
     let command = exe.map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "plonix".into());
-    let mut server = json!({ "type": "stdio", "command": command, "args": ["mcp"] });
+    let mut env = json!({ crate::mcp::CLIENT_ENV: name });
     if !is_default_home(home) {
-        server["env"] = json!({ "PLONIX_HOME": home.root });
+        env["PLONIX_HOME"] = json!(home.root);
     }
-    json!({ "mcpServers": { "plonix": server } })
+    json!({ "mcpServers": { "plonix": { "type": "stdio", "command": command, "args": ["mcp"], "env": env } } })
 }
 
 /// Whether `home` is the standard `~/.plonix`, in which case `plonix mcp` finds

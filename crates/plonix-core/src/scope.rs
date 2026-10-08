@@ -58,11 +58,12 @@ impl Rule {
     }
     /// Longer patterns are more specific; an exact rule beats a subdomain rule of equal length.
     fn specificity(&self, host: &str) -> usize {
-        // An IP range is less specific than any single address or host inside it.
+        // An IP range is less specific than any single address or host inside it,
+        // and a narrower range beats a wider one (prefix lengths go up to 128).
         if let Some((_, len)) = self.pattern.contains('/').then(|| crate::bounty::parse_cidr(&self.pattern)).flatten() {
-            return usize::from(len) / 16;
+            return usize::from(len);
         }
-        self.pattern.len() * 2 + usize::from(host == self.pattern && !self.include_subdomains)
+        1000 + self.pattern.len() * 2 + usize::from(host == self.pattern && !self.include_subdomains)
     }
 }
 
@@ -453,6 +454,17 @@ mod tests {
 
     fn seeded() -> ScopeRules {
         ScopeRules { rules: vec![rule("example.com", true, Decision::Accepted)] }
+    }
+
+    #[test]
+    fn narrower_ip_range_wins_whatever_the_order() {
+        // Rejected first, as one program import can list it; wider accept after.
+        let r = ScopeRules { rules: vec![rule("10.0.5.0/24", false, Decision::Rejected), rule("10.0.0.0/16", false, Decision::Accepted)] };
+        assert_eq!(r.decide("10.0.5.9"), Decision::Rejected);
+        assert_eq!(r.decide("10.0.6.9"), Decision::Accepted);
+        let mut r = r;
+        r.rules.push(rule("10.0.5.9", false, Decision::Accepted));
+        assert_eq!(r.decide("10.0.5.9"), Decision::Accepted);
     }
 
     #[test]

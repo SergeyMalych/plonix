@@ -36,7 +36,7 @@ use crate::replace;
 use crate::model::{Exchange, FindingEdit, NewFinding, check_severity, now_ms};
 use crate::report;
 use crate::paths::Home;
-use crate::{market, profile, registry, skill};
+use crate::{chats, market, profile, registry, skill};
 use crate::project::Project;
 use crate::proposal::{self, DraftRequest, NewProposal, Proposals};
 use crate::settings::{self, Level};
@@ -52,6 +52,10 @@ struct AppState {
     agents: Arc<AgentActivity>,
     agent_settings: Arc<SharedAgentSettings>,
     conversations: Arc<Conversations>,
+    /// The background watcher that fills the Agents inbox.
+    watch: Arc<crate::watch::Watch>,
+    /// Serializes changes to the saved chats, which are read, changed and written whole.
+    chats_lock: Arc<tokio::sync::Mutex<()>>,
     /// Edits agents suggested for Bench drafts, waiting for the user.
     proposals: Arc<Proposals>,
     api_addr: SocketAddr,
@@ -74,18 +78,31 @@ pub struct Tokens {
 }
 
 pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: Home) -> Router {
+    let conversations: Arc<Conversations> = Arc::default();
+    let watch = crate::watch::Watch::new(engine.clone(), home.clone(), conversations.clone());
     let state = AppState {
         engine,
         token: tokens.user,
         agent_token: tokens.agent,
         agents: Arc::default(),
         agent_settings: Arc::new(SharedAgentSettings::new(&home)),
-        conversations: Arc::default(),
+        conversations,
+        watch,
+        chats_lock: Arc::default(),
         proposals: Arc::default(),
         api_addr,
         launch_codes: Arc::default(),
         home,
     };
+    // The watcher looks only while agent access is on.
+    if tokio::runtime::Handle::try_current().is_ok() {
+        let settings = state.agent_settings.clone();
+        tokio::spawn(state.watch.clone().run(move || settings.get().enabled));
+    }
+    // A turn still marked running was cut off when the last engine stopped.
+    if let Err(e) = chats::settle(&state.engine.store) {
+        tracing::warn!("the saved conversations could not be read: {e:#}");
+    }
     let project_id = state.engine.project_ref.get().map(|p| p.id.clone()).unwrap_or_default();
     Router::new()
         .route("/", get(move || ui::index(project_id.clone())))
@@ -110,6 +127,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/tech/{host}", get(tech_host))
         .route("/api/rules", get(rule_packs))
         .route("/api/filters", get(named_filters))
+        .route("/api/detectors", get(detectors))
         .route("/api/skills", get(skills))
         .route("/api/skills/{name}", get(skill_detail))
         .route("/api/market", get(market_list))
@@ -193,12 +211,20 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/agents/launch", post(agent_launch))
         .route("/api/agents/run", post(agent_run))
         .route("/api/agents/run/{id}", get(agent_run_poll).delete(agent_run_cancel))
+        .route("/api/agents/activity", get(agent_activity))
+        .route("/api/agents/watch", get(watch_view).put(watch_settings))
+        .route("/api/agents/watch/look", post(watch_look))
+        .route("/api/agents/watch/items", post(watch_items))
+        .route("/api/agents/chats", get(agent_chats))
+        .route("/api/agents/chats/{id}", get(agent_chat).delete(delete_agent_chat))
         .route("/api/bench/proposals", get(list_proposals).post(add_proposal))
         .route("/api/bench/proposals/{id}", axum::routing::delete(discard_proposal))
         .route("/api/bench/proposals/{id}/diff", post(proposal_diff))
         .route("/api/usage", post(usage_screen))
         .route("/api/shutdown", post(shutdown))
         .layer(middleware::from_fn_with_state(state.clone(), guard))
+        // `guard` already caps bodies at MAX_BODY; the extractors' own 2 MB default would refuse bigger HAR uploads.
+        .layer(axum::extract::DefaultBodyLimit::disable())
         .with_state(state)
 }
 
@@ -239,7 +265,8 @@ async fn guard(State(s): State<AppState>, req: Request, next: Next) -> Response 
         let mode = AgentMode::current();
         let (method, path) = (req.method().as_str().to_string(), req.uri().path().to_string());
         let checked = access::check(mode, &s.agent_settings.get(), &method, &path);
-        s.agents.record(&initiator(req.headers()), &method, &path, checked.is_err());
+        let query = req.uri().query().unwrap_or("").to_string();
+        s.agents.record(&initiator(req.headers()), &method, &path, &query, checked.is_err());
         if let Err(refusal) = checked {
             return err(StatusCode::FORBIDDEN, refusal.code(), refusal.message());
         }
@@ -277,7 +304,7 @@ pub(crate) fn internal(e: anyhow::Error) -> Response {
 }
 
 fn initiator(h: &HeaderMap) -> String {
-    h.get("x-plonix-client").and_then(|v| v.to_str().ok()).unwrap_or("api").chars().take(32).collect()
+    h.get("x-plonix-client").and_then(|v| v.to_str().ok()).unwrap_or("api").chars().take(64).collect()
 }
 
 /// Issues a one-time code that opens the web UI already signed in.
@@ -339,6 +366,8 @@ async fn status(State(s): State<AppState>, caller: MaybeCaller) -> Response {
         "exchanges": s.engine.store.count().unwrap_or(0),
         "scope_rules": rules.rules.len(),
         "pending_suggestions": pending,
+        // Unread notes and leads in the Agents inbox, for the sidebar badge.
+        "agent_inbox_unread": s.watch.unread(),
         "ca_fingerprint": s.engine.ca.fingerprint(),
         // Which built-in tools the Market has switched on (see crate::tool),
         // so the window shows the Access check tab and the Bench user
@@ -848,11 +877,14 @@ fn default_limit() -> usize {
 }
 
 async fn traffic(State(s): State<AppState>, caller: MaybeCaller, Query(p): Query<TrafficParams>) -> Response {
-    let q = if agent_in_scope_only(&s, &caller) { format!("{} scope:in", p.q) } else { p.q };
-    let q = match s.engine.filters().parse(&q) {
+    let mut q = match s.engine.filters().parse(&p.q) {
         Ok(q) => q,
         Err(e) => return err(StatusCode::BAD_REQUEST, "bad_query", &e.to_string()),
     };
+    // Added as a term, not as text, so nothing in the agent's query can swallow it.
+    if agent_in_scope_only(&s, &caller) {
+        q.terms.push(crate::query::Term { negate: false, field: crate::query::Field::Scope(true) });
+    }
     match s.engine.store.search_sorted(&q, &s.engine.rules(), p.sort.as_deref(), p.limit.min(5000), p.offset) {
         Ok((items, total)) => Json(json!({ "total": total, "items": items })).into_response(),
         Err(e) => internal(e),
@@ -993,7 +1025,9 @@ async fn set_view_state(State(s): State<AppState>, Path(view): Path<String>, Jso
 }
 
 fn valid_view(view: &str) -> bool {
-    !view.is_empty() && view.len() <= 40 && view.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    // These names hold engine state (saved users, the program's guard, the exclusions prompt), not UI state.
+    !matches!(view, "users" | "program" | "exclusions")
+        && !view.is_empty() && view.len() <= 40 && view.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 async fn hosts(State(s): State<AppState>, caller: MaybeCaller) -> Response {
@@ -1124,7 +1158,10 @@ async fn scan_catalog(State(s): State<AppState>) -> Response {
     }
 }
 
-async fn scan_suggest(State(s): State<AppState>, Path(host): Path<String>) -> Response {
+async fn scan_suggest(State(s): State<AppState>, caller: MaybeCaller, Path(host): Path<String>) -> Response {
+    if agent_in_scope_only(&s, &caller) && !s.engine.rules().in_scope(&host) {
+        return outside_agent_data();
+    }
     let engine = s.engine.clone();
     match tokio::task::spawn_blocking(move || engine.scan_suggest(&host)).await {
         Ok(Ok(suggestion)) => Json(suggestion).into_response(),
@@ -1133,7 +1170,10 @@ async fn scan_suggest(State(s): State<AppState>, Path(host): Path<String>) -> Re
     }
 }
 
-async fn scan_plan(State(s): State<AppState>, Path(host): Path<String>) -> Response {
+async fn scan_plan(State(s): State<AppState>, caller: MaybeCaller, Path(host): Path<String>) -> Response {
+    if agent_in_scope_only(&s, &caller) && !s.engine.rules().in_scope(&host) {
+        return outside_agent_data();
+    }
     let engine = s.engine.clone();
     match tokio::task::spawn_blocking(move || engine.scan_plan(&host)).await {
         Ok(Ok(plan)) => Json(plan).into_response(),
@@ -1179,6 +1219,16 @@ async fn named_filters(State(s): State<AppState>) -> Response {
             let filters: Vec<_> = f.filters.values().collect();
             Json(json!({ "filters": filters, "packs": f.packs, "problems": f.problems })).into_response()
         }
+        Err(e) => internal(e.into()),
+    }
+}
+
+/// The detectors in effect: the app matches them against traffic to draw the
+/// Mind Reader suggestion chips. Matching stays client-side, next to the chips.
+async fn detectors(State(s): State<AppState>) -> Response {
+    let engine = s.engine.clone();
+    match tokio::task::spawn_blocking(move || engine.detectors()).await {
+        Ok(d) => Json(json!({ "detectors": d.detectors, "packs": d.packs, "problems": d.problems })).into_response(),
         Err(e) => internal(e.into()),
     }
 }
@@ -1389,6 +1439,12 @@ async fn market_detail(State(s): State<AppState>, Path(name): Path<String>) -> R
                     let pack = crate::filterpack::parse(&bytes).map_err(|e| anyhow::anyhow!(e))?;
                     let filters: Vec<_> = pack.doc.filters.iter().map(|f| json!({ "id": f.id, "label": f.label, "query": f.query })).collect();
                     json!({ "filters": filters })
+                }
+                registry::Kind::Detectors => {
+                    let pack = crate::detectorpack::parse(&bytes).map_err(|e| anyhow::anyhow!(e))?;
+                    let detectors: Vec<_> =
+                        pack.doc.detectors.iter().map(|d| json!({ "id": d.id, "chip": d.suggest.chip, "handler": d.suggest.handler })).collect();
+                    json!({ "detectors": detectors })
                 }
                 registry::Kind::List => {
                     let pack = crate::listpack::parse(&bytes).map_err(|e| anyhow::anyhow!(e))?;
@@ -2282,6 +2338,20 @@ struct RunBody {
     /// Claude session id to continue, for a follow-up turn in the same chat.
     #[serde(default)]
     resume: Option<String>,
+    /// What the user typed, when the turn should be saved as a chat the
+    /// Agents screen lists. Without it, nothing is saved (e.g. a finding
+    /// written with Claude).
+    #[serde(default)]
+    ask: Option<String>,
+    /// The saved chat this turn continues; its session is resumed.
+    #[serde(default)]
+    chat: Option<String>,
+    /// A title for a new chat; by default its first question.
+    #[serde(default)]
+    title: Option<String>,
+    /// What a new chat is about, e.g. `{"kind": "request", "id": 42}`.
+    #[serde(default)]
+    subject: Option<Value>,
 }
 
 /// Starts an in-app "Ask Claude Code" conversation: runs `claude` headless,
@@ -2294,8 +2364,29 @@ async fn agent_run(State(s): State<AppState>, Json(b): Json<RunBody>) -> Respons
     if b.prompt.trim().is_empty() {
         return err(StatusCode::BAD_REQUEST, "bad_request", "the message is empty");
     }
-    match s.conversations.start(&s.home, b.prompt, b.resume) {
-        Ok(id) => Json(json!({ "id": id })).into_response(),
+    let ask = b.ask.as_deref().map(str::trim).filter(|a| !a.is_empty()).map(String::from);
+    // A follow-up in a saved chat resumes its Claude session.
+    let saved = match (&ask, &b.chat) {
+        (Some(_), Some(id)) => match chats::get(&s.engine.store, id) {
+            Ok(Some(c)) => Some(c),
+            Ok(None) => return err(StatusCode::NOT_FOUND, "not_found", "no such conversation"),
+            Err(e) => return internal(e),
+        },
+        _ => None,
+    };
+    let resume = b.resume.or_else(|| saved.as_ref().and_then(|c| c.session_id.clone()));
+    match s.conversations.start(&s.home, b.prompt, resume) {
+        Ok(id) => {
+            let Some(ask) = ask else { return Json(json!({ "id": id })).into_response() };
+            let _guard = s.chats_lock.lock().await;
+            match chats::begin(&s.engine.store, saved.as_ref().map(|c| c.id.as_str()), b.title.as_deref(), b.subject, &ask, &id) {
+                Ok((chat, _)) => {
+                    tokio::spawn(save_when_done(s.clone(), chat.clone(), id.clone()));
+                    Json(json!({ "id": id, "chat": chat })).into_response()
+                }
+                Err(e) => internal(e),
+            }
+        }
         Err(StartError::NoCli) => err(
             StatusCode::NOT_IMPLEMENTED,
             "no_cli",
@@ -2315,6 +2406,96 @@ async fn agent_run_poll(State(s): State<AppState>, Path(id): Path<String>, Query
     match s.conversations.poll(&id, q.since) {
         Some(snap) => Json(snap).into_response(),
         None => err(StatusCode::NOT_FOUND, "not_found", "no such conversation"),
+    }
+}
+
+/// Waits for a run to finish and saves its answer into its chat.
+async fn save_when_done(s: AppState, chat: String, run: String) {
+    loop {
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        let out = match s.conversations.outcome(&run) {
+            Some(None) => continue,
+            Some(Some(out)) => out,
+            None => chats::Outcome { answer: String::new(), tools: vec![], error: "The answer was lost.".into(), ok: false, session_id: None },
+        };
+        let _guard = s.chats_lock.lock().await;
+        if let Err(e) = chats::finish(&s.engine.store, &chat, &run, out) {
+            tracing::warn!("saving the conversation failed: {e:#}");
+        }
+        return;
+    }
+}
+
+#[derive(Deserialize)]
+struct ActivityQuery {
+    #[serde(default)]
+    since: u64,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+/// What agents read lately, newest first. User-only: agents cannot reach it.
+async fn agent_activity(State(s): State<AppState>, Query(q): Query<ActivityQuery>) -> Response {
+    Json(json!({ "hits": s.agents.hits(q.since, q.limit.unwrap_or(200).min(access::MAX_HITS)), "clients": s.agents.clients() })).into_response()
+}
+
+/// The watcher: its settings, today's use and the inbox. User-only.
+async fn watch_view(State(s): State<AppState>) -> Response {
+    Json(s.watch.view()).into_response()
+}
+
+async fn watch_settings(State(s): State<AppState>, Json(new): Json<crate::watch::WatchSettings>) -> Response {
+    s.watch.set_settings(new);
+    Json(s.watch.view()).into_response()
+}
+
+/// Asks the watcher to look at the latest traffic now.
+async fn watch_look(State(s): State<AppState>) -> Response {
+    if !s.agent_settings.get().enabled {
+        return err(StatusCode::FORBIDDEN, "agents_disabled", "agent access is turned off in Settings › AI agents");
+    }
+    s.watch.look_now();
+    Json(json!({ "ok": true })).into_response()
+}
+
+#[derive(Deserialize)]
+struct WatchItemsBody {
+    /// Items to change; empty means all of them.
+    #[serde(default)]
+    ids: Vec<String>,
+    /// Remove them, and steer the watcher away from their like.
+    #[serde(default)]
+    dismiss: bool,
+}
+
+/// Marks inbox items read, or dismisses them.
+async fn watch_items(State(s): State<AppState>, Json(b): Json<WatchItemsBody>) -> Response {
+    let n = s.watch.mark(&b.ids, b.dismiss);
+    Json(json!({ "changed": n, "unread": s.watch.unread() })).into_response()
+}
+
+/// Saved Ask Claude conversations, most recent first. User-only.
+async fn agent_chats(State(s): State<AppState>) -> Response {
+    match chats::list(&s.engine.store) {
+        Ok(list) => Json(json!({ "chats": list })).into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+async fn agent_chat(State(s): State<AppState>, Path(id): Path<String>) -> Response {
+    match chats::get(&s.engine.store, &id) {
+        Ok(Some(c)) => Json(c).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "not_found", "no such conversation"),
+        Err(e) => internal(e),
+    }
+}
+
+async fn delete_agent_chat(State(s): State<AppState>, Path(id): Path<String>) -> Response {
+    let _guard = s.chats_lock.lock().await;
+    match chats::delete(&s.engine.store, &id) {
+        Ok(true) => Json(json!({ "ok": true })).into_response(),
+        Ok(false) => err(StatusCode::NOT_FOUND, "not_found", "no such conversation"),
+        Err(e) => internal(e),
     }
 }
 

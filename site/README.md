@@ -11,6 +11,8 @@ node scripts/build-docs.mjs --check   # what CI runs: fails if site/docs/ is out
 
 Links between docs become links between pages, and links to other files in the repository go to GitHub.
 
+The look of the site (colors, type, layout rules, components) is written down in [DESIGN.md](DESIGN.md). Read it before adding a section, and update it when the design changes.
+
 Preview it locally:
 
 ```sh

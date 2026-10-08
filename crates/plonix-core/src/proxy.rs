@@ -59,6 +59,8 @@ pub async fn serve(listener: TcpListener, engine: Arc<Engine>) {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!("proxy accept failed: {e}");
+                // Out of file descriptors fails again at once; pause instead of spinning.
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                 continue;
             }
         };

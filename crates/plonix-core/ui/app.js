@@ -193,6 +193,14 @@ async function boot() {
   if (VIEWS[v]) S.view = v;
   renderShell();
   poll();
+  if (S.status.demo && !pstore('plonix.demoTourSeen')) autoTour();
+}
+
+/** Offers the walkthrough the first time the demo opens, once any
+ * first-launch question has been answered. */
+function autoTour() {
+  if ($('.modal')) return setTimeout(autoTour, 400);
+  if (!pstore('plonix.demoTourSeen') && !TOUR.el) startTour();
 }
 
 function signOut(message) {
@@ -259,6 +267,7 @@ function demoBar() {
     h(
       'span',
       { class: 'tour' },
+      h('button', { class: 'btn sm primary', text: 'Take the tour', title: 'A short walk through every part of Plonix  (about two minutes)', onclick: () => startTour() }),
       h('button', { class: 'btn sm', text: 'What Lens spots', title: 'An order with a token, an email and a card number in it', onclick: lensSample }),
       h('button', { class: 'btn sm', text: 'Scope suggestions', title: 'Hosts tied to the shop, with the evidence for each', onclick: () => go('scope') }),
       h('button', { class: 'btn sm', text: 'Filters', title: 'Ready-made include and exclude filters, and how to write your own', onclick: filterTour }),
@@ -341,6 +350,247 @@ async function filterTour() {
     [h('button', { class: 'btn', text: 'Clear filters', onclick: () => (closeModal(), clearFilters(), go('traffic')) }), h('button', { class: 'btn primary', text: 'Done', onclick: closeModal })],
   );
   m.el.querySelector('.mcard').classList.add('wide');
+}
+
+/* ---------- the demo walkthrough ---------- */
+
+/** A guided walk through every part of Plonix, over the demo's own data.
+ * Each step opens a screen and rings the part it talks about; a step whose
+ * part isn't on screen still shows its card, just without the ring. */
+const TOUR_STEPS = [
+  {
+    title: 'Welcome to the Plonix demo',
+    text: 'Brightcart is a made-up shop whose traffic was captured ahead of time. This walk takes about two minutes and stops on each part of Plonix. Use the arrow keys or the buttons, and leave whenever you like.',
+    view: 'traffic',
+  },
+  {
+    view: 'traffic',
+    target: '#searchbox',
+    title: 'Traffic',
+    text: 'Every request your browser makes through Plonix lands here, live. Search any text, or type a filter such as host:, status:, path: or method: and press Enter.',
+  },
+  {
+    view: 'traffic',
+    target: '#chips',
+    title: 'Filters',
+    text: 'Filters are chips: + shows only what matches, − hides it. The Suggested chips come from this traffic, so the useful ones are a click away. Filters are saved with the project.',
+    action: { label: 'See ready-made filters', run: () => filterTour() },
+  },
+  {
+    view: 'traffic',
+    target: '#groupseg',
+    title: 'Grouping',
+    text: 'The same request sent several times in a row folds into one ×N row with its time span. Click the row to expand it, or switch to Every request.',
+  },
+  {
+    view: 'traffic',
+    prep: async () => {
+      const r = await api('/api/traffic?limit=1&q=' + encodeURIComponent('path:/v1/orders/1042 mime:json'));
+      if (r.items.length) await openInspector(r.items[0].id);
+    },
+    target: '#inspector',
+    title: 'Lens',
+    text: 'Lens shows the request and response, and points out what matters in them: tokens, emails and card numbers in this order. Select any text in it to decode it, find it in other traffic or ask Claude about it.',
+  },
+  {
+    view: 'traffic',
+    target: ['.lenssugg:not([hidden])', '#inspector'],
+    title: 'Suggestions',
+    text: 'Plonix reads the request and suggests next steps that fit it, one click each, such as drafting a finding or getting ideas for this endpoint. Nothing is sent until you click.',
+  },
+  {
+    view: 'scope',
+    target: ['#scopebody .card.sugg', '#scopebody'],
+    title: 'Scope',
+    text: 'As you browse, Plonix spots domains that belong to your target and shows why. You accept or reject each one, and anything that sends requests stays inside what you accepted.',
+  },
+  {
+    view: 'map',
+    target: ['#hostlist', '#main .view'],
+    title: 'Map',
+    text: 'Hosts, endpoints and parameters learned from the traffic, with the technologies Plonix detected. Click any endpoint to see its requests in place.',
+  },
+  {
+    view: 'bench',
+    target: ['.reqbar', '#main .view'],
+    title: 'Bench',
+    text: 'Each tab is an experiment: edit a request, send it, branch it and compare the responses. The demo comes with three ready-made experiments.',
+  },
+  {
+    view: 'bench',
+    target: ['.runconf', '#main .view'],
+    title: 'Run',
+    text: 'Mark a value with • and Run sends the request once per value, with a sensible list picked for you. Here it walks the order id through nearby numbers so you can spot orders that aren’t yours.',
+  },
+  {
+    view: 'findings',
+    target: ['#findbody > .finding', '#findbody'],
+    title: 'Findings',
+    text: 'Write up what you found, each finding tied to the requests that prove it, then export the lot as a report.',
+  },
+  {
+    view: 'scans',
+    target: ['#scanbody .scansug', '#scanbody'],
+    title: 'Scans',
+    text: 'Plonix lists what it sees in an in-scope host and recommends checks that fit it. You pick the checks and press Run; nothing scans on its own.',
+  },
+  {
+    view: 'settings',
+    prep: () => (S.settingsSection = 'replace'),
+    target: ['.spane', '#main .view'],
+    title: 'Match and replace',
+    text: 'Rules that rewrite requests and responses as they pass through the proxy, such as swapping a header or switching a feature flag on. Requests they changed are tagged in Traffic.',
+  },
+  {
+    view: 'market',
+    target: ['#mkinds', '#main .view'],
+    title: 'Market',
+    text: 'Extensions, skills, filter packs and word lists, each signed and checked before it installs. Tools such as Saved users and the Access check, which replays requests as each user and signed out, are switched on from here.',
+  },
+  {
+    view: 'programs',
+    target: ['#progbody', '#main .view'],
+    title: 'Programs',
+    text: 'Connect a bug bounty platform and follow a program: its assets become your scope, and its rules, such as rate limits and required headers, are kept for you.',
+  },
+  {
+    view: 'agents',
+    target: '#main .view > .toolbar',
+    title: 'Agents',
+    text: 'Let an AI agent such as Claude Code work with this project over MCP: ask about the traffic, the map and the findings, and see what each answer was based on.',
+  },
+  {
+    title: 'That’s the tour',
+    text: 'Press Open target to capture a site of your own. The demo stays on the Start screen, and you can take this walk again with Take the tour in the demo strip.',
+    view: 'traffic',
+  },
+];
+
+const TOUR = { i: -1, el: null, spot: null, timer: null, keys: null };
+
+/** Starts the walk at the first step, or at `at`. */
+function startTour(at = 0) {
+  endTour();
+  pstore('plonix.demoTourSeen', true);
+  TOUR.spot = h('div', { class: 'tourspot', hidden: true });
+  TOUR.el = h('div', { class: 'tourcard', role: 'dialog', 'aria-label': 'Demo walkthrough' });
+  document.body.append(TOUR.spot, TOUR.el);
+  TOUR.keys = (e) => {
+    if ($('.modal, .popover, .ctxmenu')) return;
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName)) return;
+    const k = { ArrowRight: 1, ArrowLeft: -1, Escape: 0 }[e.key];
+    if (k === undefined || e.metaKey || e.ctrlKey || e.altKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (k === 0) endTour();
+    else tourStep(TOUR.i + k);
+  };
+  document.addEventListener('keydown', TOUR.keys, true);
+  window.addEventListener('resize', placeTour);
+  // Screens draw parts of themselves late; keep the ring on its part.
+  TOUR.timer = setInterval(placeTour, 300);
+  tourStep(at);
+}
+
+function endTour() {
+  clearInterval(TOUR.timer);
+  if (TOUR.keys) document.removeEventListener('keydown', TOUR.keys, true);
+  window.removeEventListener('resize', placeTour);
+  if (TOUR.el) TOUR.el.remove();
+  if (TOUR.spot) TOUR.spot.remove();
+  Object.assign(TOUR, { i: -1, el: null, spot: null, timer: null, keys: null });
+}
+
+async function tourStep(i) {
+  if (!TOUR.el || i < 0) return;
+  if (i >= TOUR_STEPS.length) return endTour();
+  TOUR.i = i;
+  const s = TOUR_STEPS[i];
+  const last = i === TOUR_STEPS.length - 1;
+  closeModal();
+  if (s.prep && s.view !== 'traffic') s.prep();
+  if (s.view && (S.view !== s.view || s.view === 'settings')) go(s.view, true);
+  if (s.prep && s.view === 'traffic') await Promise.resolve(s.prep()).catch(() => {});
+  if (TOUR.i !== i || !TOUR.el) return;
+  const dots = TOUR_STEPS.map((_, n) => h('span', { class: 'tdot' + (n === i ? ' on' : n < i ? ' done' : '') }));
+  clear(
+    TOUR.el,
+    h('div', { class: 'tourhead' }, h('span', { class: 'tcount', text: i && !last ? `${i} of ${TOUR_STEPS.length - 2}` : 'Demo walkthrough' }), h('button', { class: 'iconbtn', title: 'End the walkthrough  (Esc)', text: '✕', onclick: endTour })),
+    h('h4', { text: s.title }),
+    h('p', { text: s.text }),
+    s.action ? h('button', { class: 'linkbtn taction', text: s.action.label + ' →', onclick: s.action.run }) : null,
+    h(
+      'div',
+      { class: 'tourfoot' },
+      h('span', { class: 'tdots' }, dots),
+      i === 0
+        ? h('button', { class: 'btn sm', text: 'Not now', onclick: endTour })
+        : last
+          ? h('button', { class: 'btn sm', text: 'Start over', onclick: () => tourStep(1) })
+          : h('button', { class: 'btn sm', text: 'Back', onclick: () => tourStep(i - 1) }),
+      h('button', { class: 'btn sm primary', text: i === 0 ? 'Start the tour' : last ? 'Done' : 'Next', onclick: () => tourStep(i + 1) }),
+    ),
+  );
+  TOUR.el.classList.remove('in');
+  void TOUR.el.offsetWidth;
+  TOUR.el.classList.add('in');
+  placeTour();
+}
+
+/** The first of a step's targets that is on screen. */
+function tourTarget(s) {
+  for (const sel of [].concat(s.target || [])) {
+    const el = $(sel);
+    if (el && el.getClientRects().length) return el;
+  }
+  return null;
+}
+
+/** Rings the step's part of the screen and sets the card beside it: right,
+ * left, below or above, whichever has room, else inside its lower corner. */
+function placeTour() {
+  if (!TOUR.el || TOUR.i < 0) return;
+  const s = TOUR_STEPS[TOUR.i];
+  const el = tourTarget(s);
+  const vw = innerWidth;
+  const vh = innerHeight;
+  const cw = TOUR.el.offsetWidth;
+  const ch = TOUR.el.offsetHeight;
+  const gap = 14;
+  const pad = 6;
+  let x;
+  let y;
+  if (!el) {
+    // A step about the whole app dims it; one whose part isn't on screen doesn't.
+    TOUR.spot.hidden = !!s.target;
+    TOUR.spot.classList.add('none');
+    TOUR.el.classList.toggle('center', !s.target);
+    if (!s.target) {
+      x = (vw - cw) / 2;
+      y = (vh - ch) / 2;
+    } else {
+      x = vw - cw - 24;
+      y = vh - ch - 48;
+    }
+  } else {
+    TOUR.el.classList.remove('center');
+    TOUR.spot.classList.remove('none');
+    // Keep the ring inside the window, even around a part that fills it.
+    const r0 = el.getBoundingClientRect();
+    const edge = pad + 3;
+    const r = { left: Math.max(r0.left, edge), top: Math.max(r0.top, edge), right: Math.min(r0.right, vw - edge), bottom: Math.min(r0.bottom, vh - edge) };
+    Object.assign(TOUR.spot.style, { left: r.left - pad + 'px', top: r.top - pad + 'px', width: r.right - r.left + pad * 2 + 'px', height: r.bottom - r.top + pad * 2 + 'px' });
+    TOUR.spot.hidden = false;
+    const clampY = (v) => Math.min(Math.max(v, 12), vh - ch - 12);
+    const clampX = (v) => Math.min(Math.max(v, 12), vw - cw - 12);
+    if (vw - r.right - pad >= cw + gap * 2) [x, y] = [r.right + pad + gap, clampY(r.top)];
+    else if (r.left - pad >= cw + gap * 2) [x, y] = [r.left - pad - gap - cw, clampY(r.top)];
+    else if (vh - r.bottom - pad >= ch + gap * 2) [x, y] = [clampX(r.left), r.bottom + pad + gap];
+    else if (r.top - pad >= ch + gap * 2) [x, y] = [clampX(r.left), r.top - pad - gap - ch];
+    else [x, y] = [clampX(r.right - cw - 20), clampY(r.bottom - ch - 20)];
+  }
+  TOUR.el.style.left = Math.round(x) + 'px';
+  TOUR.el.style.top = Math.round(y) + 'px';
 }
 
 /* ---------- theme ---------- */
@@ -756,6 +1006,14 @@ function updateChrome() {
   const rules = S.scope.rules || [];
   $('#ct-scope').title = rules.filter((r) => r.decision === 'accepted').length + ' in scope, ' + pending + ' suggested';
   $('#ct-findings').textContent = S.findingsCount || '';
+  // New notes and leads from Claude's watcher.
+  const unread = st.agent_inbox_unread || 0;
+  const ctAgents = $('#ct-agents');
+  if (ctAgents) {
+    ctAgents.textContent = unread || '';
+    ctAgents.classList.toggle('hot', unread > 0);
+    ctAgents.title = unread ? unread + ' new from Claude' : '';
+  }
   $('#ct-bench').textContent = R.tabs.length || '';
   const ctCb = $('#ct-callbacks');
   if (ctCb) {
@@ -783,7 +1041,7 @@ async function poll() {
       if (S.view === 'scope') renderScopeBody();
       if (S.view === 'map' && st.exchanges !== prev.exchanges) M.dirty = true;
     }
-    if (S.view === 'agents' && Date.now() - (S.agentsAt || 0) > 4000) loadAgents();
+    if (S.view === 'agents' && (Date.now() - (S.agentsAt || 0) > 4000 || st.agent_inbox_unread !== prev.agent_inbox_unread)) loadAgents();
     if (st.intercept && st.intercept.seq !== IC.seq) loadIntercept();
     if (st.callbacks !== prev.callbacks || (S.view === 'callbacks' && CB.data && CB.data.phase === 'starting')) callbacksChanged();
   } catch (e) {
@@ -1251,18 +1509,21 @@ function renderTraffic(main) {
   const input = h('input', {
     id: 'q',
     value: T.text,
-    placeholder: 'Search any text, or type a filter such as host:example.com',
+    placeholder: 'Search any text, or start a filter: host, status, path, method…',
     spellcheck: 'false',
     autocomplete: 'off',
     oninput: () => {
       T.text = input.value;
       clearTimeout(T.qt);
       T.qt = setTimeout(() => {
+        // Half-typed field values wait for Tab or Enter, so the list does not flash empty.
+        if (qa.typingValue()) return;
         saveTrafficView();
         T.refresh(true);
       }, 220);
     },
     onkeydown: (e) => {
+      if (qa.key(e)) return;
       if (e.key === 'Enter') {
         liftTyped();
         T.refresh(true);
@@ -1270,6 +1531,13 @@ function renderTraffic(main) {
       if (e.key === 'Escape') input.blur();
     },
     onblur: () => liftTyped(),
+  });
+  const qa = queryAssist(input, {
+    anchor: () => $('#searchbox') || input,
+    apply: () => {
+      liftTyped();
+      T.refresh(true);
+    },
   });
   const liveBtn = h('button', {
     class: 'live iconbtn',
@@ -1580,34 +1848,329 @@ function renderChips() {
   );
 }
 
-/** Values to offer for a field, from what was captured. */
-function fieldValues(field) {
+/* ---------- search autocomplete ----------
+ * Suggests filter fields as the person types, then values for the field
+ * from this project's own traffic, so nobody has to remember the syntax.
+ * Tab completes the text, Enter applies, the arrows choose, Esc closes.
+ */
+const QA_FIELDS = [
+  ['host', 'Host and its subdomains', ['domain', 'site', 'server']],
+  ['status', 'Status code or class', ['code', 'response', 'error']],
+  ['method', 'Request method', ['verb', 'get', 'post']],
+  ['path', 'Path starts with', ['url', 'endpoint', 'route']],
+  ['mime', 'Response content type', ['type', 'content', 'json', 'html']],
+  ['ext', 'File extension', ['extension', 'file']],
+  ['kind', 'Static files', ['static', 'assets']],
+  ['scope', 'In scope or out of scope', ['target']],
+  ['source', 'Captured, sent from Bench or imported', ['bench', 'replay', 'har', 'import']],
+  ['is', 'Named filter from a filter pack', ['named', 'pack', 'filter']],
+];
+const QA_STATUS = { '1xx': 'Informational', '2xx': 'Success', '3xx': 'Redirects', '4xx': 'Client errors', '5xx': 'Server errors', none: 'No response' };
+const QA_ID = /^(\d+|[0-9a-f]{8,}|[0-9a-f-]{32,36})$/i;
+
+/** Values for a field with counts, from the traffic facets and the rows on screen. */
+function qaValues(field) {
   const f = S.facets || {};
-  const vals = (list) => (list || []).map((c) => c.value);
+  const items = T.items || [];
+  const out = new Map();
+  const add = (value, count, note) => {
+    if (value == null || value === '') return;
+    const k = String(value).toLowerCase();
+    const was = out.get(k);
+    if (was) {
+      if (!was.count && count) was.count = count;
+      if (!was.note && note) was.note = note;
+    } else out.set(k, { value: String(value), count: count || 0, note: note || '' });
+  };
+  const tally = (list) => {
+    const m = new Map();
+    for (const v of list) if (v) m.set(v, (m.get(v) || 0) + 1);
+    return [...m].sort((a, b) => b[1] - a[1]);
+  };
   switch (field) {
     case 'host':
-      return [...vals(f.hosts), ...vals(f.other_hosts)];
-    case 'path':
-      return vals(f.paths);
+      for (const c of f.hosts || []) add(c.value, c.count, 'in scope');
+      for (const c of f.other_hosts || []) add(c.value, c.count, 'out of scope');
+      for (const [v, n] of tally(items.map((i) => i.host))) add(v, n);
+      break;
+    case 'path': {
+      for (const c of f.paths || []) add(c.value, c.count);
+      // Prefixes of what is on screen, up to three segments, stopping at ids.
+      const prefixes = [];
+      for (const i of items) {
+        const segs = (i.path || '').split('?')[0].split('/').filter(Boolean);
+        let p = '';
+        for (const s of segs.slice(0, 3)) {
+          if (QA_ID.test(s) || s.length > 40) break;
+          p += '/' + s;
+          prefixes.push(p);
+        }
+      }
+      for (const [v, n] of tally(prefixes)) add(v, n);
+      break;
+    }
     case 'method':
-      return vals(f.methods);
+      for (const c of f.methods || []) add(c.value, c.count);
+      for (const m of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD']) add(m);
+      break;
     case 'status':
-      return [...vals(f.statuses).filter((s) => s !== 'other'), '200', '301', '302', '401', '403', '404', '500'];
+      for (const c of (f.statuses || []).filter((c) => c.value !== 'other')) add(c.value, c.count, QA_STATUS[c.value]);
+      for (const [v, n] of tally(items.map((i) => (i.status == null ? null : String(i.status))))) add(v, n);
+      for (const k of ['2xx', '3xx', '4xx', '5xx', 'none']) add(k, 0, QA_STATUS[k]);
+      break;
     case 'mime':
-      return vals(f.kinds);
+      for (const c of f.kinds || []) add(c.value, c.count);
+      for (const k of ['json', 'html', 'javascript', 'xml', 'css', 'image', 'font']) add(k);
+      break;
     case 'ext':
-      return ['js', 'css', 'png', 'svg', 'woff2', 'map', 'json', 'html', 'php'];
+      for (const [v, n] of tally(items.map((i) => ((i.path || '').split('?')[0].match(/\.([a-z0-9]{1,6})$/i) || [])[1]?.toLowerCase()))) add(v, n);
+      for (const x of ['js', 'css', 'json', 'html', 'png', 'svg', 'woff2', 'map', 'php']) add(x);
+      break;
     case 'kind':
-      return ['static'];
-    case 'is':
-      return S.named.map((n) => n.id);
+      add('static', 0, 'images, fonts, styles, scripts and media');
+      break;
     case 'scope':
-      return ['in', 'out'];
+      add('in', f.in_scope, 'in scope');
+      add('out', f.out_of_scope, 'out of scope');
+      break;
     case 'source':
-      return ['proxy', 'replay', 'import'];
-    default:
-      return [];
+      add('proxy', 0, 'captured');
+      add('replay', f.replays, 'sent from Bench');
+      add('import', 0, 'imported from HAR');
+      break;
+    case 'is':
+      for (const n of S.named) add(n.id, 0, n.label);
+      break;
   }
+  return [...out.values()];
+}
+
+/** Values that start with `partial` first, then values that contain it. */
+function qaMatch(list, partial, skip = []) {
+  const p = partial.toLowerCase();
+  const seen = new Set(skip.map((s) => s.toLowerCase()));
+  const ranked = [];
+  list.forEach((v, i) => {
+    const s = v.value.toLowerCase();
+    if (seen.has(s)) return;
+    const note = (v.note || '').toLowerCase();
+    const at = p ? s.indexOf(p) : 0;
+    const rank = !p ? 1 : s === p ? 0 : at === 0 ? 1 : at > 0 ? 2 : note.includes(p) ? 3 : -1;
+    if (rank >= 0) ranked.push({ ...v, rank, i });
+  });
+  return ranked.sort((a, b) => a.rank - b.rank || a.i - b.i);
+}
+
+/** The whitespace separated term the caret is in. */
+function qaToken(input) {
+  const v = input.value;
+  const caret = input.selectionStart ?? v.length;
+  const before = v.slice(0, caret);
+  // Inside a quoted phrase: that is text, nothing to suggest.
+  if ((before.match(/"/g) || []).length % 2) return null;
+  const start = before.search(/\S*$/);
+  const after = v.slice(caret).search(/\s|$/);
+  return { start, end: caret + after, text: v.slice(start, caret + after) };
+}
+
+/**
+ * Attaches the suggestion list to a search input.
+ * opts.field: a function naming the one field being typed (values only),
+ *   otherwise the input takes whole query terms.
+ * opts.apply(text): called after a value is picked with Enter or a click.
+ */
+function queryAssist(input, opts = {}) {
+  const menu = h('div', { class: 'qsugg', role: 'listbox', id: 'qsugg-' + Math.random().toString(36).slice(2, 8) });
+  const st = { items: [], active: -1, tok: null, mode: 'key' };
+  input.setAttribute('role', 'combobox');
+  input.setAttribute('aria-autocomplete', 'list');
+  input.setAttribute('aria-expanded', 'false');
+  input.setAttribute('aria-controls', menu.id);
+
+  const build = () => {
+    if (opts.field) {
+      // One field's value; a comma list completes its last value.
+      const field = opts.field();
+      const list = input.value.split(',');
+      const partial = list.pop().trim();
+      const prefix = list.length ? list.join(',') + ',' : '';
+      st.tok = { start: 0, end: input.value.length };
+      st.mode = 'value';
+      return qaMatch(qaValues(field), partial, list.map((x) => x.trim()))
+        .slice(0, 8)
+        .map((v) => ({ kind: 'value', key: '', shown: v.value, partial, note: v.note, count: v.count, text: prefix + v.value }));
+    }
+    const tok = qaToken(input);
+    st.tok = tok;
+    if (!tok) return [];
+    const neg = tok.text.startsWith('-') ? '-' : '';
+    const body = tok.text.slice(neg.length);
+    const colon = body.indexOf(':');
+    if (colon > 0) {
+      const field = body.slice(0, colon).toLowerCase();
+      if (!QA_FIELDS.some(([k]) => k === field)) return [];
+      const list = body.slice(colon + 1).replace(/^"|"$/g, '').split(',');
+      const partial = list.pop().trim();
+      const done = list.map((x) => x.trim()).filter(Boolean);
+      st.mode = 'value';
+      return qaMatch(qaValues(field), partial, done)
+        .slice(0, 8)
+        .map((v) => ({ kind: 'value', key: neg + field + ':', shown: v.value, partial, note: v.note, count: v.count, text: neg + field + ':' + [...done, v.value].join(',') }));
+    }
+    st.mode = 'key';
+    const p = body.toLowerCase();
+    const keys = QA_FIELDS.filter(([k, , alias]) => !p || k.startsWith(p) || alias.some((a) => a.startsWith(p)) || FILTER_FIELDS[k].toLowerCase().startsWith(p)).map(([k, hint]) => ({
+      kind: 'key',
+      key: '',
+      shown: neg + k + ':',
+      partial: neg + p,
+      note: hint,
+      text: neg + k + ':',
+    }));
+    // Two letters in: values anywhere that contain them, as whole filters.
+    const vals = [];
+    if (p.length >= 2) {
+      for (const field of ['host', 'path', 'status', 'method', 'mime', 'is']) {
+        for (const v of qaMatch(qaValues(field), p).filter((v) => v.rank < 3).slice(0, field === 'host' || field === 'path' ? 3 : 2)) {
+          vals.push({ kind: 'value', key: neg + field + ':', shown: v.value, partial: p, note: v.note, count: v.count, text: neg + field + ':' + v.value, rank: v.rank });
+        }
+      }
+      vals.sort((a, b) => a.rank - b.rank);
+    }
+    return [...keys.slice(0, p ? 4 : keys.length), ...vals.slice(0, 6)];
+  };
+
+  const close = () => {
+    menu.remove();
+    st.items = [];
+    st.active = -1;
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+  };
+
+  const mark = (text, partial) => {
+    const p = (partial || '').replace(/^-/, '').toLowerCase();
+    const at = p ? text.toLowerCase().indexOf(p) : -1;
+    if (at < 0) return text;
+    return [text.slice(0, at), h('b', { text: text.slice(at, at + p.length) }), text.slice(at + p.length)];
+  };
+
+  const draw = () => {
+    const rows = [];
+    let section = null;
+    st.items.forEach((it, i) => {
+      const sec = it.kind === 'key' ? 'Filter by' : st.mode === 'value' ? 'Values in this project' : 'Matching filters';
+      if (sec !== section) rows.push(h('div', { class: 'qmh', text: (section = sec) }));
+      rows.push(
+        h(
+          'div',
+          {
+            class: 'qrow' + (i === st.active ? ' on' : ''),
+            role: 'option',
+            id: menu.id + '-' + i,
+            'aria-selected': i === st.active ? 'true' : 'false',
+            onmousedown: (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              pick(it, 'enter');
+            },
+            onmousemove: () => {
+              if (st.active === i) return;
+              st.active = i;
+              draw();
+            },
+          },
+          h('span', { class: 'qterm' }, it.key ? h('span', { class: 'qk', text: it.key }) : null, h('span', { class: 'qv' }, mark(it.shown, it.partial))),
+          h('span', { class: 'qnote', text: it.note || '' }),
+          it.count ? h('span', { class: 'qn', text: it.count }) : null,
+        ),
+      );
+    });
+    const hint = (k, what) => h('span', { class: 'qhint' }, h('kbd', { text: k }), what);
+    clear(
+      menu,
+      h('div', { class: 'qlist' }, rows),
+      h(
+        'div',
+        { class: 'qfoot' },
+        hint('↑↓', 'choose'),
+        hint('Tab', 'complete'),
+        hint('↵', 'apply'),
+        hint('Esc', 'close'),
+        st.mode === 'key' && !opts.field ? h('span', { class: 'qtip', text: 'Start with − to hide' }) : null,
+      ),
+    );
+    if (!menu.isConnected) document.body.append(menu);
+    const box = (opts.anchor ? opts.anchor() : input).getBoundingClientRect();
+    menu.style.left = box.left + 'px';
+    menu.style.top = box.bottom + 4 + 'px';
+    menu.style.width = Math.max(opts.field ? box.width : Math.min(box.width, 520), opts.field ? 380 : 300) + 'px';
+    input.setAttribute('aria-expanded', 'true');
+    if (st.active >= 0) {
+      input.setAttribute('aria-activedescendant', menu.id + '-' + st.active);
+      $('#' + menu.id + '-' + st.active, menu)?.scrollIntoView({ block: 'nearest' });
+    } else input.removeAttribute('aria-activedescendant');
+  };
+
+  const update = () => {
+    if (document.activeElement !== input) return close();
+    st.items = build();
+    // Typing a field's value: the best match is ready for Enter.
+    st.active = st.items.length && st.mode === 'value' && st.items[0].kind === 'value' ? 0 : -1;
+    if (!st.items.length) return close();
+    draw();
+  };
+
+  const pick = (it, how) => {
+    const v = input.value;
+    const { start, end } = st.tok;
+    const tail = v.slice(end);
+    const done = it.kind === 'value';
+    const insert = it.text + (done && !opts.field && !/^\s/.test(tail) ? ' ' : '');
+    input.value = v.slice(0, start) + insert + tail;
+    const caret = start + insert.length;
+    input.setSelectionRange(caret, caret);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    if (done && how === 'enter' && opts.apply) {
+      close();
+      opts.apply(input.value);
+      return;
+    }
+    if (done) close();
+    else update();
+  };
+
+  // Clicks on headings or the key hints keep the caret in the box.
+  menu.addEventListener('mousedown', (e) => e.preventDefault());
+  input.addEventListener('input', update);
+  input.addEventListener('focus', update);
+  input.addEventListener('click', update);
+  input.addEventListener('blur', close);
+
+  return {
+    close,
+    update,
+    /** True while a field's value is being typed with suggestions showing. */
+    typingValue: () => menu.isConnected && st.mode === 'value',
+    /** Handles a keydown; true when the list used it. */
+    key(e) {
+      if (!st.items.length || !menu.isConnected) return false;
+      const n = st.items.length;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        st.active = e.key === 'ArrowDown' ? (st.active + 1) % n : (st.active <= 0 ? n : st.active) - 1;
+        draw();
+      } else if (e.key === 'Tab' && !e.shiftKey) {
+        pick(st.items[Math.max(st.active, 0)], 'tab');
+      } else if (e.key === 'Enter' && st.active >= 0) {
+        pick(st.items[st.active], 'enter');
+      } else if (e.key === 'Escape') {
+        close();
+      } else return false;
+      e.preventDefault();
+      e.stopPropagation();
+      return true;
+    },
+  };
 }
 
 /** A small popover to build one include or exclude filter. */
@@ -1620,8 +2183,7 @@ function openFilterBuilder(anchor, preset = {}) {
     Object.entries(FILTER_FIELDS).map(([k, label]) => h('option', { value: k, text: label })),
   );
   field.value = preset.field || 'host';
-  const list = h('datalist', { id: 'fvals' });
-  const value = h('input', { list: 'fvals', placeholder: 'value', spellcheck: 'false', autocomplete: 'off', value: preset.value || '' });
+  const value = h('input', { placeholder: 'value', spellcheck: 'false', autocomplete: 'off', value: preset.value || '' });
   const err = h('div', { class: 'perr', hidden: true });
   const seg = h('div', { class: 'seg' });
   const drawSeg = () =>
@@ -1632,7 +2194,6 @@ function openFilterBuilder(anchor, preset = {}) {
       ),
     );
   const fillValues = () => {
-    clear(list, fieldValues(field.value).map((v) => h('option', { value: v })));
     value.placeholder = { host: 'example.com or *.cdn.*', path: '/api', ext: 'js', status: '4xx or 404', mime: 'json', text: 'any text' }[field.value] || 'value';
   };
   field.onchange = () => {
@@ -1655,7 +2216,9 @@ function openFilterBuilder(anchor, preset = {}) {
     // "status:4xx,5xx" typed in the box makes one chip per value.
     for (const one of field.value === 'text' ? [term] : v.split(',').filter((x) => x.trim()).map((x) => field.value + ':' + x.trim())) addFilter(one, mode);
   };
-  value.addEventListener('keydown', (e) => e.key === 'Enter' && add());
+  // Values for the chosen field from this project's traffic; free text has none.
+  const qa = queryAssist(value, { field: () => (field.value === 'text' ? '' : field.value), apply: () => add() });
+  value.addEventListener('keydown', (e) => !qa.key(e) && e.key === 'Enter' && add());
   drawSeg();
   fillValues();
   // Named filters from filter packs: one click each, in the chosen mode.
@@ -1681,7 +2244,7 @@ function openFilterBuilder(anchor, preset = {}) {
     { class: 'popover', role: 'dialog', 'aria-label': 'Add filter' },
     seg,
     named,
-    h('div', { class: 'prow' }, field, value, list),
+    h('div', { class: 'prow' }, field, value),
     err,
     h('div', { class: 'pfoot' }, h('button', { class: 'btn sm', text: 'Cancel', onclick: closePopover }), h('button', { class: 'btn sm primary', text: 'Add filter', onclick: add })),
   );
@@ -1699,7 +2262,7 @@ function showPopover(pop, rect) {
 }
 
 function closePopover() {
-  for (const p of document.querySelectorAll('.popover, .ctxmenu')) p.remove();
+  for (const p of document.querySelectorAll('.popover, .ctxmenu, .qsugg')) p.remove();
   if (T.popOutside) document.removeEventListener('mousedown', T.popOutside);
   T.popOutside = null;
 }
@@ -1721,6 +2284,13 @@ function rowMenu(e, ex) {
   if (decide(ex.host) === 'accepted' && toolOn('access-check')) {
     if (idT) actions.push({ label: 'Check this id across users', run: () => startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}` }) });
     actions.push({ label: 'Replay signed out', run: () => startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}`, onlyAnon: true }) });
+  }
+  if (decide(ex.host) === 'accepted') {
+    const leads = scanLeadsFor(ex);
+    actions.push({ label: leads.length ? leads[0].chip : 'Scan this endpoint', run: () => scanEndpoint(ex, leads[0] || null) });
+    for (const { d, cap } of detectorLeadsSync(ex)) {
+      actions.push({ label: fillTemplate(d.suggest.chip, cap), run: () => runDetectorLead(ex, d, cap) });
+    }
   }
   const groups = [
     actions,
@@ -2457,6 +3027,334 @@ function looksLikeApiSpec(ex) {
   return !!t && t.length < 8_000_000 && /"(openapi|swagger)"\s*:/.test(t.slice(0, 4000)) && /"paths"\s*:/.test(t);
 }
 
+/* ---------- Leads into the Scans tab ----------
+   Some endpoint shapes have a natural follow-up that lives in Scans: a file
+   upload, an endpoint that takes inputs. Rather than "scan the whole host",
+   these leads hand exactly the one endpoint to Scans with the fitting checks
+   pre-picked, so the researcher reviews and runs — the human decides, nothing
+   fires on its own. Each lead is a label plus the OWASP categories to focus;
+   coverage stays at the category level, concrete checks come from the Market. */
+
+const UPLOAD_PATH = /\/(upload|uploads|file|files|attachment|attachments|media|document|documents|import|avatar|avatars|photo|photos|image|images)(?:\/|$|\?)/i;
+
+/** An endpoint that takes a file — the "what does it accept, and what happens then?" smell. */
+function uploadTarget(ex) {
+  if (!/^(POST|PUT|PATCH)$/i.test(ex.method || '')) return null;
+  const ct = (header(ex.req_headers, 'content-type') || '').toLowerCase();
+  if (ct.includes('multipart/form-data')) return { how: 'sends a multipart form, the usual shape of a file upload' };
+  if (/\bfilename\s*=/.test(ex.req_text || '')) return { how: 'carries a filename in the body' };
+  if (ct.includes('application/octet-stream')) return { how: 'posts a raw file body' };
+  if (UPLOAD_PATH.test(ex.path || '')) return { how: 'is a write to an upload-shaped path' };
+  return null;
+}
+
+/** Whether a request carries inputs worth checking how the server handles. */
+function hasInputs(ex) {
+  if (queryPairsOf(ex).length) return true;
+  const rb = ex.req_text || '';
+  return rb.length < 200_000 && /[^&=]=[^&=]/.test(rb) && !/^[[{]/.test(rb.trim());
+}
+
+/** Does a value look like a hostname, URL or IP the server might fetch? */
+function looksLikeHostOrUrl(v) {
+  const s = (v || '').trim();
+  if (s.length < 4 || s.length > 2048 || /\s|@/.test(s)) return null;
+  if (/^(https?:)?\/\/[^/\s]/i.test(s)) return 'a URL';
+  if (/^\d{1,3}(\.\d{1,3}){3}(:\d+)?(\/|$)/.test(s)) return 'an IP address';
+  // A bare hostname: dotted, ending in an alphabetic label, not a file name.
+  if (/^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(:\d+)?(\/|$)/i.test(s) && !/\.(js|css|png|jpe?g|gif|svg|webp|woff2?|map|json|xml|txt|ico)$/i.test(s)) return 'a hostname';
+  return null;
+}
+
+/** An input whose value points at another server — the "does it fetch this?" smell. */
+function ssrfTarget(ex) {
+  for (const [k, v] of queryPairsOf(ex)) {
+    const what = looksLikeHostOrUrl(v);
+    if (what) return { name: k, where: `the "${k}" parameter`, what, value: v };
+  }
+  const rb = ex.req_text || '';
+  if (rb.length < 100_000 && /[=&]/.test(rb) && !/^[[{]/.test(rb.trim())) {
+    for (const part of rb.split('&')) {
+      const i = part.indexOf('=');
+      if (i <= 0) continue;
+      const dec = (s) => { try { return decodeURIComponent(s.replace(/\+/g, ' ')); } catch (_) { return s; } };
+      const k = dec(part.slice(0, i));
+      const what = looksLikeHostOrUrl(dec(part.slice(i + 1)));
+      if (what) return { name: k, where: `the "${k}" field`, what, value: dec(part.slice(i + 1)) };
+    }
+  }
+  return null;
+}
+
+/**
+ * The single most specific follow-up for this endpoint that belongs in Scans,
+ * as a one-item list (or none). Self-describing so the chip and the Scans focus
+ * banner can explain exactly what will run. `categories` are OWASP ids to
+ * pre-pick; an empty array pre-picks none. Order: the most specific wins.
+ */
+function scanLeadsFor(ex) {
+  if (!ex || decide(ex.host) !== 'accepted') return [];
+  const where = `${ex.method} ${ex.path}`;
+  const up = uploadTarget(ex);
+  if (up) {
+    return [{
+      kind: 'upload',
+      chip: 'Check this upload in Scans',
+      focus: 'file handling',
+      categories: [],
+      title: `an upload endpoint (${where})`,
+      why: `This ${up.how}. Open it in Scans to check how the upload is handled — allowed types, where files land, what the server does with them.`,
+      note: 'Plonix has no built-in file-handling check yet, so nothing is pre-picked here. Add a file-handling check from the Market, or experiment with the upload field on the Bench.',
+    }];
+  }
+  const ssrf = ssrfTarget(ex);
+  if (ssrf) {
+    return [{
+      kind: 'ssrf',
+      chip: 'Scan this input for SSRF',
+      focus: 'server-side requests (SSRF)',
+      categories: ['A10'],
+      title: `server-side requests on ${where}`,
+      why: `${ssrf.where} carries ${ssrf.what} ("${ssrf.value.slice(0, 40)}") that the server may fetch. Open it in Scans to check whether it can be pointed at somewhere it shouldn't reach.`,
+      note: 'Plonix has no built-in SSRF check yet, so nothing is pre-picked here. Add one from the Market, or change the value on the Bench and watch where the request goes.',
+    }];
+  }
+  if (hasInputs(ex)) {
+    return [{
+      kind: 'inputs',
+      chip: "Scan this endpoint's inputs",
+      focus: 'input handling',
+      categories: ['A03'],
+      title: `input handling on ${where}`,
+      why: 'This endpoint takes inputs. Open it in Scans to run the input-handling checks that fit, scoped to just this endpoint.',
+      note: '',
+    }];
+  }
+  return [];
+}
+
+/* ---------- Detector packs (Mind Reader suggestions as data) ----------
+   A detector is declarative: it recognizes a shape in the exchange and offers
+   a chip that hands off to another tab — an upload to check in Scans, a token
+   to tweak on the Bench, a cookie to write up as a finding. The engine only
+   serves the definitions; the matching runs here, next to the chips. A
+   detector can't run code or send anything: a match produces one suggestion
+   chip, and only for a host already in scope. Community packs plug in the same
+   way, so these grow without an app release. */
+
+let DETECTORS = null;
+let DETECTORS_PENDING = null;
+/** Loads the detectors in effect once, then serves them from memory. */
+async function loadDetectors() {
+  if (DETECTORS) return DETECTORS;
+  if (!DETECTORS_PENDING) {
+    DETECTORS_PENDING = api('/api/detectors')
+      .then((d) => ((DETECTORS = (d && d.detectors) || []), DETECTORS))
+      .catch(() => ((DETECTORS = []), DETECTORS));
+  }
+  return DETECTORS_PENDING;
+}
+
+const DET_RE_CACHE = new Map();
+/** A case-insensitive RegExp for a pattern, compiled once; null if invalid. */
+function detRe(p) {
+  if (DET_RE_CACHE.has(p)) return DET_RE_CACHE.get(p);
+  let re = null;
+  try {
+    re = new RegExp(p, 'i');
+  } catch (_) {
+    re = null;
+  }
+  DET_RE_CACHE.set(p, re);
+  return re;
+}
+
+/** Does a value look like a file path or name (and not a host or URL)? */
+function looksLikePathOrFile(v) {
+  const s = (v || '').trim();
+  if (s.length < 2 || s.length > 2048 || /\s/.test(s)) return null;
+  if (looksLikeHostOrUrl(s)) return null;
+  if (/(^|[/\\])\.\.([/\\]|$)/.test(s)) return 'a path that climbs directories';
+  if (/[/\\]/.test(s)) return 'a file path';
+  if (/^[\w.-]+\.[a-z0-9]{1,8}$/i.test(s)) return 'a file name';
+  return null;
+}
+
+/** Does a value look like a JWT (three base64url segments, the middle a claims set)? */
+function looksLikeJwt(v) {
+  return /eyj[a-z0-9_-]+\.eyj[a-z0-9_-]+\.[a-z0-9_-]+/i.test((v || '').trim()) ? 'a token' : null;
+}
+
+const DET_VALUE_CLASS = { host_or_url: looksLikeHostOrUrl, path_or_file: looksLikePathOrFile, jwt: looksLikeJwt };
+
+/** The request body as key/value pairs, when it is a urlencoded form. */
+function formPairsOf(ex) {
+  const rb = ex.req_text || '';
+  if (rb.length > 200_000 || !/[=&]/.test(rb) || /^[[{]/.test(rb.trim())) return [];
+  const dec = (s) => {
+    try {
+      return decodeURIComponent(s.replace(/\+/g, ' '));
+    } catch (_) {
+      return s;
+    }
+  };
+  const out = [];
+  for (const part of rb.split('&')) {
+    const i = part.indexOf('=');
+    if (i <= 0) continue;
+    out.push([dec(part.slice(0, i)), dec(part.slice(i + 1))]);
+  }
+  return out;
+}
+
+/** Whether a header condition holds. The header must exist; then any sub-test given must pass. */
+function headerCondMatch(headers, c) {
+  const vals = (headers || []).filter(([k]) => (k || '').toLowerCase() === c.name.toLowerCase()).map(([, v]) => v || '');
+  if (!vals.length) return false;
+  if (c.contains && !vals.some((v) => v.toLowerCase().includes(c.contains.toLowerCase()))) return false;
+  if (c.regex) {
+    const re = detRe(c.regex);
+    if (!re || !vals.some((v) => re.test(v))) return false;
+  }
+  if (c.absent_regex) {
+    const re = detRe(c.absent_regex);
+    // The header is present, but at least one value lacks the pattern
+    // (e.g. one Set-Cookie has HttpOnly and another does not).
+    if (!re || !vals.some((v) => !re.test(v))) return false;
+  }
+  return true;
+}
+
+/** Runs a detector's `when` over an exchange. Returns a capture (to fill the
+ *  chip text) when every condition holds, or null. */
+function detectorMatch(ex, when) {
+  const cap = { method: ex.method || '', path: ex.path || '' };
+  if (when.method && when.method.length && !when.method.some((m) => m.toUpperCase() === (ex.method || '').toUpperCase())) return null;
+  if (when.req_content_type) {
+    const ct = (header(ex.req_headers, 'content-type') || '').toLowerCase();
+    if (!ct.includes(when.req_content_type.toLowerCase())) return null;
+    cap.ct = ct;
+  }
+  if (when.resp_content_type) {
+    const ct = (header(ex.resp_headers, 'content-type') || '').toLowerCase();
+    if (!ct.includes(when.resp_content_type.toLowerCase())) return null;
+    cap.ct = ct;
+  }
+  if (when.path_regex) {
+    const re = detRe(when.path_regex);
+    if (!re || !re.test(ex.path || '')) return null;
+  }
+  if (when.req_body_regex) {
+    const re = detRe(when.req_body_regex);
+    if (!re || !re.test((ex.req_text || '').slice(0, 200_000))) return null;
+  }
+  if (when.resp_body_regex) {
+    const re = detRe(when.resp_body_regex);
+    if (!re || !re.test((ex.resp_text || '').slice(0, 200_000))) return null;
+  }
+  if (when.req_header && !headerCondMatch(ex.req_headers, when.req_header)) return null;
+  if (when.resp_header && !headerCondMatch(ex.resp_headers, when.resp_header)) return null;
+  if (when.status) {
+    const s = ex.status || 0;
+    if (when.status.min != null && s < when.status.min) return null;
+    if (when.status.max != null && s > when.status.max) return null;
+  }
+  if (when.param) {
+    const test = DET_VALUE_CLASS[when.param.value_class];
+    if (!test) return null;
+    const places = when.param.in && when.param.in.length ? when.param.in : ['query', 'body'];
+    const pairs = [];
+    if (places.includes('query')) pairs.push(...queryPairsOf(ex));
+    if (places.includes('body')) pairs.push(...formPairsOf(ex));
+    let hit = null;
+    for (const [k, v] of pairs) {
+      const what = test(v);
+      if (what) {
+        hit = { param: k, value: v, what };
+        break;
+      }
+    }
+    if (!hit) return null;
+    cap.param = hit.param;
+    cap.value = hit.value;
+    cap.what = hit.what;
+  }
+  return cap;
+}
+
+/** Fills `{method}`, `{path}`, `{param}`, `{value}`, `{ct}`, `{what}` in a string. */
+function fillTemplate(s, cap) {
+  if (!s) return s;
+  return s.replace(/\{(method|path|param|value|ct|what)\}/g, (_, k) => {
+    const v = cap[k] != null ? String(cap[k]) : '';
+    return k === 'value' ? v.slice(0, 60) : v;
+  });
+}
+
+/** Detector suggestions for this exchange, already in priority order. Each is
+ *  the served detector plus the capture used to fill its text. In-scope only. */
+async function detectorLeads(ex) {
+  if (!ex || decide(ex.host) !== 'accepted') return [];
+  const defs = await loadDetectors();
+  const out = [];
+  for (const d of defs) {
+    // An access hand-off only makes sense when the Access check is switched on.
+    if (d.suggest.handler === 'access' && !toolOn('access-check')) continue;
+    const cap = detectorMatch(ex, d.when || {});
+    if (cap) out.push({ d, cap });
+  }
+  return out;
+}
+
+/** Detector suggestions without awaiting: used where a menu is built on the
+ *  spot. Returns nothing until the detectors have loaded (kicking that off),
+ *  which they have after the first Lens draw. */
+function detectorLeadsSync(ex) {
+  if (!ex || decide(ex.host) !== 'accepted') return [];
+  if (!DETECTORS) {
+    loadDetectors();
+    return [];
+  }
+  const out = [];
+  for (const d of DETECTORS) {
+    if (d.suggest.handler === 'access' && !toolOn('access-check')) continue;
+    const cap = detectorMatch(ex, d.when || {});
+    if (cap) out.push({ d, cap });
+  }
+  return out;
+}
+
+const DET_CHIP_CLASS = { scan: 'k-scan', bench: 'k-bench', finding: 'k-warn', access: 'k-access' };
+
+/** Acts on a detector suggestion: pre-fills the handler's tab, nothing is sent. */
+function runDetectorLead(ex, d, cap) {
+  const s = d.suggest;
+  const title = fillTemplate(s.title, cap);
+  const note = fillTemplate(s.note, cap);
+  switch (s.handler) {
+    case 'scan':
+      scanEndpoint(ex, {
+        kind: d.id,
+        chip: fillTemplate(s.chip, cap),
+        focus: s.focus,
+        categories: Array.isArray(s.categories) ? s.categories : [],
+        title,
+        why: fillTemplate(s.why, cap),
+        note,
+      });
+      break;
+    case 'bench':
+      benchWithNote(ex.id, note);
+      break;
+    case 'finding':
+      findingForm(null, [ex.id], title, { severity: s.severity, note });
+      break;
+    case 'access':
+      startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}`, onlyAnon: s.mode === 'anon' });
+      break;
+  }
+}
+
 /** The "Suggested" row under the Lens header. Every chip is one click to act on, and nothing is sent until clicked. */
 async function drawLensSuggestions(slot, ex, list) {
   const chips = [];
@@ -2505,6 +3403,17 @@ async function drawLensSuggestions(slot, ex, list) {
     // GraphQL — open it on the Bench like any other request to explore.
     if (isGraphql(ex)) {
       chips.push(h('button', { class: 'chip k-bench', title: 'Open this GraphQL request on the Bench to edit the operation and explore the schema.', onclick: () => benchWithNote(ex.id, 'GraphQL endpoint — edit the operation to explore what it exposes.') }, h('span', { text: 'GraphQL → Bench' })));
+    }
+    // Something on this endpoint is worth taking into Scans, scoped to it.
+    for (const lead of scanLeadsFor(ex)) {
+      chips.push(h('button', { class: 'chip k-scan', title: lead.why, onclick: () => scanEndpoint(ex, lead) }, h('span', { text: lead.chip })));
+    }
+    // Detector packs: the same idea as data, so the community can add more.
+    for (const { d, cap } of await detectorLeads(ex)) {
+      const title = fillTemplate(d.suggest.why || d.suggest.note || d.suggest.title || d.suggest.chip, cap);
+      chips.push(
+        h('button', { class: `chip ${DET_CHIP_CLASS[d.suggest.handler] || ''}`, title, onclick: () => runDetectorLead(ex, d, cap) }, h('span', { text: fillTemplate(d.suggest.chip, cap) })),
+      );
     }
   }
   if (looksLikeApiSpec(ex)) {
@@ -2625,7 +3534,7 @@ function curlFor(method, url, headers, body, binary) {
   const host = hostOf(url);
   const parts = ['curl'];
   const m = (method || 'GET').toUpperCase();
-  if (m !== 'GET' || (body && m !== 'POST')) parts.push('-X ' + m);
+  if (m !== 'GET' || (body && m !== 'POST')) parts.push('-X ' + shq(m));
   parts.push(shq(url));
   let compressed = false;
   for (const [k, v] of headers || []) {
@@ -2867,18 +3776,24 @@ function scopeButtons(s, size, after) {
   ];
 }
 
-/** Accepts (each host only) or rejects every pending suggestion, after asking. */
+/**
+ * Accepts (each host only) or rejects every pending suggestion, after asking.
+ * Every domain in the sheet has a checkbox, so any of them can be left out.
+ */
 function decideAll(action) {
   const list = stillPending(S.scope.suggestions);
   if (!list.length) return;
   const accept = action === 'accept';
+  const shown = (s) => (accept ? suggestionBase(s.domain) : s.domain);
+  const picked = new Set(list.map((s) => s.domain));
   const run = async () => {
+    const chosen = list.filter((s) => picked.has(s.domain));
+    if (!chosen.length) return;
     closeModal();
     let done = 0;
-    for (const s of list) {
-      const domain = accept ? suggestionBase(s.domain) : s.domain;
+    for (const s of chosen) {
       try {
-        await api('/api/scope/' + action, { method: 'POST', body: { domain, include_subdomains: false } });
+        await api('/api/scope/' + action, { method: 'POST', body: { domain: shown(s), include_subdomains: false } });
         done++;
       } catch (e) {
         toast(e.message, 'err');
@@ -2888,14 +3803,27 @@ function decideAll(action) {
     await loadScope();
     if (S.view === 'scope') renderScopeBody();
   };
+  const goBtn = h('button', { class: 'btn ' + (accept ? 'primary' : 'danger'), onclick: run });
+  const toggleAll = h('button', { class: 'link', onclick: () => (picked.size === list.length ? picked.clear() : list.forEach((s) => picked.add(s.domain)), boxes.forEach((b) => (b.checked = picked.has(b.value))), sync()) });
+  const boxes = list.map((s) => h('input', { type: 'checkbox', value: s.domain, checked: true, onchange: (e) => (e.target.checked ? picked.add(s.domain) : picked.delete(s.domain), sync()) }));
+  const sync = () => {
+    const n = picked.size;
+    const all = n === list.length;
+    $('.modal .mcard h3').textContent = (accept ? 'Accept ' : 'Reject ') + (all ? `all ${n} suggested domains?` : `${n} of ${list.length} suggested domains?`);
+    goBtn.textContent = n === 0 ? 'Nothing picked' : all ? (accept ? 'Accept all' : 'Reject all') : `${accept ? 'Accept' : 'Reject'} ${n}`;
+    goBtn.disabled = n === 0;
+    toggleAll.textContent = all ? 'Uncheck all' : 'Check all';
+  };
   modal(
-    accept ? `Accept all ${list.length} suggested domains?` : `Reject all ${list.length} suggested domains?`,
+    '',
     [
-      h('p', { class: 'muted', text: accept ? 'Each host is accepted on its own, without its subdomains. You can change any of them on the Scope screen.' : 'They stay captured, but Bench sends to them are refused. You can change any of them on the Scope screen.' }),
-      h('div', { class: 'alllist' }, list.map((s) => h('div', { class: 'mono', text: accept ? suggestionBase(s.domain) : s.domain }))),
+      h('p', { class: 'muted', text: (accept ? 'Each host is accepted on its own, without its subdomains.' : 'They stay captured, but Bench sends to them are refused.') + ' Uncheck any domain to leave it for later.' }),
+      h('div', { class: 'allbar' }, toggleAll),
+      h('div', { class: 'alllist' }, list.map((s, i) => h('label', { class: 'allrow' }, boxes[i], h('span', { class: 'mono', text: shown(s), title: shown(s) })))),
     ],
-    [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), h('button', { class: 'btn ' + (accept ? 'primary' : 'danger'), text: accept ? 'Accept all' : 'Reject all', onclick: run })],
+    [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), goBtn],
   );
+  sync();
 }
 
 function evidenceList(evidence) {
@@ -6457,7 +7385,42 @@ function findingForm(f, ids = [], title = '', hint = null) {
  * of Plonix, so nothing ever leaves the hosts you accepted. Any issue a scan
  * records is a normal finding, editable on the Findings screen.
  */
-const SC = { host: null, hosts: [], suggest: null, suggestErr: null, picks: null, intrusive: false, running: false, report: null, crawl: null, crawling: false, crawlStart: '/', crawlBrowser: false, crawlClick: false };
+const SC = { host: null, hosts: [], suggest: null, suggestErr: null, picks: null, intrusive: false, running: false, report: null, focus: null, crawl: null, crawling: false, crawlStart: '/', crawlBrowser: false, crawlClick: false };
+
+/**
+ * Hands one endpoint to Scans, focused: the scan is narrowed to this endpoint
+ * (the engine aims injecting checks only here) and the checks that fit the
+ * lead are pre-picked. Nothing runs until the researcher presses Run scan.
+ */
+function scanEndpoint(ex, lead) {
+  SC.host = ex.host;
+  SC.focus = {
+    method: ex.method,
+    path: ex.path,
+    label: lead ? lead.focus : '',
+    // An array of OWASP ids pre-picks the checks that match (an empty array
+    // pre-picks none); null, for a plain "scan this endpoint", pre-picks every
+    // recommended check, aimed at this endpoint.
+    categories: lead ? lead.categories || [] : null,
+    title: lead ? lead.title : `${ex.method} ${ex.path}`,
+    note: lead ? lead.note : '',
+  };
+  SC.suggest = null;
+  SC.report = null;
+  SC.crawl = null;
+  SC.running = false;
+  leaveTo('scans');
+}
+
+/** Drops the endpoint focus and goes back to scanning the whole host. */
+function clearScanFocus() {
+  SC.focus = null;
+  if (SC.suggest) {
+    SC.picks = new Set(SC.suggest.recommended.map((t) => t.id));
+    SC.intrusive = false;
+  }
+  drawScans();
+}
 
 const INTRU_LABEL = { passive: 'Passive', safe: 'Safe', active: 'Active', intrusive: 'Intrusive' };
 const INTRU_TAG = { passive: 'in', safe: 'in', active: 'upd', intrusive: 'rej' };
@@ -7183,7 +8146,13 @@ async function loadSuggest() {
   if (SC.host !== host || S.view !== 'scans') return;
   SC.suggest = sug;
   // Recommended checks start selected; intrusive ones stay off until opted in.
-  SC.picks = new Set(sug.recommended.map((t) => t.id));
+  // Under a focus, `categories` is an array of OWASP ids to pre-pick (empty
+  // picks none — e.g. a shape Plonix has no built-in check for yet), or null
+  // for "every recommended check, aimed at this endpoint".
+  const cats = SC.focus ? SC.focus.categories : null;
+  const fits = (t) => (t.owasp || []).some((o) => (cats || []).some((c) => o === c || o.startsWith(c)));
+  const chosen = !SC.focus || cats === null ? sug.recommended : sug.recommended.filter(fits);
+  SC.picks = new Set(chosen.map((t) => t.id));
   SC.intrusive = false;
   drawScans();
 }
@@ -7216,6 +8185,7 @@ function drawScans() {
         SC.suggest = null;
         SC.report = null;
         SC.crawl = null;
+        SC.focus = null;
         loadSuggest();
       },
     },
@@ -7228,7 +8198,20 @@ function drawScans() {
     h('div', { class: 'scanrow' }, h('label', { class: 'muted', text: 'Host' }), sel),
     h('p', { class: 'muted', text: 'Only accepted, in-scope hosts appear here.' }),
   );
-  clear(box, targetCard, scanSuggestSection(), scanCrawlSection());
+  clear(box, scanFocusBanner(), targetCard, scanSuggestSection(), scanCrawlSection());
+}
+
+/** When a focus is set, a banner naming the one endpoint the scan is scoped to. */
+function scanFocusBanner() {
+  const f = SC.focus;
+  if (!f) return null;
+  return h(
+    'div',
+    { class: 'card scanfocus' },
+    h('div', { class: 'sechead' }, h('h3', { text: 'Focused on one endpoint' }), h('span', { class: 'shacts' }, h('button', { class: 'btn sm', text: 'Scan the whole host', onclick: clearScanFocus }))),
+    h('div', { class: 'focusrow' }, h('span', { class: 'focustag', text: f.method }), h('code', { class: 'focuspath', text: f.path }), f.label ? h('span', { class: 'focuscat', text: f.label }) : null),
+    h('p', { class: 'muted focusnote', text: f.note || 'The scan is aimed at this endpoint. The checks below are pre-picked for it — review and run.' }),
+  );
 }
 
 function scanSuggestSection() {
@@ -7355,8 +8338,10 @@ async function runScan() {
   SC.running = true;
   SC.report = null;
   drawScans();
+  const body = { host: SC.host, tactics, include_intrusive: SC.intrusive };
+  if (SC.focus) body.endpoints = [{ method: SC.focus.method, path: SC.focus.path }];
   try {
-    SC.report = await api('/api/scan', { method: 'POST', body: { host: SC.host, tactics, include_intrusive: SC.intrusive } });
+    SC.report = await api('/api/scan', { method: 'POST', body });
   } catch (e) {
     SC.running = false;
     drawScans();
@@ -7467,11 +8452,14 @@ async function refreshFindingsCount() {
 }
 
 /* ======================================================================
-   Agents
+   Agents: ask Claude about the project, pick up past conversations, and
+   follow what agents read. Setup lives behind the Setup button.
    ====================================================================== */
 
 // An agent counts as connected while its MCP server checks in (every 20 s).
 const AGENT_LIVE_MS = 60000;
+// Requests one agent makes this close together read as one burst in the feed.
+const AGENT_BURST_MS = 120000;
 
 const EXAMPLE_PROMPTS = [
   'Use Plonix to find in-scope API endpoints that returned errors, then read the most interesting request and tell me what stands out.',
@@ -7480,36 +8468,600 @@ const EXAMPLE_PROMPTS = [
   'Summarize my Plonix findings and point to the requests that prove each one.',
 ];
 
+// Questions offered under the ask box when nothing has been typed yet.
+const STARTER_QUESTIONS = [
+  'What should I look at next in this project?',
+  'Which endpoints take an id, and which look worth checking for access control?',
+  'Summarize what this application does from its traffic.',
+];
+
+const AG = { chat: null, cv: null, setup: null, chats: [], policy: null, hits: [], skills: [], watch: null, inboxAll: false, lookAsked: 0 };
+
 function renderAgents(main) {
+  AG.cv = null;
+  const setupBtn = h('button', { class: 'btn sm', id: 'agsetupbtn', text: 'Setup', onclick: () => toggleAgentSetup() });
   clear(
     main,
     h(
       'div',
       { class: 'view' },
-      h('div', { class: 'toolbar' }, h('h2', { text: 'Agents' }), h('span', { class: 'hint', text: 'Let an AI agent such as Claude Code read this project over MCP. Read-only.' })),
-      h('div', { class: 'pane' }, h('div', { class: 'stack', id: 'agentsbody' }, h('div', { class: 'muted', text: 'Loading…' }))),
+      h('div', { class: 'toolbar' }, h('h2', { text: 'Agents' }), h('span', { class: 'hint', text: 'Ask Claude about this project, pick up past conversations, and see what agents looked at.' }), setupBtn),
+      h(
+        'div',
+        { class: 'pane' },
+        h(
+          'div',
+          { class: 'agws' },
+          h('div', { class: 'agmain' }, h('div', { class: 'card aginbox', id: 'aginbox' }), h('div', { class: 'card agask', id: 'agask' }), h('div', { id: 'agbody' })),
+          h('aside', { class: 'agside' }, h('div', { class: 'card agfeed', id: 'agfeed' }, h('div', { class: 'ab muted', text: 'Loading…' }))),
+        ),
+        h('div', { class: 'stack agsetup', id: 'agentsbody', hidden: true }),
+      ),
     ),
   );
-  loadAgents();
+  drawAgentAsk();
+  drawAgentBody();
+  loadAgents(true);
 }
 
-async function loadAgents() {
-  let a;
+function toggleAgentSetup(open) {
+  AG.setup = open === undefined ? !AG.setup : open;
+  const box = $('#agentsbody');
+  const btn = $('#agsetupbtn');
+  if (!box) return;
+  box.hidden = !AG.setup;
+  if (btn) btn.classList.toggle('on', !!AG.setup);
+  if (AG.setup) {
+    drawAgentSetup();
+    box.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
+}
+
+/** Refreshes what changes on its own: who is connected, the feed, the conversations. */
+async function loadAgents(first) {
+  S.agentsAt = Date.now();
+  let a, act, list, watch;
   try {
-    a = await api('/api/agents');
+    [a, act, list, watch] = await Promise.all([api('/api/agents'), api('/api/agents/activity?limit=200'), api('/api/agents/chats'), api('/api/agents/watch')]);
   } catch (e) {
     return toast(e.message, 'err');
   }
-  S.agentsAt = Date.now();
+  if (S.view !== 'agents') return;
+  AG.policy = a;
+  AG.hits = act.hits || [];
+  AG.chats = list.chats || [];
+  AG.watch = watch;
+  if (first) {
+    // Nothing has ever happened here: show how to get started.
+    if (AG.setup === null) AG.setup = !AG.chats.length && !(a.clients || []).length && a.ask_in_app === false;
+    toggleAgentSetup(AG.setup);
+    drawAgentAsk();
+    loadAgentStarters();
+  } else if (AG.setup) drawAgentSetup();
+  drawAgentInbox();
+  drawAgentFeed();
+  if (!AG.chat) drawAgentBody();
+}
+
+/* ---- the ask box ---- */
+
+function drawAgentAsk() {
+  const box = $('#agask');
+  if (!box) return;
+  const a = AG.policy;
+  if (a && !a.enabled) {
+    return clear(box, h('div', { class: 'ab' }, h('b', { text: 'Agent access is off.' }), ' Turn it on in Settings › AI agents to ask Claude about this project. ', h('button', { class: 'link', text: 'Open Settings', onclick: () => ((S.settingsSection = 'agents'), leaveTo('settings')) })));
+  }
+  if (a && a.ask_in_app === false) {
+    return clear(
+      box,
+      h(
+        'div',
+        { class: 'ab' },
+        h('b', { text: 'Claude Code is not installed on this Mac.' }),
+        ' Install it from claude.com/claude-code to ask about this project right here. Other agents can still connect: ',
+        h('button', { class: 'link', text: 'see Setup', onclick: () => toggleAgentSetup(true) }),
+        '.',
+      ),
+    );
+  }
+  const q = h('textarea', { class: 'agq', id: 'agq', rows: 2, placeholder: 'Ask Claude about this project: what to look at next, what an endpoint does, which hosts belong to the target…' });
+  const go = h('button', { class: 'btn primary', text: '✦ Ask', disabled: true });
+  const send = () => {
+    const t = q.value.trim();
+    if (!t) return;
+    q.value = '';
+    go.disabled = true;
+    startAgentChat(t, t);
+  };
+  q.addEventListener('input', () => (go.disabled = !q.value.trim()));
+  q.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  });
+  go.onclick = send;
+  clear(
+    box,
+    h('div', { class: 'agqrow' }, q, go),
+    h('div', { class: 'agstarters', id: 'agstarters' }),
+    h('div', { id: 'agarg' }),
+    h('p', { class: 'muted fine agnote', text: 'Claude reads this project through Plonix, read-only. It can suggest; it cannot send requests or change anything.' }),
+  );
+  drawAgentStarters();
+}
+
+async function loadAgentStarters() {
+  try {
+    AG.skills = ((await api('/api/skills')).skills || []).filter((s) => s.available);
+  } catch (_) {
+    AG.skills = [];
+  }
+  drawAgentStarters();
+}
+
+/** One-click starts: skills (playbooks) and a few plain questions. */
+function drawAgentStarters() {
+  const box = $('#agstarters');
+  if (!box) return;
+  clear(
+    box,
+    AG.skills.map((sk) => h('button', { class: 'chip k-ai', title: sk.description, onclick: () => runSkill(sk) }, h('span', { text: '✦ ' + sk.title }))),
+    STARTER_QUESTIONS.map((t) => h('button', { class: 'chip', title: 'Ask this', onclick: () => startAgentChat(t, t) }, h('span', { text: t }))),
+  );
+}
+
+/** Runs a skill; one that needs something (a host, a request id) asks for it first. */
+async function runSkill(sk, values = {}) {
+  const need = (sk.arguments || []).filter((x) => x.required && !values[x.name]);
+  const slot = $('#agarg');
+  if (need.length) {
+    if (!slot) return;
+    const hosts = ((S.facets && S.facets.hosts) || []).map((x) => x.value);
+    const inputs = need.map((x) => {
+      const guess = x.name === 'host' ? (M.sel && hosts.includes(M.sel) ? M.sel : hosts[0] || '') : x.name === 'id' && T.sel ? String(T.sel) : '';
+      return { x, el: h('input', { value: guess, placeholder: x.description, list: x.name === 'host' ? 'aghosts' : null, spellcheck: 'false' }) };
+    });
+    const ok = () => {
+      const v = { ...values };
+      for (const { x, el } of inputs) v[x.name] = el.value.trim();
+      if (inputs.some(({ x }) => !v[x.name])) return;
+      clear(slot);
+      runSkill(sk, v);
+    };
+    for (const { el } of inputs) el.addEventListener('keydown', (e) => e.key === 'Enter' && ok());
+    clear(
+      slot,
+      h(
+        'div',
+        { class: 'agargrow' },
+        h('b', { text: sk.title }),
+        inputs.map(({ x, el }) => h('label', null, h('span', { text: x.name }), el)),
+        h('datalist', { id: 'aghosts' }, hosts.map((v) => h('option', { value: v }))),
+        h('button', { class: 'btn primary sm', text: 'Run', onclick: ok }),
+        h('button', { class: 'btn sm ghost', text: 'Cancel', onclick: () => clear(slot) }),
+      ),
+    );
+    inputs[0].el.focus();
+    return;
+  }
+  let r;
+  try {
+    r = await api('/api/skills/' + encodeURIComponent(sk.name) + '?' + new URLSearchParams(values));
+  } catch (e) {
+    return toast(e.message, 'err');
+  }
+  if (!r.prompt) return toast(r.needs || 'This skill needs more to go on.', 'err');
+  const detail = Object.values(values).join(', ');
+  startAgentChat(r.prompt, sk.title + (detail ? ': ' + detail : ''));
+}
+
+/* ---- the inbox: what the background watcher found ---- */
+
+const INBOX_SHOW = 8;
+const ITEM_KIND = { lead: { label: 'Lead', cls: 'lead' }, note: { label: 'Note', cls: 'note' }, digest: { label: 'New', cls: 'digest' } };
+const NEXT_ACTION = {
+  lens: 'Open request',
+  bench: 'Open in Bench',
+  scan: 'Scan this host',
+  access: 'Check as other users',
+  finding: 'Write it up',
+  map: 'Open in Map',
+  scope: 'Open Scope',
+};
+
+/** Acts on an inbox item where it points: the request, the Bench, Scans, Access or a new finding. */
+async function actOnItem(it) {
+  markItems([it.id], false);
+  const id = it.request;
+  const next = it.next || 'lens';
+  if (next === 'map' || next === 'scope') {
+    if (next === 'map' && it.host) M.sel = it.host;
+    return leaveTo(next);
+  }
+  if (!id) return;
+  if (next === 'bench') return sendToBench(id);
+  if (next === 'finding') return newFinding([id], it.title);
+  if (next === 'access' && toolOn('access-check')) return startAccessCheck({ targets: [id], sourceLabel: it.title });
+  if (next === 'scan') {
+    try {
+      const ex = await api('/api/traffic/' + id);
+      SC.host = ex.host;
+      return leaveTo('scans');
+    } catch (_) {}
+  }
+  showExchange(id);
+}
+
+async function markItems(ids, dismiss) {
+  try {
+    const r = await api('/api/agents/watch/items', { method: 'POST', body: { ids, dismiss } });
+    if (S.status) S.status.agent_inbox_unread = r.unread;
+    updateChrome();
+  } catch (e) {
+    return toast(e.message, 'err');
+  }
+  if (dismiss || !ids.length) loadAgents();
+}
+
+async function saveWatch(patch) {
+  try {
+    AG.watch = await api('/api/agents/watch', { method: 'PUT', body: { ...AG.watch.settings, ...patch } });
+  } catch (e) {
+    return toast(e.message, 'err');
+  }
+  drawAgentInbox();
+}
+
+async function lookNow() {
+  try {
+    await api('/api/agents/watch/look', { method: 'POST' });
+  } catch (e) {
+    return toast(e.message, 'err');
+  }
+  AG.lookAsked = Date.now();
+  drawAgentInbox();
+  toast('Claude will look at your latest traffic in a moment', 'ok');
+}
+
+function drawAgentInbox() {
+  const box = $('#aginbox');
+  const w = AG.watch;
+  if (!box || !w) return;
+  const a = AG.policy;
+  const st = w.settings;
+  const items = w.items || [];
+  // Asked to look: show it as looking until the look starts and ends (or it gives up).
+  const asked = AG.lookAsked && Date.now() - AG.lookAsked < 30000 && !(w.state.last_look_at >= AG.lookAsked);
+  const looking = w.running || asked;
+  const used = w.state.tokens_today || 0;
+  const pct = Math.min(100, Math.round((used / st.daily_tokens) * 100));
+  const status = !st.enabled
+    ? 'Off'
+    : w.capped
+      ? 'Paused until tomorrow: today’s tokens are used up'
+      : looking
+        ? 'Looking at your traffic…'
+        : w.waiting
+          ? `${w.waiting} new request${w.waiting === 1 ? '' : 's'} waiting; Claude looks when you pause`
+          : 'Watching your traffic';
+  const toggle = h('input', { type: 'checkbox', checked: st.enabled, onchange: () => saveWatch({ enabled: toggle.checked }) });
+  const budget = h(
+    'select',
+    { title: 'Most tokens Claude may use per day watching this project', onchange: (e) => saveWatch({ daily_tokens: Number(e.target.value) }) },
+    w.budgets.map((n) => h('option', { value: n, text: fmtTok(n) + ' a day', selected: n === st.daily_tokens })),
+  );
+  const head = h(
+    'div',
+    { class: 'aghead' },
+    h('b', { text: 'From Claude' }),
+    w.unread ? h('span', { class: 'qn', text: w.unread }) : null,
+    h('span', { class: 'agstat' + (looking ? ' busy' : ''), text: status }),
+    h('span', { class: 'sp' }),
+    w.unread ? h('button', { class: 'btn sm ghost', text: 'Mark all read', onclick: () => markItems([], false) }) : null,
+    h('button', { class: 'btn sm', text: looking ? 'Looking…' : 'Look now', disabled: looking || !a || !a.enabled || a.ask_in_app === false, title: 'Have Claude look at the latest in-scope traffic now', onclick: lookNow }),
+    h('label', { class: 'agswitch', title: 'Let Claude read new in-scope traffic in the background and leave notes and leads here' }, toggle, h('span', { text: 'Watch my traffic' })),
+  );
+  let body;
+  if (!items.length && !st.enabled) {
+    body = h(
+      'div',
+      { class: 'agempty' },
+      h('div', { class: 'agbig', text: 'Let Claude watch while you browse' }),
+      h('p', { text: 'When you pause, Claude reads the new in-scope traffic and leaves notes and leads here: what stands out, what to check next, and where. It only reads. Nothing is sent unless you click.' }),
+      h('div', { class: 'agrowbtns' }, h('button', { class: 'btn primary', text: 'Turn on', onclick: () => saveWatch({ enabled: true }) }), h('span', { class: 'muted fine', text: 'Up to ' + fmtTok(st.daily_tokens) + ' tokens a day. You can change this or turn it off any time.' })),
+    );
+  } else if (!items.length) {
+    body = h('div', { class: 'ab muted', text: w.state.last_error || 'Nothing yet. Browse the target; when you pause, Claude looks at what is new. Or press Look now.' });
+  } else {
+    const shown = AG.inboxAll ? items : items.slice(0, INBOX_SHOW);
+    body = h(
+      'div',
+      { class: 'aglist' },
+      shown.map((it) => {
+        const k = ITEM_KIND[it.kind] || ITEM_KIND.note;
+        // Access needs its Market tool; without it the lead opens the request.
+        const next = it.next === 'access' && !toolOn('access-check') ? 'lens' : it.next || 'lens';
+        const act = it.kind === 'digest' ? null : NEXT_ACTION[next];
+        return h(
+          'div',
+          { class: 'agitem' + (it.read ? '' : ' unread') },
+          h('span', { class: 'agkind ' + k.cls, text: k.label }),
+          h(
+            'div',
+            { class: 'agimain' },
+            h('div', { class: 'agititle', text: it.title }),
+            it.detail ? h('div', { class: 'agidetail', text: it.detail }) : null,
+            h(
+              'div',
+              { class: 'agimeta' },
+              it.request ? h('button', { class: 'link', text: 'Request #' + it.request, onclick: () => (markItems([it.id], false), showExchange(it.request)) }) : null,
+              h('span', { text: agoText(it.at) }),
+            ),
+          ),
+          h(
+            'div',
+            { class: 'agiacts' },
+            act && (it.request || it.next === 'map' || it.next === 'scope') ? h('button', { class: 'btn sm' + (it.kind === 'lead' ? ' primary' : ''), text: act, onclick: () => actOnItem(it) }) : null,
+            !it.read ? h('button', { class: 'mini', text: '✓', title: 'Mark read', onclick: () => markItems([it.id], false) }) : null,
+            h('button', { class: 'mini', text: '✕', title: it.kind === 'digest' ? 'Remove' : 'Dismiss: not useful. Claude will suggest fewer like it.', onclick: () => markItems([it.id], true) }),
+          ),
+        );
+      }),
+      items.length > INBOX_SHOW
+        ? h('button', { class: 'link agmore', text: AG.inboxAll ? 'Show fewer' : `Show all ${items.length}`, onclick: () => ((AG.inboxAll = !AG.inboxAll), drawAgentInbox()) })
+        : null,
+    );
+  }
+  clear(
+    box,
+    head,
+    body,
+    st.enabled || used
+      ? h(
+          'div',
+          { class: 'agfoot' },
+          h('div', { class: 'askmeter' }, h('div', { class: 'bar' + (w.capped ? ' over' : '') }, h('i', { style: { width: pct + '%' } })), h('span', { text: `${fmtTok(used)} of ${fmtTok(st.daily_tokens)} tokens today` + (w.state.looks_today ? ` · ${w.state.looks_today} look${w.state.looks_today === 1 ? '' : 's'}` : '') })),
+          h('span', { class: 'sp' }),
+          budget,
+        )
+      : null,
+  );
+}
+
+/* ---- conversations ---- */
+
+/** Starts a new conversation and opens it. */
+function startAgentChat(prompt, ask) {
+  AG.chat = 'new';
+  const cv = openAgentChat(null, ask);
+  cv.start(prompt, ask);
+}
+
+/** Shows one conversation in place of the list: a saved one, or a new one (titled `ask`) when `chat` is null. */
+function openAgentChat(chat, ask) {
+  const body = $('#agbody');
+  const stopBtn = h('button', { class: 'btn sm', text: 'Stop', hidden: true });
+  const delBtn = h('button', { class: 'btn sm ghost', text: 'Delete', hidden: !chat });
+  const title = h('b', { class: 'agctitle', text: chat ? chat.title : (ask || 'New conversation').split('\n')[0] });
+  const sub = chat && chat.subject ? h('button', { class: 'chip', title: 'Open it', onclick: () => openSubject(chat.subject) }, h('span', { text: subjectLabel(chat.subject) })) : null;
+  const cv = claudeConvo({
+    tall: true,
+    onRunning: (on) => (stopBtn.hidden = !on),
+    onChat: (id) => {
+      AG.chat = id;
+      delBtn.hidden = false;
+    },
+    onDone: () => loadAgents(),
+  });
+  AG.cv = cv;
+  stopBtn.onclick = () => cv.stop();
+  delBtn.onclick = async () => {
+    if (cv.isRunning() || !cv.chat()) return;
+    try {
+      await api('/api/agents/chats/' + encodeURIComponent(cv.chat()), { method: 'DELETE' });
+    } catch (e) {
+      return toast(e.message, 'err');
+    }
+    closeAgentChat();
+  };
+  clear(
+    body,
+    h(
+      'div',
+      { class: 'card agchat' },
+      h('div', { class: 'agchead' }, h('button', { class: 'btn sm ghost', text: '← Conversations', onclick: closeAgentChat }), title, sub, h('span', { class: 'sp' }), stopBtn, delBtn),
+      h('div', { class: 'agcbody' }, cv.el),
+    ),
+  );
+  if (chat) cv.load(chat);
+  return cv;
+}
+
+function closeAgentChat() {
+  AG.chat = null;
+  AG.cv = null;
+  drawAgentBody();
+  loadAgents();
+}
+
+async function showAgentChat(id) {
+  let chat;
+  try {
+    chat = await api('/api/agents/chats/' + encodeURIComponent(id));
+  } catch (e) {
+    return toast(e.message, 'err');
+  }
+  if (S.view !== 'agents') return;
+  AG.chat = id;
+  openAgentChat(chat).focus();
+}
+
+/** The conversation list, shown while no conversation is open. */
+function drawAgentBody() {
+  const body = $('#agbody');
+  if (!body || AG.chat) return;
+  const del = async (e, c) => {
+    e.stopPropagation();
+    try {
+      await api('/api/agents/chats/' + encodeURIComponent(c.id), { method: 'DELETE' });
+    } catch (err) {
+      return toast(err.message, 'err');
+    }
+    loadAgents();
+  };
+  clear(
+    body,
+    h('div', { class: 'sechead' }, h('h3', { text: 'Conversations' }), AG.chats.length ? h('span', { class: 'muted fine', text: String(AG.chats.length) }) : null),
+    h(
+      'div',
+      { class: 'card aglist' },
+      AG.chats.length
+        ? AG.chats.map((c) =>
+            h(
+              'div',
+              { class: 'agrow', role: 'button', tabindex: 0, onclick: () => showAgentChat(c.id), onkeydown: (e) => e.key === 'Enter' && showAgentChat(c.id) },
+              h(
+                'div',
+                { class: 'agrmain' },
+                h('div', { class: 'agrtop' }, h('b', { text: c.title }), c.subject ? h('span', { class: 'tag', text: subjectLabel(c.subject) }) : null, c.running ? h('span', { class: 'tag in', text: 'answering' }) : null),
+                c.preview ? h('div', { class: 'agrprev', text: c.preview }) : null,
+              ),
+              h('span', { class: 'agrmeta', text: (c.turns > 1 ? c.turns + ' questions · ' : '') + agoText(c.updated_at) }),
+              h('button', { class: 'mini', text: '✕', title: 'Delete this conversation', onclick: (e) => del(e, c) }),
+            ),
+          )
+        : h('div', { class: 'ab muted', text: 'Questions you ask here, or with ✦ Ask Claude anywhere in Plonix, are kept here so you can pick them up again later.' }),
+    ),
+  );
+}
+
+/* ---- the activity feed ---- */
+
+/** What one agent request was, in words, and where it leads in the app. */
+function hitInfo(x) {
+  const p = x.path;
+  const q = new URLSearchParams(x.query || '');
+  const host = (m) => decodeURIComponent(m);
+  const toMap = (hst) => () => {
+    if (hst) M.sel = hst;
+    leaveTo('map');
+  };
+  let m;
+  if (p === '/api/traffic') {
+    const t = q.get('q') || '';
+    return { ico: '⌕', text: t ? 'Searched traffic for ' + t : 'Listed recent traffic', go: () => setQuery(t) };
+  }
+  if ((m = p.match(/^\/api\/traffic\/(\d+)(?:\/(insights|messages))?$/))) {
+    const what = m[2] === 'insights' ? 'Spotted values in request #' : m[2] === 'messages' ? 'WebSocket messages of request #' : 'Request #';
+    return { ico: '⇅', text: what + m[1], go: () => showExchange(Number(m[1])) };
+  }
+  if (p === '/api/hosts') return { ico: '⊞', text: 'Hosts seen', go: toMap() };
+  if ((m = p.match(/^\/api\/hosts\/([^/]+)\/endpoints$/))) return { ico: '⊞', text: 'Endpoints on ' + host(m[1]), go: toMap(host(m[1])) };
+  if (p === '/api/tech') return { ico: '⊞', text: 'Technologies on every host', go: toMap() };
+  if ((m = p.match(/^\/api\/tech\/([^/]+)$/))) return { ico: '⊞', text: 'Technologies on ' + host(m[1]), go: toMap(host(m[1])) };
+  if (p === '/api/scope') return { ico: '◉', text: 'Scope and suggested domains', go: () => leaveTo('scope') };
+  if (p === '/api/findings') return { ico: '⚑', text: 'Findings', go: () => leaveTo('findings') };
+  if (p === '/api/findings/export') return { ico: '⚑', text: 'Findings report', go: () => leaveTo('findings') };
+  if ((m = p.match(/^\/api\/findings\/(\d+)$/))) return { ico: '⚑', text: 'Finding #' + m[1], go: () => leaveTo('findings') };
+  if (p === '/api/scan/catalog') return { ico: '◎', text: 'Available scan checks', go: () => leaveTo('scans') };
+  if ((m = p.match(/^\/api\/scan\/(?:suggest|plan)\/([^/]+)$/))) return { ico: '◎', text: 'Scan plan for ' + host(m[1]), go: () => leaveTo('scans') };
+  if (p === '/api/bench/proposals' && x.method === 'POST') return { ico: '⎇', text: 'Suggested an edit on the Bench', go: () => leaveTo('bench') };
+  if (p === '/api/status') return { ico: '•', text: 'Engine status' };
+  return { ico: '•', text: x.method + ' ' + p };
+}
+
+/** Who made a burst of requests: an Ask Claude conversation by its title, else the agent's name. */
+function hitWho(client) {
+  const [name, run] = client.split('/');
+  if (name === 'plonix-watch') return { label: 'Watching your traffic', ask: true };
+  if (name !== 'plonix-ask') return { label: name };
+  const chat = run && AG.chats.find((c) => (c.runs || []).includes(run));
+  return chat ? { label: chat.title, chat: chat.id, ask: true } : { label: 'Ask Claude', ask: true };
+}
+
+function drawAgentFeed() {
+  const box = $('#agfeed');
+  const a = AG.policy;
+  if (!box || !a) return;
+  const now = Date.now();
+  const live = (a.clients || []).filter((c) => now - c.last_seen < AGENT_LIVE_MS && !c.name.startsWith('plonix-'));
+  // Consecutive requests from one agent, close together, form one burst.
+  const bursts = [];
+  for (const x of AG.hits) {
+    const b = bursts[bursts.length - 1];
+    if (b && b.client === x.client && b.last - x.at < AGENT_BURST_MS) {
+      b.hits.push(x);
+      b.last = x.at;
+    } else bursts.push({ client: x.client, at: x.at, last: x.at, hits: [x] });
+  }
+  const SHOW = 6;
+  clear(
+    box,
+    h(
+      'div',
+      { class: 'agfhead' },
+      h('span', { class: 'adot' + (live.length ? ' on' : '') }),
+      h('b', { text: 'Activity' }),
+      h('span', { class: 'muted fine', text: live.length ? (live.length === 1 ? live[0].name + ' connected' : live.length + ' agents connected') : '' }),
+      h('span', { class: 'mode', text: 'Read-only', title: 'Agents can look, never send or change. See Setup.' }),
+    ),
+    bursts.length
+      ? h(
+          'div',
+          { class: 'agfbody' },
+          bursts.slice(0, 30).map((b) => {
+            const who = hitWho(b.client);
+            const items = b.hits.map((x) => {
+              const info = hitInfo(x);
+              return h(
+                info.go ? 'button' : 'div',
+                { class: 'agfhit' + (x.refused ? ' refused' : ''), title: x.method + ' ' + x.path + (x.query ? '?' + x.query : ''), onclick: info.go || null },
+                h('span', { class: 'ico', text: info.ico }),
+                h('span', { class: 'tx', text: (x.refused ? 'Refused: ' : '') + info.text }),
+              );
+            });
+            const more = items.length - SHOW;
+            const rest = more > 0 ? items.slice(SHOW) : [];
+            for (const r of rest) r.hidden = true;
+            return h(
+              'div',
+              { class: 'agfburst' },
+              h(
+                'div',
+                { class: 'agfwho' },
+                who.chat ? h('button', { class: 'link', text: '✦ ' + who.label, title: 'Open this conversation', onclick: () => showAgentChat(who.chat) }) : h('b', { text: (who.ask ? '✦ ' : '') + who.label }),
+                h('span', { class: 'muted', text: agoText(b.at) }),
+              ),
+              items.slice(0, SHOW),
+              rest,
+              more > 0
+                ? h('button', {
+                    class: 'link agfmore',
+                    text: `+${more} more`,
+                    onclick: (e) => {
+                      for (const r of rest) r.hidden = false;
+                      e.target.remove();
+                    },
+                  })
+                : null,
+            );
+          }),
+        )
+      : h('div', { class: 'ab muted', text: 'When Claude or another agent reads this project, each thing it looks at shows up here, so you can follow along and open it yourself.' }),
+  );
+}
+
+/* ---- setup: connecting agents, what they may do, skills ---- */
+
+function drawAgentSetup() {
   const box = $('#agentsbody');
-  if (!box || S.view !== 'agents') return;
+  const a = AG.policy;
+  if (!box || !a) return;
   const now = Date.now();
   const clients = a.clients || [];
   const live = clients.filter((c) => now - c.last_seen < AGENT_LIVE_MS);
-  const ago = (ms) => {
-    const s = Math.max(0, Math.round((now - ms) / 1000));
-    return s < 60 ? 'just now' : s < 3600 ? Math.round(s / 60) + ' min ago' : fmtDate(ms);
-  };
   const cmd = (a.connect && a.connect.command) || 'plonix connect claude';
   // The settings card keeps its own state across the status refreshes.
   let settingsCard = $('#agentsettings');
@@ -7517,6 +9069,7 @@ async function loadAgents() {
   if (fresh) settingsCard = h('div', { class: 'card', id: 'agentsettings' });
   clear(
     box,
+    h('div', { class: 'sechead' }, h('h3', { text: 'Setup' }), h('span', { class: 'shacts' }, h('button', { class: 'btn sm ghost', text: 'Hide', onclick: () => toggleAgentSetup(false) }))),
     h(
       'div',
       { class: 'card agentstatus' },
@@ -7536,8 +9089,8 @@ async function loadAgents() {
               h(
                 'tr',
                 null,
-                h('td', { class: 'mono', text: c.name }),
-                h('td', { text: now - c.last_seen < AGENT_LIVE_MS ? 'connected' : 'last seen ' + ago(c.last_seen) }),
+                h('td', { class: 'mono', text: c.name === 'plonix-ask' ? 'Ask Claude (in Plonix)' : c.name === 'plonix-watch' ? 'Watcher (in Plonix)' : c.name }),
+                h('td', { text: now - c.last_seen < AGENT_LIVE_MS ? 'connected' : 'last seen ' + agoText(c.last_seen) }),
                 h('td', { text: c.requests + (c.refused ? ` (${c.refused} refused)` : '') }),
                 h('td', { class: 'mono muted', text: c.last_request }),
               ),
@@ -7545,7 +9098,6 @@ async function loadAgents() {
           )
         : h('div', { class: 'ab muted', text: 'When an agent starts the Plonix MCP server it shows up here, with every request it makes.' }),
     ),
-    h('div', { class: 'sechead' }, h('h3', { text: 'Claude Code settings' })),
     settingsCard,
     h('div', { class: 'sechead' }, h('h3', { text: 'Connect Claude Code' })),
     h(
@@ -7583,7 +9135,7 @@ async function loadAgents() {
     ),
     h('div', { class: 'sechead' }, h('h3', { text: 'Skills' }), h('button', { class: 'btn sm ghost', text: 'Get more in the Market', onclick: () => leaveTo('market') })),
     h('div', { class: 'card', id: 'agentskills' }, h('div', { class: 'ab muted', text: 'Loading skills…' })),
-    h('div', { class: 'sechead' }, h('h3', { text: 'Try asking' })),
+    h('div', { class: 'sechead' }, h('h3', { text: 'Try asking from your terminal' })),
     h(
       'div',
       { class: 'card' },
@@ -8311,129 +9863,22 @@ function mdInline(t) {
 const CLAUDE_QUIET_MS = 15000;
 
 /**
- * The Ask sheet: shows exactly what will be shared and how big it is, lets
- * the user edit the question, drop parts and shorten bodies, and asks for
- * an explicit confirmation when it is larger than their limit.
+ * A live in-app conversation with Claude Code: the transcript, the progress
+ * line while Claude works, and the follow-up box. Used by the Ask sheet and
+ * the Agents screen. Turns started with `ask` are saved as a chat the Agents
+ * screen lists; follow-ups go into the same chat and resume its session.
+ *
+ * Hooks in `o`: onRunning(on) when a turn starts or ends, onError() when it
+ * fails (to offer fallbacks), onDone({ proposed }) when a turn has finished,
+ * onChat(id) when the turn was saved, and onStart() as a turn is sent.
  */
-async function askClaude(subject, opts = {}) {
-  const st = { exclude: [], question: opts.question || null, max: null, bundle: null, confirmBig: false };
-  // The live in-app conversation, if one has been started.
-  const convo = { id: null, since: 0, sessionId: null, running: false, proposed: false };
-
-  /* ---- compose view (what gets shared) ---- */
-  const q = h('textarea', { class: 'askq', rows: 3, value: opts.question || '' });
-  const partsBox = h('div', { class: 'askparts' });
-  const meter = h('div', { class: 'askmeter' });
-  const warn = h('div', { class: 'askwarn', hidden: true });
-  const clipSel = h('select', { title: 'Each request and response body is clipped to this length' }, [1000, 2000, 4000, 8000, 16000, 50000].map((n) => h('option', { value: n, text: fmtTok(n) + ' chars' })));
-  const cliHint = h('p', { class: 'muted fine', hidden: true });
-  const composeView = h(
-    'div',
-    null,
-    h('label', null, 'Your question', q),
-    h('div', { class: 'askhead' }, h('span', { text: 'What Claude Code gets' }), h('label', { class: 'askclip' }, 'Bodies up to ', clipSel)),
-    partsBox,
-    meter,
-    warn,
-    h('p', { class: 'muted fine', text: 'Only what is ticked is sent, straight from this Mac to Claude Code. It may include passwords or session tokens from captured traffic.' }),
-    cliHint,
-  );
-
-  /* ---- conversation view (the answer, in-app) ---- */
-  const transcript = h('div', { class: 'convo' });
+function claudeConvo(o = {}) {
+  const convo = { id: null, since: 0, sessionId: null, running: false, proposed: false, chat: o.chat || null };
+  const transcript = h('div', { class: 'convo' + (o.tall ? ' tall' : '') });
   const followIn = h('textarea', { class: 'cfollow', rows: 1, placeholder: 'Ask a follow-up…' });
   const sendBtn = h('button', { class: 'btn primary sm', text: 'Send' });
   const followRow = h('div', { class: 'cfollowrow', hidden: true }, followIn, sendBtn);
-  const convoView = h('div', { hidden: true }, transcript, followRow);
 
-  /* ---- footer buttons ---- */
-  const copyBtn = h('button', { class: 'btn', text: 'Copy prompt' });
-  const termBtn = h('button', { class: 'btn', text: 'Open in Terminal' });
-  const askBtn = h('button', { class: 'btn primary', text: '✦ Ask Claude' });
-  const stopBtn = h('button', { class: 'btn', text: 'Stop', hidden: true });
-  const newBtn = h('button', { class: 'btn', text: 'New question', hidden: true });
-
-  let askInApp = true;
-  let timer;
-  const rebuild = async () => {
-    try {
-      st.bundle = await api('/api/agents/ask', { method: 'POST', body: { ...subject, question: st.question, exclude: st.exclude, max_body_chars: st.max } });
-    } catch (e) {
-      m.err.textContent = e.message;
-      return;
-    }
-    m.err.textContent = '';
-    draw();
-  };
-  const later = () => {
-    clearTimeout(timer);
-    timer = setTimeout(rebuild, 350);
-  };
-  const draw = () => {
-    const b = st.bundle;
-    if (st.question == null) q.value = b.question;
-    clipSel.value = String(b.max_body_chars);
-    if (![...clipSel.options].some((o) => o.value === String(b.max_body_chars))) clipSel.append(h('option', { value: b.max_body_chars, text: fmtTok(b.max_body_chars) + ' chars', selected: true }));
-    clear(
-      partsBox,
-      b.parts.map((p) => {
-        const box = h('input', {
-          type: 'checkbox',
-          checked: p.included,
-          onchange: () => {
-            st.exclude = box.checked ? st.exclude.filter((x) => x !== p.id) : [...st.exclude, p.id];
-            st.confirmBig = false;
-            rebuild();
-          },
-        });
-        const pre = h('pre', { class: 'askpre', hidden: true, text: p.text });
-        return h(
-          'div',
-          { class: 'askpart' + (p.included ? '' : ' off') },
-          h('label', null, box, h('span', { class: 'pl', text: p.label }), p.clipped ? h('span', { class: 'clipped', text: 'clipped' }) : null, h('span', { class: 'pt', text: '~' + fmtTok(p.tokens) + ' tokens' })),
-          h('button', { class: 'link', text: 'preview', onclick: () => (pre.hidden = !pre.hidden) }),
-          pre,
-        );
-      }),
-    );
-    const pct = Math.min(100, Math.round((b.tokens / b.budget) * 100));
-    clear(meter, h('div', { class: 'bar' + (b.over_budget ? ' over' : '') }, h('i', { style: { width: pct + '%' } })), h('span', { text: `~${fmtTok(b.tokens)} of your ${fmtTok(b.budget)}-token limit` }));
-    warn.hidden = !b.over_budget;
-    if (b.over_budget) {
-      const ok = h('input', { type: 'checkbox', checked: st.confirmBig, onchange: () => ((st.confirmBig = ok.checked), sync()) });
-      clear(
-        warn,
-        h('b', { text: `This is about ${fmtTok(b.tokens)} tokens, over your limit of ${fmtTok(b.budget)}.` }),
-        ' A large context makes answers slower and less focused. Untick parts or shorten the bodies, or ',
-        h('label', null, ok, ' send it anyway'),
-        '. The limit is in Agents → Claude Code.',
-      );
-    }
-    sync();
-  };
-  const sync = () => {
-    const blocked = !st.bundle || (st.bundle.over_budget && !st.confirmBig);
-    copyBtn.disabled = blocked;
-    termBtn.disabled = blocked;
-    askBtn.disabled = blocked || !askInApp;
-  };
-
-  /* ---- view switching ---- */
-  const showCompose = () => {
-    composeView.hidden = false;
-    convoView.hidden = true;
-    copyBtn.hidden = termBtn.hidden = askBtn.hidden = false;
-    stopBtn.hidden = newBtn.hidden = true;
-    sync();
-  };
-  const showConvo = () => {
-    composeView.hidden = true;
-    convoView.hidden = false;
-    copyBtn.hidden = termBtn.hidden = askBtn.hidden = true;
-    newBtn.hidden = false;
-  };
-
-  /* ---- transcript rendering ---- */
   const scroll = () => (transcript.scrollTop = transcript.scrollHeight);
   // While Claude works: what it is doing, tokens read and written, time.
   let thinking = null;
@@ -8490,20 +9935,304 @@ async function askClaude(subject, opts = {}) {
   // Claude answers in Markdown; show it formatted.
   const answer = (text, extra = '') => h('div', { class: 'cmsg bot ' + extra }, h('div', { class: 'cbub md' }, mdNodes(text)));
   const sayError = (text) => add(h('div', { class: 'cerr', text }));
-  const offerFallback = () => {
-    copyBtn.hidden = termBtn.hidden = false;
+  const toolLine = (text) => h('div', { class: 'ctool', text: '✦ ' + text });
+
+  const alive = () => document.body.contains(transcript);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const running = (on) => {
+    convo.running = on;
+    followIn.disabled = sendBtn.disabled = on;
+    if (o.onRunning) o.onRunning(on);
   };
+
+  const pollLoop = async () => {
+    while (convo.running && alive()) {
+      let snap;
+      try {
+        snap = await api(`/api/agents/run/${convo.id}?since=${convo.since}`);
+      } catch (e) {
+        setThinking(false);
+        sayError(e.message);
+        running(false);
+        break;
+      }
+      for (const ev of snap.events) {
+        convo.since = ev.seq + 1;
+        if (ev.type === 'text') {
+          dropDraft();
+          add(answer(ev.text));
+        } else if (ev.type === 'tool') {
+          add(toolLine(ev.text));
+        } else if (ev.type === 'proposal') {
+          add(toolLine(ev.text));
+          convo.proposed = true;
+        } else if (ev.type === 'error') {
+          setThinking(false);
+          sayError(ev.text);
+          if (o.onError) o.onError();
+        }
+      }
+      if (snap.session_id) convo.sessionId = snap.session_id;
+      if (snap.status !== 'running') {
+        setThinking(false);
+        const p = snap.progress;
+        if (snap.status === 'done' && p) add(h('div', { class: 'cdone', text: `Answered in ${claudeStats(p).replace(/^(.*) · ([\d:]+)$/, '$2 · $1')}` }));
+        running(false);
+        if (snap.status === 'done') followRow.hidden = false;
+        const proposed = convo.proposed;
+        convo.proposed = false;
+        if (o.onDone) o.onDone({ proposed, ok: snap.status === 'done' });
+        break;
+      }
+      // Keep the working indicator alive between turns.
+      if (!thinking) setThinking(true);
+      showProgress(snap.progress);
+      await sleep(500);
+    }
+  };
+
+  /** Sends one turn: `prompt` goes to Claude, `ask` (what the user typed) is saved with the chat. */
+  const start = async (prompt, ask, extra = {}) => {
+    convo.since = 0;
+    convo.proposed = false;
+    followRow.hidden = true;
+    if (o.onStart) o.onStart();
+    add(bubble('user', ask));
+    running(true);
+    setThinking(true);
+    try {
+      const body = { prompt, ask, ...extra };
+      if (convo.chat) body.chat = convo.chat;
+      else if (convo.sessionId) body.resume = convo.sessionId;
+      const r = await api('/api/agents/run', { method: 'POST', body });
+      convo.id = r.id;
+      if (r.chat && r.chat !== convo.chat) {
+        convo.chat = r.chat;
+        if (o.onChat) o.onChat(r.chat);
+      }
+    } catch (e) {
+      setThinking(false);
+      running(false);
+      sayError(e.message);
+      if (o.onError) o.onError();
+      return;
+    }
+    pollLoop();
+  };
+
+  /** Shows a saved chat's turns, ready for a follow-up. */
+  const load = (chat) => {
+    clear(transcript);
+    convo.chat = chat.id;
+    convo.sessionId = chat.session_id || null;
+    for (const t of chat.turns || []) {
+      add(bubble('user', t.ask));
+      for (const tool of t.tools || []) add(toolLine(tool));
+      if (t.answer) add(answer(t.answer));
+      if (t.error) add(h('div', { class: 'cerr', text: t.error }));
+      if (t.status === 'running') add(h('div', { class: 'cdone', text: 'Still answering. Open this conversation again in a moment to see the answer.' }));
+    }
+    const last = (chat.turns || [])[chat.turns.length - 1];
+    followRow.hidden = !!(last && last.status === 'running');
+  };
+
+  const stop = async () => {
+    if (!convo.id || !convo.running) return;
+    running(false);
+    setThinking(false);
+    try {
+      await api(`/api/agents/run/${convo.id}`, { method: 'DELETE' });
+    } catch (_) {}
+    sayError('Stopped.');
+    if (o.onError) o.onError();
+  };
+
+  const reset = () => {
+    convo.id = convo.sessionId = convo.chat = null;
+    clear(transcript);
+    followRow.hidden = true;
+  };
+
+  sendBtn.onclick = () => {
+    const t = followIn.value.trim();
+    if (!t || convo.running) return;
+    followIn.value = '';
+    start(t, t);
+  };
+  followIn.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendBtn.onclick();
+    }
+  });
+
+  return { el: h('div', { class: 'convobox' }, transcript, followRow), transcript, add, start, load, stop, reset, isRunning: () => convo.running, chat: () => convo.chat, focus: () => followIn.focus() };
+}
+
+/** What an Ask Claude subject is about, in a few words: "Request #42", "api.example.com". */
+function subjectLabel(sub) {
+  if (!sub) return '';
+  if (sub.kind === 'request') return 'Request #' + sub.id;
+  if (sub.kind === 'finding') return 'Finding #' + sub.id;
+  if (sub.kind === 'host') return sub.host;
+  if (sub.kind === 'draft') return 'Bench request';
+  return '';
+}
+
+/** The part of a subject worth keeping with a saved chat: enough to link back. */
+function subjectRef(sub) {
+  if (!sub) return null;
+  if (sub.kind === 'request' || sub.kind === 'finding') return { kind: sub.kind, id: sub.id };
+  if (sub.kind === 'host') return { kind: 'host', host: sub.host };
+  if (sub.kind === 'draft') return { kind: 'draft' };
+  return null;
+}
+
+/** Opens what a saved chat is about, where it lives in the app. */
+function openSubject(sub) {
+  if (!sub) return;
+  if (sub.kind === 'request') showExchange(sub.id);
+  else if (sub.kind === 'finding') leaveTo('findings');
+  else if (sub.kind === 'host') {
+    M.sel = sub.host;
+    leaveTo('map');
+  } else if (sub.kind === 'draft') leaveTo('bench');
+}
+
+/**
+ * The Ask sheet: shows exactly what will be shared and how big it is, lets
+ * the user edit the question, drop parts and shorten bodies, and asks for
+ * an explicit confirmation when it is larger than their limit.
+ */
+async function askClaude(subject, opts = {}) {
+  const st = { exclude: [], question: opts.question || null, max: null, bundle: null, confirmBig: false };
+
+  /* ---- compose view (what gets shared) ---- */
+  const q = h('textarea', { class: 'askq', rows: 3, value: opts.question || '' });
+  const partsBox = h('div', { class: 'askparts' });
+  const meter = h('div', { class: 'askmeter' });
+  const warn = h('div', { class: 'askwarn', hidden: true });
+  const clipSel = h('select', { title: 'Each request and response body is clipped to this length' }, [1000, 2000, 4000, 8000, 16000, 50000].map((n) => h('option', { value: n, text: fmtTok(n) + ' chars' })));
+  const cliHint = h('p', { class: 'muted fine', hidden: true });
+  const composeView = h(
+    'div',
+    null,
+    h('label', null, 'Your question', q),
+    h('div', { class: 'askhead' }, h('span', { text: 'What Claude Code gets' }), h('label', { class: 'askclip' }, 'Bodies up to ', clipSel)),
+    partsBox,
+    meter,
+    warn,
+    h('p', { class: 'muted fine', text: 'Only what is ticked is sent, straight from this Mac to Claude Code. It may include passwords or session tokens from captured traffic.' }),
+    cliHint,
+  );
+
+  /* ---- footer buttons ---- */
+  const copyBtn = h('button', { class: 'btn', text: 'Copy prompt' });
+  const termBtn = h('button', { class: 'btn', text: 'Open in Terminal' });
+  const askBtn = h('button', { class: 'btn primary', text: '✦ Ask Claude' });
+  const stopBtn = h('button', { class: 'btn', text: 'Stop', hidden: true });
+  const newBtn = h('button', { class: 'btn', text: 'New question', hidden: true });
+
+  /* ---- conversation view (the answer, in-app, saved on the Agents screen) ---- */
+  const cv = claudeConvo({
+    onStart: () => (m.err.textContent = ''),
+    onRunning: (on) => (stopBtn.hidden = !on),
+    onError: () => (copyBtn.hidden = termBtn.hidden = false),
+    onDone: ({ proposed }) => proposed && offerReview(),
+  });
+  const savedNote = h('p', { class: 'muted fine', text: 'Saved in Agents, where you can pick this conversation up again later.' });
+  const convoView = h('div', { hidden: true }, cv.el, savedNote);
+
+  let askInApp = true;
+  let timer;
+  const rebuild = async () => {
+    try {
+      st.bundle = await api('/api/agents/ask', { method: 'POST', body: { ...subject, question: st.question, exclude: st.exclude, max_body_chars: st.max } });
+    } catch (e) {
+      m.err.textContent = e.message;
+      return;
+    }
+    m.err.textContent = '';
+    draw();
+  };
+  const later = () => {
+    clearTimeout(timer);
+    timer = setTimeout(rebuild, 350);
+  };
+  const draw = () => {
+    const b = st.bundle;
+    if (st.question == null) q.value = b.question;
+    clipSel.value = String(b.max_body_chars);
+    if (![...clipSel.options].some((o) => o.value === String(b.max_body_chars))) clipSel.append(h('option', { value: b.max_body_chars, text: fmtTok(b.max_body_chars) + ' chars', selected: true }));
+    clear(
+      partsBox,
+      b.parts.map((p) => {
+        const box = h('input', {
+          type: 'checkbox',
+          checked: p.included,
+          onchange: () => {
+            st.exclude = box.checked ? st.exclude.filter((x) => x !== p.id) : [...st.exclude, p.id];
+            st.confirmBig = false;
+            rebuild();
+          },
+        });
+        const pre = h('pre', { class: 'askpre', hidden: true, text: p.text });
+        return h(
+          'div',
+          { class: 'askpart' + (p.included ? '' : ' off') },
+          h('label', null, box, h('span', { class: 'pl', text: p.label }), p.clipped ? h('span', { class: 'clipped', text: 'clipped' }) : null, h('span', { class: 'pt', text: '~' + fmtTok(p.tokens) + ' tokens' })),
+          h('button', { class: 'link', text: 'preview', onclick: () => (pre.hidden = !pre.hidden) }),
+          pre,
+        );
+      }),
+    );
+    const pct = Math.min(100, Math.round((b.tokens / b.budget) * 100));
+    clear(meter, h('div', { class: 'bar' + (b.over_budget ? ' over' : '') }, h('i', { style: { width: pct + '%' } })), h('span', { text: `~${fmtTok(b.tokens)} of your ${fmtTok(b.budget)}-token limit` }));
+    warn.hidden = !b.over_budget;
+    if (b.over_budget) {
+      const ok = h('input', { type: 'checkbox', checked: st.confirmBig, onchange: () => ((st.confirmBig = ok.checked), sync()) });
+      clear(
+        warn,
+        h('b', { text: `This is about ${fmtTok(b.tokens)} tokens, over your limit of ${fmtTok(b.budget)}.` }),
+        ' A large context makes answers slower and less focused. Untick parts or shorten the bodies, or ',
+        h('label', null, ok, ' send it anyway'),
+        '. The limit is in Settings › AI agents.',
+      );
+    }
+    sync();
+  };
+  const sync = () => {
+    const blocked = !st.bundle || (st.bundle.over_budget && !st.confirmBig);
+    copyBtn.disabled = blocked;
+    termBtn.disabled = blocked;
+    askBtn.disabled = blocked || !askInApp;
+  };
+
+  /* ---- view switching ---- */
+  const showCompose = () => {
+    composeView.hidden = false;
+    convoView.hidden = true;
+    copyBtn.hidden = termBtn.hidden = askBtn.hidden = false;
+    stopBtn.hidden = newBtn.hidden = true;
+    sync();
+  };
+  const showConvo = () => {
+    composeView.hidden = true;
+    convoView.hidden = false;
+    copyBtn.hidden = termBtn.hidden = askBtn.hidden = true;
+    newBtn.hidden = false;
+  };
+
   // Claude suggested an edit to the Bench draft: point to the review there.
   // Nothing has changed yet; the Bench shows the diff with Apply and Discard.
   const offerReview = async () => {
-    convo.proposed = false;
     if (subject.kind !== 'draft' || !subject.draft_id) return;
     let list = [];
     try {
       list = (await api('/api/bench/proposals?draft=' + encodeURIComponent(subject.draft_id))).proposals || [];
     } catch (_) {}
-    if (!list.length || !alive()) return;
-    add(
+    if (!list.length || !document.body.contains(cv.transcript)) return;
+    cv.add(
       h(
         'div',
         { class: 'cprop' },
@@ -8521,78 +10250,6 @@ async function askClaude(subject, opts = {}) {
     );
   };
 
-  const alive = () => document.body.contains(transcript);
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-  const pollLoop = async () => {
-    while (convo.running && alive()) {
-      let snap;
-      try {
-        snap = await api(`/api/agents/run/${convo.id}?since=${convo.since}`);
-      } catch (e) {
-        setThinking(false);
-        sayError(e.message);
-        convo.running = false;
-        break;
-      }
-      for (const ev of snap.events) {
-        convo.since = ev.seq + 1;
-        if (ev.type === 'text') {
-          dropDraft();
-          add(answer(ev.text));
-        } else if (ev.type === 'tool') {
-          add(h('div', { class: 'ctool', text: '✦ ' + ev.text }));
-        } else if (ev.type === 'proposal') {
-          add(h('div', { class: 'ctool', text: '✦ ' + ev.text }));
-          convo.proposed = true;
-        } else if (ev.type === 'error') {
-          setThinking(false);
-          sayError(ev.text);
-          offerFallback();
-        }
-      }
-      if (snap.session_id) convo.sessionId = snap.session_id;
-      if (snap.status !== 'running') {
-        convo.running = false;
-        setThinking(false);
-        const p = snap.progress;
-        if (snap.status === 'done' && p) add(h('div', { class: 'cdone', text: `Answered in ${claudeStats(p).replace(/^(.*) · ([\d:]+)$/, '$2 · $1')}` }));
-        if (convo.proposed) offerReview();
-        if (snap.status === 'done') {
-          followRow.hidden = false;
-          followIn.disabled = sendBtn.disabled = false;
-        }
-        break;
-      }
-      // Keep the working indicator alive between turns.
-      if (!thinking) setThinking(true);
-      showProgress(snap.progress);
-      await sleep(500);
-    }
-    stopBtn.hidden = true;
-  };
-
-  const runTurn = async (prompt, resume) => {
-    convo.running = true;
-    convo.since = 0;
-    stopBtn.hidden = false;
-    followIn.disabled = sendBtn.disabled = true;
-    m.err.textContent = '';
-    setThinking(true);
-    try {
-      const { id } = await api('/api/agents/run', { method: 'POST', body: { prompt, resume } });
-      convo.id = id;
-    } catch (e) {
-      setThinking(false);
-      convo.running = false;
-      stopBtn.hidden = true;
-      sayError(e.message);
-      offerFallback();
-      return;
-    }
-    pollLoop();
-  };
-
   q.addEventListener('input', () => {
     st.question = q.value;
     later();
@@ -8605,39 +10262,12 @@ async function askClaude(subject, opts = {}) {
   askBtn.onclick = () => {
     if (!st.bundle) return;
     showConvo();
-    add(bubble('user', st.bundle.question));
-    runTurn(st.bundle.prompt, null);
+    cv.start(st.bundle.prompt, st.bundle.question, { subject: subjectRef(subject) });
   };
-  sendBtn.onclick = () => {
-    const t = followIn.value.trim();
-    if (!t || convo.running) return;
-    followIn.value = '';
-    followRow.hidden = true;
-    add(bubble('user', t));
-    runTurn(t, convo.sessionId);
-  };
-  followIn.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendBtn.onclick();
-    }
-  });
-  stopBtn.onclick = async () => {
-    if (!convo.id) return;
-    convo.running = false;
-    stopBtn.hidden = true;
-    setThinking(false);
-    try {
-      await api(`/api/agents/run/${convo.id}`, { method: 'DELETE' });
-    } catch (_) {}
-    sayError('Stopped.');
-    offerFallback();
-  };
+  stopBtn.onclick = () => cv.stop();
   newBtn.onclick = () => {
-    if (convo.running) return;
-    convo.id = convo.sessionId = null;
-    clear(transcript);
-    followRow.hidden = true;
+    if (cv.isRunning()) return;
+    cv.reset();
     showCompose();
   };
   copyBtn.onclick = async () => {
