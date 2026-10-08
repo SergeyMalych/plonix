@@ -428,6 +428,9 @@ pub struct ScanRequest {
     /// like `/orders/123` lines up with the folded `/orders/{id}`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub endpoints: Vec<EndpointSel>,
+    /// Send every request as this saved user (its cookies and headers).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub as_user: Option<String>,
 }
 
 /// An endpoint a focused scan is aimed at: a method and a path. Used only to

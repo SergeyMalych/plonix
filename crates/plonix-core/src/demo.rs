@@ -908,10 +908,21 @@ export async function api(path, opts = {{}}) {{
     // second one, each with their own session cookie. Install the Saved users
     // and Access check tools from the Market to replay requests as them.
     let jar = |sess: &str| format!("bc_session={sess}; cart_state={cart_state}; consent=analytics%3D1");
-    store.set_saved_users(&[
-        SavedUser { id: "maya".into(), name: "Maya (customer)".into(), note: "The signed-in shopper from the captured traffic.".into(), headers: vec![("Cookie".into(), jar(SESSION_A))] },
-        SavedUser { id: "dana".into(), name: "Dana (another customer)".into(), note: "A second shopper, to compare what each may see.".into(), headers: vec![("Cookie".into(), jar(SESSION_B))] },
-    ])?;
+    let user = |id: &str, name: &str, note: &str, sess: &str| {
+        let mut u = SavedUser { id: id.into(), name: name.into(), note: note.into(), headers: vec![("Cookie".into(), jar(sess))], cookies: vec![], keep_fresh: true };
+        u.fold_cookie_header();
+        u
+    };
+    let mut maya = user("maya", "Maya (customer)", "The signed-in shopper from the captured traffic.", SESSION_A);
+    let mut dana = user("dana", "Dana (another customer)", "A second shopper, to compare what each may see.", SESSION_B);
+    // The session cookie belongs to the shop; Dana's is marked to run out
+    // tomorrow, and a promo cookie from an old visit has already expired.
+    for u in [&mut maya, &mut dana] {
+        u.cookies.iter_mut().filter(|c| c.name == "bc_session").for_each(|c| c.domain = "brightcart.example".into());
+    }
+    dana.cookies.iter_mut().filter(|c| c.name == "bc_session").for_each(|c| c.expires = Some(crate::users::now_secs() + 86_400));
+    dana.cookies.push(crate::users::Cookie { name: "promo".into(), value: "SPRING10".into(), domain: "brightcart.example".into(), expires: Some(crate::users::now_secs() - 3_600) });
+    store.set_saved_users(&[maya, dana])?;
 
     seed_filters(store)?;
     seed_traffic_rules(store)?;
@@ -1014,6 +1025,14 @@ mod tests {
 
         // Findings, the Bench and Lens insights.
         assert_eq!(store.findings().unwrap().len(), 5);
+
+        // Two saved users, their cookies one by one; one of Dana's has run out.
+        let users = store.saved_users().unwrap();
+        assert_eq!(users.len(), 2);
+        assert!(users.iter().all(|u| u.headers.is_empty() && u.cookies.iter().any(|c| c.name == "bc_session")));
+        let now = crate::users::now_secs();
+        assert!(users[1].cookies.iter().any(|c| !c.live(now)));
+        assert!(users[1].request_headers("api.brightcart.example", now)[0].1.contains(SESSION_B));
         let named = crate::filterpack::FilterLibrary::at(&home.root.join("filters")).load();
         let tour = store.view_state("filter_tour").unwrap().unwrap();
         for v in tour["views"].as_array().unwrap() {

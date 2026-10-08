@@ -12,6 +12,10 @@ use crate::codec;
 use crate::model::*;
 use crate::query::Query;
 use crate::replace::Rule as ReplaceRule;
+
+/// Serialises changes to the saved users, so cookies a response sets are not
+/// lost to a save that read the users a moment earlier.
+static USERS: Mutex<()> = Mutex::new(());
 use crate::exclude::Group;
 use crate::scope::{Decision, Evidence, EvidenceKind, NewEvidence, Rule, ScopeRules, Suggestion};
 
@@ -610,19 +614,51 @@ impl Store {
         Ok(f)
     }
 
-    // ---- saved users (the cookie jar) ------------------------------------
+    // ---- saved users ------------------------------------------------------
 
     /// The saved users for this project, in the order the person arranged
     /// them. Stored in the project database next to everything else it holds.
     pub fn saved_users(&self) -> Result<Vec<crate::users::SavedUser>> {
         let Some(v) = self.view_state("users")? else { return Ok(vec![]) };
-        Ok(v.get("users").and_then(|u| serde_json::from_value(u.clone()).ok()).unwrap_or_default())
+        let mut users: Vec<crate::users::SavedUser> = v.get("users").and_then(|u| serde_json::from_value(u.clone()).ok()).unwrap_or_default();
+        users.iter_mut().for_each(|u| u.fold_cookie_header());
+        Ok(users)
     }
 
     /// Replaces the saved users. The caller validates them with
     /// [`crate::users::check`] first.
     pub fn set_saved_users(&self, users: &[crate::users::SavedUser]) -> Result<()> {
+        let _jar = USERS.lock().unwrap();
         self.set_view_state("users", &serde_json::json!({ "users": users }))
+    }
+
+    /// The saved user the person is acting as, if any: browser traffic to
+    /// in-scope hosts, new Bench tabs and Scans are sent as this user.
+    pub fn acting_user(&self) -> Result<Option<crate::users::SavedUser>> {
+        let Some(id) = self.view_state("acting_user")?.and_then(|v| v.get("id").and_then(|i| i.as_str()).map(String::from)) else {
+            return Ok(None);
+        };
+        Ok(self.saved_users()?.into_iter().find(|u| u.id == id))
+    }
+
+    pub fn set_acting_user(&self, id: Option<&str>) -> Result<()> {
+        self.set_view_state("acting_user", &serde_json::json!({ "id": id }))
+    }
+
+    /// Takes the cookies a server set, in answer to a request sent to `host`
+    /// as saved user `id`, into that user. Does nothing for a user that is
+    /// gone or does not keep its cookies fresh.
+    pub fn absorb_cookies(&self, id: &str, host: &str, resp_headers: &[(String, String)]) -> Result<()> {
+        if !resp_headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("set-cookie")) {
+            return Ok(());
+        }
+        let _jar = USERS.lock().unwrap();
+        let mut users = self.saved_users()?;
+        let Some(u) = users.iter_mut().find(|u| u.id == id && u.keep_fresh) else { return Ok(()) };
+        if u.absorb(host, resp_headers, crate::users::now_secs()) {
+            self.set_view_state("users", &serde_json::json!({ "users": users }))?;
+        }
+        Ok(())
     }
 
     // ---- saved view state -------------------------------------------------
