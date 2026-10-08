@@ -29,8 +29,7 @@
   --faint: #8b8ea8;
   --indigo: #4b55d6;       /* the logo's own indigo */
   --indigo-deep: #4b55d6;
-  --glow: #8f7bff;         /* hero light */
-  --glow-2: #ff9d7a;       /* warm counter-light */
+  --wash: #4b55d6;         /* the one tint behind the hero: the brand indigo, never a second hue */
   --amber: #f7c64f;        /* "spotted" highlight, as in the Lens */
   --tag: #a86400;
   --green: #11a36a;
@@ -49,7 +48,7 @@
   :root:not([data-theme="light"]) {
     --ink: #0d0e13; --ink-2: #15161e; --ink-3: #1d1f2a; --line: #292b39;
     --fg: #ecedf4; --muted: #a2a5bb; --faint: #6f7289;
-    --indigo: #8b93ff; --indigo-deep: #4b55d6; --glow: #5b4bd6; --glow-2: #c4553a;
+    --indigo: #8b93ff; --indigo-deep: #4b55d6; --wash: #4b55d6;
     --amber: #f5bd55; --tag: #f5bd55; --green: #45d197; --red: #ff7a85;
     --code-fg: #c9cbe0; --code-key: #a9a3ff; --code-enc: #7c7f99; --decoded-bg: #1c1e2b;
     --tok-fg: #cdd0ff; --tok-ex: #ffc2c6; --tok-txt: #ffe2a8;
@@ -61,7 +60,7 @@
 :root[data-theme="dark"] {
     --ink: #0d0e13; --ink-2: #15161e; --ink-3: #1d1f2a; --line: #292b39;
     --fg: #ecedf4; --muted: #a2a5bb; --faint: #6f7289;
-    --indigo: #8b93ff; --indigo-deep: #4b55d6; --glow: #5b4bd6; --glow-2: #c4553a;
+    --indigo: #8b93ff; --indigo-deep: #4b55d6; --wash: #4b55d6;
     --amber: #f5bd55; --tag: #f5bd55; --green: #45d197; --red: #ff7a85;
     --code-fg: #c9cbe0; --code-key: #a9a3ff; --code-enc: #7c7f99; --decoded-bg: #1c1e2b;
     --tok-fg: #cdd0ff; --tok-ex: #ffc2c6; --tok-txt: #ffe2a8;
@@ -80,6 +79,12 @@ body {
 }
 img { max-width: 100%; height: auto; display: block; }
 a { color: inherit; }
+[id] { scroll-margin-top: 84px; }
+.skip { position: absolute; left: 16px; top: -60px; z-index: 30; padding: 10px 16px; border-radius: 10px; background: var(--indigo-deep); color: #fff; font-weight: 600; text-decoration: none; transition: top .15s ease; }
+.skip:focus-visible { top: 12px; }
+/* faint film grain over the whole page; fixed so it never repaints on scroll */
+body::after { content: ""; position: fixed; inset: 0; z-index: 40; pointer-events: none; opacity: .035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
 :focus-visible { outline: 2px solid var(--indigo); outline-offset: 3px; border-radius: 6px; }
 .wrap { max-width: var(--wrap); margin: 0 auto; padding-inline: 24px; }
 @media (max-width: 520px) { .wrap { padding-inline: 16px; } }
@@ -115,6 +120,7 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
   transition: transform .15s ease, background .15s ease, border-color .15s ease;
 }
 .btn:hover { border-color: var(--indigo); transform: translateY(-1px); }
+.btn:active { transform: translateY(0) scale(.98); }
 .btn.primary { background: var(--indigo-deep); border-color: var(--indigo-deep); color: #fff; box-shadow: 0 8px 30px -8px color-mix(in srgb, var(--indigo-deep) 80%, transparent); }
 .btn.primary:hover { background: #5862e6; }
 .btn.small { height: 36px; padding-inline: 14px; font-size: 0.9rem; border-radius: 10px; }
@@ -125,26 +131,20 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
 .hero { position: relative; padding-block: 76px 40px; }
 .hero::before {
   content: ""; position: absolute; inset: -120px 0 auto 0; height: 820px; z-index: -1; pointer-events: none;
-  background:
-    radial-gradient(540px 400px at 78% 40%, color-mix(in srgb, var(--glow) 28%, transparent), transparent 70%),
-    radial-gradient(380px 300px at 92% 8%, color-mix(in srgb, var(--glow-2) 22%, transparent), transparent 70%),
-    radial-gradient(420px 300px at 8% 8%, color-mix(in srgb, var(--glow) 12%, transparent), transparent 70%);
+  background: radial-gradient(620px 420px at 76% 42%, color-mix(in srgb, var(--wash) 13%, transparent), transparent 72%);
 }
 .hero-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr); gap: 56px; align-items: center; }
 .hero h1 { font-size: clamp(2.6rem, 5.3vw, 4.5rem); margin-top: 22px; }
 .hero h1 .ring { color: var(--indigo); }
 .hero .lede { margin-top: 24px; font-size: 1.2rem; }
 .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; }
-.meta-row { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 26px; color: var(--faint); font: 0.82rem var(--mono); }
-.meta-row span { display: inline-flex; gap: 7px; align-items: center; }
-.meta-row span::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
 @media (max-width: 940px) { .hero-grid { grid-template-columns: minmax(0, 1fr); gap: 44px; } .hero { padding-block: 48px 24px; } }
 
 /* the lens demo */
 .lensbox {
   position: relative; border-radius: 18px; background: var(--ink-2); border: 1px solid var(--line);
   box-shadow: 0 40px 90px -30px var(--shadow);
-  overflow: hidden; touch-action: pan-y; cursor: none;
+  overflow: hidden; touch-action: pan-y; cursor: crosshair;
 }
 .lensbox-bar {
   display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line);
@@ -194,7 +194,16 @@ section.block { padding-block: 110px; }
 .head { display: grid; gap: 18px; max-width: 760px; }
 
 /* ---------- features ---------- */
-.fgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: 52px; }
+.fgrid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 20px; margin-top: 52px; }
+.fgrid > :nth-child(1), .fgrid > :nth-child(6) { grid-column: span 4; }
+.fgrid > :nth-child(2), .fgrid > :nth-child(5) { grid-column: span 2; }
+.fgrid > :nth-child(3), .fgrid > :nth-child(4) { grid-column: span 3; }
+/* wide tiles read sideways: words first, the picture beside them */
+.fcard.wide { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); grid-template-rows: auto; align-items: center; gap: 28px; padding: 14px 14px 14px 24px; }
+.fcard.wide .txt { order: -1; padding-inline: 0; }
+.fcard.wide .demo { height: auto; min-height: 196px; align-self: stretch; }
+.fcard.tint { background: color-mix(in srgb, var(--indigo-deep) 7%, var(--ink-2)); border-color: color-mix(in srgb, var(--indigo) 28%, var(--line)); }
+.fcard.tint .demo { background: color-mix(in srgb, var(--indigo-deep) 10%, var(--ink-3)); }
 .fcard { display: grid; grid-template-rows: auto 1fr; gap: 20px; background: var(--ink-2); border: 1px solid var(--line); border-radius: 18px; padding: 14px 14px 24px; text-decoration: none; transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease; }
 .fcard:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--indigo) 45%, var(--line)); box-shadow: 0 24px 50px -30px var(--shadow); }
 .fcard .txt { display: grid; gap: 8px; padding-inline: 10px; align-content: start; }
@@ -233,15 +242,24 @@ section.block { padding-block: 110px; }
 .demo .checks span::before { content: "\2713  "; color: var(--green); }
 .facts2 { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
 .facts2 span { font: .8rem var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; }
-@media (max-width: 980px) { .fgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 620px) { .fgrid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 980px) {
+  .fgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fgrid > * { grid-column: span 1 !important; }
+  .fgrid > .wide { grid-column: span 2 !important; }
+}
+@media (max-width: 620px) {
+  .fgrid { grid-template-columns: minmax(0, 1fr); }
+  .fgrid > .wide { grid-column: span 1 !important; }
+  .fcard.wide { grid-template-columns: minmax(0, 1fr); gap: 20px; padding: 14px 14px 24px; }
+  .fcard.wide .txt { order: 0; padding-inline: 10px; }
+  .fcard.wide .demo { min-height: 0; height: 168px; }
+}
 
 /* ---------- flow ---------- */
 .flow { list-style: none; padding: 0; margin: 40px 0 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: var(--ink-2); border: 1px solid var(--line); border-radius: 18px; }
 .flow li { position: relative; padding: 24px 22px 26px; display: grid; gap: 6px; align-content: start; }
 .flow li + li { border-left: 1px solid var(--line); }
 .flow li + li::before { content: "\203A"; position: absolute; left: -13px; top: 26px; width: 24px; height: 24px; border-radius: 50%; background: var(--ink-2); border: 1px solid var(--line); display: grid; place-items: center; color: var(--indigo); font: 600 1rem/1 var(--body); }
-.flow .n { font: 500 .72rem var(--mono); color: var(--faint); }
 .flow b { font: 600 1.2rem var(--display); letter-spacing: -.01em; }
 .flow i { justify-self: start; font: normal .72rem var(--mono); color: var(--tok-fg); background: color-mix(in srgb, var(--indigo) 12%, transparent); border-radius: 999px; padding: 2px 9px; }
 .flow span { color: var(--muted); font-size: .9rem; margin-top: 4px; }
@@ -267,11 +285,17 @@ section.block { padding-block: 110px; }
 .ticks { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 12px; }
 .ticks li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; color: var(--fg); font-size: .98rem; }
 .ticks li::before { content: ""; width: 10px; height: 10px; margin-top: 8px; border-radius: 50%; border: 2px solid var(--indigo); }
-.ticks li span { color: var(--muted); }
+.ticks li span { display: block; color: var(--muted); font-size: .9rem; margin-top: 2px; }
 .light-shot { border-radius: 14px; overflow: hidden; border: 1px solid var(--line); box-shadow: 0 40px 90px -36px var(--shadow); background: #f4f5f9; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { font: 0.8rem var(--mono); padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--ink-2); display: inline-flex; align-items: center; gap: 7px; }
-.chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--c, var(--indigo)); }
+.feature.stack { grid-template-columns: minmax(0, 1fr); gap: 40px; }
+.feature.stack .copy { max-width: 880px; }
+.feature.stack .copy > p { max-width: 68ch; }
+.feature.stack .light-shot img { width: 100%; }
+.fcard.wide .big { font-size: 3.4rem; }
+.feature.stack .ticks { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 28px; }
+@media (max-width: 900px) { .feature.stack .ticks { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 900px) {
   .feature, .feature.flip { grid-template-columns: minmax(0, 1fr); gap: 36px; }
   .feature.flip .copy { order: 0; }
@@ -316,7 +340,7 @@ section.block { padding-block: 110px; }
 .term .ok { color: #45d197; }
 .term .q { color: #f5bd55; }
 .guard { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin-top: 28px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
-.guard div { padding: 20px 22px; display: grid; gap: 6px; }
+.guard div { padding: 20px 22px; display: grid; gap: 6px; align-content: start; }
 .guard div + div { border-left: 1px solid var(--line); }
 .guard b { font: 600 1.05rem var(--display); }
 .guard span { color: var(--muted); font-size: .93rem; }
@@ -364,11 +388,9 @@ footer a:hover { color: var(--fg); }
 .mr-pick { display: flex; flex-direction: column; gap: 8px; }
 @media (max-width: 760px) { .mr-pick { flex-direction: row; flex-wrap: wrap; } }
 .mr-pick button { display: flex; align-items: center; gap: 11px; text-align: left; font: 500 1rem/1.3 var(--body); color: var(--muted); background: var(--ink-2); border: 1px solid var(--line); border-radius: 13px; padding: 13px 15px; cursor: pointer; transition: border-color .18s, color .18s, background .18s; }
-.mr-pick button .mi { flex: none; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; background: var(--ink-3); color: var(--faint); }
 .mr-pick button:hover { color: var(--fg); border-color: color-mix(in srgb, var(--indigo) 45%, var(--line)); }
 .mr-pick button[aria-selected="true"] { color: var(--fg); background: color-mix(in srgb, var(--indigo) 9%, var(--ink-2)); border-color: var(--indigo); }
-.mr-pick button[aria-selected="true"] .mi { background: color-mix(in srgb, var(--indigo) 18%, var(--ink-3)); color: var(--indigo); }
-@media (max-width: 760px) { .mr-pick button { flex: 1 1 auto; } .mr-pick button .mi { display: none; } }
+@media (max-width: 760px) { .mr-pick button { flex: 1 1 auto; } }
 
 .mr-stage { background: var(--ink-2); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 1px 2px #0000000d, 0 18px 40px var(--shadow); overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
 .mr-bar { display: flex; align-items: center; gap: 10px; padding: 11px 16px; border-bottom: 1px solid var(--line); background: var(--chrome); font: 500 .82rem/1 var(--mono); color: var(--muted); }
@@ -382,10 +404,9 @@ footer a:hover { color: var(--fg); }
 .mr-sugg { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 18px; border-top: 1px dashed color-mix(in srgb, var(--line) 80%, transparent); }
 .mr-lbl { font: 600 .66rem/1 var(--body); letter-spacing: .09em; text-transform: uppercase; color: var(--faint); }
 .mr-chip { display: inline-flex; align-items: center; gap: 8px; font: 500 .92rem/1 var(--body); color: var(--indigo); background: color-mix(in srgb, var(--indigo) 10%, var(--ink-2)); border: 1px solid color-mix(in srgb, var(--indigo) 55%, var(--line)); border-radius: 999px; padding: 8px 15px; cursor: pointer; transition: transform .12s, box-shadow .18s; }
-.mr-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .mr-chip.warn { color: var(--tag); background: color-mix(in srgb, var(--amber) 14%, var(--ink-2)); border-color: color-mix(in srgb, var(--amber) 60%, var(--line)); }
 .mr-chip:hover { box-shadow: 0 4px 14px var(--ring-glow); transform: translateY(-1px); }
-.mr-chip:active { transform: translateY(0); }
+.mr-chip:active { transform: translateY(0) scale(.98); }
 .mr-does { padding: 0 18px 15px; color: var(--muted); font-size: .98rem; }
 .mr-does b { color: var(--fg); font-weight: 600; }
 .mr-result { margin: 0 18px 18px; padding: 11px 14px; border-radius: 11px; background: color-mix(in srgb, var(--green) 12%, var(--ink-2)); border: 1px solid color-mix(in srgb, var(--green) 40%, var(--line)); color: var(--fg); font-size: .94rem; display: flex; align-items: center; gap: 10px; }
@@ -395,6 +416,7 @@ footer a:hover { color: var(--fg); }
 </style>
 </head>
 <body>
+<a class="skip" href="#top">Skip to content</a>
 
 <header class="nav">
   <div class="wrap">
@@ -424,18 +446,15 @@ footer a:hover { color: var(--fg); }
 <section class="hero">
   <div class="wrap hero-grid">
     <div>
-      <span class="eyebrow">Open source · Native on macOS</span>
+      <span class="eyebrow">Open-source web security workbench for macOS</span>
       <h1>Look closer at every request.</h1>
-      <p class="lede">Plonix is a web security workbench for the Mac. It captures everything your browser does, learns the real shape of the target while you explore it, and helps you search, replay and prove what you find. From a window, a terminal, or an AI agent.</p>
+      <p class="lede">Capture every request, map the target as you browse, and prove what you find. From a window, a terminal or an agent.</p>
       <div class="cta-row">
         <a class="btn primary" href="#start">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M6 10l6 6 6-6M5 20h14"/></svg>
-          Get Plonix for Mac
+          Download for Mac
         </a>
         <a class="btn" href="https://github.com/SergeyMalych/plonix">Star on GitHub</a>
-      </div>
-      <div class="meta-row" aria-label="Facts">
-        <span>Apache-2.0</span><span>Rust engine</span><span>CLI + local API</span><span>Built-in MCP</span>
       </div>
     </div>
 
@@ -457,7 +476,7 @@ footer a:hover { color: var(--fg); }
   <div class="wrap">
     <div class="shot">
       <div class="bar"><i></i><i></i><i></i><span>Plonix · shop.acme.test</span></div>
-      <img src="assets/window.webp" width="1440" height="900" alt="The Plonix window: live traffic with a search filter, a suggestion to add a new domain to scope with its evidence, and the Lens showing a request and its response.">
+      <img src="assets/window.webp" width="1440" height="900" fetchpriority="high" alt="The Plonix window: live traffic with a search filter, a suggestion to add a new domain to scope with its evidence, and the Lens showing a request and its response.">
     </div>
     <p class="shot-caption">The Plonix window, capturing. A new domain is suggested for scope with the evidence behind it.</p>
   </div>
@@ -466,11 +485,10 @@ footer a:hover { color: var(--fg); }
 <section class="block" id="features">
   <div class="wrap">
     <div class="head reveal">
-      <span class="eyebrow">Why Plonix</span>
       <h2>Everything a web assessment needs. Nothing it doesn't.</h2>
     </div>
     <div class="fgrid reveal">
-      <a class="fcard" href="#agents">
+      <a class="fcard wide" href="#agents">
         <div class="demo"><div class="dark"><div><span class="p">$</span> plonix connect claude</div><div><span class="ok">&#10003;</span> Claude Code connected &middot; read-only</div></div><span class="pillbtn">Ask Claude Code</span></div>
         <div class="txt"><h3>AI-first, built for Claude Code</h3><p>Built-in MCP gives Claude Code your live traffic, scope and findings in one command. Ask about any request with one click.</p><span class="more">AI and agents &rarr;</span></div>
       </a>
@@ -482,15 +500,15 @@ footer a:hover { color: var(--fg); }
         <div class="demo"><div class="tiles"><div class="tile"><b>api-kit</b><span>Bundle</span><i>&#10003; Verified</i></div><div class="tile"><b>leaks</b><span>Filter pack</span><i>&#10003; Verified</i></div><div class="tile"><b>check-scope</b><span>Skill</span><i>&#10003; Built in</i></div></div><div class="row1"><span class="on" style="margin:0">&#10003;</span> Signed &middot; checked before install</div></div>
         <div class="txt"><h3>A community Market for everything modular</h3><p>Skills, rule packs, filter packs and bundles, maintained by the community and signed before they install.</p><span class="more">Market &rarr;</span></div>
       </a>
-      <a class="fcard" href="#search">
-        <div class="demo"><div class="qb">status:5xx method:POST -is:trackers</div><div class="chips2"><span class="c in">+ Auth flows</span><span class="c in">+ host:api.acme.test</span><span class="c out">&minus; Analytics &amp; trackers</span><span class="c out">&minus; static files</span></div></div>
-        <div class="txt"><h3>Advanced filtering</h3><p>Type a query or click chips to show only or hide. Save named filters, and use the same query in the CLI and API.</p><span class="more">Filtering &rarr;</span></div>
-      </a>
       <a class="fcard" href="#scope">
         <div class="demo"><div class="sug"><div><b>static.acmecdn.test</b> looks like part of your target</div><div>&#8599; called from shop.acme.test &middot; shares a certificate</div><div class="btns"><span class="acc">Accept</span><span>+ subdomains</span><span class="rej">Reject</span></div></div></div>
         <div class="txt"><h3>Scope that works, and stays easy</h3><p>Scope grows as you browse, with evidence for every suggestion. One click to accept or reject, and noise like trackers is excluded for you.</p><span class="more">Adaptive scope &rarr;</span></div>
       </a>
-      <a class="fcard" href="#start">
+      <a class="fcard" href="#search">
+        <div class="demo"><div class="qb">status:5xx method:POST -is:trackers</div><div class="chips2"><span class="c in">+ Auth flows</span><span class="c in">+ host:api.acme.test</span><span class="c out">&minus; Analytics &amp; trackers</span><span class="c out">&minus; static files</span></div></div>
+        <div class="txt"><h3>Advanced filtering</h3><p>Type a query or click chips to show only or hide. Save named filters, and use the same query in the CLI and API.</p><span class="more">Filtering &rarr;</span></div>
+      </a>
+      <a class="fcard wide tint" href="#start">
         <div class="demo"><div class="big">&lt;60s<small>download to captured traffic</small></div><div class="checks"><span>Certificate</span><span>Proxy</span><span>Scope</span><span>Browser</span></div></div>
         <div class="txt"><h3>Friendly from the first minute</h3><p>One click or one command sets up the certificate, proxy, scope and a capture browser. A real Mac app with shortcuts you already know.</p><span class="more">Get started &rarr;</span></div>
       </a>
@@ -502,15 +520,14 @@ footer a:hover { color: var(--fg); }
 <section class="block" id="flow" style="padding-block:40px 30px">
   <div class="wrap">
     <div class="head reveal">
-      <span class="eyebrow">How it works</span>
       <h2>From first request to proven finding.</h2>
     </div>
     <ol class="flow reveal">
-      <li><span class="n">1</span><b>Capture</b><i>Traffic</i><span>Every request and response, HTTPS included.</span></li>
-      <li><span class="n">2</span><b>Discover</b><i>Scope &middot; Map</i><span>Domains, hosts, endpoints and tech.</span></li>
-      <li><span class="n">3</span><b>Investigate</b><i>Search &middot; Lens</i><span>Filter fast, decode as you read.</span></li>
-      <li><span class="n">4</span><b>Experiment</b><i>Bench</i><span>Edit, send, branch and compare.</span></li>
-      <li><span class="n">5</span><b>Validate</b><i>Findings</i><span>Write it up with the proof attached.</span></li>
+      <li><b>Capture</b><i>Traffic</i><span>Every request and response, HTTPS included.</span></li>
+      <li><b>Discover</b><i>Scope &middot; Map</i><span>Domains, hosts, endpoints and tech.</span></li>
+      <li><b>Investigate</b><i>Search &middot; Lens</i><span>Filter fast, decode as you read.</span></li>
+      <li><b>Experiment</b><i>Bench</i><span>Edit, send, branch and compare.</span></li>
+      <li><b>Validate</b><i>Findings</i><span>Write it up with the proof attached.</span></li>
     </ol>
   </div>
 </section>
@@ -523,45 +540,43 @@ footer a:hover { color: var(--fg); }
         <h2>Scope that learns the target while you browse.</h2>
         <p>Static allow-lists assume you already know every domain an app uses. You find out by using it. Plonix records everything, then suggests domains to bring into scope, each one backed by evidence you can click.</p>
         <ul class="ticks">
-          <li><div>Called from an in-scope page <span>· Referer or Origin</span></div></li>
-          <li><div>Redirected or linked <span>· Location, page links, CSP</span></div></li>
-          <li><div>Shares a session or a certificate <span>· tokens and TLS SANs</span></div></li>
-          <li><div>Enforced in one place <span>· replays, sends and agents can only reach accepted hosts</span></div></li>
+          <li><div>Called from an in-scope page <span>Referer or Origin</span></div></li>
+          <li><div>Redirected or linked <span>Location, page links, CSP</span></div></li>
+          <li><div>Shares a session or a certificate <span>tokens and TLS SANs</span></div></li>
+          <li><div>Enforced in one place <span>replays, sends and agents can only reach accepted hosts</span></div></li>
         </ul>
       </div>
-      <div class="light-shot"><img src="assets/scope.webp" width="1600" height="893" alt="The Scope screen: four suggested domains, each with the evidence that it was called from an in-scope page, and buttons to accept or reject."></div>
+      <div class="light-shot"><img src="assets/scope.webp" loading="lazy" width="1600" height="893" alt="The Scope screen: four suggested domains, each with the evidence that it was called from an in-scope page, and buttons to accept or reject."></div>
     </div>
 
-    <div class="feature flip reveal" id="lens">
+    <div class="feature stack reveal" id="lens">
       <div class="copy">
-        <span class="eyebrow">Lens</span>
         <h2>It points at what matters before you go looking.</h2>
         <p>The Lens shows the selected request and its response, decoded and pretty-printed. Above them, Plonix lists what it spotted. Click one to highlight it in place, copy the decoded value, or find it across everything you captured.</p>
         <div class="chips">
           <span class="chip">JWT</span>
-          <span class="chip" style="--c:var(--amber)">Base64 · hex · URL-encoded</span>
-          <span class="chip" style="--c:var(--red)">Leaked secrets</span>
-          <span class="chip" style="--c:var(--green)">Emails · card numbers</span>
-          <span class="chip" style="--c:#b48cff">Basic auth</span>
-          <span class="chip" style="--c:#6fc3ff">Internal IPs</span>
+          <span class="chip">Base64, hex, URL-encoded</span>
+          <span class="chip">Leaked secrets</span>
+          <span class="chip">Emails and card numbers</span>
+          <span class="chip">Basic auth</span>
+          <span class="chip">Internal IPs</span>
         </div>
         <p style="font-size:.93rem">Detection runs locally, on traffic you already captured. A token's signature is never claimed valid.</p>
       </div>
-      <div class="light-shot"><img src="assets/lens.webp" width="1108" height="550" alt="The Lens with a JWT spotted in the authorization header, its header and payload decoded, and the token highlighted in the request."></div>
+      <div class="light-shot"><img src="assets/lens.webp" loading="lazy" width="1108" height="550" alt="The Lens with a JWT spotted in the authorization header, its header and payload decoded, and the token highlighted in the request."></div>
     </div>
 
-    <div class="feature reveal" id="bench">
+    <div class="feature flip reveal" id="bench">
       <div class="copy">
-        <span class="eyebrow">Bench</span>
         <h2>Experiments, kept and comparable.</h2>
         <p>Press <code>b</code> on any request to take it to the Bench. Edit it, send it, and every send stays in that tab's history. Restore or branch any earlier send into a new tab, and put two sends side by side to see what changed.</p>
         <ul class="ticks">
           <li><div>Side-by-side response and request diff</div></li>
-          <li><div>Sends only reach in-scope hosts <span>· accept a host right there</span></div></li>
+          <li><div>Sends only reach in-scope hosts <span>accept a host right there</span></div></li>
           <li><div>Turn a send into a finding in one click</div></li>
         </ul>
       </div>
-      <div class="light-shot"><img src="assets/bench.webp" width="1108" height="747" alt="The Bench: a POST request on the left, its JSON response on the right, and the send history below with Restore, Branch and Finding buttons."></div>
+      <div class="light-shot"><img src="assets/bench.webp" loading="lazy" width="1108" height="747" alt="The Bench: a POST request on the left, its JSON response on the right, and the send history below with Restore, Branch and Finding buttons."></div>
     </div>
   </div>
 </section>
@@ -569,14 +584,13 @@ footer a:hover { color: var(--fg); }
 <section class="block search-band" id="search">
   <div class="wrap">
     <div class="head reveal">
-      <span class="eyebrow">Search</span>
       <h2>Filters you can type.</h2>
       <p class="lede">A small query language over URLs, headers and decoded bodies. Search stays quick as a project grows, because every project has its own database. The same query works in the window, the CLI and the API.</p>
     </div>
     <div class="qbox reveal">
       <label class="qbar" for="q">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="q" type="text" spellcheck="false" autocomplete="off" value="host:api.acme.com method:POST status:5xx -logout" aria-label="Try a query">
+        <input id="q" name="q" type="text" spellcheck="false" autocomplete="off" value="host:api.acme.com method:POST status:5xx -logout" aria-label="Try a query">
         <span class="count" id="qcount"></span>
       </label>
       <div class="qexamples" role="group" aria-label="Example queries">
@@ -594,9 +608,8 @@ footer a:hover { color: var(--fg); }
 <section class="block" id="actions">
   <div class="wrap">
     <div class="head reveal">
-      <span class="eyebrow">Quick actions</span>
       <h2>Quick actions that read the room.</h2>
-      <p class="lede">A set of one-click actions that surface the single most useful next step for whatever is on screen — the right chip, in the right pane, at the moment you notice something. Nothing fires on its own: you click to run, and anything that sends stays in scope.</p>
+      <p class="lede">A set of one-click actions that surface the single most useful next step for whatever is on screen: the right chip, in the right pane, at the moment you notice something. Nothing fires on its own: you click to run, and anything that sends stays in scope.</p>
     </div>
     <div class="mr reveal" id="mr">
       <div class="mr-pick" role="tablist" aria-label="Pick a moment"></div>
@@ -608,7 +621,7 @@ footer a:hover { color: var(--fg); }
         <div class="mr-result" id="mrresult" hidden></div>
       </div>
     </div>
-    <p class="mr-note">Pick a moment, then click the chip to see what one click does. This is a preview — the real actions live in the app.</p>
+    <p class="mr-note">Pick a moment, then click the chip to see what one click does. This is a preview. The real actions live in the app.</p>
   </div>
 </section>
 
@@ -632,7 +645,7 @@ footer a:hover { color: var(--fg); }
   returned errors, then read the most interesting
   request and tell me what stands out.</span></pre>
       </div>
-      <div class="light-shot"><img src="assets/ask.webp" width="1520" height="950" alt="The Ask Claude Code dialog: a question, the request, response, spotted values and detected technologies it will share, each with a token count, and a context limit."></div>
+      <div class="light-shot"><img src="assets/ask.webp" loading="lazy" width="1520" height="950" alt="The Ask Claude Code dialog: a question, the request, response, spotted values and detected technologies it will share, each with a token count, and a context limit."></div>
     </div>
     <div class="guard reveal">
       <div><b>Read-only by default</b><span>Agents sign in with their own token. Anything but reading is refused by the engine.</span></div>
@@ -644,14 +657,13 @@ footer a:hover { color: var(--fg); }
 
 <section class="block" id="projects" style="padding-top:0">
   <div class="wrap">
-    <div class="feature flip reveal">
+    <div class="feature stack reveal">
       <div class="copy">
-        <span class="eyebrow">Projects</span>
         <h2>Several targets open, nothing colliding.</h2>
         <p>A project is a folder you choose. It holds its own traffic, scope, findings and settings. Open several at once: each gets its own window, proxy port, API and database. Trust the certificate once and it covers them all.</p>
         <p style="font-size:.93rem">Turn on <b style="color:var(--fg);font-weight:600">Keep only in-scope traffic</b> and out-of-scope requests are deleted from disk when the project closes.</p>
       </div>
-      <div class="light-shot"><img src="assets/projects.webp" width="1600" height="432" alt="The Projects screen with two open projects, Shop API on proxy port 8081 and Acme staging on port 8080."></div>
+      <div class="light-shot"><img src="assets/projects.webp" loading="lazy" width="1600" height="432" alt="The Projects screen with two open projects, Shop API on proxy port 8081 and Acme staging on port 8080."></div>
     </div>
   </div>
 </section>
@@ -660,17 +672,16 @@ footer a:hover { color: var(--fg); }
   <div class="wrap">
     <div class="feature reveal">
       <div class="copy">
-        <span class="eyebrow">Market</span>
         <h2>Add what you need, and know where it came from.</h2>
         <p>One catalog for everything modular: skills that tell an agent how to do a job, rule packs that recognise technologies, filter packs like <code>is:auth</code>, and bundles that install a set together. Open it with <code>⌘7</code> or run <code>plonix market</code>.</p>
         <ul class="ticks">
-          <li><div>Signed by the Plonix maintainers <span>· every file is checked before anything installs</span></div></li>
-          <li><div>Clear labels <span>· Verified, Built in, Not verified, Changed</span></div></li>
-          <li><div>Nothing runs code <span>· skills are text and packs are data</span></div></li>
-          <li><div>Host your own <span>· a team Market with its own signing key</span></div></li>
+          <li><div>Signed by the Plonix maintainers <span>every file is checked before anything installs</span></div></li>
+          <li><div>Clear labels <span>Verified, Built in, Not verified, Changed</span></div></li>
+          <li><div>Nothing runs code <span>skills are text and packs are data</span></div></li>
+          <li><div>Host your own <span>a team Market with its own signing key</span></div></li>
         </ul>
       </div>
-      <div class="light-shot"><img src="assets/market.webp" width="1600" height="940" alt="The Market: skills, rule packs, filter packs, a bundle and an extension, each marked Built in or Verified, with Remove buttons on installed items."></div>
+      <div class="light-shot"><img src="assets/market.webp" loading="lazy" width="1600" height="940" alt="The Market: skills, rule packs, filter packs, a bundle and an extension, each marked Built in or Verified, with Remove buttons on installed items."></div>
     </div>
   </div>
 </section>
@@ -679,7 +690,6 @@ footer a:hover { color: var(--fg); }
   <div class="wrap">
     <div class="feature reveal">
       <div class="copy">
-        <span class="eyebrow">Programmable everywhere</span>
         <h2>Anything you can click, you can script.</h2>
         <p>The window, the <code>plonix</code> command and agents are equal clients of one local API. Every command takes <code>--json</code>, and exit codes tell a script what happened, down to a request refused by scope.</p>
         <p style="font-size:.93rem">The API listens on loopback only and needs a token from <code>~/.plonix/api-token</code>.</p>
@@ -688,7 +698,7 @@ footer a:hover { color: var(--fg); }
         <div class="tabs" role="tablist" aria-label="Examples">
           <button type="button" role="tab" aria-selected="true" data-tab="cli">CLI</button>
           <button type="button" role="tab" aria-selected="false" data-tab="api">API</button>
-          <button type="button" class="copybtn" id="copy">Copy</button>
+          <button type="button" class="copybtn" id="copy" aria-live="polite">Copy</button>
         </div>
 <pre data-panel="cli"><span class="p">$ </span>plonix search host:acme.test status:5xx
 <span class="p">$ </span>plonix show 42
@@ -754,6 +764,7 @@ footer a:hover { color: var(--fg); }
       <a href="docs/">Docs</a>
       <a href="https://github.com/SergeyMalych/plonix/releases">Releases</a>
       <a href="https://github.com/SergeyMalych/plonix/issues">Issues</a>
+      <a href="docs/privacy.html">Privacy</a>
     </nav>
   </div>
 </footer>
@@ -796,7 +807,10 @@ footer a:hover { color: var(--fg); }
   pane.addEventListener('pointermove', move);
   pane.addEventListener('pointerdown', move);
   if (!reduce) {
+    // The drift only runs while the demo is on screen.
+    let onScreen = true, running = false;
     const tick = () => {
+      if (!onScreen) { running = false; return; }
       const r = pane.getBoundingClientRect();
       if (auto) {
         t += 0.0065;
@@ -805,13 +819,19 @@ footer a:hover { color: var(--fg); }
       if (target) { pos.x += (target.x - pos.x) * 0.12; pos.y += (target.y - pos.y) * 0.12; set(pos.x, pos.y); }
       requestAnimationFrame(tick);
     };
-    requestAnimationFrame(tick);
+    const start = () => { if (!running) { running = true; requestAnimationFrame(tick); } };
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(([e]) => { onScreen = e.isIntersecting; if (onScreen) start(); }).observe(box);
+    }
+    start();
   }
 
   /* ---- showcase flattens as it scrolls in ---- */
   const show = document.getElementById('showcase');
-  const flat = () => { const r = show.getBoundingClientRect(); if (r.top < innerHeight * 0.55) { show.classList.add('flat'); removeEventListener('scroll', flat); } };
-  addEventListener('scroll', flat, { passive: true }); flat();
+  if ('IntersectionObserver' in window) {
+    const fo = new IntersectionObserver(([e]) => { if (e.isIntersecting) { show.classList.add('flat'); fo.disconnect(); } }, { rootMargin: '0px 0px -45% 0px' });
+    fo.observe(show);
+  } else show.classList.add('flat');
 
   /* ---- reveal on scroll (visible by default; only hidden once JS knows it's below the fold) ---- */
   if (!reduce && 'IntersectionObserver' in window) {
@@ -875,49 +895,49 @@ footer a:hover { color: var(--fg); }
     // Each moment: what's on screen (code, with the spotted part in <mark>), the chip that surfaces,
     // what one click does, and the result the researcher sees. Content is authored, so the HTML is trusted.
     const SCENES = [
-      { key: 'token', label: 'A session comes back', icon: '🔑',
+      { key: 'token', label: 'A session comes back',
         where: 'POST api.acme.test/login', st: '200 · in scope', ok: true,
         code: '<span class="k">HTTP/1.1</span> 200 OK\n<span class="k">Set-Cookie:</span> <mark>sid=S3yJ9f…; HttpOnly; Secure</mark>\n<span class="k">Content-Type:</span> application/json\n\n{ "user": "maya", "role": "member" }',
         chip: 'Save login as a user', cls: '',
         does: 'Captures the session this response just set as a <b>reusable identity</b>, ready in the Bench “As…” picker and the Access check.',
-        result: 'Saved “maya” — now switch to her in one click, or replay anything as her.' },
-      { key: 'idor', label: 'A tell-tale id', icon: '#',
+        result: 'Saved “maya”. Now switch to her in one click, or replay anything as her.' },
+      { key: 'idor', label: 'A tell-tale id',
         where: 'GET api.acme.test/v2/orders/1041', st: '200 · in scope', ok: true,
         code: '<span class="k">GET</span> /v2/orders/<mark>1041</mark> HTTP/1.1\n<span class="k">Cookie:</span> sid=S3yJ9f…\n\n<span class="k">HTTP/1.1</span> 200 OK\n{ "id": 1041, "total": "$84.00", "name": "Maya R." }',
         chip: 'Check this id across users', cls: '',
-        does: 'Replays this request as <b>every saved user and signed out</b>, then lines up who can read record <b>1041</b> — the “can I see someone else’s?” question, answered.',
-        result: 'Replayed as 3 identities and signed out. Dana and signed-out both got 200 — flagged.' },
-      { key: 'reflect', label: 'A value echoes back', icon: '↩',
+        does: 'Replays this request as <b>every saved user and signed out</b>, then lines up who can read record <b>1041</b>: the “can I see someone else’s?” question, answered.',
+        result: 'Replayed as 3 identities and signed out. Dana and signed-out both got 200, so it is flagged.' },
+      { key: 'reflect', label: 'A value echoes back',
         where: 'GET shop.acme.test/search', st: '200 · in scope', ok: true,
         code: '<span class="k">GET</span> /search?q=<mark>plonix-test</mark> HTTP/1.1\n\n<span class="k">HTTP/1.1</span> 200 OK\n<span class="k">Content-Type:</span> text/html\n\n&lt;h2&gt;No results for <mark>plonix-test</mark>&lt;/h2&gt;',
         chip: 'Reflected value → Bench', cls: '',
         does: 'Opens this request on the <b>Bench</b> with the reflected value marked, ready to vary it and compare how the page changes.',
-        result: 'Opened on the Bench — “q” marked as a position, response ready to compare.' },
-      { key: 'redirect', label: 'A redirect target', icon: '→',
+        result: 'Opened on the Bench with “q” marked as a position, response ready to compare.' },
+      { key: 'redirect', label: 'A redirect target',
         where: 'GET acme.test/go', st: '302 · in scope', ok: true,
         code: '<span class="k">GET</span> /go?next=<mark>//elsewhere.test/dash</mark> HTTP/1.1\n\n<span class="k">HTTP/1.1</span> 302 Found\n<span class="k">Location:</span> <mark>//elsewhere.test/dash</mark>',
         chip: 'Trace this redirect', cls: '',
         does: 'Opens it on the <b>Bench</b> with the “next” parameter marked, so you can change where it points and watch where the server actually sends you.',
-        result: 'Opened on the Bench — change “next”, send, and the Location it follows is shown.' },
-      { key: 'cors', label: 'A cross-origin header', icon: '◎',
+        result: 'Opened on the Bench. Change “next”, send, and the Location it follows is shown.' },
+      { key: 'cors', label: 'A cross-origin header',
         where: 'GET api.acme.test/v2/me', st: '200 · look closer', ok: false,
         code: '<span class="k">HTTP/1.1</span> 200 OK\n<span class="k">Access-Control-Allow-Origin:</span> <mark>*</mark>\n<span class="k">Access-Control-Allow-Credentials:</span> <mark>true</mark>\n\n{ "email": "maya@acme.test" }',
         chip: '+ Finding: open CORS policy', cls: 'warn',
-        does: 'Spots that any origin can read this response on a signed-in user’s behalf, and <b>drafts the finding</b> with this request as evidence — Claude can write it up.',
+        does: 'Spots that any origin can read this response on a signed-in user’s behalf, and <b>drafts the finding</b> with this request as evidence. Claude can write it up.',
         result: 'Finding drafted: “Permissive cross-origin policy on /v2/me”, evidence attached.' },
-      { key: 'trace', label: 'A verbose error', icon: '!',
+      { key: 'trace', label: 'A verbose error',
         where: 'GET api.acme.test/v2/report', st: '500 · look closer', ok: false,
         code: '<span class="k">HTTP/1.1</span> 500 Internal Server Error\n\n<mark>Traceback (most recent call last):\n  File "app/report.py", line 88, in build\n    rows = db.query(sql)</mark>',
         chip: 'Find others like this', cls: 'warn',
         does: 'Jumps to <b>every matching error</b> from this host in Traffic, so one leaked trace shows you the whole class of endpoints that behave the same.',
-        result: 'Traffic filtered to api.acme.test · 500s — 7 more endpoints leak the same trace.' },
+        result: 'Traffic filtered to api.acme.test 500s: 7 more endpoints leak the same trace.' },
     ];
     let active = SCENES[0];
     SCENES.forEach((s, i) => {
       const b = document.createElement('button');
       b.type = 'button'; b.setAttribute('role', 'tab'); b.dataset.key = s.key;
       b.setAttribute('aria-selected', String(i === 0));
-      b.innerHTML = `<span class="mi" aria-hidden="true">${s.icon}</span><span>${s.label}</span>`;
+      b.textContent = s.label;
       b.addEventListener('click', () => select(s));
       pick.appendChild(b);
     });
@@ -937,6 +957,17 @@ footer a:hover { color: var(--fg); }
     });
     select(SCENES[0]);
   })();
+
+  /* ---- arrow keys move between tabs in a tablist ---- */
+  document.querySelectorAll('[role="tablist"]').forEach((list) => list.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft' && e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const items = [...list.querySelectorAll('[role="tab"]')];
+    const i = items.indexOf(document.activeElement);
+    if (i < 0) return;
+    e.preventDefault();
+    const next = items[(i + (e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length];
+    next.focus(); next.click();
+  }));
 
   /* ---- CLI / API tabs + copy ---- */
   const tabs = [...document.querySelectorAll('[data-tab]')];
