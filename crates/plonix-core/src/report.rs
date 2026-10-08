@@ -449,7 +449,7 @@ mod tests {
                 .unwrap()
         };
         add("Reflected <script> in search", "medium", vec![reflected, 999]);
-        add("Big response", "high", vec![big]);
+        add("Big response", "high", vec![big, reflected]);
         let fp = add("Not real", "critical", vec![]);
         s.update_finding(fp.id, &FindingEdit { status: Some("false_positive".into()), ..Default::default() }.checked().unwrap()).unwrap();
         s
@@ -474,6 +474,11 @@ mod tests {
         let r = build(&s, "Shop", &Selection::default(), &|ex| ex.host.ends_with("example.com")).unwrap();
         let big = &r.findings[0].evidence[0];
         assert!(big.request.is_none() && big.note.as_deref().unwrap().contains("in-scope traffic only"));
+        // A finding whose every request is hidden is left out altogether.
+        let mut only_hidden = r.findings[0].finding.clone();
+        only_hidden.exchange_ids.truncate(1);
+        assert!(!shown(&s, &only_hidden, &|ex| ex.host.ends_with("example.com")).unwrap());
+        assert!(shown(&s, &only_hidden, &|_| true).unwrap());
         let r = build(&s, "Shop", &Selection::default(), &|_| true).unwrap();
         let big = &r.findings[0].evidence[0];
         assert!(big.clipped && big.response.as_ref().unwrap().len() < MAX_BODY_CHARS + 300);

@@ -523,7 +523,7 @@ impl DetectorLibrary {
     }
 
     pub fn at(dir: &Path) -> Self {
-        Self { shelf: Shelf::new(dir, "detector pack", "detectors", MAX_INSTALLED_PACKS) }
+        Self { shelf: Shelf::new(dir, "detector pack", "market", MAX_INSTALLED_PACKS) }
     }
 
     pub fn stamp(&self) -> Option<std::time::SystemTime> {

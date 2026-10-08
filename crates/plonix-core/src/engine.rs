@@ -453,8 +453,27 @@ impl Engine {
         self.reload_replace_rules()
     }
 
+    /// Adds a match-and-replace rule and applies it at once.
+    pub fn add_replace_rule(&self, rule: &crate::replace::Rule) -> Result<crate::replace::Rule> {
+        let stored = self.store.add_replace_rule(rule)?;
+        self.reload_replace_rules()?;
+        Ok(stored)
+    }
+
+    pub fn update_replace_rule(&self, rule: &crate::replace::Rule) -> Result<bool> {
+        let changed = self.store.update_replace_rule(rule)?;
+        self.reload_replace_rules()?;
+        Ok(changed)
+    }
+
+    pub fn delete_replace_rule(&self, id: i64) -> Result<bool> {
+        let removed = self.store.delete_replace_rule(id)?;
+        self.reload_replace_rules()?;
+        Ok(removed)
+    }
+
     /// Reads the rules again after they changed.
-    pub fn reload_replace_rules(&self) -> Result<()> {
+    fn reload_replace_rules(&self) -> Result<()> {
         let set = if self.replace_on.load(Ordering::Relaxed) { RuleSet::new(&self.store.replace_rules()?) } else { Arc::default() };
         *self.replace.write().unwrap() = set;
         Ok(())
@@ -1808,17 +1827,12 @@ impl Engine {
         if proposals.is_empty() {
             return Ok(0);
         }
-        let by = extension_author(&ext.name);
-        let existing: BTreeSet<String> = self.store.findings()?.into_iter().filter(|f| f.created_by == by).map(|f| f.title).collect();
-        let mut added = 0;
-        for p in proposals.iter().filter(|p| !existing.contains(&p.title)) {
-            let note = format!("Proposed by the extension {} {}. Not confirmed: check it before you rely on it.", ext.name, ext.version);
-            let description = if p.description.is_empty() { note } else { format!("{}\n\n{note}", p.description) };
-            let f = crate::model::NewFinding { title: p.title.clone(), severity: p.severity.clone(), description, exchange_ids: p.exchange_ids.clone() };
-            self.store.add_finding(&f, &by)?;
-            added += 1;
-        }
-        Ok(added)
+        let note = format!("Proposed by the extension {} {}. Not confirmed: check it before you rely on it.", ext.name, ext.version);
+        let findings = proposals.iter().map(|p| {
+            let description = if p.description.is_empty() { note.clone() } else { format!("{}\n\n{note}", p.description) };
+            crate::model::NewFinding { title: p.title.clone(), severity: p.severity.clone(), description, exchange_ids: p.exchange_ids.clone() }
+        });
+        self.add_extension_findings(&ext.name, findings)
     }
 
     /// Hands newly recorded exchanges to every enabled extension.
@@ -2097,15 +2111,26 @@ impl Engine {
                  Proposed by the extension {} {}. Not confirmed: check it before you rely on it.",
                 baseline.id, ext.name, ext.version
             );
-            let by = extension_author(&ext.name);
-            let existing: BTreeSet<String> = self.store.findings()?.into_iter().filter(|f| f.created_by == by).map(|f| f.title).collect();
-            if !existing.contains(&title) {
-                let f = crate::model::NewFinding { title, severity: "info".into(), description, exchange_ids: ids };
-                self.store.add_finding(&f, &by)?;
-                report.proposed = true;
-            }
+            let f = crate::model::NewFinding { title, severity: "info".into(), description, exchange_ids: ids };
+            report.proposed = self.add_extension_findings(&ext.name, [f])? > 0;
         }
         Ok(report)
+    }
+
+    /// Adds findings an extension proposed, attributed to it, skipping
+    /// titles it already proposed and ones that do not check out. Returns
+    /// how many are new.
+    fn add_extension_findings(&self, name: &str, findings: impl IntoIterator<Item = crate::model::NewFinding>) -> Result<usize> {
+        let by = extension_author(name);
+        let mut existing: BTreeSet<String> = self.store.findings()?.into_iter().filter(|f| f.created_by == by).map(|f| f.title).collect();
+        let mut added = 0;
+        for f in findings.into_iter().filter_map(|f| f.checked().ok()) {
+            if existing.insert(f.title.clone()) {
+                self.store.add_finding(&f, &by)?;
+                added += 1;
+            }
+        }
+        Ok(added)
     }
 
     /// Logs why a program extension could not run, once until it changes.
