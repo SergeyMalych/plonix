@@ -190,7 +190,7 @@ without it.
 
 ## UX: the Scans area
 
-A new **Scans** screen (⌘7), with a simple left-to-right flow:
+A **Scans** screen (⌘8), with a simple left-to-right flow:
 
 1. **Target** — pick from in-scope hosts/endpoints only (out-of-scope targets
    are not selectable). Shows the fingerprint for context.
@@ -203,6 +203,17 @@ A new **Scans** screen (⌘7), with a simple left-to-right flow:
    sent (and that they stayed in scope), signals found, findings so far.
 5. **Review** — findings flow into the existing **Findings** screen, each with
    its reproducing request/response, so there is one place for results.
+
+Scans can also open **focused on one endpoint**. When the Lens or the Traffic
+row menu sees an endpoint shape worth a look (a file upload, an input whose
+value looks like a host, URL or IP the server might fetch, or any endpoint that
+takes inputs), it offers a one-click hand-off: Scans opens with a *Focused on
+one endpoint* banner naming the method and path, the checks that fit it picked,
+and the scan narrowed to that endpoint. The row menu always offers a plain
+**Scan this endpoint** too. Where no built-in check fits yet (uploads, SSRF),
+the banner says so and points to the Market and the Bench instead of picking
+unrelated checks. **Scan the whole host** clears the focus. Nothing runs until
+you press Run, and the hand-off is offered only for hosts in scope.
 
 ## Guardrails
 

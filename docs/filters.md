@@ -11,6 +11,12 @@ $ plonix search is:auth -is:trackers
 
 In the window, every named filter appears under **+ Filter** in Traffic. Pick *Show only* or *Hide*, then click a filter. It becomes a chip like any other filter and is saved with the project.
 
+## Typing them
+
+You don't have to remember field names or values. As you type in the Traffic search box, a list opens under it: the filter fields first (host, status, method, path, content type, extension, kind, scope, source, named filters), then the values for the field you picked, taken from this project's own traffic, with request counts and notes such as "in scope" or a named filter's label. After two letters of plain text it also offers matching values from any field, so `upl` offers `host:uploads…` and `is:uploads`.
+
+↑↓ choose, Tab completes the text, Enter adds it as a filter chip and Esc closes the list. A leading `-` carries through (`-host:` suggests hosts to hide), and after a comma (`status:4xx,`) it suggests the remaining values. The value box in **+ Filter** uses the same list.
+
 ## Using them
 
 | Query | Means |

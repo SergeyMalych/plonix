@@ -1,3 +1,5 @@
+<div align="center">
+
 <img src="docs/images/plonix-mark.svg" width="64" height="64" alt="Plonix logo">
 
 # Plonix
@@ -13,19 +15,22 @@
 [![Last commit](https://img.shields.io/github/last-commit/SergeyMalych/plonix)](https://github.com/SergeyMalych/plonix/commits/main)
 [![Stars](https://img.shields.io/github/stars/SergeyMalych/plonix?style=flat)](https://github.com/SergeyMalych/plonix/stargazers)
 
-**🌐 [plonix.io](https://plonix.io)**
-
 **The open-source web security workbench for macOS. Fast, native, and scriptable from day one.**
+
+**[Website](https://plonix.io)** · **[Documentation](https://plonix.io/docs/)** · **[Download for Mac](https://github.com/SergeyMalych/plonix/releases/latest)**
+
+</div>
 
 Plonix captures everything your browser does, learns the real shape of the target as you explore it, and lets you search, replay and prove what you find, from a GUI, a terminal, or an AI agent.
 
 Plonix is an assistant, not an automatic vulnerability finder. It analyzes what you captured and suggests what to look at next; you decide what to send and when. Nothing scans, crawls or fires on its own.
 
-![The Plonix window: live traffic with an adaptive-scope suggestion and the Lens showing a request and its response](docs/images/plonix-window.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/window-dark.webp">
+  <img src="docs/images/window-light.webp" alt="The Plonix window: live traffic with filter chips and suggestions, a scope decision bar, and the Lens showing a request, its response and one-click suggested next steps">
+</picture>
 
 > **Status: early, and usable today.** [v0.1.0](https://github.com/SergeyMalych/plonix/releases/latest) is out for Mac. The core engine (proxy, traffic store, search, adaptive scope, local API), the `plonix` CLI, the Plonix app, the Bench with payload runs, the Market, Programs, scope-gated crawl and scans, and read-only MCP access for AI agents work today and are covered by tests. See [Roadmap](#roadmap).
-
-**Website:** [plonix.io](https://plonix.io) · **Documentation:** [plonix.io/docs](https://plonix.io/docs/) (the same pages as [docs/](docs/)) · **Download:** [latest release](https://github.com/SergeyMalych/plonix/releases/latest)
 
 ---
 
@@ -45,6 +50,7 @@ Most of a web assessment is the same loop: capture traffic, figure out what the 
 | Several targets at once | Each project opens in its own window with its own proxy, database and scope. |
 | A toolbox that grows without bloat | A signed community Market of skills, rule packs, filter packs, payload lists, extensions and tools, with a starter set picked for your kind of work. |
 | Scope you can keep up with | Follow a bug bounty or disclosure program and its scope and rules apply to everything Plonix sends. |
+| A next step without the setup | The Lens reads the request on screen and offers the one move that fits (save a login as a user, check an id across users, replay signed out, scan just this endpoint), one click away. You still decide and send. |
 
 ## Principles
 
@@ -68,15 +74,55 @@ Plonix has a handful of tools, each with its own name. They are the same in the 
 | **Map** | Hosts, the technologies behind them and their endpoints and parameters | `plonix hosts`, `plonix tech` |
 | **Findings** | What you found, with the requests that prove it attached as evidence. Edit, confirm, close and export them as a report | `plonix findings` |
 | **Scans** | Crawl a host, review a scan plan for it, and run the scope-gated checks you pick | `plonix crawl`, `plonix scan`, ⌘8 |
-| **Agents** | Which AI agents are connected to the project, what they may do, and how to connect one | `plonix connect claude`, `plonix mcp` |
+| **Agents** | Ask Claude about the whole project, pick up saved conversations, read the notes and leads Claude leaves while you browse (when you turn it on), and see every read an agent made | `plonix connect claude`, `plonix mcp` |
 | **Programs** | Bug bounty and disclosure programs: bring one in, and its scope and rules (request rate, required headers, no automated testing) apply to everything Plonix sends | `plonix program`, ⌘9 |
 | **Market** | One signed catalog of skills, rule packs, filter packs, payload lists, platforms, tools, bundles and extensions, with picks for your kind of work | `plonix market`, ⌘7 |
 | **Extensions** | Sandboxed analyzers that add notes to the Lens and propose findings for you to confirm | `plonix extensions` |
 | **Skills** | Playbooks AI agents follow for a job in Plonix, offered over MCP | `plonix skills` |
-| **Rules** | Community rule packs that teach Plonix to recognise technologies | `plonix rules` |
+| **Rules** | Change traffic as it passes: add, change or remove a header, or replace text, for browser traffic, the Bench and Scans, optionally only when a Traffic search matches | `plonix replace` |
+| **Rule packs** | Community packs that teach Plonix to recognise technologies | `plonix rules` |
 | **Saved users** | The cookies and tokens for each user of an application. Act as one from the title bar and your browser, the Bench and Scans send as them; see, edit and expire each cookie on the Users screen (a Market tool) | Title bar › Act as, Users |
 | **Access check** | Replays chosen requests as each saved user and signed out, side by side, so differences in what each one may see stand out (a Market tool) | Traffic or Map selection |
 | **Callbacks** | Hands out a unique host for each test and lists every DNS lookup, HTTP request or mail that reaches one (a Market tool) | Callbacks tab, Bench › Insert callback host |
+
+## A look around
+
+These are from the demo project that ships with Plonix (Start screen › Try the Demo), so you can open the same screens without a target.
+
+<table>
+<tr>
+<td width="50%">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/bench-dark.webp">
+  <img src="docs/images/bench-light.webp" alt="The Bench: a request with decoded values spotted in it, its response, and a history of sends to restore, branch or compare">
+</picture>
+<b>Bench.</b> Edit a request, send it, branch it and compare sends. Tokens and encoded values are decoded in place.
+</td>
+<td width="50%">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/scope-dark.webp">
+  <img src="docs/images/scope-light.webp" alt="Scope: suggested domains, each with the evidence that ties it to the target and buttons to accept or reject">
+</picture>
+<b>Scope.</b> Domains Plonix thinks belong to the target, each with the requests that show why. You accept or reject.
+</td>
+</tr>
+<tr>
+<td width="50%">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/map-dark.webp">
+  <img src="docs/images/map-light.webp" alt="The Map: hosts with their technologies, and a host's endpoints with statuses and parameters, ids and tokens folded, and a filter box">
+</picture>
+<b>Map.</b> Hosts, what runs on them, and every endpoint with its statuses and parameters. Sort, filter and resize the table.
+</td>
+<td width="50%">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/ask-dark.webp">
+  <img src="docs/images/ask-light.webp" alt="Ask Claude: the question, and each part of the request that will be shared, with its size, to tick or untick">
+</picture>
+<b>Ask Claude.</b> See and pick exactly what Claude gets before you ask. The answer arrives in the app.
+</td>
+</tr>
+</table>
 
 ## What works today
 
@@ -134,6 +180,8 @@ source:proxy              captured traffic, source:replay for sent requests, sou
 passw -logout             plain full-text terms
 ```
 
+You don't have to remember any of it. As you type, a list under the search box offers the fields first, then the values this project actually has (hosts, status codes, paths, content types, named filters), each with how many requests match. ↑↓ picks, Tab completes, Enter adds it as a filter chip. A leading `-` carries through, so `-host:` suggests hosts to hide, and after a comma (`status:4xx,`) it offers the rest.
+
 ### Adaptive scope
 Static whitelists assume you already know every domain an app uses. You don't. You find out by using it. Plonix records everything, then suggests domains to bring into scope, each backed by evidence:
 
@@ -145,7 +193,7 @@ Static whitelists assume you already know every domain an app uses. You don't. Y
 | Shares a session | Receives a session token that an in-scope host issued |
 | Shares a certificate | Appears in the TLS certificate SANs of an in-scope host, or the reverse |
 
-You accept or reject each suggestion (`*.example.com` covers all subdomains). Accepting a domain re-analyzes past traffic, so new suggestions surface right away.
+You accept or reject each suggestion (`*.example.com` covers all subdomains). Accepting a domain re-analyzes past traffic, so new suggestions surface right away. **Accept all** and **Reject all** list every domain with a checkbox first, so you can leave some out; unchecked domains stay pending.
 
 **Enforcement is built in.** Every active request, whether a replay, a crafted request, or one from an agent, passes a single choke point. If the target host isn't accepted, it is refused. Passive capture keeps recording everything.
 
@@ -203,6 +251,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - **Client certificates** (per project): certificates presented to servers that ask for one, and one switch that turns them all off.
 - **Storage** (per project): keep only in-scope traffic, with a count of what it would delete and a button to delete it now.
 - **Interface** (all projects): open projects in a Plonix window or in your web browser.
+- **Appearance** (this Mac): theme (match the system, light or dark) and spacing. **Dense**, the default, fits more on screen; **Roomy** gives rows and panels more air.
 - **Usage statistics** (all projects): share anonymous feature counts once a day, or not. See [Privacy](#privacy).
 - Settings are a registry: a feature adds a section by describing its fields, and the Settings screens draw it with validation and storage included (see [docs/projects.md](docs/projects.md#adding-a-settings-section)).
 
@@ -213,7 +262,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - **Works on every Mac.** With no Chrome, Brave, Edge or Firefox installed (a Safari-only Mac), Open target offers **Get the Plonix browser**: one click downloads Chromium (Google's Chrome for Testing build, about 150 MB, once) into `~/.plonix/chromium`, with a progress bar and a retry if the download fails, and then opens the target in it. Nothing is bundled with the app, so Plonix.app stays small.
 - **Firefox users** get a one-click **Trust the Plonix certificate** right after Open target, shown only while the certificate is not trusted yet. It adds the certificate to your login keychain (macOS asks for your password or Touch ID); the capture profile makes Firefox follow the keychain, so HTTPS works after a reload.
 - **Plonix › Install Command Line Tool…** puts the `plonix` command on your PATH (`/usr/local/bin/plonix`, linked to the tool inside Plonix.app, so it updates with the app). macOS asks for an administrator password only when that folder needs it. Uninstall Command Line Tool… removes it again. See [docs/setup.md](docs/setup.md) for all three.
-- Native menu bar and shortcuts: ⌘N new project, ⇧⌘P the Start screen, ⌘, Settings, ⌘1 to ⌘9 switch between Traffic, Bench, Scope, Map, Findings, Agents, Market, Scans and Programs, ⌃⌘S shows or hides the sidebar. Light and dark follow the system.
+- Native menu bar and shortcuts: ⌘N new project, ⇧⌘P the Start screen, ⌘, Settings, ⌘1 to ⌘9 switch between Traffic, Bench, Scope, Map, Findings, Agents, Market, Scans and Programs, ⌃⌘S shows or hides the sidebar. Light and dark follow the system unless you pick one in Settings › Appearance.
 - `plonix` commands in a terminal talk to the same sessions while the app is open (`-p` picks the project), and projects started from a terminal show up on the Start screen. Quitting the app closes the projects it opened.
 - The same window also runs in any browser with `plonix ui`, served by the engine itself.
 - **Updates are your call.** Plonix asks once whether to check for new versions (daily, weekly, at launch or only when you ask) and never installs anything by itself: downloading and installing each need a click, and closing a dialog means no. See [docs/updates.md](docs/updates.md).
@@ -223,23 +272,27 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - **Sidebar:** navigation, Open target, the scope suggestions waiting on you (accept or reject in one click) and the hosts in scope with their request counts (click one to filter Traffic). Collapse it to icons with ⌃⌘S, or `\` in a browser.
 - **Traffic:** a live-updating request list with the search language and the **Lens**, an inline request/response viewer that decodes gzip/brotli and pretty-prints JSON. A banner surfaces each new domain adaptive scope suggests, with its evidence and one-click accept or reject.
 - **Look-alike grouping:** Traffic offers to fold requests to the same path with different ids into one row each. Click a group to see every request in it, or turn grouping off to see each request on its own row.
+- **Repeats folded:** the same request sent several times in a row shows as one row with its count (×N) and the time from first to last. Click it to see each one, or pick **Every request** in the toolbar.
 - **Include and exclude filters:** filters sit as chips above the list, under **Show only** and **Hide**. Add one with **+ Filter**, in one click from the suggestions drawn from your traffic (hide static files, hide the busiest third-party hosts, show only errors), or right-click any row to show only or hide its host, path, status class, content type, extension or method. Click a chip to flip it between show and hide, × to remove it. Filters typed in the search box become chips, and **Copy query** gives the same filters as a query for the CLI or the API. Active filters are saved with the project.
-- **Spotted in the Lens:** Plonix points out what stands out in a request or response, right above it. JWTs (header and payload decoded, algorithm, expiry; the signature is never claimed valid), Base64, hex and double URL-encoding that decode to readable text, Basic auth credentials, personal data (email addresses, Luhn-valid card numbers), leaked secrets (AWS, Google, GitHub, Slack and Stripe keys, private keys) and internal IP addresses. It also spots stack traces in responses. Click one to highlight it in place and see the decoded value, then copy it or find it across all captured traffic. Nothing is flagged unless it is there, and detection runs locally on traffic you already captured.
+- **Spotted in the Lens:** Plonix points out what stands out in a request or response, right above it. JWTs (header and payload decoded, algorithm, expiry; the signature is never claimed valid), Base64, hex and double URL-encoding that decode to readable text, Basic auth credentials, personal data (email addresses, Luhn-valid card numbers), leaked secrets (AWS, Google, GitHub, Slack and Stripe keys, private keys) and internal IP addresses. It also spots stack traces in responses. Click one to highlight it in place and see the decoded value, then copy it or find it across all captured traffic. Nothing is flagged unless it is there, and detection runs locally on traffic you already captured. Select any text in the Lens yourself to decode it (JWT, URL-encoding, Base64, hex), find it across traffic or ask Claude about it.
 - **Next steps in the Lens:** when something stands out (a leaked secret, an unsigned or expired token that still works, a card number, many people's email addresses, a stack trace, a server error), the Lens offers to record a finding, and **Ideas for this endpoint** asks Claude what to try. **Copy as curl** works from the Lens, the Traffic right-click menu and the Bench.
+- **Quick actions that read the request:** the Lens **Suggested** row and the Traffic right-click menu offer the one next step that fits what is on screen. A response that sets a session offers **Save login as a user**; an id in the path offers **Check this id across users**; a signed-in request that worked offers **Replay signed out**; a reflected value, a redirect or a GraphQL call opens on the Bench ready to vary; an open CORS policy drafts a finding; a stack trace or 5xx finds others like it from that host. A file upload, an input that looks like a URL or host the server fetches, or any endpoint with inputs offers to open **Scans focused on that one endpoint**, with the fitting checks picked. Hand-offs into Scans and other tabs are offered only for hosts in scope, anything that sends goes through the scope check, and nothing is sent until you click.
+- **AI actions stand out:** every Ask Claude button and Claude-written suggestion has a soft rainbow frame, so you can tell at a glance which actions go to Claude.
 - **Bench:** edit any request and send it (press `b` or double-click a row in Traffic), keep a history per tab, restore or branch any earlier send into a new tab, and compare two sends side by side (response or request diff). Sends go through the engine's scope enforcement: out-of-scope hosts are refused, and you can accept the host right there.
 - **Editable Lens on the Bench:** JWTs, URL-encoded and Base64 values in a draft are decoded in place; edit the decoded value and the request is rewritten with it. When a send comes back logged out but worked before, the Bench offers the newest login captured for that host, for that tab or every tab still on the old one.
 - **Scope:** every suggested domain with its evidence, accept (with or without subdomains) or reject, and the rule list. Common third parties (analytics, ads, payments and the like) can be kept out in named groups, switched as a set, alongside groups you define.
-- **Map:** hosts with their scope state, detected technologies with the evidence behind them, and endpoints with statuses and parameters. When an API description (OpenAPI or Swagger) shows up in traffic, the Map lists the endpoints nobody has visited yet, each one click from the Bench.
+- **Map:** hosts with their scope state, detected technologies with the evidence behind them, and endpoints with statuses and parameters. Numbers in paths fold into `{id}` and long opaque segments (signed links, session tokens, JWTs) into `{token}`, so every link to the same resource is one endpoint, and long paths stay on one line with the resource name readable. Resize columns by dragging their edge, sort by clicking a title, and filter with plain words or `method:`, `path:`, `status:` and `param:` terms. When an API description (OpenAPI or Swagger) shows up in traffic, the Map lists the endpoints nobody has visited yet, each one click from the Bench.
 - **Findings:** record a finding from any request, with the requests that prove it linked as evidence. **Write it with Claude** drafts it for you (a plain-words title, severity with the reason, what happens, why it matters, steps to reproduce and the request as curl), and nothing is saved until you press Save. Edit its title, severity and description, set its status (open, confirmed, false positive, fixed) and delete it after a confirmation. **Export** saves the findings as a report in Markdown, a self-contained HTML page or JSON, each finding with its evidence requests and responses (bodies clipped to 4,000 characters). Reports leave false positives out unless you ask for them.
-- **Agents:** which AI agents are connected right now and every request they made, a summary of what agents may read (changed in Settings › AI agents: on/off, in-scope-only or everything, which kinds of data, and the Ask-Claude context limit), the one command that connects Claude Code, and prompts to try.
+- **Agents:** where you work with Claude on the project as a whole. Ask about the whole project or start a skill in one click; every question asked here or with Ask Claude anywhere is saved as a conversation you can reopen and follow up on. Turn on **Watch my traffic** and Claude reads new in-scope traffic when you pause and leaves a digest, notes and leads, each with one place to act on it (the Lens, the Bench, a focused scan, an access check, a draft finding); the sidebar counts unread items, and it stops for the day at a token limit you pick. An activity feed lists every read an agent made, in plain words. Setup (connect command, agent settings, what agents may do) sits behind one button.
 - **Suggested filters** come from the traffic you captured: in-scope only, server and client errors, the write methods in use, JSON, the busiest API paths and hosts, requests sent from the Bench, and one chip that hides static files. Each shows how many requests it matches, and a filter only appears when something matches it.
+- **Demo project:** Try the Demo on the Start screen opens a made-up shop's traffic with scope, findings and Bench experiments ready, and offers a short walkthrough that rings each part of Plonix on screen. Take it again any time from **Take the tour** in the demo strip.
 - The page signs in through a one-time link (the app and `plonix ui` create it), so the API token never appears in a URL. It is locked down with a strict Content-Security-Policy, and captured content is only ever rendered as text.
 
 ### AI agents over MCP
 - `plonix connect claude` adds Plonix to Claude Code as an MCP server. From then on Claude Code can search your captured traffic, read requests and responses, see hosts, endpoints and detected technologies, review scope suggestions, and read findings or export them as a report, on the live project.
 - Access is **read-only and enforced by the engine**: agents sign in with their own token (`~/.plonix/agent-token`), and anything but reading (sending or replaying requests, changing scope, recording, editing or deleting findings) is refused. The one thing an agent can leave is a suggested edit to a Bench request, which only you can apply.
 - **Ask Claude** on a request, finding, host or scope suggestion hands Claude Code just that spot's context as a prompt you review first. Plonix clips the bodies, shows what will be shared, and warns before sending more than your context limit.
-- **Answers arrive in the app.** Plonix runs the `claude` command on your Mac, wired to the same read-only MCP server, and shows its progress as it works: the current step, tokens read and written, elapsed time and the answer as it is written, formatted with headings, lists, tables and code blocks you can copy. A run that goes quiet says so and is stopped with a clear message instead of hanging.
+- **Answers arrive in the app.** Plonix runs the `claude` command on your Mac, wired to the same read-only MCP server and nothing else (your other MCP servers and Claude Code's shell, file and web tools are switched off for these runs), and shows its progress as it works: the current step, tokens read and written, elapsed time and the answer as it is written, formatted with headings, lists, tables and code blocks you can copy. A run that goes quiet says so and is stopped with a clear message instead of hanging.
 - **Suggested edits on the Bench:** ask Claude about a request you are editing and it can propose a concrete edited request. The Bench shows it as a diff against your draft (request line, headers, body, with query strings, form fields, JSON and JWTs decoded) with **Apply** and **Discard**. Nothing changes until you apply it, applying only changes the draft, and sending stays your click. An edited JWT keeps its original signature and is marked unsigned.
 - Any other MCP client can run `plonix mcp` as a stdio server. Captured data stays on your machine. See [docs/agents.md](docs/agents.md).
 
@@ -255,6 +308,7 @@ claude                       # then ask:
 - **Crawl** a host to discover its endpoints, parameters and forms (`plonix crawl example.com`). It starts from the traffic you captured, follows same-host links within a page and depth budget, and never submits a form.
 - **Crawl with a browser** for JavaScript apps (`plonix crawl --browser https://app.example.com/`, or **Use a browser** on the Scans screen). Pages render in a headless copy of your Chrome, Chromium, Brave or Edge, on a throwaway profile, routed through Plonix so every request lands in Traffic and on the Map. Links come from the rendered page and the app's own routes; requests to hosts outside scope are blocked inside the browser, forms are never submitted, and with `--click` it also clicks buttons that do not look destructive (never log out, delete, pay and the like).
 - **Scan plan:** `plonix scan plan example.com` (or `GET /api/scan/plan/{host}`) analyzes a host and lists the tests that apply to it, each with the reason, grouped by OWASP category, for you to review. It sends nothing.
+- **Focused on one endpoint:** a quick action in the Lens or Traffic opens Scans narrowed to that endpoint, with the checks that fit it picked; **Scan the whole host** clears the focus. You review and press Run.
 - **Active scans** run checks chosen from the target's fingerprint: a check only runs where its detector found something it applies to, so checks that cannot apply are never sent. `plonix scan suggest example.com` shows the suggested profile without sending anything, and `plonix scan run example.com` runs it.
 - The built-in checks are benign (exposed `.git/config` and `.env`, `server-status`, a harmless reflection marker). Intrusive checks are off unless you turn them on for a scan, and every scan is capped by a request budget.
 - Every scan and crawl request goes through the same scope choke point as a replay, so it can only reach hosts you accepted, and it is recorded in Traffic. Nothing scans on its own: a person starts every scan, and agents cannot. Findings land in Findings with the requests that prove them. See [docs/scanning.md](docs/scanning.md).
@@ -506,7 +560,7 @@ site/             the plonix.io website; site/docs is generated from docs/ by sc
 - [x] Adaptive scope v1: suggestions with evidence, accept/reject, enforcement
 - [x] Replay and send
 - [x] Intercept: hold requests and responses in flight to edit, forward or drop them
-- [x] Match and replace: rules that change requests and responses in flight
+- [x] Rules: plain header and text rules that change requests and responses in flight, for browser traffic, the Bench and Scans, with conditions, on their own screen
 - [x] Token-authenticated, loopback-only local API
 - [x] `plonix` CLI: search, inspect, watch, replay and manage scope from the terminal
 - [x] `plonix open <target>`: one command from nothing to captured traffic, in a pre-configured browser
@@ -538,6 +592,12 @@ site/             the plonix.io website; site/docs is generated from docs/ by sc
 - [x] Callbacks: per-test hosts and the DNS, HTTP and mail callbacks they get
 - [x] Scan plan: analyze a host into reviewable test proposals (`plonix scan plan`)
 - [x] Starter profiles: Market recommendations for bug hunters, red teamers and researchers
+- [x] Quick actions in the Lens and Traffic, including hand-offs into Scans focused on one endpoint
+- [x] The Agents screen: project-wide questions, saved conversations, an activity feed, and an inbox Claude fills while you browse (opt-in, read-only)
+- [x] Filter suggestions while typing in Traffic search
+- [x] Map endpoints that sort, filter and resize, with ids and tokens folded
+- [x] Dense or Roomy spacing and a theme choice in Settings › Appearance
+- [x] A guided walkthrough of the demo project
 
 **Coming**
 - [ ] Opt-in active mode for agents: replay and send within accepted scope, switched on by you ([design](docs/agents.md#later-an-opt-in-active-mode))
