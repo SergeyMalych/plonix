@@ -184,6 +184,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/run", post(run))
         .route("/api/run/lists", get(run_lists))
         .route("/api/users", get(saved_users).put(set_saved_users))
+        .route("/api/users/acting", put(set_acting_user))
         .route("/api/access-check", post(access_check))
         .route("/api/callbacks", get(callbacks_get))
         .route("/api/callbacks/start", post(callbacks_start))
@@ -1581,6 +1582,13 @@ async fn market_install(State(s): State<AppState>, Json(b): Json<MarketBody>) ->
 }
 
 async fn market_remove(State(s): State<AppState>, Json(b): Json<MarketBody>) -> Response {
+    // Removing Saved users stops acting as one: nothing should keep changing
+    // browser traffic with no switcher left on screen to show it.
+    if b.name == "saved-users"
+        && let Err(e) = s.engine.store.set_acting_user(None)
+    {
+        tracing::warn!("could not stop acting as a saved user: {e:#}");
+    }
     market_change(s, Some(b), "remove").await
 }
 
@@ -1916,7 +1924,7 @@ async fn run_lists(State(s): State<AppState>) -> Response {
     }
 }
 
-// ---- saved users (the cookie jar) and the access check --------------------
+// ---- saved users and the access check ---------------------------------------
 
 #[derive(serde::Deserialize)]
 struct SavedUsersBody {
@@ -1929,8 +1937,34 @@ async fn saved_users(State(s): State<AppState>, caller: MaybeCaller) -> Response
     if let Some(r) = user_only(&caller) {
         return r;
     }
+    let acting = s.engine.store.acting_user().ok().flatten().map(|u| u.id);
     match s.engine.store.saved_users() {
-        Ok(users) => Json(json!({ "users": users })).into_response(),
+        Ok(users) => Json(json!({ "users": users, "acting": acting })).into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct ActingBody {
+    id: Option<String>,
+}
+
+/// Picks the saved user the person acts as (or none: the browser's own
+/// session). User-only. Changing it sends nothing by itself.
+async fn set_acting_user(State(s): State<AppState>, caller: MaybeCaller, Json(body): Json<ActingBody>) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    let id = body.id.filter(|i| !i.is_empty());
+    if let Some(id) = &id {
+        match s.engine.store.saved_users() {
+            Ok(users) if users.iter().any(|u| &u.id == id) => {}
+            Ok(_) => return err(StatusCode::BAD_REQUEST, "bad_request", &format!("there is no saved user '{}'", crate::detect::clean(id, 40))),
+            Err(e) => return internal(e),
+        }
+    }
+    match s.engine.store.set_acting_user(id.as_deref()) {
+        Ok(()) => Json(json!({ "acting": id })).into_response(),
         Err(e) => internal(e),
     }
 }
