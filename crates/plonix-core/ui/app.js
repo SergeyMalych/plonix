@@ -1133,14 +1133,24 @@ function navList() {
   return nav;
 }
 
-/** Rebuilds the sidebar's buttons when a tool is switched on or off. */
+/** Rebuilds the sidebar's buttons and the Act as pill when a tool is
+ * switched on or off, and leaves a screen whose tool was just removed. */
 function redrawNav() {
   const old = $('#rail .nav');
   if (!old) return;
   const nav = navList();
   for (const b of nav.children) b.classList.toggle('on', b.dataset.v === S.view);
   old.replaceWith(nav);
+  const pill = $('#actas');
+  if (toolOn('saved-users') && !pill) {
+    $('#engine').before(actasPill());
+    loadUsers().then(drawActing);
+  } else if (!toolOn('saved-users') && pill) pill.remove();
+  if (!shownView(S.view) && !VIEWS[S.view]?.footer) go('traffic', true);
+  updateChrome();
 }
+
+const actasPill = () => h('button', { class: 'actas', id: 'actas', onclick: (e) => actingMenu(e.currentTarget) });
 
 function renderShell() {
   const nav = navList();
@@ -1153,7 +1163,7 @@ function renderShell() {
       h(
         'div',
         { class: 'right' },
-        toolOn('saved-users') ? h('button', { class: 'actas', id: 'actas', onclick: (e) => actingMenu(e.currentTarget) }) : null,
+        toolOn('saved-users') ? actasPill() : null,
         h('div', { class: 'engine', id: 'engine' }, h('span', { class: 'dot' }), h('span', { id: 'enginetxt' })),
         h('button', { class: 'iconbtn', title: 'Theme (auto / light / dark)', onclick: cycleTheme, text: '◐' }),
       ),
@@ -7887,7 +7897,7 @@ function callbacksInstallCard() {
     'div',
     { class: 'empty cbinstall' },
     h('h3', { text: 'One thing to install' }),
-    h('p', { class: 'mnote', text: 'Callbacks are collected by interactsh, the open-source callback tool by ProjectDiscovery, which runs on this Mac. Install it once:' }),
+    h('p', { class: 'mnote', text: 'Callbacks are collected by interactsh, the open-source callback tool by ProjectDiscovery, which runs on this Mac. Install it once in Terminal. It builds with Go in a minute or so, and Plonix finds it in ~/go/bin:' }),
     h('div', { class: 'cbcmd' }, h('code', { text: cmd }), h('button', { class: 'btn sm', text: 'Copy', onclick: () => copyText(cmd) })),
     h('div', { class: 'cbacts' }, h('button', { class: 'btn primary', text: 'Check again', onclick: () => renderCallbacks($('#main')) })),
   );
@@ -10649,6 +10659,8 @@ async function marketAction(p, action, consent) {
     toast(e.message, 'err');
   }
   MK.busy = null;
+  // Show or hide the tool's screen in the sidebar right away, not on the next poll.
+  await poll();
   await loadMarket(false);
   loadFacets();
 }
