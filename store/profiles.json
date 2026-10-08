@@ -97,6 +97,7 @@
     "parameter-probe": { "tags": ["recon", "api", "payloads"], "noise": "active" },
     "saved-users": { "tags": ["auth", "access"], "why": { "bug-hunter": "Keep two accounts side by side to test who sees what.", "red-teamer": "Keep every identity you gain and switch between them in the Bench." } },
     "access-check": { "tags": ["access", "auth"], "noise": "light", "why": { "bug-hunter": "Access bugs are the most common paid finding." } },
+    "programs": { "tags": ["scope", "reporting"], "why": { "bug-hunter": "Brings in each program's scope and keeps its rules, such as rate limits and required headers, while you test." } },
     "callbacks": { "tags": ["deep-dive", "payloads"], "why": { "bug-hunter": "Proves a server made a call of its own, with the request it came from.", "researcher": "Shows calls a server makes that never appear in its response." } },
     "cloud-identity": { "tags": ["cloud", "auth", "analysis"], "why": { "researcher": "Explains how the app gets cloud credentials and what those credentials can reach.", "red-teamer": "Shows what the cloud credentials handed to the browser can reach." } },
     "value-trace": { "tags": ["analysis", "deep-dive"], "why": { "researcher": "Pick any id, token or email and see where it was issued and everywhere it travels." } },

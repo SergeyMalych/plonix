@@ -15,6 +15,7 @@ What changed in each Plonix release. The newest release is at the top.
 - Accept all and Reject all in Scope list each domain with a checkbox, so you can leave some out.
 
 ### Changed
+- Programs is now a tool you install from the Market, like Saved users and the Access check, so the sidebar shows it only once you want it. A project that already follows a program keeps the Programs screen and its rules. Bug hunters see it in *Recommended for you*.
 - Ask Claude runs in the app use only Plonix's read-only MCP server, with your other MCP servers and Claude Code's shell, file and web tools switched off.
 - ws:// and plain http:// through the capture browser are captured, browser crawls keep to a program's request rate, and Bench and crawl responses keep only the body limit while recording the real size.
 

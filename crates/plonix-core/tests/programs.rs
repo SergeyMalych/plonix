@@ -174,6 +174,11 @@ async fn program_routes_are_for_the_user_only() {
         }
     };
     tokio::task::spawn_blocking(move || {
+        // Programs is a Market tool: off until installed, or until the project follows a program.
+        let tools = |c: &dyn Fn(&str, &str, &str, Option<serde_json::Value>) -> Result<ureq::Response, ureq::Error>| {
+            c("GET", "/api/status", &user, None).unwrap().into_json::<serde_json::Value>().unwrap()["tools"].clone()
+        };
+        assert!(!tools(&call).as_array().unwrap().iter().any(|t| t == "programs"));
         let read = call("POST", "/api/program/read", &user, Some(serde_json::json!({ "text": "In scope\n- app.acme.io\nOut of scope\n- Self-XSS\nLimit to 2 requests per second." })))
             .unwrap()
             .into_json::<serde_json::Value>()
@@ -182,6 +187,7 @@ async fn program_routes_are_for_the_user_only() {
         assert_eq!(read["program"]["rules"]["rate_per_second"], 2.0);
         let applied = call("POST", "/api/program/apply", &user, Some(serde_json::json!({ "program": read["program"] }))).unwrap().into_json::<serde_json::Value>().unwrap();
         assert_eq!(applied["scope"][0]["change"], "add");
+        assert!(tools(&call).as_array().unwrap().iter().any(|t| t == "programs"));
         let platforms = call("GET", "/api/platforms", &user, None).unwrap().into_json::<serde_json::Value>().unwrap();
         assert!(platforms["platforms"].as_array().unwrap().iter().any(|p| p["name"] == "hackerone" && p["connected"] == false));
         let not_connected = call("GET", "/api/platforms/hackerone/programs", &user, None).unwrap_err();

@@ -457,13 +457,7 @@ const TOUR_STEPS = [
     view: 'market',
     target: ['#mkinds', '#main .view'],
     title: 'Market',
-    text: 'Extensions, skills, filter packs and word lists, each signed and checked before it installs. Tools such as Saved users and the Access check, which replays requests as each user and signed out, are switched on from here.',
-  },
-  {
-    view: 'programs',
-    target: ['#progbody', '#main .view'],
-    title: 'Programs',
-    text: 'Connect a bug bounty platform and follow a program: its assets become your scope, and its rules, such as rate limits and required headers, are kept for you.',
+    text: 'Extensions, skills, filter packs and word lists, each signed and checked before it installs. Tools are switched on from here too: Saved users, the Access check, which replays requests as each user and signed out, and Programs, which follows a bug bounty program and keeps its scope and rules for you.',
   },
   {
     view: 'agents',
@@ -639,7 +633,7 @@ const VIEWS = {
   agents: { label: 'Agents', ico: '✦', render: renderAgents },
   market: { label: 'Market', ico: '⬢', render: renderMarket },
   scans: { label: 'Scans', ico: '⌖', render: renderScans },
-  programs: { label: 'Programs', ico: '◈', render: renderPrograms },
+  programs: { label: 'Programs', ico: '◈', render: renderPrograms, tool: 'programs' },
   rules: { label: 'Rules', ico: '⇄', render: renderRules },
   settings: { label: 'Settings', ico: '⚙', render: renderSettings, footer: true },
 };
@@ -649,7 +643,8 @@ const IN_APP = !!window.__PLONIX_APP__;
 /** Whether a built-in tool has been switched on from the Market. */
 const toolOn = (id) => !!(S.status && S.status.tools && S.status.tools.includes(id));
 
-function renderShell() {
+/** The sidebar's screen buttons, without the tools that are not switched on. */
+function navList() {
   const nav = h('div', { class: 'nav' });
   Object.entries(VIEWS).forEach(([key, v], i) => {
     if (v.footer) return;
@@ -664,6 +659,20 @@ function renderShell() {
       ),
     );
   });
+  return nav;
+}
+
+/** Rebuilds the sidebar's buttons when a tool is switched on or off. */
+function redrawNav() {
+  const old = $('#rail .nav');
+  if (!old) return;
+  const nav = navList();
+  for (const b of nav.children) b.classList.toggle('on', b.dataset.v === S.view);
+  old.replaceWith(nav);
+}
+
+function renderShell() {
+  const nav = navList();
   clear(
     $('#app'),
     h(
@@ -1062,6 +1071,7 @@ async function poll() {
     }
     if (S.view === 'agents' && (Date.now() - (S.agentsAt || 0) > 4000 || st.agent_inbox_unread !== prev.agent_inbox_unread)) loadAgents();
     if (st.intercept && st.intercept.seq !== IC.seq) loadIntercept();
+    if (prev.tools && String(st.tools) !== String(prev.tools)) redrawNav();
     if (st.callbacks !== prev.callbacks || (S.view === 'callbacks' && CB.data && CB.data.phase === 'starting')) callbacksChanged();
   } catch (e) {
     if (e.code === 'unauthorized') return;
@@ -8287,7 +8297,7 @@ async function showProgramLock(id, what) {
       'div',
       { class: 'proglock' },
       h('span', { text: `${p.name} does not allow automated testing. ${what}; browsing and single Bench requests still work.` }),
-      h('button', { class: 'btn sm', text: 'Program rules', onclick: () => leaveTo('programs') }),
+      toolOn('programs') ? h('button', { class: 'btn sm', text: 'Program rules', onclick: () => leaveTo('programs') }) : null,
     ),
   );
 }
@@ -9878,7 +9888,9 @@ async function showPackage(name) {
       sec(
         'Programs',
         h('p', { class: 'muted', text: `Lists your ${det.platform.title} programs on the Programs screen and brings one in with its scope and rules. Plonix only talks to ${det.platform.api}, with the token you give it.` }),
-        h('button', { class: 'btn sm', text: 'Open Programs', onclick: () => leaveTo('programs') }),
+        toolOn('programs')
+          ? h('button', { class: 'btn sm', text: 'Open Programs', onclick: () => leaveTo('programs') })
+          : h('div', null, h('p', { class: 'muted fine', text: 'Needs the Programs tool, which adds the Programs screen.' }), h('button', { class: 'btn sm', text: 'Get Programs', onclick: () => showPackage('programs') })),
       ),
     );
   if (det.lists) parts.push(sec('Lists', det.lists.map((l) => h('div', { class: 'marg' }, h('code', { text: l.id }), h('span', { class: 'muted', text: `${l.title} · ${l.count} value${l.count === 1 ? '' : 's'}` })))));

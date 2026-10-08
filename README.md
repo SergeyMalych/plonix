@@ -75,7 +75,7 @@ Plonix has a handful of tools, each with its own name. They are the same in the 
 | **Findings** | What you found, with the requests that prove it attached as evidence. Edit, confirm, close and export them as a report | `plonix findings` |
 | **Scans** | Crawl a host, review a scan plan for it, and run the scope-gated checks you pick | `plonix crawl`, `plonix scan`, ⌘8 |
 | **Agents** | Ask Claude about the whole project, pick up saved conversations, read the notes and leads Claude leaves while you browse (when you turn it on), and see every read an agent made | `plonix connect claude`, `plonix mcp` |
-| **Programs** | Bug bounty and disclosure programs: bring one in, and its scope and rules (request rate, required headers, no automated testing) apply to everything Plonix sends | `plonix program`, ⌘9 |
+| **Programs** | Bug bounty and disclosure programs: bring one in, and its scope and rules (request rate, required headers, no automated testing) apply to everything Plonix sends | `plonix program`, ⌘9 once installed from the Market |
 | **Market** | One signed catalog of skills, rule packs, filter packs, payload lists, platforms, tools, bundles and extensions, with picks for your kind of work | `plonix market`, ⌘7 |
 | **Extensions** | Sandboxed analyzers that add notes to the Lens and propose findings for you to confirm | `plonix extensions` |
 | **Skills** | Playbooks AI agents follow for a job in Plonix, offered over MCP | `plonix skills` |
@@ -233,7 +233,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - Listening starts only when you press **Start listening** and talks only to the callback server: the public servers, or your own with a token. It uses [interactsh](https://github.com/projectdiscovery/interactsh), the open-source callback tool by ProjectDiscovery (MIT license), which you install with `brew install interactsh`. Plonix keeps each project's session so earlier hosts keep working after a restart.
 
 ### Programs
-- **Programs** (⌘9, `plonix program`) bring in a bug bounty or vulnerability disclosure program: connect HackerOne, paste a program's policy, or look up a domain's `security.txt`, then review and follow it.
+- **Programs** (a tool in the Market that adds the Programs screen, ⌘9; `plonix program`) bring in a bug bounty or vulnerability disclosure program: connect HackerOne, paste a program's policy, or look up a domain's `security.txt`, then review and follow it.
 - With a platform connected, Plonix syncs every program you can work on, with its assets and rules, so you can search them by program or by asset. It tells you when a followed program's scope changes. Platform tokens stay in the macOS Keychain and are never given to agents.
 - Following a program sets the project's scope from its assets (in-scope assets accepted, listed exclusions rejected, IP ranges as rules), and its rules apply to everything Plonix sends: at most the program's request rate, the headers it asks for, and no scans, crawls or Bench runs when it bans automated testing.
 - Platforms are declarative Market packages, so more can be added without a Plonix release. See [docs/programs.md](docs/programs.md).
