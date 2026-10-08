@@ -127,7 +127,7 @@ impl ToolLibrary {
     }
 
     pub fn at(dir: &Path) -> Self {
-        Self { shelf: Shelf::new(dir, "tool", "tools", MAX_INSTALLED) }
+        Self { shelf: Shelf::new(dir, "tool", "market", MAX_INSTALLED) }
     }
 
     pub fn stamp(&self) -> Option<std::time::SystemTime> {

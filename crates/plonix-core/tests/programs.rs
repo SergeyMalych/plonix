@@ -1,6 +1,9 @@
 //! A project that follows a program: its scope, headers, request rate and
 //! testing rules hold for every request Plonix sends.
 
+mod common;
+use common::Running;
+
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -14,7 +17,7 @@ use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use plonix_core::Engine;
 use plonix_core::ca::CertAuthority;
-use plonix_core::engine::{self, EngineConfig, Running, SendError, SendRequest};
+use plonix_core::engine::{SendError, SendRequest};
 use plonix_core::paths::Home;
 use plonix_core::bounty::{Asset, AssetKind, Program, RequiredHeader, Rules};
 use plonix_core::scope::Decision;
@@ -44,20 +47,7 @@ async fn serve() -> SocketAddr {
 }
 
 async fn start(home: &Home) -> Running {
-    home.ensure().unwrap();
-    std::fs::create_dir_all(home.root.join("projects")).unwrap();
-    let ca = Arc::new(CertAuthority::load_or_create(home).unwrap());
-    let store = Store::open(&home.project_db("test")).unwrap();
-    let engine = Engine::new("test", store, ca, Upstream::new(false, vec![]).unwrap()).unwrap();
-    let config = EngineConfig {
-        home: home.clone(),
-        project: "test".into(),
-        proxy_addr: "127.0.0.1:0".parse().unwrap(),
-        proxy_port_fallback: false,
-        api_addr: "127.0.0.1:0".parse().unwrap(),
-        insecure_upstream: false,
-    };
-    engine::start_with(engine, &config).await.unwrap()
+    common::open(home, "test", None).await
 }
 
 async fn via_proxy(proxy: SocketAddr, url: &str) -> String {
@@ -138,9 +128,12 @@ async fn a_followed_program_is_enforced_on_every_send() {
     assert!(matches!(crawl, Err(SendError::NotAllowed(_))));
     let run = r.engine.run(plonix_core::runs::RunRequest::default(), "run").await;
     assert!(matches!(run, Err(SendError::NotAllowed(_))));
+    let check: plonix_core::authcheck::AuthCheckRequest = serde_json::from_value(serde_json::json!({ "targets": [1] })).unwrap();
+    let check = r.engine.access_check(check, "access").await;
+    assert!(matches!(check, Err(SendError::NotAllowed(_))), "{check:?}");
 
     // The program survives a restart of the project.
-    let store = Store::open(&home.project_db("test")).unwrap();
+    let store = Store::open(&r.session.project.db_path()).unwrap();
     let again = Engine::new("test", store, Arc::new(CertAuthority::load_or_create(&home).unwrap()), Upstream::new(false, vec![]).unwrap()).unwrap();
     assert_eq!(again.program().unwrap().program.name, "Acme Cloud");
 

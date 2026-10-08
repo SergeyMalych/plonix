@@ -1,12 +1,14 @@
-//! Saved users: named sets of request headers (cookies and auth tokens) that
-//! stand for the different people an application knows. They are the "cookie
-//! jar" the Bench switches between, and the identities the access check
-//! replays a request as.
+//! Saved users: named sets of cookies and request headers (auth tokens) that
+//! stand for the different people an application knows. The person acts as
+//! one of them at a time (browser capture, the Bench and Scans send as that
+//! user), the Bench can pick one per tab, and the access check replays a
+//! request as each of them.
 //!
-//! A saved user is only data: a label and a list of headers to apply to a
-//! request before it is sent. Applying a user never widens scope — every
-//! request still goes through the one scope-gated send path in
-//! [`crate::engine::Engine::send`]. Users are stored per project (see
+//! A saved user is only data: a label, its cookies and a list of headers to
+//! apply to a request before it is sent. Applying a user never widens scope:
+//! every request still goes through the scope-gated send paths. Cookies the
+//! server sets in answer to a request sent as a user are kept with that user,
+//! so its session stays current. Users are stored per project (see
 //! [`crate::store::Store::saved_users`]).
 
 use serde::{Deserialize, Serialize};
@@ -23,6 +25,10 @@ const MAX_NAME: usize = 60;
 const MAX_NOTE: usize = 200;
 const MAX_HEADER_NAME: usize = 120;
 const MAX_HEADER_VALUE: usize = 8_192;
+/// Most cookies one saved user may carry.
+pub const MAX_COOKIES: usize = 100;
+const MAX_COOKIE_NAME: usize = 200;
+const MAX_COOKIE_VALUE: usize = 4_096;
 
 /// The request headers stripped when a request is sent with no user (the
 /// "signed out" identity), and the ones a saved user replaces rather than
@@ -41,15 +47,199 @@ pub fn is_auth_header(name: &str) -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SavedUser {
     /// Stable id the Bench and the access check refer to. `[a-z0-9-]`.
+    /// Derived from the name when left out.
+    #[serde(default)]
     pub id: String,
     /// What the person calls this user, e.g. "Alice (admin)".
     pub name: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub note: String,
-    /// The headers applied to a request sent as this user. Usually one
-    /// `Cookie` line, sometimes an `Authorization` or an API-key header.
+    /// Headers applied to a request sent as this user, other than cookies:
+    /// usually an `Authorization` or an API-key header. A `Cookie` header
+    /// given here is split into [`Self::cookies`] when the user is saved.
     #[serde(default)]
     pub headers: Headers,
+    /// The user's cookies, sent as one `Cookie` header.
+    #[serde(default)]
+    pub cookies: Vec<Cookie>,
+    /// Keep the cookies current: a cookie the server sets or clears in answer
+    /// to a request sent as this user is updated here.
+    #[serde(default = "yes")]
+    pub keep_fresh: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// One cookie of a saved user.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Cookie {
+    pub name: String,
+    pub value: String,
+    /// The host the cookie is sent to, and its subdomains. Empty means every
+    /// in-scope host.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub domain: String,
+    /// When the cookie stops being sent, in seconds since 1970. None keeps it
+    /// until it is removed or expired by hand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires: Option<i64>,
+}
+
+impl Cookie {
+    pub fn live(&self, now: i64) -> bool {
+        self.expires.is_none_or(|t| t > now)
+    }
+
+    fn sent_to(&self, host: &str) -> bool {
+        let d = self.domain.as_str();
+        d.is_empty() || host.eq_ignore_ascii_case(d) || host.to_ascii_lowercase().ends_with(&format!(".{d}"))
+    }
+}
+
+/// How an exchange sent as a saved user says so in its `replaced` notes,
+/// followed by the user's name.
+pub const SENT_AS: &str = "sent as saved user: ";
+
+/// Seconds since 1970, the clock cookie expiry is measured on.
+pub fn now_secs() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+}
+
+impl SavedUser {
+    /// The headers a request to `host` carries when sent as this user: its
+    /// own headers, then one `Cookie` header with its live cookies for that
+    /// host. The caller removes the request's own auth headers first.
+    pub fn request_headers(&self, host: &str, now: i64) -> Headers {
+        let mut out = self.headers.clone();
+        let jar: Vec<String> =
+            self.cookies.iter().filter(|c| c.live(now) && c.sent_to(host)).map(|c| format!("{}={}", c.name, c.value)).collect();
+        if !jar.is_empty() {
+            out.push(("Cookie".into(), jar.join("; ")));
+        }
+        out
+    }
+
+    /// Moves any `Cookie` header into [`Self::cookies`], one entry per
+    /// cookie, so cookies can be seen and changed one by one. Users saved
+    /// before cookies were kept separately carry them as a header.
+    pub fn fold_cookie_header(&mut self) {
+        let mut found = vec![];
+        self.headers.retain(|(k, v)| {
+            let cookie = k.eq_ignore_ascii_case("cookie");
+            if cookie {
+                found.push(v.clone());
+            }
+            !cookie
+        });
+        for line in found {
+            for pair in line.split(';') {
+                let Some((n, v)) = pair.split_once('=') else { continue };
+                let n = n.trim();
+                if n.is_empty() {
+                    continue;
+                }
+                match self.cookies.iter_mut().find(|c| c.name == n && c.domain.is_empty()) {
+                    Some(c) => c.value = v.trim().to_string(),
+                    None => self.cookies.push(Cookie { name: n.into(), value: v.trim().into(), domain: String::new(), expires: None }),
+                }
+            }
+        }
+    }
+
+    /// Takes in the cookies a server set in a response to a request sent as
+    /// this user to `host`. A cookie the server clears is kept, marked
+    /// expired, so the person can see the session ended. Returns whether
+    /// anything changed.
+    pub fn absorb(&mut self, host: &str, resp_headers: &[(String, String)], now: i64) -> bool {
+        let mut changed = false;
+        for (k, v) in resp_headers {
+            if !k.eq_ignore_ascii_case("set-cookie") {
+                continue;
+            }
+            let Some(set) = parse_set_cookie(v, now) else { continue };
+            let room = self.cookies.len() < MAX_COOKIES;
+            let slot = self.cookies.iter_mut().find(|c| c.name == set.name && (c.domain == set.domain || c.domain.is_empty() || (set.domain.is_empty() && c.sent_to(host))));
+            match slot {
+                Some(c) => {
+                    let domain = if set.domain.is_empty() { c.domain.clone() } else { set.domain.clone() };
+                    let next = Cookie { domain, ..set };
+                    if *c != next {
+                        *c = next;
+                        changed = true;
+                    }
+                }
+                None if room && set.live(now) => {
+                    let domain = if set.domain.is_empty() { host.to_ascii_lowercase() } else { set.domain.clone() };
+                    self.cookies.push(Cookie { domain, ..set });
+                    changed = true;
+                }
+                None => {}
+            }
+        }
+        changed
+    }
+}
+
+/// Reads a `Set-Cookie` value: the cookie, the domain it names and when it
+/// expires (`Max-Age` wins over `Expires`, as browsers do).
+fn parse_set_cookie(v: &str, now: i64) -> Option<Cookie> {
+    let mut parts = v.split(';');
+    let (name, value) = parts.next()?.split_once('=')?;
+    let name = name.trim();
+    if name.is_empty() || name.len() > MAX_COOKIE_NAME || value.len() > MAX_COOKIE_VALUE {
+        return None;
+    }
+    let (mut domain, mut max_age, mut expires) = (String::new(), None, None);
+    for attr in parts {
+        let (k, val) = attr.split_once('=').unwrap_or((attr, ""));
+        match k.trim().to_ascii_lowercase().as_str() {
+            "domain" => domain = val.trim().trim_start_matches('.').to_ascii_lowercase(),
+            "max-age" => max_age = val.trim().parse::<i64>().ok(),
+            "expires" => expires = http_date(val.trim()),
+            _ => {}
+        }
+    }
+    let expires = match max_age {
+        Some(n) if n <= 0 => Some(now),
+        Some(n) => Some(now.saturating_add(n)),
+        None => expires,
+    };
+    Some(Cookie { name: name.into(), value: value.trim().into(), domain, expires })
+}
+
+/// Seconds since 1970 for a cookie date such as `Wed, 21 Oct 2015 07:28:00
+/// GMT` (or the `21-Oct-2015` form older servers send).
+fn http_date(s: &str) -> Option<i64> {
+    const MONTHS: [&str; 12] = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    let (mut day, mut month, mut year, mut hms) = (None, None, None, None);
+    for tok in s.split([' ', '-', ',']).filter(|t| !t.is_empty()) {
+        let low = tok.to_ascii_lowercase();
+        if tok.contains(':') {
+            let n: Vec<i64> = tok.split(':').filter_map(|x| x.parse().ok()).collect();
+            if n.len() == 3 {
+                hms = Some(n[0] * 3600 + n[1] * 60 + n[2]);
+            }
+        } else if let Some(m) = MONTHS.iter().position(|m| low.starts_with(m)) {
+            month = Some(m as i64 + 1);
+        } else if let Ok(n) = tok.parse::<i64>() {
+            if tok.len() <= 2 && day.is_none() {
+                day = Some(n);
+            } else {
+                year = Some(if n < 70 { 2000 + n } else if n < 100 { 1900 + n } else { n });
+            }
+        }
+    }
+    let (d, m, y) = (day?, month?, year?);
+    // Days from 1970-01-01 to y-m-d (proleptic Gregorian).
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some((era * 146_097 + doe - 719_468) * 86_400 + hms.unwrap_or(0))
 }
 
 /// Checks and tidies a list of saved users from the client. Returns the
@@ -91,8 +281,34 @@ pub fn check(users: &[SavedUser]) -> Result<Vec<SavedUser>, String> {
             }
             headers.push((k.to_string(), v.clone()));
         }
+        let mut user = SavedUser { headers, cookies: u.cookies.clone(), ..u.clone() };
+        user.fold_cookie_header();
+        if user.cookies.len() > MAX_COOKIES {
+            return Err(format!("{name}: at most {MAX_COOKIES} cookies"));
+        }
+        let mut cookies: Vec<Cookie> = Vec::with_capacity(user.cookies.len());
+        for c in user.cookies {
+            let n = c.name.trim();
+            if n.is_empty() {
+                continue; // an empty row from the editor: drop it
+            }
+            if n.len() > MAX_COOKIE_NAME || n.bytes().any(|b| b.is_ascii_control() || b"=; ,".contains(&b)) {
+                return Err(format!("{name}: `{}` is not a valid cookie name", clean(n, 40)));
+            }
+            if c.value.len() > MAX_COOKIE_VALUE || c.value.bytes().any(|b| b.is_ascii_control() || b == b';') {
+                return Err(format!("{name}: the value of cookie `{n}` is too long or contains a `;` or a line break"));
+            }
+            let domain = c.domain.trim().trim_start_matches('.').to_ascii_lowercase();
+            if !domain.bytes().all(|b| b.is_ascii_alphanumeric() || b"-.:[]".contains(&b)) {
+                return Err(format!("{name}: `{}` is not a valid cookie domain", clean(&domain, 40)));
+            }
+            match cookies.iter_mut().find(|x| x.name == n && x.domain == domain) {
+                Some(x) => (x.value, x.expires) = (c.value.trim().to_string(), c.expires),
+                None => cookies.push(Cookie { name: n.to_string(), value: c.value.trim().to_string(), domain, expires: c.expires }),
+            }
+        }
         let id = make_id(&u.id, name, &out);
-        out.push(SavedUser { id, name: name.to_string(), note: u.note.trim().to_string(), headers });
+        out.push(SavedUser { id, name: name.to_string(), note: u.note.trim().to_string(), headers: user.headers, cookies, keep_fresh: u.keep_fresh });
     }
     Ok(out)
 }
@@ -135,7 +351,61 @@ mod tests {
             name: name.into(),
             note: String::new(),
             headers: headers.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            cookies: vec![],
+            keep_fresh: true,
         }
+    }
+
+    fn c(name: &str, value: &str) -> Cookie {
+        Cookie { name: name.into(), value: value.into(), domain: String::new(), expires: None }
+    }
+
+    #[test]
+    fn a_cookie_header_is_split_into_cookies() {
+        let out = check(&[u("A", &[("Cookie", "s=1; theme=dark"), ("Authorization", "Bearer x")])]).unwrap();
+        assert_eq!(out[0].headers, vec![("Authorization".to_string(), "Bearer x".to_string())]);
+        assert_eq!(out[0].cookies, vec![c("s", "1"), c("theme", "dark")]);
+        assert!(check(&[SavedUser { cookies: vec![c("a b", "1")], ..u("A", &[]) }]).unwrap_err().contains("cookie name"));
+    }
+
+    #[test]
+    fn request_headers_send_only_live_cookies_for_the_host() {
+        let user = SavedUser {
+            cookies: vec![
+                c("s", "1"),
+                Cookie { expires: Some(50), ..c("old", "x") },
+                Cookie { domain: "shop.test".into(), ..c("cart", "9") },
+                Cookie { domain: "other.test".into(), ..c("no", "0") },
+            ],
+            ..u("A", &[("Authorization", "Bearer t")])
+        };
+        let h = user.request_headers("api.shop.test", 100);
+        assert_eq!(h, vec![("Authorization".to_string(), "Bearer t".to_string()), ("Cookie".to_string(), "s=1; cart=9".to_string())]);
+        assert_eq!(user.request_headers("x.test", 10)[1].1, "s=1; old=x");
+    }
+
+    #[test]
+    fn set_cookie_updates_adds_and_expires() {
+        let mut user = SavedUser { cookies: vec![c("s", "1"), c("gone", "x")], ..u("A", &[]) };
+        let resp = vec![
+            ("Set-Cookie".to_string(), "s=2; Path=/; HttpOnly".to_string()),
+            ("set-cookie".to_string(), "fresh=y; Max-Age=60; Domain=.shop.test".to_string()),
+            ("Set-Cookie".to_string(), "gone=; Expires=Thu, 01 Jan 1970 00:00:00 GMT".to_string()),
+        ];
+        assert!(user.absorb("www.shop.test", &resp, 1000));
+        assert_eq!(user.cookies[0], c("s", "2"));
+        assert_eq!(user.cookies[1].expires, Some(0));
+        assert!(!user.cookies[1].live(1000));
+        assert_eq!(user.cookies[2], Cookie { domain: "shop.test".into(), expires: Some(1060), ..c("fresh", "y") });
+        assert!(!user.absorb("www.shop.test", &resp[..1], 1000), "the same value again changes nothing");
+    }
+
+    #[test]
+    fn cookie_dates_parse() {
+        assert_eq!(http_date("Wed, 21 Oct 2015 07:28:00 GMT"), Some(1_445_412_480));
+        assert_eq!(http_date("Wed, 21-Oct-2015 07:28:00 GMT"), Some(1_445_412_480));
+        assert_eq!(http_date("Thu, 01 Jan 1970 00:00:00 GMT"), Some(0));
+        assert_eq!(http_date("soon"), None);
     }
 
     #[test]
@@ -144,7 +414,7 @@ mod tests {
         assert_eq!(out[0].id, "alice-admin");
         assert_eq!(out[1].id, "alice-admin-2");
         assert_eq!(out[2].id, "bob");
-        assert_eq!(out[0].headers, vec![("Cookie".to_string(), "s=1".to_string())]);
+        assert_eq!(out[0].cookies, vec![c("s", "1")]);
     }
 
     #[test]
@@ -155,8 +425,8 @@ mod tests {
 
     #[test]
     fn empty_header_rows_are_dropped_and_bad_ones_rejected() {
-        let out = check(&[u("A", &[("", ""), ("Cookie", "x")])]).unwrap();
-        assert_eq!(out[0].headers, vec![("Cookie".to_string(), "x".to_string())]);
+        let out = check(&[u("A", &[("", ""), ("X-Api-Key", "x")])]).unwrap();
+        assert_eq!(out[0].headers, vec![("X-Api-Key".to_string(), "x".to_string())]);
         assert!(check(&[u("A", &[("bad header", "x")])]).unwrap_err().contains("not a valid header name"));
         assert!(check(&[u("A", &[("Cookie", "a\r\nb")])]).unwrap_err().contains("line break"));
         assert!(check(&[u("", &[])]).unwrap_err().contains("name is required"));

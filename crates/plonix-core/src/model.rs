@@ -332,6 +332,18 @@ pub struct NewFinding {
     pub exchange_ids: Vec<i64>,
 }
 
+impl NewFinding {
+    /// Trims and checks a new finding, spelling the severity the way it is stored.
+    pub fn checked(mut self) -> Result<Self, String> {
+        self.title = self.title.trim().to_string();
+        if self.title.is_empty() {
+            return Err("title is required".into());
+        }
+        self.severity = check_severity(&self.severity)?;
+        Ok(self)
+    }
+}
+
 fn default_severity() -> String {
     "info".into()
 }

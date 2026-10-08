@@ -5,7 +5,7 @@ What changed in each Plonix release. The newest release is at the top.
 ## [Unreleased]
 
 ### Changed
-- Programs is now a tool you install from the Market, like Saved users and the Access check, so the sidebar shows it only once you want it. A project that already follows a program keeps the Programs screen and its rules. Bug hunters see it in *Recommended for you*.
+- Programs is now a tool you install from the Market, like Saved users and the Access check, so the sidebar shows it only once you want it. A project that already follows a program keeps the Programs screen and its rules, and the demo project still shows it. Bug hunters see it in *Recommended for you*.
 
 ## [0.1.1] - 2026-10-08
 

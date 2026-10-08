@@ -1,6 +1,9 @@
 //! End-to-end tests: a real proxy, real upstream servers (HTTP and HTTPS),
 //! the store, adaptive scope and the local API.
 
+mod common;
+use common::Running;
+
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -13,12 +16,10 @@ use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use plonix_core::ca::CertAuthority;
-use plonix_core::engine::{self, EngineConfig, ReplayRequest, Running, SendError, SendRequest};
+use plonix_core::engine::{ReplayRequest, SendError, SendRequest};
 use plonix_core::paths::Home;
 use plonix_core::query::Query;
 use plonix_core::scope::{Decision, EvidenceKind};
-use plonix_core::store::Store;
-use plonix_core::upstream::Upstream;
 use plonix_core::Engine;
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, ServerName};
@@ -118,21 +119,7 @@ impl rustls::server::ResolvesServerCert for Fixed {
 }
 
 async fn start(home: &Home, extra_root: Option<CertificateDer<'static>>) -> Running {
-    home.ensure().unwrap();
-    let ca = Arc::new(CertAuthority::load_or_create(home).unwrap());
-    std::fs::create_dir_all(home.root.join("projects")).unwrap();
-    let store = Store::open(&home.project_db("test")).unwrap();
-    let upstream = Upstream::new(false, extra_root.into_iter().collect()).unwrap();
-    let engine = Engine::new("test", store, ca, upstream).unwrap();
-    let config = EngineConfig {
-        home: home.clone(),
-        project: "test".into(),
-        proxy_addr: "127.0.0.1:0".parse().unwrap(),
-        proxy_port_fallback: false,
-        api_addr: "127.0.0.1:0".parse().unwrap(),
-        insecure_upstream: false,
-    };
-    engine::start_with(engine, &config).await.unwrap()
+    common::open(home, "test", extra_root).await
 }
 
 /// Sends one request through the proxy in absolute form.
@@ -774,15 +761,21 @@ async fn findings_can_be_finished_by_the_user_only() {
         let id = f["id"].as_i64().unwrap();
         let path = format!("/api/findings/{id}");
 
-        // Agents read and export, and cannot edit or delete.
-        assert_eq!(json(req("GET", &path, &agent).call()).1["title"], "Open redirect");
+        // Agents cannot edit or delete.
         for method in ["PATCH", "PUT", "DELETE"] {
             let (code, body) = json(req(method, &path, &agent).send_json(serde_json::json!({ "status": "fixed" })));
             assert_eq!((code, body["code"].as_str()), (403, Some("agent_not_allowed")), "{method}");
         }
-        // localhost is not in scope, so an agent's report leaves the request out.
+        // localhost is not in scope, and its request is the finding's only
+        // evidence, so an agent limited to in-scope data does not see it.
+        assert_eq!(json(req("GET", &path, &agent).call()).1["code"], "outside_agent_data");
+        assert!(json(req("GET", "/api/findings", &agent).call()).1.as_array().unwrap().is_empty());
+        assert!(!text("/api/findings/export?format=md", &agent).2.contains("Open redirect"));
+        // With all data allowed, agents read and export it.
+        json(req("PUT", "/api/agents/settings", &user).send_json(serde_json::json!({ "data": "all" })));
+        assert_eq!(json(req("GET", &path, &agent).call()).1["title"], "Open redirect");
         let (_, _, md) = text("/api/findings/export?format=md", &agent);
-        assert!(md.contains("Open redirect") && md.contains("agents may see in-scope traffic only") && !md.contains("welcome home"), "{md}");
+        assert!(md.contains("Open redirect") && md.contains("welcome home"), "{md}");
 
         // The user edits it.
         let (code, body) = json(req("PATCH", &path, &user).send_json(serde_json::json!({ "status": "nonsense" })));
@@ -824,6 +817,7 @@ async fn agent_settings_and_ask_context() {
     via_proxy(r.proxy_addr, &format!("http://localhost:{}/", up.port()), &[]).await;
     wait_for_count(&r.engine, 1).await;
     let base = format!("http://{}", r.api_addr);
+    let port = up.port();
     let (user, agent) = (format!("Bearer {}", r.token), format!("Bearer {}", r.agent_token));
 
     tokio::task::spawn_blocking(move || {
@@ -851,6 +845,22 @@ async fn agent_settings_and_ask_context() {
         assert_eq!(b["total"], 0);
         assert_eq!(get("/api/scan/plan/localhost", &agent).1["code"], "outside_agent_data");
         assert_eq!(get("/api/scan/suggest/localhost", &agent).1["code"], "outside_agent_data");
+
+        // No route an agent can read shows the out-of-scope host, its
+        // response or a finding about it.
+        assert_eq!(post("/api/findings", &user, serde_json::json!({ "title": "Leaky title", "severity": "low", "exchange_ids": [1] })).0, 201);
+        for c in plonix_core::access::capabilities(plonix_core::access::AgentMode::ReadOnly).iter().filter(|c| c.method == "GET") {
+            let path = c.path.replace("{id}", "1").replace("{host}", "localhost").replace("{name}", "x");
+            let r = ureq::get(&format!("{base}{path}")).set("Authorization", &agent).call();
+            let body = match r {
+                Ok(r) => r.into_string().unwrap(),
+                Err(ureq::Error::Status(_, r)) => r.into_string().unwrap(),
+                Err(e) => panic!("{e}"),
+            };
+            for leak in [format!("localhost:{port}"), "welcome home".into(), "Leaky title".into()] {
+                assert!(!body.contains(&leak), "{path} shows {leak}: {body}");
+            }
+        }
 
         // Bodies over the extractors' old 2 MB default reach the handler, and
         // engine state kept beside UI state is not writable as a view.

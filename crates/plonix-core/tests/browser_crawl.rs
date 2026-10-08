@@ -2,9 +2,12 @@
 //! Chromium-based browser is found (or `PLONIX_BROWSER` points at one);
 //! otherwise it says so and passes.
 
+mod common;
+use common::Running;
+
 use std::convert::Infallible;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -13,15 +16,11 @@ use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
-use plonix_core::Engine;
 use plonix_core::browser::{self, Kind};
-use plonix_core::ca::CertAuthority;
 use plonix_core::crawl::CrawlRequest;
-use plonix_core::engine::{self, EngineConfig, SendError};
+use plonix_core::engine::{SendError};
 use plonix_core::paths::Home;
 use plonix_core::scope::Decision;
-use plonix_core::store::Store;
-use plonix_core::upstream::Upstream;
 use tokio::net::TcpListener;
 
 fn hits() -> &'static Mutex<Vec<String>> {
@@ -66,21 +65,8 @@ async fn serve() -> SocketAddr {
     addr
 }
 
-async fn start(home: &Home) -> engine::Running {
-    home.ensure().unwrap();
-    let ca = Arc::new(CertAuthority::load_or_create(home).unwrap());
-    std::fs::create_dir_all(home.root.join("projects")).unwrap();
-    let store = Store::open(&home.project_db("test")).unwrap();
-    let engine = Engine::new("test", store, ca, Upstream::new(false, vec![]).unwrap()).unwrap();
-    let config = EngineConfig {
-        home: home.clone(),
-        project: "test".into(),
-        proxy_addr: "127.0.0.1:0".parse().unwrap(),
-        proxy_port_fallback: false,
-        api_addr: "127.0.0.1:0".parse().unwrap(),
-        insecure_upstream: false,
-    };
-    engine::start_with(engine, &config).await.unwrap()
+async fn start(home: &Home) -> Running {
+    common::open(home, "test", None).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
