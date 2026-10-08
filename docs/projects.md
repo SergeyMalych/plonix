@@ -27,6 +27,8 @@ A local folder works best. Captured traffic changes constantly, which syncs poor
 
 The first time the demo opens, a short walkthrough offers to show you around: it steps through Traffic, filters, grouping, the Lens and its suggestions, Scope, the Map, the Bench and its runs, Findings, Scans, Rules and adding a rule, the Market, Programs and Agents, ringing each part on screen with a line or two on what it does. Use the arrow keys or Next and Back, and Esc to leave. **Take the tour** in the demo strip starts it again.
 
+Most stops have a **Test now!** button that shows that part working on the demo's data: it searches the traffic for one user's id, pulls out the sign-in flow with a single filter, decodes the bearer token in the Lens, accepts a suggested domain, lists the API endpoints nobody has visited yet, changes the order id in the Bench and gets another customer's order back, runs through 22 order ids, sends a request through the rules, checks Maya's order as each saved user and signed out, and reads a pasted bug bounty policy. The demo's stand-in API answers all of it locally.
+
 Although the demo's hosts are not real, its API answers locally, so you can actually try things. The Bench opens on a ready-made run: the order id is marked as a position with a range of ids queued, and pressing **Start run** walks the ids and shows how each one returns a different customer's order — the finding the demo is built around. This stand-in only ever answers the demo's made-up hosts, never a real one.
 
 Change anything you like. **Start demo over…** in the project's **⋯** menu (or `plonix projects demo --fresh`) replaces it with a fresh copy. Only a project marked as the demo can be started over, and only while it is closed.

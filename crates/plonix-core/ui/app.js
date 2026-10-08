@@ -361,19 +361,21 @@ async function filterTour() {
 const TOUR_STEPS = [
   {
     title: 'Welcome to the Plonix demo',
-    text: 'Brightcart is a made-up shop whose traffic was captured ahead of time. This walk takes about two minutes and stops on each part of Plonix. Use the arrow keys or the buttons, and leave whenever you like.',
+    text: 'Brightcart is a made-up shop whose traffic was captured ahead of time. This walk takes about two minutes and stops on each part of Plonix. Where you see Test now!, press it to watch that part work for real on the demo. Use the arrow keys or the buttons, and leave whenever you like.',
     view: 'traffic',
   },
   {
     view: 'traffic',
     target: '#searchbox',
     title: 'Traffic',
+    test: 'traffic',
     text: 'Every request your browser makes through Plonix lands here, live. Search any text, or type a filter such as host:, status:, path: or method: and press Enter.',
   },
   {
     view: 'traffic',
     target: '#chips',
     title: 'Filters',
+    test: 'filters',
     text: 'Filters are chips: + shows only what matches, − hides it. The Suggested chips come from this traffic, so the useful ones are a click away. Filters are saved with the project.',
     action: { label: 'See ready-made filters', run: () => filterTour() },
   },
@@ -381,6 +383,7 @@ const TOUR_STEPS = [
     view: 'traffic',
     target: '#groupseg',
     title: 'Grouping',
+    test: 'grouping',
     text: 'The same request sent several times in a row folds into one ×N row with its time span. Click the row to expand it, or switch to Every request.',
   },
   {
@@ -391,36 +394,42 @@ const TOUR_STEPS = [
     },
     target: '#inspector',
     title: 'Lens',
+    test: 'lens',
     text: 'Lens shows the request and response, and points out what matters in them: tokens, emails and card numbers in this order. Select any text in it to decode it, find it in other traffic or ask Claude about it.',
   },
   {
     view: 'traffic',
     target: ['.lenssugg:not([hidden])', '#inspector'],
     title: 'Suggestions',
+    test: 'suggestions',
     text: 'Plonix reads the request and suggests next steps that fit it, one click each, such as drafting a finding or getting ideas for this endpoint. Nothing is sent until you click.',
   },
   {
     view: 'scope',
     target: ['#scopebody .card.sugg', '#scopebody'],
     title: 'Scope',
+    test: 'scope',
     text: 'As you browse, Plonix spots domains that belong to your target and shows why. You accept or reject each one, and anything that sends requests stays inside what you accepted.',
   },
   {
     view: 'map',
     target: ['#hostlist', '#main .view'],
     title: 'Map',
+    test: 'map',
     text: 'Hosts, endpoints and parameters learned from the traffic, with the technologies Plonix detected. Click any endpoint to see its requests in place.',
   },
   {
     view: 'bench',
     target: ['.reqbar', '#main .view'],
     title: 'Bench',
+    test: 'bench',
     text: 'Each tab is an experiment: edit a request, send it, branch it and compare the responses. The demo comes with three ready-made experiments.',
   },
   {
     view: 'bench',
     target: ['.runconf', '#main .view'],
     title: 'Run',
+    test: 'run',
     text: 'Mark a value with • and Run sends the request once per value, with a sensible list picked for you. Here it walks the order id through nearby numbers so you can spot orders that aren’t yours.',
   },
   {
@@ -439,6 +448,7 @@ const TOUR_STEPS = [
     view: 'rules',
     target: ['.rllist', '#main .view'],
     title: 'Rules',
+    test: 'rules',
     text: 'Rules change traffic as it passes: send a header on every request, change or remove one, or replace any text. Each rule says where it applies (your browser, the Bench, Scans) and can have a condition, written like a Traffic search.',
   },
   {
@@ -457,12 +467,14 @@ const TOUR_STEPS = [
     view: 'market',
     target: ['#mkinds', '#main .view'],
     title: 'Market',
+    test: 'market',
     text: 'Extensions, skills, filter packs and word lists, each signed and checked before it installs. Tools such as Saved users and the Access check, which replays requests as each user and signed out, are switched on from here.',
   },
   {
     view: 'programs',
     target: ['#progbody', '#main .view'],
     title: 'Programs',
+    test: 'programs',
     text: 'Connect a bug bounty platform and follow a program: its assets become your scope, and its rules, such as rate limits and required headers, are kept for you.',
   },
   {
@@ -478,7 +490,289 @@ const TOUR_STEPS = [
   },
 ];
 
-const TOUR = { i: -1, el: null, spot: null, timer: null, keys: null };
+/* ---- Test now: a live example for each stop ---- */
+
+/** What a Test now example can do: wait, type like a person, press a
+ * button where it can be seen, and move the ring to what it shows. Every
+ * example runs on the demo's own data; its made-up hosts are answered by the
+ * demo's stand-in API, so nothing reaches the internet. */
+function tourKit(i) {
+  const alive = () => TOUR.i === i && !!TOUR.el;
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const kit = {
+    alive,
+    wait,
+    async until(fn, ms = 6000) {
+      for (let t = 0; t < ms && alive(); t += 100) {
+        const v = fn();
+        if (v) return v;
+        await wait(100);
+      }
+      return fn();
+    },
+    ring(target) {
+      TOUR.focus = target;
+      placeTour();
+    },
+    async type(el, text, { clear: wipe = true, ms = 40 } = {}) {
+      if (!el) return;
+      if (wipe) el.value = '';
+      for (const ch of text) {
+        if (!alive()) return;
+        el.value += ch;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        await wait(ms);
+      }
+      el.blur();
+    },
+    async press(el) {
+      if (!el || !alive()) return;
+      el.classList.add('tourpress');
+      await wait(380);
+      el.classList.remove('tourpress');
+      el.click();
+    },
+  };
+  return kit;
+}
+
+const andList = (xs) => (xs.length < 2 ? xs.join('') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1]);
+
+const TOUR_TESTS = {
+  traffic: {
+    run: async (t) => {
+      await t.type($('#q'), 'usr_8f2c41');
+      await t.wait(700);
+      t.ring('#tablewrap');
+      const n = (($('#tcount') || {}).textContent || '').trim();
+      return `${n || 'These requests'} carry Maya’s user id, usr_8f2c41, somewhere in a URL, header or body. One search, across every host, as fast as you type.`;
+    },
+    undo: () => {
+      const q = $('#q');
+      if (q) q.value = '';
+      T.text = '';
+      saveTrafficView();
+      if (S.view === 'traffic' && T.refresh) T.refresh(true);
+    },
+  },
+  filters: {
+    run: async (t) => {
+      TOUR.saved = { filters: T.filters.map((f) => ({ ...f })), text: T.text };
+      const filters = [{ term: 'is:auth', mode: 'include' }];
+      T.filters = filters;
+      T.text = '';
+      const q = $('#q');
+      if (q) q.value = '';
+      filtersChanged();
+      await t.wait(700);
+      t.ring('#tablewrap');
+      const r = await api('/api/traffic?limit=200&q=' + encodeURIComponent(queryFor(filters, ''))).catch(() => ({ items: [], total: 0 }));
+      const hosts = new Set(r.items.map((x) => x.host));
+      return `One chip, is:auth, pulls out the whole sign-in flow: ${plural(r.total, 'request')} across ${plural(hosts.size, 'host')}, from the login page to the token exchange.`;
+    },
+    undo: () => {
+      if (!TOUR.saved) return;
+      T.filters = TOUR.saved.filters;
+      T.text = TOUR.saved.text;
+      TOUR.saved = null;
+      if (S.view === 'traffic') filtersChanged();
+      else saveTrafficView();
+    },
+  },
+  grouping: {
+    run: async (t) => {
+      const tag = await t.until(() => $('#rows .tag.alike:not(.on)'));
+      if (!tag) return 'Every repeat is already unfolded.';
+      const row = tag.closest('tr');
+      const id = row && Number(row.dataset.id);
+      const n = (tag.textContent.match(/\d+/) || ['2'])[0];
+      await t.press(tag);
+      await t.wait(300);
+      const tr = $(`#rows tr[data-id="${id}"]`);
+      if (tr) t.ring(tr);
+      const ex = id ? await getExchange(id).catch(() => null) : null;
+      return `${ex ? ex.method + ' ' + ex.path : 'This request'} was sent ${n} times in a row. Folded, it takes one line; unfolded, each send is right underneath to compare.`;
+    },
+  },
+  lens: {
+    run: async (t) => {
+      const ex = T.sel ? await getExchange(T.sel).catch(() => null) : null;
+      const auth = ex && (ex.req_headers || []).find(([k]) => /^authorization$/i.test(k));
+      const tok = auth && auth[1].replace(/^Bearer\s+/i, '');
+      const slot = $('#inspector .selslot');
+      if (!tok || !slot) return 'Select any text in the Lens to decode it.';
+      t.ring(slot.parentElement);
+      decodeSelection(slot.parentElement, tok);
+      await t.wait(200);
+      t.ring($('#inspector .spotdetail') || slot.parentElement);
+      const it = genericDecode(tok);
+      const p = (it.jwt && it.jwt.payload) || {};
+      const who = [p.sub && 'user ' + p.sub, p.role && 'role ' + p.role, p.exp && 'expires ' + new Date(p.exp * 1000).toLocaleDateString()].filter(Boolean).join(', ');
+      return `The bearer token, decoded in place: ${who || 'its claims and header'}. Select any value in a request or response to do the same.`;
+    },
+    undo: () => document.querySelectorAll('#inspector .selslot').forEach((s) => clear(s)),
+  },
+  suggestions: {
+    run: async (t) => {
+      const chip = await t.until(() => $('.lenssugg .chip.k-warn') || $('.lenssugg .chip'));
+      if (!chip) return 'No suggestions for this request.';
+      const label = chip.textContent.trim();
+      await t.press(chip);
+      const m = await t.until(() => $('.modal'));
+      if (!m) return label;
+      m.classList.add('tourmodal');
+      t.ring(m.querySelector('.mcard'));
+      return `“${label}” turned into a ready finding: title, severity and this request as evidence, filled in for you. Save it as is, or let Claude write it up.`;
+    },
+  },
+  scope: {
+    run: async (t) => {
+      const card = $('#scopebody .card.sugg');
+      const btn = card && card.querySelector('button.primary');
+      if (!btn) return 'Nothing waiting for a decision.';
+      const host = (card.querySelector('.dom') || {}).textContent || 'This host';
+      const why = card.querySelectorAll('.ev').length;
+      await t.press(btn);
+      await t.wait(600);
+      t.ring(['#railsecs', '#scopebody']);
+      return `${host.trim()} is now in scope, accepted on ${why ? plural(why, 'piece', 'pieces') + ' of' : 'the'} evidence Plonix found while you browsed. The Bench, Scans and every check can reach it; anything you didn’t accept stays out.`;
+    },
+  },
+  map: {
+    run: async (t) => {
+      const host = 'api.brightcart.example';
+      M.sel = host;
+      M.specOpen = host;
+      if (typeof drawHostList === 'function') drawHostList();
+      drawHostDetail();
+      const sec = await t.until(() => $('#hostdetail .specsec'));
+      if (!sec) return 'This host has no API description.';
+      sec.scrollIntoView({ block: 'center' });
+      await t.wait(250);
+      t.ring(sec);
+      const spec = await api('/api/hosts/' + encodeURIComponent(host) + '/spec').catch(() => null);
+      const todo = spec ? spec.endpoints.filter((e) => !e.visited) : [];
+      const pick = todo.find((e) => /admin|role/.test(e.path)) || todo[0];
+      return `Plonix found the API’s own description in the traffic: ${plural(spec ? spec.endpoints.length : 0, 'endpoint')}, ${todo.length} never visited${pick ? `, such as ${pick.method} ${pick.path}` : ''}. Each one is a click from the Bench.`;
+    },
+  },
+  rules: {
+    run: async (t) => {
+      const ex = await api('/api/send', { method: 'POST', body: { method: 'GET', url: 'https://api.brightcart.example/v1/orders/1042', headers: [['Accept', 'application/json']] } });
+      t.ring(['.rllist', '#main .view']);
+      // Only Accept was sent, so any other header was added by a rule on the way.
+      const changes = (ex.req_headers || []).filter(([k]) => !/^(accept|host|content-length)$/i.test(k)).map(([k, v]) => `${k}: ${v}`);
+      return `Sent a bare request from the Bench. On the way, the rules ${changes.length ? 'added ' + changes.join(', ') : 'checked it and changed nothing'}, and the request is tagged “changed” in Traffic so you always know.`;
+    },
+  },
+  bench: {
+    run: async (t) => {
+      const i = R.tabs.findIndex((x) => x.name === 'Order lookup');
+      if (i < 0) return 'The order lookup experiment is gone; start the demo over to get it back.';
+      R.active = i;
+      saveBench();
+      renderBench($('#main'));
+      const url = await t.until(() => $('#benchurl'));
+      t.ring('.reqbar');
+      url.value = url.value.replace(/\d+$/, '');
+      await t.type(url, '1043', { clear: false, ms: 140 });
+      await t.press($('.reqbar .btn.primary'));
+      await t.until(() => R.tabs[i].cur && !$('.reqbar .btn.primary[disabled]'));
+      await t.wait(300);
+      t.ring(['.rsplit > .rcol:last-child', '#main .view']);
+      const ex = R.tabs[i].cur ? await getExchange(R.tabs[i].cur).catch(() => null) : null;
+      let who = '';
+      try {
+        const o = JSON.parse(ex.resp_text);
+        who = `${o.customer.name}’s order: their name, email and card number`;
+      } catch (_) {}
+      return `Order 1043 came back with ${who || 'someone else’s order'}, while signed in as Maya. The API never checks whose order it is.`;
+    },
+  },
+  run: {
+    run: async (t) => {
+      const i = R.tabs.findIndex((x) => /run/i.test(x.name || '') && (x.url || '').includes(MARK));
+      if (i < 0) return 'The ready-made run is gone; start the demo over to get it back.';
+      R.active = i;
+      saveBench();
+      renderBench($('#main'));
+      const start = await t.until(() => $('.runstart:not([disabled])'));
+      if (!start) return 'Pick a value to run first.';
+      await t.press(start);
+      t.ring('#runresults');
+      const tab = R.tabs[i];
+      await t.until(() => tab.runState && !tab.runState.busy, 20000);
+      const rep = tab.runState && tab.runState.report;
+      if (!rep) return (tab.runState && tab.runState.error) || 'The run did not finish.';
+      const ok = rep.rows.filter((r) => r.status === 200 && r.exchange_id);
+      const names = new Set();
+      for (const r of ok.slice(0, 10)) {
+        try {
+          names.add(JSON.parse((await getExchange(r.exchange_id)).resp_text).customer.name);
+        } catch (_) {}
+      }
+      t.ring('#runresults');
+      return `Sent ${plural(rep.rows.length, 'request')} in a moment and got ${ok.length} orders back, belonging to ${plural(names.size, 'different customer')}, including ${andList([...names].slice(0, 3))}. That’s the flaw, found with one click.`;
+    },
+  },
+  market: {
+    run: async (t) => {
+      for (const name of ['saved-users', 'access-check']) {
+        if (!toolOn(name)) await api('/api/market/install', { method: 'POST', body: { name } });
+      }
+      S.status = await api('/api/status');
+      renderShell();
+      const r = await api('/api/traffic?limit=1&q=' + encodeURIComponent('path:/v1/orders/1042 mime:json'));
+      if (!r.items.length) return 'The order to check is gone; start the demo over to get it back.';
+      startAccessCheck({ targets: [r.items[0].id], sourceLabel: 'GET /v1/orders/1042, Maya’s order' });
+      const btn = await t.until(() => $('#main .acpane .btn.primary:not([disabled])'));
+      t.ring('#main .view');
+      await t.press(btn);
+      await t.until(() => AC.report || AC.err, 15000);
+      await t.wait(200);
+      t.ring(['#main .actable', '#main .view']);
+      if (!AC.report) return AC.err || 'The check did not finish.';
+      const ok = AC.report.identities.filter((id) => AC.report.rows[0].cells.some((c) => c.identity === id.id && okStatus(c.status)));
+      return `Switched on Saved users and the Access check, then replayed Maya’s order ${andList(AC.report.identities.map((x) => (x.anon ? 'signed out' : 'as ' + x.label.replace(/\s*\(.*\)$/, ''))))}. ${ok.length === AC.report.identities.length ? 'Every one of them got it, even signed out.' : `${plural(ok.length, 'identity', 'identities')} got it.`}`;
+    },
+  },
+  programs: {
+    run: async (t) => {
+      PG.source = 'paste';
+      PG.draft = null;
+      PG.preview = null;
+      drawPrograms();
+      const name = await t.until(() => $('#pg-name'));
+      const text = $('#pg-text');
+      t.ring(['#progbody .card', '#progbody']);
+      await t.type(name, 'Brightcart', { ms: 30 });
+      const policy =
+        'Brightcart bug bounty\n\nRules\n- Keep automated testing under 5 requests per second.\n- Add the header X-Bug-Bounty: your-username to every request.\n- No denial of service or social engineering.\n\nIn scope\n- *.brightcart.example\n- api.brightcart.example\n- uploads.brightcart-files.example\n\nOut of scope\n- status.brightcart.example';
+      for (const line of policy.split('\n')) {
+        if (!t.alive()) return '';
+        text.value += (text.value ? '\n' : '') + line;
+        await t.wait(70);
+      }
+      await t.press($('#progbody .progform .btn.primary'));
+      await t.until(() => PG.preview, 8000);
+      await t.wait(300);
+      t.ring('#progbody');
+      const p = PG.draft;
+      if (!p) return 'Plonix could not read that policy.';
+      const inn = p.assets.filter((a) => a.in_scope).length;
+      const out = p.assets.length - inn;
+      const r = p.rules || {};
+      return `From plain text, Plonix found ${plural(inn, 'asset')} in scope and ${out} out, a limit of ${r.rate_per_second || '—'} requests a second and ${plural((r.headers || []).length, 'required header')}. Follow it and they become your scope and guard rails.`;
+    },
+    undo: () => {
+      PG.draft = null;
+      PG.preview = null;
+      if (S.view === 'programs') drawPrograms();
+    },
+  },
+};
+
+const TOUR = { i: -1, el: null, spot: null, timer: null, keys: null, focus: null, undo: null, saved: null };
 
 /** Starts the walk at the first step, or at `at`. */
 function startTour(at = 0) {
@@ -510,13 +804,16 @@ function endTour() {
   window.removeEventListener('resize', placeTour);
   if (TOUR.el) TOUR.el.remove();
   if (TOUR.spot) TOUR.spot.remove();
-  Object.assign(TOUR, { i: -1, el: null, spot: null, timer: null, keys: null });
+  tourUndo();
+  Object.assign(TOUR, { i: -1, el: null, spot: null, timer: null, keys: null, focus: null, saved: null });
 }
 
 async function tourStep(i) {
   if (!TOUR.el || i < 0) return;
   if (i >= TOUR_STEPS.length) return endTour();
+  tourUndo();
   TOUR.i = i;
+  TOUR.focus = null;
   const s = TOUR_STEPS[i];
   const last = i === TOUR_STEPS.length - 1;
   closeModal();
@@ -531,6 +828,7 @@ async function tourStep(i) {
     h('h4', { text: s.title }),
     h('p', { text: s.text }),
     s.action ? h('button', { class: 'linkbtn taction', text: s.action.label + ' →', onclick: s.action.run }) : null,
+    s.test ? tourTestBox(i, TOUR_TESTS[s.test]) : null,
     h(
       'div',
       { class: 'tourfoot' },
@@ -549,9 +847,57 @@ async function tourStep(i) {
   placeTour();
 }
 
-/** The first of a step's targets that is on screen. */
+/** Undoes what the last Test now changed on screen, so the next stop starts clean. */
+function tourUndo() {
+  const undo = TOUR.undo;
+  TOUR.undo = null;
+  if (undo) {
+    try {
+      undo();
+    } catch (_) {}
+  }
+}
+
+/** The Test now button, and where the example says what it found. */
+function tourTestBox(i, test) {
+  if (!test) return null;
+  const result = h('div', { class: 'tresult', hidden: true });
+  const btn = h('button', { class: 'btn sm ttest', onclick: () => go() }, h('span', { class: 'tico', text: '▶' }), h('span', { text: 'Test now!' }));
+  const go = async () => {
+    if (btn.disabled) return;
+    tourUndo();
+    btn.disabled = true;
+    btn.classList.add('busy');
+    btn.lastChild.textContent = 'Running…';
+    result.hidden = true;
+    TOUR.undo = test.undo || null;
+    let said;
+    try {
+      said = await test.run(tourKit(i));
+    } catch (e) {
+      said = e.message;
+    }
+    if (TOUR.i !== i || !TOUR.el) return;
+    btn.disabled = false;
+    btn.classList.remove('busy');
+    btn.lastChild.textContent = 'Test again';
+    if (said) {
+      clear(result, h('span', { class: 'tok', text: '✓' }), h('span', { text: said }));
+      result.hidden = false;
+    }
+    placeTour();
+  };
+  return h('div', { class: 'ttestbox' }, btn, result);
+}
+
+/** The first of a step's targets that is on screen; a running Test now
+ * points the ring at what it is showing instead. */
 function tourTarget(s) {
-  for (const sel of [].concat(s.target || [])) {
+  for (const sel of [].concat(TOUR.focus || s.target || [])) {
+    if (sel instanceof Element) {
+      if (sel.isConnected && sel.getClientRects().length) return sel;
+      continue;
+    }
     const el = $(sel);
     if (el && el.getClientRects().length) return el;
   }
