@@ -350,6 +350,17 @@ async fn ui_session(State(s): State<AppState>, headers: HeaderMap, Json(b): Json
     }
 }
 
+/// The built-in tools switched on for this window. A project that already
+/// follows a program keeps its Programs screen, so the rules it follows stay
+/// in view even where the Programs tool was never installed.
+fn tools_on(s: &AppState) -> std::collections::BTreeSet<String> {
+    let mut on = crate::tool::ToolLibrary::new(&s.home).enabled_features();
+    if s.engine.program().is_some() {
+        on.insert("programs".into());
+    }
+    on
+}
+
 async fn status(State(s): State<AppState>, caller: MaybeCaller) -> Response {
     let rules = s.engine.rules();
     let pending = s.engine.store.suggestions(&rules).map(|v| v.len()).unwrap_or(0);
@@ -373,7 +384,7 @@ async fn status(State(s): State<AppState>, caller: MaybeCaller) -> Response {
         // Which built-in tools the Market has switched on (see crate::tool),
         // so the window shows the Access check tab and the Bench user
         // switcher only once they are installed.
-        "tools": crate::tool::ToolLibrary::new(&s.home).enabled_features(),
+        "tools": tools_on(&s),
         // The newest callback's number, so the sidebar can count new ones.
         "callbacks": s.engine.callbacks.latest(),
     });

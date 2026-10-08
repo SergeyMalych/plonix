@@ -49,6 +49,11 @@ pub const FEATURES: &[Feature] = &[
         title: "Callbacks",
         summary: "A screen that hands out unique hosts to put in requests and lists every DNS lookup, HTTP request or mail that reaches one.",
     },
+    Feature {
+        id: "programs",
+        title: "Programs",
+        summary: "A screen that brings in a bug bounty or disclosure program, turns its assets into scope and keeps its rules while you test.",
+    },
 ];
 
 pub fn feature(id: &str) -> Option<&'static Feature> {

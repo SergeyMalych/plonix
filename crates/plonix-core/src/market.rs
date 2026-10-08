@@ -60,6 +60,7 @@ pub const SNAPSHOT: &[(&str, &str)] = &[
     ("tools/saved-users.json", include_str!("../../../store/tools/saved-users.json")),
     ("tools/access-check.json", include_str!("../../../store/tools/access-check.json")),
     ("tools/callbacks.json", include_str!("../../../store/tools/callbacks.json")),
+    ("tools/programs.json", include_str!("../../../store/tools/programs.json")),
     ("skills/triage-host.md", include_str!("../../../store/skills/triage-host.md")),
     ("skills/explain-request.md", include_str!("../../../store/skills/explain-request.md")),
     ("skills/review-sign-in.md", include_str!("../../../store/skills/review-sign-in.md")),
@@ -101,6 +102,14 @@ const BUILTIN_TOOLS: &[(&str, &[&str])] = &[
             "Adds a Callbacks screen. Make a host for each test, put it in a request (a URL parameter, a header, a webhook field), and see every DNS lookup, HTTP request or mail that later reaches it, with the time, the address it came from and the raw request.",
             "Each host carries its own name, so a callback points straight at the test it came from. Insert one from the Bench in a click, find the request that carried it, and turn a callback into a finding.",
             "Nothing runs on its own: listening starts when you press Start and registers only with the callback server. It uses interactsh, the open-source callback tool by ProjectDiscovery (MIT license), which you install with `brew install interactsh`. Use the public servers or your own, with a token.",
+        ],
+    ),
+    (
+        "tools/programs.json",
+        &[
+            "Adds a Programs screen. Bring in a bug bounty or disclosure program from a connected platform such as HackerOne, from its pasted policy, or from a domain's security.txt, and review it before you follow it.",
+            "Following a program turns its in-scope assets into scope rules and keeps its rules while you test: the rate limit, the headers it asks for, and whether it allows automated testing. Connect a platform with your own token and every program you can see is pulled in, so you can search them by name or by asset.",
+            "Nothing is sent on its own. Plonix only talks to the platform you connect, with the token you give it, and keeps the token in the Keychain.",
         ],
     ),
 ];

@@ -2,7 +2,7 @@
 
 Bug bounty and vulnerability disclosure programs say which assets you may test and under which rules. Plonix reads a program, shows you what it will change, and from then on follows it: the program's scope becomes the project's scope, and its rules of engagement apply to every request Plonix sends.
 
-Open **Programs** in the sidebar (⌘9 in the app), or use the CLI:
+Programs is a tool you switch on from the **Market**: install **Programs** there and the Programs screen appears in the sidebar (⌘9 in the app). A project that already follows a program, and the demo project, keep the screen either way. The CLI works without it:
 
 ```sh
 plonix program follow hackerone:acme          # read a program and show what would change

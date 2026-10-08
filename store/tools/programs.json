@@ -1,0 +1,8 @@
+{
+  "plonix_tool": 1,
+  "name": "programs",
+  "version": "1.0.0",
+  "description": "Follow a bug bounty or disclosure program: its assets become your scope and its rules are kept while you test.",
+  "author": "Plonix contributors",
+  "feature": "programs"
+}
