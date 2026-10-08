@@ -384,7 +384,7 @@ const TOUR_STEPS = [
     target: '#groupseg',
     title: 'Grouping',
     test: 'grouping',
-    text: 'The same request sent several times in a row folds into one ×N row with its time span. Click the row to expand it, or switch to Every request.',
+    text: 'The same request sent several times in a row folds into one ×N row with its time span. Switch between Grouped and Every request here, or click a folded row to unfold it in place.',
   },
   {
     view: 'traffic',
@@ -403,6 +403,13 @@ const TOUR_STEPS = [
     title: 'Suggestions',
     test: 'suggestions',
     text: 'Plonix reads the request and suggests next steps that fit it, one click each, such as drafting a finding or getting ideas for this endpoint. Nothing is sent until you click.',
+  },
+  {
+    view: 'traffic',
+    target: ['#inspector .lenshead', '#inspector'],
+    title: 'Ask Claude',
+    test: 'ask',
+    text: 'Ask Claude Code about any request, finding or host. You see exactly what it gets before anything is sent, and the answer comes back here with what it was based on.',
   },
   {
     view: 'scope',
@@ -427,6 +434,21 @@ const TOUR_STEPS = [
   },
   {
     view: 'bench',
+    prep: () => {
+      const i = R.tabs.findIndex((x) => x.name === 'Order lookup');
+      if (i >= 0) R.active = i;
+    },
+    target: ['.hist', '#main .view'],
+    title: 'Compare',
+    test: 'compare',
+    text: 'Every send is kept in the tab’s history. Tick any two and Compare puts them side by side, with the lines that differ marked, for the response or the request.',
+  },
+  {
+    view: 'bench',
+    prep: () => {
+      const i = R.tabs.findIndex((x) => (x.url || '').includes(MARK));
+      if (i >= 0) R.active = i;
+    },
     target: ['.runconf', '#main .view'],
     title: 'Run',
     test: 'run',
@@ -474,7 +496,6 @@ const TOUR_STEPS = [
     view: 'programs',
     target: ['#progbody', '#main .view'],
     title: 'Programs',
-    test: 'programs',
     text: 'Connect a bug bounty platform and follow a program: its assets become your scope, and its rules, such as rate limits and required headers, are kept for you.',
   },
   {
@@ -525,15 +546,61 @@ function tourKit(i) {
       }
       el.blur();
     },
+    /** Glides the pointer to the middle of `el`. */
+    async point(el) {
+      if (!el || !alive()) return;
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      const m = tourMouse();
+      const r = el.getBoundingClientRect();
+      m.hidden = false;
+      m.classList.remove('gone');
+      m.style.transform = `translate(${Math.round(r.left + Math.min(r.width / 2, 40))}px, ${Math.round(r.top + r.height / 2)}px)`;
+      await wait(620);
+    },
+    /** Points at `el` and clicks it, so the user sees where the click lands. */
     async press(el) {
       if (!el || !alive()) return;
+      await kit.point(el);
+      if (!alive()) return;
+      const m = tourMouse();
+      m.classList.add('click');
       el.classList.add('tourpress');
-      await wait(380);
+      await wait(260);
+      m.classList.remove('click');
       el.classList.remove('tourpress');
       el.click();
+      await wait(120);
     },
   };
+  // Typing starts with a click into the field.
+  const type = kit.type;
+  kit.type = async (el, text, opts) => {
+    await kit.press(el);
+    await type(el, text, opts);
+  };
   return kit;
+}
+
+/** The pointer a Test now example moves and clicks with, starting from the Test now button. */
+function tourMouse() {
+  let m = $('.tourmouse');
+  if (!m) {
+    m = h('div', { class: 'tourmouse', hidden: true, 'aria-hidden': 'true' });
+    m.innerHTML = '<svg width="22" height="26" viewBox="0 0 22 26"><path d="M2 2 L2 21 L7 16.5 L10.5 24 L14 22.5 L10.6 15.2 L17.5 15 Z" fill="#fff" stroke="#14161c" stroke-width="1.6" stroke-linejoin="round"/></svg><span class="tmring"></span>';
+    document.body.append(m);
+    const b = $('.tourcard .ttest');
+    const r = b ? b.getBoundingClientRect() : { left: innerWidth / 2, top: innerHeight / 2, width: 0, height: 0 };
+    m.style.transform = `translate(${Math.round(r.left + r.width / 2)}px, ${Math.round(r.top + r.height / 2)}px)`;
+  }
+  return m;
+}
+
+function hideTourMouse(now) {
+  const m = $('.tourmouse');
+  if (!m) return;
+  if (now) return m.remove();
+  m.classList.add('gone');
+  setTimeout(() => m.classList.contains('gone') && m.remove(), 900);
 }
 
 const andList = (xs) => (xs.length < 2 ? xs.join('') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1]);
@@ -581,17 +648,31 @@ const TOUR_TESTS = {
   },
   grouping: {
     run: async (t) => {
+      const rowsNow = () => document.querySelectorAll('#rows tr').length;
+      const seg = await t.until(() => $('#groupseg'));
+      if (!seg) return 'Grouping lives in Traffic.';
+      t.ring('#groupseg');
+      const grouped = rowsNow();
+      await t.press([...seg.querySelectorAll('button')].find((b) => /every/i.test(b.textContent)));
+      await t.until(() => rowsNow() !== grouped, 2500);
+      const every = rowsNow();
+      t.ring('#tablewrap');
+      await t.wait(900);
+      await t.press([...$('#groupseg').querySelectorAll('button')].find((b) => /grouped/i.test(b.textContent)));
+      await t.until(() => rowsNow() === grouped, 2500);
       const tag = await t.until(() => $('#rows .tag.alike:not(.on)'));
-      if (!tag) return 'Every repeat is already unfolded.';
-      const row = tag.closest('tr');
-      const id = row && Number(row.dataset.id);
+      if (!tag) return `Every request shows ${every} rows; Grouped folds them into ${grouped}.`;
+      const id = Number(tag.closest('tr').dataset.id);
       const n = (tag.textContent.match(/\d+/) || ['2'])[0];
       await t.press(tag);
-      await t.wait(300);
+      await t.wait(250);
       const tr = $(`#rows tr[data-id="${id}"]`);
       if (tr) t.ring(tr);
-      const ex = id ? await getExchange(id).catch(() => null) : null;
-      return `${ex ? ex.method + ' ' + ex.path : 'This request'} was sent ${n} times in a row. Folded, it takes one line; unfolded, each send is right underneath to compare.`;
+      const ex = await getExchange(id).catch(() => null);
+      return `Every request: ${every} rows. Grouped: ${grouped}, with repeats folded into one row. ${ex ? ex.method + ' ' + ex.path : 'This one'} was sent ${n} times in a row; one click unfolds them right underneath.`;
+    },
+    undo: () => {
+      if (!T.group) setGrouping(true);
     },
   },
   lens: {
@@ -665,6 +746,58 @@ const TOUR_TESTS = {
       return `Sent a bare request from the Bench. On the way, the rules ${changes.length ? 'added ' + changes.join(', ') : 'checked it and changed nothing'}, and the request is tagged “changed” in Traffic so you always know.`;
     },
   },
+  ask: {
+    run: async (t) => {
+      const btn = await t.until(() => [...document.querySelectorAll('#inspector button')].find((b) => /ask claude/i.test(b.textContent)));
+      if (!btn) return 'Open a request in the Lens to ask about it.';
+      await t.press(btn);
+      const m = await t.until(() => $('.modal textarea.askq'));
+      if (!m) return 'Ask Claude needs Claude Code on this Mac.';
+      $('.modal').classList.add('tourmodal');
+      t.ring($('.modal .mcard'));
+      await t.type(m, 'Can this token read other customers’ orders? What should I try next?', { ms: 22 });
+      m.dispatchEvent(new Event('input', { bubbles: true }));
+      await t.wait(500);
+      const parts = document.querySelectorAll('.modal .askparts input[type=checkbox]:checked').length;
+      return `Ask Claude opened on this request with your question, and shows exactly what Claude Code gets${parts ? ` (${plural(parts, 'part')}, each one you can untick)` : ''}. Press Ask Claude and the answer is written here, then kept in Agents.`;
+    },
+  },
+  compare: {
+    run: async (t) => {
+      const i = R.tabs.findIndex((x) => x.name === 'Order lookup');
+      if (i < 0 || R.tabs[i].history.length < 2) return 'The order lookup experiment is gone; start the demo over to get it back.';
+      R.active = i;
+      R.tabs[i].picks = [];
+      saveBench();
+      renderBench($('#main'));
+      await t.until(() => $('.hist .histrows'));
+      t.ring('.hist');
+      const boxes = [...document.querySelectorAll('.hist .histrows input[type=checkbox]')].slice(0, 2);
+      for (const b of boxes) await t.press(b);
+      const cmp = await t.until(() => [...document.querySelectorAll('.hist .histhead button')].find((b) => /compare/i.test(b.textContent)));
+      await t.press(cmp);
+      const view = await t.until(() => $('#cmpslot .cmpview'));
+      if (!view) return 'Tick two sends to compare them.';
+      view.scrollIntoView({ block: 'start' });
+      await t.wait(300);
+      t.ring('#cmpslot .cmpview');
+      const [a, b] = await Promise.all(R.tabs[i].picks.map(getExchange));
+      const who = (ex) => {
+        try {
+          return JSON.parse(ex.resp_text).customer.name;
+        } catch (_) {
+          return null;
+        }
+      };
+      const sum = ($('#cmpslot .cmpsum') || {}).textContent || '';
+      return `${sum} Same request, one digit apart in the URL, and two different people’s orders: ${andList([who(a), who(b)].filter(Boolean)) || 'two customers'}, with their emails and cards.`;
+    },
+    undo: () => {
+      const tab = R.tabs.find((x) => x.name === 'Order lookup');
+      if (tab) tab.picks = [];
+      saveBench();
+    },
+  },
   bench: {
     run: async (t) => {
       const i = R.tabs.findIndex((x) => x.name === 'Order lookup');
@@ -736,40 +869,6 @@ const TOUR_TESTS = {
       return `Switched on Saved users and the Access check, then replayed Maya’s order ${andList(AC.report.identities.map((x) => (x.anon ? 'signed out' : 'as ' + x.label.replace(/\s*\(.*\)$/, ''))))}. ${ok.length === AC.report.identities.length ? 'Every one of them got it, even signed out.' : `${plural(ok.length, 'identity', 'identities')} got it.`}`;
     },
   },
-  programs: {
-    run: async (t) => {
-      PG.source = 'paste';
-      PG.draft = null;
-      PG.preview = null;
-      drawPrograms();
-      const name = await t.until(() => $('#pg-name'));
-      const text = $('#pg-text');
-      t.ring(['#progbody .card', '#progbody']);
-      await t.type(name, 'Brightcart', { ms: 30 });
-      const policy =
-        'Brightcart bug bounty\n\nRules\n- Keep automated testing under 5 requests per second.\n- Add the header X-Bug-Bounty: your-username to every request.\n- No denial of service or social engineering.\n\nIn scope\n- *.brightcart.example\n- api.brightcart.example\n- uploads.brightcart-files.example\n\nOut of scope\n- status.brightcart.example';
-      for (const line of policy.split('\n')) {
-        if (!t.alive()) return '';
-        text.value += (text.value ? '\n' : '') + line;
-        await t.wait(70);
-      }
-      await t.press($('#progbody .progform .btn.primary'));
-      await t.until(() => PG.preview, 8000);
-      await t.wait(300);
-      t.ring('#progbody');
-      const p = PG.draft;
-      if (!p) return 'Plonix could not read that policy.';
-      const inn = p.assets.filter((a) => a.in_scope).length;
-      const out = p.assets.length - inn;
-      const r = p.rules || {};
-      return `From plain text, Plonix found ${plural(inn, 'asset')} in scope and ${out} out, a limit of ${r.rate_per_second || '—'} requests a second and ${plural((r.headers || []).length, 'required header')}. Follow it and they become your scope and guard rails.`;
-    },
-    undo: () => {
-      PG.draft = null;
-      PG.preview = null;
-      if (S.view === 'programs') drawPrograms();
-    },
-  },
 };
 
 const TOUR = { i: -1, el: null, spot: null, timer: null, keys: null, focus: null, undo: null, saved: null };
@@ -818,7 +917,7 @@ async function tourStep(i) {
   const last = i === TOUR_STEPS.length - 1;
   closeModal();
   if (s.prep && s.view !== 'traffic') s.prep();
-  if (s.view && (S.view !== s.view || s.view === 'settings')) go(s.view, true);
+  if (s.view && (S.view !== s.view || s.view === 'settings' || (s.prep && s.view !== 'traffic'))) go(s.view, true);
   if (s.prep && s.view === 'traffic') await Promise.resolve(s.prep()).catch(() => {});
   if (TOUR.i !== i || !TOUR.el) return;
   const dots = TOUR_STEPS.map((_, n) => h('span', { class: 'tdot' + (n === i ? ' on' : n < i ? ' done' : '') }));
@@ -849,6 +948,7 @@ async function tourStep(i) {
 
 /** Undoes what the last Test now changed on screen, so the next stop starts clean. */
 function tourUndo() {
+  hideTourMouse(true);
   const undo = TOUR.undo;
   TOUR.undo = null;
   if (undo) {
@@ -878,6 +978,7 @@ function tourTestBox(i, test) {
       said = e.message;
     }
     if (TOUR.i !== i || !TOUR.el) return;
+    setTimeout(() => TOUR.i === i && hideTourMouse(), 1400);
     btn.disabled = false;
     btn.classList.remove('busy');
     btn.lastChild.textContent = 'Test again';
@@ -941,8 +1042,8 @@ function placeTour() {
     TOUR.spot.hidden = false;
     const clampY = (v) => Math.min(Math.max(v, 12), vh - ch - 12);
     const clampX = (v) => Math.min(Math.max(v, 12), vw - cw - 12);
-    if (vw - r.right - pad >= cw + gap * 2) [x, y] = [r.right + pad + gap, clampY(r.top)];
-    else if (r.left - pad >= cw + gap * 2) [x, y] = [r.left - pad - gap - cw, clampY(r.top)];
+    if (vw - r.right - pad >= cw + gap + 12) [x, y] = [r.right + pad + gap, clampY(r.top)];
+    else if (r.left - pad >= cw + gap + 12) [x, y] = [r.left - pad - gap - cw, clampY(r.top)];
     else if (vh - r.bottom - pad >= ch + gap * 2) [x, y] = [clampX(r.left), r.bottom + pad + gap];
     else if (r.top - pad >= ch + gap * 2) [x, y] = [clampX(r.left), r.top - pad - gap - ch];
     else [x, y] = [clampX(r.right - cw - 20), clampY(r.bottom - ch - 20)];
