@@ -145,7 +145,7 @@ fn unsigned_admin_jwt(now: i64) -> String {
 // The demo's hosts are made-up `.example` names that resolve nowhere, so a real
 // send fails. This stand-in answers them locally, as the made-up API would, so
 // a Bench run against the demo returns varied results to explore. It is wired
-// in only for the demo project (see `engine::start` / `session::open`); it never
+// in only for the demo project (see `session::open`); it never
 // answers a real host, so it can never stand in for live traffic.
 
 /// The engine responder the demo installs.

@@ -75,4 +75,4 @@ pub mod usage;
 pub mod websocket;
 
 
-pub use engine::{Engine, EngineConfig};
+pub use engine::Engine;
