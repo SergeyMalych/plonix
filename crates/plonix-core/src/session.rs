@@ -144,8 +144,10 @@ impl Session {
     /// Writes this session's announcement and makes it the current session.
     pub fn announce(&self) -> Result<()> {
         let data = serde_json::to_vec_pretty(&self.info())?;
-        write_atomic(&session_file(&self.home, self.project.id()), &data)?;
-        write_atomic(&self.home.engine_file(), &data)
+        // The current-session file first: `plonix start` returns once the session
+        // file appears, and the next command without a project reads the other one.
+        write_atomic(&self.home.engine_file(), &data)?;
+        write_atomic(&session_file(&self.home, self.project.id()), &data)
     }
 
     /// Re-applies the project's proxy settings after they changed.
