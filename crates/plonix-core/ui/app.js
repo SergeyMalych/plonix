@@ -1,54 +1,12 @@
 // Plonix web UI. Plain JavaScript, no build step: every screen reads and
-// writes through the engine's local API, exactly like the CLI.
-//
-// Captured traffic is attacker-controlled, so nothing from the API is ever
-// parsed as HTML: the DOM is built with h() and text nodes only.
+// writes through the engine's local API, exactly like the CLI. Shared
+// helpers (h, store, toast, modal, ApiError) are in common.js.
 'use strict';
-
-/* ---------- DOM helpers ---------- */
-
-function h(tag, props, ...kids) {
-  const el = document.createElement(tag);
-  if (props) {
-    for (const [k, v] of Object.entries(props)) {
-      if (v == null || v === false) continue;
-      if (k === 'class') el.className = v;
-      else if (k === 'text') el.textContent = v;
-      else if (k === 'value' || k === 'checked' || k === 'disabled' || k === 'selected') el[k] = v;
-      else if (k === 'style') Object.assign(el.style, v);
-      else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
-      else el.setAttribute(k, v === true ? '' : String(v));
-    }
-  }
-  append(el, kids);
-  return el;
-}
-
-function append(el, kids) {
-  for (const c of kids.flat(Infinity)) {
-    if (c == null || c === false) continue;
-    el.append(c instanceof Node ? c : String(c));
-  }
-  return el;
-}
-
-function clear(el, ...kids) {
-  el.replaceChildren();
-  return append(el, kids);
-}
-
-const $ = (sel, root = document) => root.querySelector(sel);
 
 /* ---------- formatting ---------- */
 
 const fmtTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 const fmtDate = (ms) => new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-function fmtSize(n) {
-  if (n == null || n < 0) return '';
-  if (n < 1024) return n + ' B';
-  if (n < 1024 * 1024) return (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB';
-  return (n / 1048576).toFixed(1) + ' MB';
-}
 const b64len = (s) => (s ? Math.floor((s.length * 3) / 4) - (s.endsWith('==') ? 2 : s.endsWith('=') ? 1 : 0) : 0);
 const statusClass = (s) => (s == null ? 'sc sc-x' : 'sc sc-' + String(s)[0]);
 const target = (ex) => ex.path + (ex.query ? '?' + ex.query : '');
@@ -65,27 +23,7 @@ const PROJECT_ID = (document.querySelector('meta[name="plonix-project"]') || {})
 const pkey = (key) => (PROJECT_ID && !PROJECT_ID.includes('{') ? `${key}@${PROJECT_ID}` : key);
 const pstore = (key, value) => store(pkey(key), value);
 
-function store(key, value) {
-  try {
-    if (value === undefined) return JSON.parse(localStorage.getItem(key));
-    if (value === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, JSON.stringify(value));
-  } catch (_) {
-    return null;
-  }
-}
-
 /* ---------- API ---------- */
-
-class ApiError extends Error {
-  constructor(status, code, message, data) {
-    super(message);
-    this.status = status;
-    this.code = code;
-    this.problems = data && data.problems;
-    this.data = data;
-  }
-}
 
 const S = {
   token: null,
@@ -125,35 +63,6 @@ async function api(path, { method = 'GET', body } = {}) {
   }
   if (!resp.ok) throw new ApiError(resp.status, (data && data.code) || 'error', (data && data.error) || resp.statusText, data);
   return data;
-}
-
-/* ---------- toasts & modal ---------- */
-
-function toast(msg, kind = '') {
-  let box = $('.toasts');
-  if (!box) document.body.append((box = h('div', { class: 'toasts' })));
-  const t = h('div', { class: 'toast ' + kind, text: msg });
-  box.append(t);
-  setTimeout(() => t.remove(), kind === 'err' ? 6000 : 3200);
-}
-
-function closeModal() {
-  const m = $('.modal');
-  if (m) m.remove();
-}
-
-function modal(title, body, actions) {
-  closeModal();
-  const err = h('span', { class: 'err' });
-  const m = h(
-    'div',
-    { class: 'modal', onmousedown: (e) => e.target === m && closeModal() },
-    h('div', { class: 'mcard', role: 'dialog' }, h('h3', { text: title }), h('div', { class: 'mb' }, body), h('div', { class: 'mf' }, err, actions)),
-  );
-  document.body.append(m);
-  const first = m.querySelector('input, textarea, select');
-  if (first) first.focus();
-  return { el: m, err };
 }
 
 /* ---------- session ---------- */
@@ -1198,16 +1107,21 @@ const toolOn = (id) => !!(S.status && ((S.status.tools && S.status.tools.include
 /** Tools the demo project shows without installing them, so its walkthrough can stop on them. */
 const DEMO_TOOLS = ['saved-users', 'programs'];
 
+/** Screens with a number key (⌘1-⌘9 in the app), in the order of the app's
+ * View menu (plonix-app/src/main.rs), so a hint always names the right key. */
+const SHORTCUTS = ['traffic', 'bench', 'scope', 'map', 'findings', 'agents', 'market', 'scans', 'programs'];
+const shownView = (key) => !!VIEWS[key] && !VIEWS[key].footer && (!VIEWS[key].tool || toolOn(VIEWS[key].tool));
+
 /** The sidebar's screen buttons, without the tools that are not switched on. */
 function navList() {
   const nav = h('div', { class: 'nav' });
-  Object.entries(VIEWS).forEach(([key, v], i) => {
-    if (v.footer) return;
-    if (v.tool && !toolOn(v.tool)) return;
+  Object.entries(VIEWS).forEach(([key, v]) => {
+    if (!shownView(key)) return;
+    const n = SHORTCUTS.indexOf(key);
     nav.append(
       h(
         'button',
-        { 'data-v': key, title: `${v.label}  (${IN_APP ? '⌘' : ''}${i + 1})`, onclick: () => go(key) },
+        { 'data-v': key, title: n < 0 ? v.label : `${v.label}  (${IN_APP ? '⌘' : ''}${n + 1})`, onclick: () => go(key) },
         h('span', { class: 'ico', text: v.ico }),
         h('span', { class: 'nl', text: v.label }),
         h('span', { class: 'ct', id: 'ct-' + key }),
@@ -11534,8 +11448,8 @@ document.addEventListener('keydown', (e) => {
     }
     return;
   }
-  const keys = Object.keys(VIEWS).filter((k) => !VIEWS[k].footer);
-  if (/^[1-9]$/.test(e.key) && keys[Number(e.key) - 1]) return go(keys[Number(e.key) - 1]);
+  const key = /^[1-9]$/.test(e.key) && SHORTCUTS[Number(e.key) - 1];
+  if (key && shownView(key)) return go(key);
   if (e.key === '\\') return toggleSidebar();
   if (S.view !== 'traffic') return;
   if (e.key === '/') {

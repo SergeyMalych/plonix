@@ -3,30 +3,9 @@
  * by a session of its own. */
 'use strict';
 
-const h = PlonixSettings.h;
-const $ = (sel, root = document) => root.querySelector(sel);
 const IN_APP = !!window.__PLONIX_APP__;
 
-function store(key, value) {
-  try {
-    if (value === undefined) return JSON.parse(localStorage.getItem(key));
-    if (value === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, JSON.stringify(value));
-  } catch (_) {
-    return null;
-  }
-}
-
 const L = { token: null, about: {}, projects: [], timer: null, opening: null };
-
-class ApiError extends Error {
-  constructor(status, data) {
-    super((data && data.error) || 'Request failed');
-    this.status = status;
-    this.code = data && data.code;
-    this.problems = data && data.problems;
-  }
-}
 
 async function api(path, { method = 'GET', body } = {}) {
   let resp;
@@ -38,51 +17,19 @@ async function api(path, { method = 'GET', body } = {}) {
       cache: 'no-store',
     });
   } catch (_) {
-    throw new ApiError(0, { error: 'Plonix is not running. Open it again.' });
+    throw new ApiError(0, 'engine_down', 'Plonix is not running. Open it again.');
   }
   const data = await resp.json().catch(() => null);
   if (resp.status === 401) {
     store('plonix.hubtoken', null);
     showLock('This page has signed out.');
-    throw new ApiError(401, data);
+    throw new ApiError(401, 'unauthorized', 'Signed out', data);
   }
-  if (!resp.ok) throw new ApiError(resp.status, data);
+  if (!resp.ok) throw new ApiError(resp.status, (data && data.code) || 'error', (data && data.error) || 'Request failed', data);
   return data;
 }
 
 /* ---------- helpers ---------- */
-
-function toast(msg, kind = '') {
-  let box = $('.toasts');
-  if (!box) document.body.append((box = h('div', { class: 'toasts' })));
-  const t = h('div', { class: 'toast ' + kind, text: msg });
-  box.append(t);
-  setTimeout(() => t.remove(), kind === 'err' ? 7000 : 3200);
-}
-
-function closeModal() {
-  const m = $('.modal');
-  if (m) m.remove();
-}
-
-function modal(title, body, actions, wide) {
-  closeModal();
-  const err = h('span', { class: 'err' });
-  const m = h(
-    'div',
-    { class: 'modal', onmousedown: (e) => e.target === m && closeModal() },
-    h('div', { class: 'mcard' + (wide ? ' wide' : ''), role: 'dialog' }, h('h3', { text: title }), h('div', { class: 'mb' }, body), h('div', { class: 'mf' }, err, actions)),
-  );
-  document.body.append(m);
-  const first = m.querySelector('input, textarea, select');
-  if (first) first.focus();
-  return { el: m, err };
-}
-
-function tilde(p) {
-  const home = L.about.home_dir;
-  return home && p.startsWith(home + '/') ? '~' + p.slice(home.length) : p;
-}
 
 function ago(ms) {
   if (!ms) return 'never opened';
@@ -92,14 +39,6 @@ function ago(ms) {
   if (s < 86400) return Math.floor(s / 3600) + ' h ago';
   if (s < 86400 * 30) return Math.floor(s / 86400) + ' d ago';
   return new Date(ms).toLocaleDateString();
-}
-
-function fmtSize(n) {
-  if (n == null) return '';
-  if (n < 1024) return n + ' B';
-  if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
-  if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
-  return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
 }
 
 function slug(name) {

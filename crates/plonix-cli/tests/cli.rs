@@ -531,9 +531,10 @@ fn ui_serves_the_window_and_signs_in_with_a_one_time_link() {
     let csp = page.header("content-security-policy").unwrap().to_string();
     assert!(csp.contains("script-src 'self'") && csp.contains("frame-ancestors 'none'"), "{csp}");
     assert!(page.into_string().unwrap().contains("/ui/app.js"));
-    for asset in ["/ui/app.js", "/ui/app.css", "/ui/icon.svg"] {
+    for asset in ["/ui/common.js", "/ui/app.js", "/ui/app.css", "/ui/icon.svg"] {
         assert_eq!(ureq::get(&format!("{api}{asset}")).call().unwrap().status(), 200, "{asset}");
     }
+    assert!(matches!(ureq::get(&format!("{api}/ui/nope.js")).call(), Err(ureq::Error::Status(404, _))));
     // The API itself still needs the token.
     match ureq::get(&format!("{api}/api/status")).call() {
         Err(ureq::Error::Status(401, _)) => {}
