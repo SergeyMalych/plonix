@@ -290,7 +290,9 @@ async fn crawl_discovers_linked_pages_and_stays_in_scope() {
 
     // One captured request so the engine knows the host's scheme and port.
     via_proxy(r.proxy_addr, &format!("http://localhost:{}/site", up.port()), &[]).await;
-    wait_for_count(&r.engine, 1).await;
+    // A path with an id, stored folded as /orders/{id}.
+    via_proxy(r.proxy_addr, &format!("http://localhost:{}/orders/123", up.port()), &[]).await;
+    wait_for_count(&r.engine, 2).await;
 
     // Refused until the host is accepted.
     let refused = r.engine.crawl(CrawlRequest { host: "localhost".into(), ..Default::default() }, "crawl").await;
@@ -308,6 +310,9 @@ async fn crawl_discovers_linked_pages_and_stays_in_scope() {
     let endpoints = r.engine.store.endpoints("localhost").unwrap();
     let paths: Vec<&str> = endpoints.iter().map(|e| e.path.as_str()).collect();
     assert!(paths.contains(&"/site/a") && paths.contains(&"/site/c"), "crawl should reach linked pages: {paths:?}");
+    // Folded endpoints are requested by a real path, never the literal `{id}`.
+    let (sent, _) = r.engine.store.search(&plonix_core::query::Query::parse("path:/orders").unwrap(), &r.engine.rules(), 50, 0).unwrap();
+    assert!(sent.len() >= 2 && sent.iter().all(|e| !e.path.contains('{')), "{:?}", sent.iter().map(|e| &e.path).collect::<Vec<_>>());
     assert!(report.forms.iter().any(|f| f.action.ends_with("/login") && f.fields.contains(&"user".to_string())));
     assert!(!r.engine.store.count().is_err());
     // evil.test was never requested.

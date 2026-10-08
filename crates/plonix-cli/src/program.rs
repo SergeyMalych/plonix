@@ -106,21 +106,16 @@ pub fn program_cmd(ctx: &Ctx, cmd: ProgramCmd) -> Result<()> {
         ProgramCmd::Connect { platform, user } => {
             let secret = match std::env::var("PLONIX_PLATFORM_TOKEN") {
                 Ok(t) if !t.trim().is_empty() => t,
-                _ => {
-                    eprint!("Token for {platform}: ");
-                    let mut line = String::new();
-                    std::io::stdin().read_line(&mut line)?;
-                    line
-                }
+                _ => crate::har::ask_secret(&format!("Token for {platform}"))?,
             };
-            let v = c.post(&format!("/api/platforms/{}/connect", seg(&platform)), json!({ "user": user.unwrap_or_default(), "secret": secret.trim() }))?;
+            let v = c.post(&format!("/api/platforms/{}/connect", crate::client::encode(&platform)), json!({ "user": user.unwrap_or_default(), "secret": secret.trim() }))?;
             if ctx.json {
                 return ctx.print_json(&v);
             }
             println!("Connected to {platform}: {} programs. Pulling their scope and rules now; see `plonix program sync {platform}`.", v["programs"]);
         }
         ProgramCmd::Disconnect { platform } => {
-            c.post(&format!("/api/platforms/{}/disconnect", seg(&platform)), json!({}))?;
+            c.post(&format!("/api/platforms/{}/disconnect", crate::client::encode(&platform)), json!({}))?;
             println!("Forgot the {platform} token.");
         }
         ProgramCmd::List { platform } => {
@@ -137,11 +132,11 @@ pub fn program_cmd(ctx: &Ctx, cmd: ProgramCmd) -> Result<()> {
             }
         }
         ProgramCmd::Sync { platform } => {
-            let path = format!("/api/platforms/{}/sync", seg(&platform));
+            let path = format!("/api/platforms/{}/sync", crate::client::encode(&platform));
             c.post(&path, json!({}))?;
             let mut last = (u64::MAX, u64::MAX);
             let v = loop {
-                let v = c.get(&format!("/api/platforms/{}/catalog", seg(&platform)))?;
+                let v = c.get(&format!("/api/platforms/{}/catalog", crate::client::encode(&platform)))?;
                 let s = &v["sync"];
                 if s["running"].as_bool() != Some(true) {
                     break v;
@@ -197,7 +192,7 @@ pub fn program_cmd(ctx: &Ctx, cmd: ProgramCmd) -> Result<()> {
 
 /// A platform's synced programs. Says how to get them when there are none yet.
 fn catalog(c: &crate::client::Client, platform: &str) -> Result<Value> {
-    let v = c.get(&format!("/api/platforms/{}/catalog", seg(platform)))?;
+    let v = c.get(&format!("/api/platforms/{}/catalog", crate::client::encode(platform)))?;
     if v["catalog"].is_null() {
         if v["sync"]["running"].as_bool() == Some(true) {
             bail!("still pulling programs from {platform}; run `plonix program sync {platform}` to wait for it");
@@ -207,17 +202,12 @@ fn catalog(c: &crate::client::Client, platform: &str) -> Result<Value> {
     Ok(v["catalog"].clone())
 }
 
-/// Percent-encodes a path segment.
-fn seg(s: &str) -> String {
-    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
-}
-
 fn read(c: &crate::client::Client, source: &str, name: &str) -> Result<Value> {
     if let Some((platform, handle)) = source.split_once(':')
         && !platform.contains(['/', '.'])
         && !handle.starts_with("//")
     {
-        let v = c.get(&format!("/api/platforms/{}/programs/{}?name={}", seg(platform), seg(handle), seg(name)))?;
+        let v = c.get(&format!("/api/platforms/{}/programs/{}?name={}", crate::client::encode(platform), crate::client::encode(handle), crate::client::encode(name)))?;
         return Ok(v["program"].clone());
     }
     let body = if source.starts_with("https://") || source.starts_with("http://") {

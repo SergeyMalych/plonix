@@ -127,7 +127,7 @@ pub fn findings_cmd(ctx: &Ctx, cmd: FindingsCmd) -> Result<()> {
             if ctx.json {
                 return ctx.print_json(&f);
             }
-            print!("{}", show(&f));
+            print!("{}", crate::render::safe(&show(&f)));
         }
         FindingsCmd::Add(a) => {
             let body = json!({

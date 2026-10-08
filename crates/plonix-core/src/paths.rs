@@ -151,6 +151,15 @@ pub struct EngineInfo {
 
 /// Replaces a file in one step, so readers never see half of it.
 pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
+    replace(path, data, 0o644)
+}
+
+/// Writes a file readable only by the current user, in one step like [`write_atomic`].
+pub fn write_private(path: &Path, data: &[u8]) -> Result<()> {
+    replace(path, data, 0o600)
+}
+
+fn replace(path: &Path, data: &[u8], mode: u32) -> Result<()> {
     let dir = path.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir)?;
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -159,33 +168,35 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let tmp = dir.join(format!(".{name}.{}.{seq}.tmp", std::process::id()));
     let write = || -> std::io::Result<()> {
-        let mut f = std::fs::File::create(&tmp)?;
+        let mut opts = std::fs::OpenOptions::new();
+        opts.create(true).write(true).truncate(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut opts, mode);
+        #[cfg(not(unix))]
+        let _ = mode;
+        let mut f = opts.open(&tmp)?;
         std::io::Write::write_all(&mut f, data)?;
         // On disk before the rename, so a crash cannot leave an empty file in its place.
         f.sync_all()
     };
-    write().with_context(|| format!("writing {}", tmp.display()))?;
+    if let Err(e) = write() {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e).with_context(|| format!("writing {}", tmp.display()));
+    }
     std::fs::rename(&tmp, path).with_context(|| format!("writing {}", path.display()))
 }
 
-/// Writes a file readable only by the current user.
-pub fn write_private(path: &Path, data: &[u8]) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut f = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)
-            .with_context(|| format!("writing {}", path.display()))?;
-        f.write_all(data)?;
-        Ok(())
+/// Before rewriting a JSON file from its parsed contents: when it exists but
+/// does not parse, moves it aside (`<name>.corrupt-<ms>`) so the rewrite
+/// cannot silently replace what the user had with defaults.
+pub fn set_aside_unreadable<T: serde::de::DeserializeOwned>(path: &Path) {
+    let Ok(bytes) = std::fs::read(path) else { return };
+    if serde_json::from_slice::<T>(&bytes).is_ok() {
+        return;
     }
-    #[cfg(not(unix))]
-    {
-        std::fs::write(path, data).with_context(|| format!("writing {}", path.display()))
+    let aside = path.with_file_name(format!("{}.corrupt-{}", path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default(), crate::model::now_ms()));
+    match std::fs::rename(path, &aside) {
+        Ok(()) => tracing::warn!("{} could not be read; kept it as {}", path.display(), aside.display()),
+        Err(e) => tracing::warn!("{} could not be read or set aside: {e}", path.display()),
     }
 }
