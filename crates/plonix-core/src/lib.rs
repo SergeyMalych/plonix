@@ -15,6 +15,7 @@ pub mod authcheck;
 pub mod assistant;
 pub mod browser;
 pub mod browser_crawl;
+pub mod callbacks;
 pub mod ca;
 pub mod cdp;
 pub mod chromium;

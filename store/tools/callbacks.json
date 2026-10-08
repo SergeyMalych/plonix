@@ -1,0 +1,10 @@
+{
+  "plonix_tool": 1,
+  "name": "callbacks",
+  "version": "1.0.0",
+  "description": "Hand out unique hosts for out-of-band tests and see every DNS lookup, HTTP request or mail that reaches them.",
+  "author": "Plonix contributors",
+  "feature": "callbacks",
+  "license": "MIT",
+  "homepage": "https://github.com/projectdiscovery/interactsh"
+}

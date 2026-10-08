@@ -366,6 +366,7 @@ const VIEWS = {
   scope: { label: 'Scope', ico: '◉', render: renderScope },
   map: { label: 'Map', ico: '⊞', render: renderMap },
   access: { label: 'Access', ico: '⚿', render: renderAccess, tool: 'access-check' },
+  callbacks: { label: 'Callbacks', ico: '↩', render: renderCallbacks, tool: 'callbacks' },
   findings: { label: 'Findings', ico: '⚑', render: renderFindings },
   agents: { label: 'Agents', ico: '✦', render: renderAgents },
   market: { label: 'Market', ico: '⬢', render: renderMarket },
@@ -756,6 +757,13 @@ function updateChrome() {
   $('#ct-scope').title = rules.filter((r) => r.decision === 'accepted').length + ' in scope, ' + pending + ' suggested';
   $('#ct-findings').textContent = S.findingsCount || '';
   $('#ct-bench').textContent = R.tabs.length || '';
+  const ctCb = $('#ct-callbacks');
+  if (ctCb) {
+    const fresh = S.view === 'callbacks' ? 0 : Math.max(0, (st.callbacks || 0) - cbSeen());
+    ctCb.textContent = fresh || '';
+    ctCb.classList.toggle('hot', fresh > 0);
+    ctCb.title = fresh ? fresh + (fresh === 1 ? ' new callback' : ' new callbacks') : '';
+  }
 }
 
 /* ---------- live updates ---------- */
@@ -777,6 +785,7 @@ async function poll() {
     }
     if (S.view === 'agents' && Date.now() - (S.agentsAt || 0) > 4000) loadAgents();
     if (st.intercept && st.intercept.seq !== IC.seq) loadIntercept();
+    if (st.callbacks !== prev.callbacks || (S.view === 'callbacks' && CB.data && CB.data.phase === 'starting')) callbacksChanged();
   } catch (e) {
     if (e.code === 'unauthorized') return;
     S.engineUp = false;
@@ -3058,8 +3067,10 @@ function renderBench(main) {
 
   const method = h('input', { class: 'method', value: tab.method, spellcheck: 'false', list: 'methods', oninput: () => ((tab.method = method.value.toUpperCase()), saveBench(), proposalEdited(tab, main)) });
   const url = h('input', {
+    id: 'benchurl',
     value: tab.url,
     spellcheck: 'false',
+    onfocus: () => (R.cbField = 'url'),
     oninput: () => {
       tab.url = url.value;
       saveBench();
@@ -3070,8 +3081,10 @@ function renderBench(main) {
     onkeydown: (e) => e.key === 'Enter' && !e.metaKey && !e.ctrlKey && send(),
   });
   const editor = h('textarea', {
+    id: 'bencheditor',
     value: tab.raw,
     spellcheck: 'false',
+    onfocus: () => (R.cbField = 'editor'),
     oninput: () => ((tab.raw = editor.value), saveBench(), refreshRun(), proposalEdited(tab, main), editor._onedit && editor._onedit()),
     onkeydown: (e) => {
       if (e.key === 'Tab') {
@@ -3152,6 +3165,18 @@ function renderBench(main) {
           'span',
           { class: 'r' },
           'headers, blank line, body · ',
+          toolOn('callbacks')
+            ? [
+                h('button', {
+                  class: 'link',
+                  text: 'Insert callback host',
+                  title: 'Make a callback host for this request and put it where the cursor is',
+                  onmousedown: (e) => e.preventDefault(),
+                  onclick: () => insertCallbackHost(tab, R.cbField || 'editor', main),
+                }),
+                ' · ',
+              ]
+            : null,
           h('button', {
             class: 'link',
             text: 'Copy curl',
@@ -5780,6 +5805,381 @@ function drawAccessReport(box) {
   clear(box, head, h('table', { class: 'actable' }, cols, h('thead', null, h('tr', null, headCells)), h('tbody', null, rows)));
 }
 
+/* ---- the Callbacks screen ---- */
+
+// What the Callbacks screen knows: the listener's state, its hosts and the
+// callbacks seen so far (newest last), and which host and callback are open.
+const CB = { data: null, list: [], seq: 0, host: null, sel: null, busy: false, draft: '' };
+
+const cbProto = (p) => ({ dns: 'DNS', http: 'HTTP', https: 'HTTPS', smtp: 'SMTP', smtps: 'SMTP', ldap: 'LDAP', ftp: 'FTP', smb: 'SMB', responder: 'SMB' })[p] || (p || '').toUpperCase();
+const cbHostOf = (id) => ((CB.data && CB.data.payloads) || []).find((p) => p.id === id) || null;
+const cbSeen = () => Number(pstore('plonix.callbacksSeen') || 0);
+
+/** Fetches what changed. Callbacks only ever arrive, so only new ones are asked for. */
+async function loadCallbacks(full) {
+  const since = full ? 0 : CB.seq;
+  const d = await api('/api/callbacks?since=' + since);
+  if (full || d.seq < CB.seq) CB.list = [];
+  CB.list.push(...d.interactions);
+  if (CB.list.length > 500) CB.list = CB.list.slice(-500);
+  CB.seq = d.seq;
+  CB.data = d;
+  return d;
+}
+
+/** The status poll noticed a new callback (or none) — refresh the screen if it is open. */
+function callbacksChanged() {
+  if (S.view === 'callbacks') loadCallbacks().then(() => S.view === 'callbacks' && drawCallbacks()).catch(() => {});
+}
+
+async function renderCallbacks(main) {
+  clear(main, h('div', { class: 'view' }, h('div', { class: 'toolbar' }, backButton(), h('h2', { text: 'Callbacks' }), h('span', { id: 'cbstate' })), h('div', { class: 'cbbody', id: 'cbbody' })));
+  try {
+    await loadCallbacks(true);
+  } catch (e) {
+    return clear($('#cbbody'), h('div', { class: 'rerr', text: e.message }));
+  }
+  drawCallbacks();
+}
+
+function drawCallbacks() {
+  const d = CB.data;
+  const body = $('#cbbody');
+  if (!d || !body) return;
+  pstore('plonix.callbacksSeen', d.seq);
+  updateChrome();
+  drawCallbacksState();
+  if (!d.installed) return clear(body, callbacksInstallCard());
+  const hosts = h('div', { class: 'cbhosts' });
+  const feed = h('div', { class: 'cbfeed' });
+  clear(body, hosts, feed);
+  drawCallbackHosts(hosts);
+  drawCallbackFeed(feed);
+}
+
+function drawCallbacksState() {
+  const box = $('#cbstate');
+  if (!box) return;
+  const d = CB.data;
+  const listening = d.phase === 'listening';
+  const starting = d.phase === 'starting';
+  const server = d.base ? d.base.split('.').slice(1).join('.') : d.config.server || 'public server';
+  const pill = h(
+    'span',
+    { class: 'cbpill ' + d.phase },
+    h('span', { class: 'cbdot' }),
+    listening ? 'Listening on ' + server : starting ? 'Connecting…' : d.phase === 'failed' ? 'Stopped' : 'Not listening',
+  );
+  const toggle = h('button', {
+    class: 'btn sm' + (listening || starting ? '' : ' primary'),
+    text: listening || starting ? 'Stop' : 'Start listening',
+    disabled: !d.installed || CB.busy,
+    title: listening ? 'Stop collecting callbacks. Hosts already handed out keep working and their callbacks arrive when you start again.' : 'Register with the callback server and start collecting callbacks',
+    onclick: () => callbacksToggle(listening || starting),
+  });
+  clear(
+    box,
+    h('span', { class: 'hint', text: 'Put a host in a request; anything that later reaches it shows up here.' }),
+    pill,
+    h('button', { class: 'btn sm', text: 'Server…', title: 'Use the public servers or your own', disabled: !d.installed, onclick: callbacksServer }),
+    toggle,
+  );
+  box.className = 'cbstate';
+}
+
+async function callbacksToggle(stop) {
+  CB.busy = true;
+  drawCallbacksState();
+  try {
+    CB.data = { ...CB.data, ...(await api('/api/callbacks/' + (stop ? 'stop' : 'start'), { method: 'POST' })), interactions: [] };
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+  CB.busy = false;
+  drawCallbacks();
+}
+
+function callbacksInstallCard() {
+  const cmd = CB.data.install;
+  return h(
+    'div',
+    { class: 'empty cbinstall' },
+    h('h3', { text: 'One thing to install' }),
+    h('p', { class: 'mnote', text: 'Callbacks are collected by interactsh-client, an open-source tool that runs on this Mac. Install it once:' }),
+    h('div', { class: 'cbcmd' }, h('code', { text: cmd }), h('button', { class: 'btn sm', text: 'Copy', onclick: () => copyText(cmd) })),
+    h('div', { class: 'cbacts' }, h('button', { class: 'btn primary', text: 'Check again', onclick: () => renderCallbacks($('#main')) })),
+  );
+}
+
+function drawCallbackHosts(box) {
+  const d = CB.data;
+  const ready = !!d.base;
+  // Redrawn whenever a callback arrives, so keep what is being typed.
+  const typing = document.activeElement && document.activeElement.classList.contains('cbnew');
+  const label = h('input', {
+    class: 'cbnew',
+    value: CB.draft,
+    placeholder: ready ? 'What it’s for, e.g. avatar URL on /profile' : 'Start listening to make hosts',
+    disabled: !ready,
+    oninput: () => (CB.draft = label.value),
+    onkeydown: (e) => e.key === 'Enter' && make(),
+  });
+  const make = async () => {
+    try {
+      const p = await api('/api/callbacks/payloads', { method: 'POST', body: { label: label.value.trim() } });
+      CB.draft = '';
+      await loadCallbacks();
+      CB.host = p.id;
+      drawCallbacks();
+      copyText(p.host);
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  };
+  const all = h(
+    'button',
+    { class: 'cbhost all' + (CB.host ? '' : ' on'), onclick: () => ((CB.host = null), (CB.sel = null), drawCallbacks()) },
+    h('span', { class: 'cblabel', text: 'All callbacks' }),
+    h('span', { class: 'cbhits', text: String(CB.list.length) }),
+  );
+  const rows = d.payloads.map((p) =>
+    h(
+      'div',
+      { class: 'cbhost' + (CB.host === p.id ? ' on' : '') + (p.live ? '' : ' stale'), onclick: () => ((CB.host = CB.host === p.id ? null : p.id), (CB.sel = null), drawCallbacks()) },
+      h('div', { class: 'cbhrow' }, h('span', { class: 'cblabel', text: p.label || 'Untitled host' }), h('span', { class: 'cbhits' + (p.hits ? ' hot' : ''), text: String(p.hits), title: p.hits + (p.hits === 1 ? ' callback' : ' callbacks') })),
+      h('div', { class: 'cbhrow' }, h('span', { class: 'mono cbname', text: p.host, title: p.host }), p.live ? h('span', { class: 'cbtime', text: fmtTime(p.created_at) }) : h('span', { class: 'cbtime', text: 'other server', title: 'Made on another callback server; switch back to it to hear from this host again' })),
+      h(
+        'div',
+        { class: 'cbhacts', onclick: (e) => e.stopPropagation() },
+        h('button', { class: 'link', text: 'Copy', onclick: () => copyText(p.host) }),
+        h('button', { class: 'link', text: 'Find in traffic', title: 'Show the requests that carried this host', onclick: () => setQuery('"' + p.id + '"') }),
+        h('button', { class: 'link', text: 'Rename', onclick: () => renameCallbackHost(p) }),
+        h('button', { class: 'link danger', text: 'Remove', onclick: () => removeCallbackHost(p) }),
+      ),
+    ),
+  );
+  clear(
+    box,
+    h('div', { class: 'cbnewrow' }, label, h('button', { class: 'btn sm primary', text: 'New host', disabled: !ready, onclick: make })),
+    h('div', { class: 'cbhint muted', text: 'Each test gets a host of its own, so a callback points at the test it came from. A new host is copied for you.' }),
+    h('div', { class: 'cbhostlist' }, all, rows.length ? rows : h('div', { class: 'cbnone muted', text: ready ? 'No hosts yet. Name one above, or insert one from the Bench.' : 'Hosts appear once listening has started.' })),
+  );
+  if (typing) label.focus();
+}
+
+function renameCallbackHost(p) {
+  const input = h('input', { value: p.label });
+  const save = async () => {
+    try {
+      await api('/api/callbacks/payloads/' + p.id, { method: 'PATCH', body: { label: input.value } });
+      closeModal();
+      await loadCallbacks();
+      drawCallbacks();
+    } catch (e) {
+      m.err.textContent = e.message;
+    }
+  };
+  input.onkeydown = (e) => e.key === 'Enter' && save();
+  const m = modal('Rename host', [h('label', null, 'What it’s for', input)], [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), h('button', { class: 'btn primary', text: 'Save', onclick: save })]);
+}
+
+async function removeCallbackHost(p) {
+  try {
+    await api('/api/callbacks/payloads/' + p.id, { method: 'DELETE' });
+    if (CB.host === p.id) CB.host = null;
+    await loadCallbacks();
+    drawCallbacks();
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+/** One line on what a callback was: the record asked for, the request line, the sender. */
+function callbackSummary(i) {
+  if (i.protocol === 'dns') return (i.q_type || 'A') + ' lookup of ' + i.full_id;
+  if (i.protocol === 'smtp' || i.protocol === 'smtps') return i.smtp_from ? 'Mail from ' + i.smtp_from : 'Mail';
+  const first = (i.raw_request || '').split(/\r?\n/)[0];
+  return first || i.full_id;
+}
+
+function drawCallbackFeed(box) {
+  const d = CB.data;
+  const list = CB.list.filter((i) => !CB.host || i.payload === CB.host).slice().reverse();
+  const host = CB.host && cbHostOf(CB.host);
+  const head = h(
+    'div',
+    { class: 'cbfeedhead' },
+    h('b', { text: host ? host.label || 'Untitled host' : 'All callbacks' }),
+    h('span', { class: 'muted', text: ' · ' + list.length + (list.length === 1 ? ' callback' : ' callbacks') }),
+    CB.list.length ? h('button', { class: 'link', style: { marginLeft: 'auto' }, text: 'Clear all', onclick: clearCallbacks }) : null,
+  );
+  if (!list.length) {
+    const why =
+      d.phase === 'listening'
+        ? host
+          ? 'Nothing has reached this host yet. Callbacks arrive within a few seconds of the call.'
+          : 'Waiting for callbacks. Put a host in a request, send it, and anything that reaches the host shows up here.'
+        : d.phase === 'starting'
+          ? 'Connecting to the callback server…'
+          : d.error || 'Press Start listening to register with a callback server. Nothing is sent to any target.';
+    return clear(box, head, h('div', { class: 'empty cbempty' + (d.phase === 'failed' ? ' bad' : ''), text: why }));
+  }
+  if (!CB.sel || !list.some((i) => i.seq === CB.sel)) CB.sel = list[0].seq;
+  const rows = list.map((i) => {
+    const p = i.payload && cbHostOf(i.payload);
+    return h(
+      'tr',
+      { class: CB.sel === i.seq ? 'on' : '', onclick: () => ((CB.sel = i.seq), drawCallbackFeed(box)) },
+      h('td', { class: 'cbt mono', text: fmtTime(i.at) }),
+      h('td', null, h('span', { class: 'cbproto p-' + i.protocol, text: cbProto(i.protocol) })),
+      h('td', { class: 'cbfor', text: p ? p.label || 'Untitled host' : 'Unlisted host', title: i.full_id }),
+      h('td', { class: 'mono cbfrom', text: i.remote }),
+      h('td', { class: 'mono cbwhat', text: callbackSummary(i), title: callbackSummary(i) }),
+    );
+  });
+  const table = h(
+    'div',
+    { class: 'cbtablewrap' },
+    h(
+      'table',
+      { class: 'cbtable' },
+      h('colgroup', null, h('col', { class: 'c-t' }), h('col', { class: 'c-p' }), h('col', { class: 'c-f' }), h('col', { class: 'c-r' }), h('col')),
+      h('thead', null, h('tr', null, ['Time', 'Type', 'Host', 'From', 'What arrived'].map((t) => h('th', { text: t })))),
+      h('tbody', null, rows),
+    ),
+  );
+  const detail = h('div', { class: 'cbdetail' });
+  clear(box, head, table, detail);
+  drawCallbackDetail(detail, list.find((i) => i.seq === CB.sel));
+}
+
+function drawCallbackDetail(box, i) {
+  if (!i) return clear(box);
+  const p = i.payload && cbHostOf(i.payload);
+  const facts = [
+    ['Received', new Date(i.at).toLocaleString()],
+    ['From', i.remote],
+    ['Name', i.full_id],
+    p ? ['Host', p.host] : null,
+  ].filter(Boolean);
+  const raw = (title, text) => (text ? h('div', { class: 'cbraw' }, h('div', { class: 'lbl', text: title }), h('pre', { class: 'raw', text: text })) : null);
+  clear(
+    box,
+    h(
+      'div',
+      { class: 'cbdhead' },
+      h('span', { class: 'cbproto p-' + i.protocol, text: cbProto(i.protocol) }),
+      h('b', { class: 'cbdtitle', text: p ? p.label || 'Untitled host' : 'Unlisted host' }),
+      h(
+        'span',
+        { class: 'cbdacts' },
+        p ? h('button', { class: 'btn sm', text: 'Find the request', title: 'Show the captured requests that carried this host', onclick: () => setQuery('"' + p.id + '"') }) : null,
+        h('button', { class: 'btn sm', text: 'Copy', onclick: () => copyText(i.raw_request || i.full_id) }),
+        h('button', { class: 'btn sm primary', text: '+ Finding', onclick: () => findingFromCallback(i, p) }),
+      ),
+    ),
+    h('div', { class: 'cbfacts' }, facts.map(([k, v]) => h('div', null, h('span', { class: 'muted', text: k }), h('span', { class: 'mono', text: v })))),
+    h('div', { class: 'cbraws' }, raw('What arrived', i.raw_request), raw('What the server answered', i.raw_response)),
+  );
+}
+
+/** Opens a new finding with the callback as evidence, and the request that carried its host when Plonix captured one. */
+async function findingFromCallback(i, p) {
+  let ids = [];
+  if (p) {
+    try {
+      const r = await api('/api/traffic?limit=3&q=' + encodeURIComponent('"' + p.id + '"'));
+      ids = r.items.map((x) => x.id);
+    } catch (_) {}
+  }
+  const what = cbProto(i.protocol) + (i.protocol === 'dns' ? ' lookup' : i.protocol.startsWith('smtp') ? ' mail' : ' request');
+  const description = [
+    `The server made an outbound ${what} to a host it was only given in a request${p && p.label ? ` (${p.label})` : ''}.`,
+    '',
+    `Received: ${new Date(i.at).toISOString()}`,
+    `From: ${i.remote}`,
+    `Name: ${i.full_id}`,
+    i.raw_request ? '\n' + i.raw_request.slice(0, 4000) : '',
+  ].join('\n');
+  findingForm(null, ids, `Server makes an outbound ${what} to a host supplied in a request`, {
+    severity: 'medium',
+    note: ids.length ? `request #${ids[0]} carried this host.` : 'no captured request carries this host; add the one that sent it as evidence.',
+    description,
+  });
+}
+
+async function clearCallbacks() {
+  try {
+    await api('/api/callbacks/clear', { method: 'POST' });
+    CB.sel = null;
+    await loadCallbacks(true);
+    drawCallbacks();
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+function callbacksServer() {
+  const c = CB.data.config;
+  const server = h('input', { class: 'mono', value: c.server, placeholder: 'Public servers', spellcheck: 'false' });
+  const token = h('input', { class: 'mono', type: 'password', placeholder: c.has_token ? 'Saved — type to replace' : 'Only for a server that asks for one', autocomplete: 'off' });
+  const save = async () => {
+    const body = { server: server.value.trim() };
+    if (token.value.trim() || (!server.value.trim() && c.has_token)) body.token = token.value.trim();
+    try {
+      CB.data = { ...CB.data, ...(await api('/api/callbacks/config', { method: 'PUT', body })), interactions: [] };
+      closeModal();
+      toast(CB.data.phase === 'listening' ? 'Saved. Stop and start listening to switch servers.' : 'Saved', 'ok');
+      drawCallbacks();
+    } catch (e) {
+      m.err.textContent = e.message;
+    }
+  };
+  const m = modal(
+    'Callback server',
+    [
+      h('p', { class: 'mnote muted', text: 'Leave the address empty to use the public servers. A server you host yourself keeps callbacks private to you.' }),
+      h('label', null, 'Server address', server),
+      h('label', null, 'Token', token),
+      h('p', { class: 'mnote muted', text: 'Changing the server gives out new hosts; ones handed out earlier stop reaching this project.' }),
+    ],
+    [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), h('button', { class: 'btn primary', text: 'Save', onclick: save })],
+  );
+}
+
+const urlPath = (u) => {
+  try {
+    const x = new URL(u);
+    return x.host + x.pathname;
+  } catch (_) {
+    return u;
+  }
+};
+
+/** Makes a callback host for this Bench request and puts it where the cursor was. */
+async function insertCallbackHost(tab, field, main) {
+  const el = field === 'url' ? $('#benchurl') : $('#bencheditor');
+  if (!el) return;
+  const start = el.selectionStart ?? el.value.length;
+  const end = el.selectionEnd ?? start;
+  let p;
+  try {
+    p = await api('/api/callbacks/payloads', { method: 'POST', body: { label: `${tab.method} ${urlPath(tab.url)}`.slice(0, 120) } });
+  } catch (e) {
+    if (e.code === 'not_listening') {
+      toast('Start listening in Callbacks first, then insert a host.', 'err');
+      return leaveTo('callbacks');
+    }
+    return toast(e.message, 'err');
+  }
+  el.value = el.value.slice(0, start) + p.host + el.value.slice(end);
+  if (field === 'url') tab.url = el.value;
+  else tab.raw = el.value;
+  saveBench();
+  renderBench(main);
+  toast('Callback host inserted. Its callbacks show up in Callbacks.', 'ok');
+}
+
 /* ======================================================================
    Findings
    ====================================================================== */
@@ -5956,7 +6356,7 @@ function newFinding(ids, title) {
 function findingForm(f, ids = [], title = '', hint = null) {
   const t = h('input', { value: f ? f.title : title || '', placeholder: 'e.g. IDOR on /v2/orders/{id} exposes other users’ addresses' });
   const sev = h('select', null, SEVERITIES.map((s) => h('option', { value: s, text: s, selected: s === (f ? f.severity : (hint && hint.severity) || 'medium') })));
-  const desc = h('textarea', { placeholder: 'What happens, how to reproduce it, and why it matters.', value: f ? f.description : '' });
+  const desc = h('textarea', { placeholder: 'What happens, how to reproduce it, and why it matters.', value: f ? f.description : (hint && hint.description) || '' });
   const ex = f ? null : h('input', { value: ids.join(', '), placeholder: 'Request ids, e.g. 14, 22', oninput: () => !job.busy && writeIdle() });
   // Claude can write the title, severity and description from the evidence.
   const job = {};

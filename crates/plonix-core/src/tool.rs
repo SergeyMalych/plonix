@@ -44,6 +44,11 @@ pub const FEATURES: &[Feature] = &[
         title: "Access check",
         summary: "A screen that replays selected requests as each saved user, and once signed out, and lines up the responses.",
     },
+    Feature {
+        id: "callbacks",
+        title: "Callbacks",
+        summary: "A screen that hands out unique hosts to put in requests and lists every DNS lookup, HTTP request or mail that reaches one.",
+    },
 ];
 
 pub fn feature(id: &str) -> Option<&'static Feature> {

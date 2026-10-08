@@ -89,6 +89,9 @@ pub struct Engine {
     /// The bug bounty or disclosure program this project follows, if any
     /// (see [`crate::bounty`]): its rules are enforced on every send.
     program: RwLock<Option<Arc<bounty::Guard>>>,
+    /// Hosts handed out for out-of-band tests and the callbacks they got
+    /// (see [`crate::callbacks`]). Idle until the user starts it.
+    pub callbacks: crate::callbacks::Callbacks,
 }
 
 /// Where a project keeps the program it follows.
@@ -261,6 +264,7 @@ impl Engine {
             },
             None => None,
         };
+        let callbacks = crate::callbacks::Callbacks::load(&store);
         let (recorder, rx) = mpsc::unbounded_channel();
         let engine = Arc::new(Self {
             recorder,
@@ -293,6 +297,7 @@ impl Engine {
             client_certs: RwLock::default(),
             client_certs_on: AtomicBool::new(true),
             program: RwLock::new(guard),
+            callbacks,
         });
         engine.reload_client_certs()?;
         Ok(engine)
@@ -464,6 +469,8 @@ impl Engine {
     /// Asks the engine to stop: the API stops serving and waiters wake up.
     pub fn request_shutdown(&self) {
         self.stopping.store(true, Ordering::SeqCst);
+        self.callbacks.stop();
+        let _ = self.callbacks.persist(&self.store);
         if let Some(task) = self.proxy.lock().unwrap().task.take() {
             task.abort();
         }
