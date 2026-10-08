@@ -160,6 +160,7 @@ function modal(title, body, actions) {
 
 async function boot() {
   applyTheme(store('plonix.theme') || 'auto');
+  applyDensity(store('plonix.density') || 'roomy');
   const hash = location.hash;
   const code = hash.startsWith('#code=') ? hash.slice(6) : null;
   if (code) {
@@ -599,6 +600,12 @@ function applyTheme(t) {
   if (t === 'auto') document.documentElement.removeAttribute('data-theme');
   else document.documentElement.setAttribute('data-theme', t);
   S.theme = t;
+}
+
+/** Roomy (the default) gives rows and panels more air; Dense fits more on screen. */
+function applyDensity(d) {
+  document.documentElement.setAttribute('data-density', d === 'dense' ? 'dense' : 'roomy');
+  S.density = d === 'dense' ? 'dense' : 'roomy';
 }
 
 function cycleTheme() {
@@ -3701,11 +3708,11 @@ const scopeLabel = (d) => ({ accepted: 'in scope', rejected: 'rejected', unknown
 /* ---- adaptive scope banner on the traffic screen ---- */
 
 const EV = {
-  shares_session: ['🔑', 'Shares a session'],
-  shares_certificate: ['🔒', 'Shares a certificate'],
-  redirected_from: ['↪', 'Redirected from'],
-  requested_from: ['↗', 'Called from'],
-  linked_from: ['🔗', 'Linked from'],
+  shares_session: 'Shares a session',
+  shares_certificate: 'Shares a certificate',
+  redirected_from: 'Redirected from',
+  requested_from: 'Called from',
+  linked_from: 'Linked from',
 };
 
 /**
@@ -3723,7 +3730,7 @@ function renderBanner() {
   const queue = all.filter((s) => !(T.skipped || []).includes(s.domain));
   const s = queue[0] || all[0];
   const ev = s.evidence[0];
-  const [ico, label] = (ev && EV[ev.kind]) || ['•', ''];
+  const label = (ev && EV[ev.kind]) || '';
   clear(
     slot,
     h(
@@ -3731,7 +3738,7 @@ function renderBanner() {
       { class: 'scopequeue' },
       h('button', { class: 'qcount', title: 'Review every suggestion on the Scope screen', onclick: () => go('scope') }, h('b', { text: all.length }), all.length === 1 ? ' scope decision' : ' scope decisions'),
       h('span', { class: 'qdom', text: s.domain, title: s.domain }),
-      ev ? h('span', { class: 'qev', title: s.evidence.map((e) => e.summary).join('\n') }, h('i', { text: ico }), ' ', label, ' ', ev.via) : null,
+      ev ? h('span', { class: 'qev', title: s.evidence.map((e) => e.summary).join('\n') }, label, ' ', ev.via) : null,
       h('span', { class: 'qacts' }, scopeButtons(s, 'sm'), all.length > 1 ? h('button', { class: 'btn sm ghost', text: 'Skip', title: 'Decide later; show the next one', onclick: () => ((T.skipped = queue.length > 1 ? [...(T.skipped || []), s.domain] : []), renderBanner()) }) : null),
       h(
         'span',
@@ -3822,11 +3829,10 @@ function evidenceList(evidence) {
     'div',
     { class: 'evlist' },
     evidence.map((e) => {
-      const [ico, label] = EV[e.kind] || ['•', e.kind];
       return h(
         'div',
         { class: 'ev' },
-        h('span', { class: 'k' }, h('i', { text: ico }), label),
+        h('span', { class: 'k', text: EV[e.kind] || e.kind }),
         h('span', { class: 'd' }, e.summary, e.detail ? ' · ' + e.detail : ''),
         h('span', { class: 'w' }, e.count > 1 ? '×' + e.count + ' ' : '', h('button', { class: 'link', text: '#' + e.exchange_id, title: 'Show the request this came from', onclick: () => showExchange(e.exchange_id) })),
       );
@@ -8165,7 +8171,7 @@ function drawAgentAsk() {
     );
   }
   const q = h('textarea', { class: 'agq', id: 'agq', rows: 2, placeholder: 'Ask Claude about this project: what to look at next, what an endpoint does, which hosts belong to the target…' });
-  const go = h('button', { class: 'btn primary', text: '✦ Ask', disabled: true });
+  const go = h('button', { class: 'btn primary ai', text: '✦ Ask', disabled: true });
   const send = () => {
     const t = q.value.trim();
     if (!t) return;
@@ -9728,7 +9734,7 @@ async function askClaude(subject, opts = {}) {
   /* ---- footer buttons ---- */
   const copyBtn = h('button', { class: 'btn', text: 'Copy prompt' });
   const termBtn = h('button', { class: 'btn', text: 'Open in Terminal' });
-  const askBtn = h('button', { class: 'btn primary', text: '✦ Ask Claude' });
+  const askBtn = h('button', { class: 'btn primary ai', text: '✦ Ask Claude' });
   const stopBtn = h('button', { class: 'btn', text: 'Stop', hidden: true });
   const newBtn = h('button', { class: 'btn', text: 'New question', hidden: true });
 
@@ -9983,6 +9989,7 @@ async function renderSettings(main) {
     return;
   }
   if (S.view !== 'settings') return;
+  data.sections = [appearanceSection(), ...(data.sections || [])];
   const host = h('div', { style: { flex: '1', minHeight: '0', display: 'flex' } });
   const back = backButton();
   clear(box, back ? h('div', { class: 'toolbar' }, back) : null, host);
@@ -9990,6 +9997,13 @@ async function renderSettings(main) {
     select: S.settingsSection || 'proxy',
     onSelect: (id) => (S.settingsSection = id),
     save: async (section, values) => {
+      if (section === 'appearance') {
+        applyTheme(values.theme);
+        store('plonix.theme', values.theme);
+        applyDensity(values.density);
+        store('plonix.density', values.density);
+        return { applies: 'now' };
+      }
       const r = await api('/api/settings/' + section, { method: 'PUT', body: { values } });
       if (section === 'agents') loadAgentSettings();
       if (section === 'intercept') loadIntercept();
@@ -10007,6 +10021,22 @@ async function renderSettings(main) {
       if (section.id === 'client-certs') el.append(clientCertPanel());
     },
   });
+}
+
+/** How Plonix looks on this computer. Kept in the window, not the engine. */
+function appearanceSection() {
+  return {
+    id: 'appearance',
+    title: 'Appearance',
+    level: 'device',
+    description: 'How Plonix looks on this computer.',
+    applies: 'now',
+    fields: [
+      { key: 'theme', label: 'Theme', type: 'choice', options: [{ value: 'auto', label: 'Match system' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }] },
+      { key: 'density', label: 'Spacing', type: 'choice', help: 'Roomy gives rows and panels more air. Dense fits more on screen.', options: [{ value: 'roomy', label: 'Roomy' }, { value: 'dense', label: 'Dense' }] },
+    ],
+    values: { theme: S.theme || 'auto', density: S.density || 'roomy' },
+  };
 }
 
 function proxyPanel() {
