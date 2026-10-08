@@ -229,7 +229,8 @@ Inner elements always have a smaller radius than their container.
   downloading is always "Download for Mac".
 - **Tiles**: surface, hairline, `{rounded.xl}`, a sunk picture area that shows a small piece of the real UI,
   then a title, one or two sentences, and a mono link.
-- **Screenshot frame**: a real app screenshot with explicit width and height, `loading="lazy"` below the
+- **Screenshot frame**: a real app screenshot, taken from the demo project in both themes
+  (`name-light.webp` and `name-dark.webp`; CSS shows the one matching the page), with explicit width and height, `loading="lazy"` below the
   fold. The hero window gets `fetchpriority="high"`.
 - **Terminal**: dark in both themes, prompt `$` in indigo, success `✓` in green, comments faint.
 - **Chips**: mono text in a pill, no colored dots.

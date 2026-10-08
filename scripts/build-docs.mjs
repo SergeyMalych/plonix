@@ -337,7 +337,7 @@ function page({ file, title, description, sidebar, main, source }) {
 <meta property="og:title" content="${esc(title)}">
 <meta property="og:description" content="${esc(description)}">
 <meta property="og:url" content="${canonical}">
-<meta property="og:image" content="https://plonix.io/assets/window.webp">
+<meta property="og:image" content="https://plonix.io/assets/window-light.webp">
 <link rel="canonical" href="${canonical}">
 <meta name="theme-color" content="#f5f5fa" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0d0e13" media="(prefers-color-scheme: dark)">

@@ -8,7 +8,7 @@
 <meta property="og:title" content="Plonix">
 <meta property="og:description" content="Open-source, macOS-native web security workbench: intercept, adaptive scope, fast search, scriptable API, AI-native.">
 <meta property="og:url" content="https://plonix.io/">
-<meta property="og:image" content="https://plonix.io/assets/window.webp">
+<meta property="og:image" content="https://plonix.io/assets/window-light.webp">
 <link rel="canonical" href="https://plonix.io/">
 <meta name="theme-color" content="#f5f5fa" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0d0e13" media="(prefers-color-scheme: dark)">
@@ -78,6 +78,14 @@ body {
   overflow-x: hidden;
 }
 img { max-width: 100%; height: auto; display: block; }
+/* app screenshots come in both themes; show the one matching the page */
+.shot-dark { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .shot-light { display: none; }
+  :root:not([data-theme="light"]) .shot-dark { display: block; }
+}
+:root[data-theme="dark"] .shot-light { display: none; }
+:root[data-theme="dark"] .shot-dark { display: block; }
 a { color: inherit; }
 [id] { scroll-margin-top: 84px; }
 .skip { position: absolute; left: 16px; top: -60px; z-index: 30; padding: 10px 16px; border-radius: 10px; background: var(--indigo-deep); color: #fff; font-weight: 600; text-decoration: none; transition: top .15s ease; }
@@ -272,7 +280,7 @@ section.block { padding-block: 110px; }
 .ticks li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; color: var(--fg); font-size: .98rem; }
 .ticks li::before { content: ""; width: 10px; height: 10px; margin-top: 8px; border-radius: 50%; border: 2px solid var(--indigo); }
 .ticks li span { display: block; color: var(--muted); font-size: .9rem; margin-top: 2px; }
-.light-shot { border-radius: 14px; overflow: hidden; border: 1px solid var(--line); box-shadow: 0 40px 90px -36px var(--shadow); background: #f4f5f9; }
+.light-shot { border-radius: 14px; overflow: hidden; border: 1px solid var(--line); box-shadow: 0 40px 90px -36px var(--shadow); background: var(--ink-2); }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { font: 0.8rem var(--mono); padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--ink-2); display: inline-flex; align-items: center; gap: 7px; }
 .feature.stack { grid-template-columns: minmax(0, 1fr); gap: 40px; }
@@ -447,10 +455,10 @@ footer a:hover { color: var(--fg); }
 
     <div>
       <div class="lensbox" id="lensbox" aria-label="Interactive demo: a captured request. Moving the lens over it shows what Plonix decodes.">
-        <div class="lensbox-bar"><b>LENS</b> GET api.acme.test/v2/me <span class="st">200 · in scope</span></div>
+        <div class="lensbox-bar"><b>LENS</b> GET api.brightcart.example/v2/me <span class="st">200 · in scope</span></div>
         <div class="pane">
-          <pre class="http" aria-hidden="false"><div><span class="m">GET</span> /v2/me?next=<span class="enc">%252Faccount%252Fsettings</span> HTTP/1.1</div><div><span class="k">host</span>: api.acme.test</div><div><span class="k">authorization</span>: Bearer <span class="enc">eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMDQyIiwiZW1haWwiOiJib2JAYWNtZS50ZXN0In0</span></div><div><span class="k">x-trace</span>: <span class="enc">6f726465722d73657276696365</span></div><div><span class="k">cookie</span>: prefs=<span class="enc">eyJyb2xlIjoidXNlciIsInRlYW0iOiJiaWxsaW5nIn0=</span></div><div><span class="k">x-forwarded-for</span>: <span class="enc">10.20.4.17</span></div><div><span class="k">origin</span>: https://shop.acme.test</div><div><span class="k">referer</span>: https://shop.acme.test/account</div><div><span class="k">accept</span>: application/json</div><div><span class="k">sec-fetch-site</span>: same-site</div></pre>
-          <pre class="http decoded" aria-hidden="true"><div><span class="m">GET</span> /v2/me?next=<span class="dec">/account/settings</span><span class="tag">URL-ENCODED ×2</span></div><div><span class="k">host</span>: api.acme.test</div><div><span class="k">authorization</span>: Bearer <span class="dec">{"alg":"HS256"} {"sub":"1042","email":"bob@acme.test"}</span><span class="tag">JWT</span></div><div><span class="k">x-trace</span>: <span class="dec">order-service</span><span class="tag">HEX</span></div><div><span class="k">cookie</span>: prefs=<span class="dec">{"role":"user","team":"billing"}</span><span class="tag">BASE64</span></div><div><span class="k">x-forwarded-for</span>: <span class="dec">10.20.4.17</span><span class="tag">INTERNAL IP</span></div><div><span class="k">origin</span>: https://shop.acme.test</div><div><span class="k">referer</span>: https://shop.acme.test/account</div><div><span class="k">accept</span>: application/json</div><div><span class="k">sec-fetch-site</span>: same-site</div></pre>
+          <pre class="http" aria-hidden="false"><div><span class="m">GET</span> /v2/me?next=<span class="enc">%252Faccount%252Fsettings</span> HTTP/1.1</div><div><span class="k">host</span>: api.brightcart.example</div><div><span class="k">authorization</span>: Bearer <span class="enc">eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMDQyIiwiZW1haWwiOiJtYXlhLmxvcGV6QG1haWwuZXhhbXBsZSJ9</span></div><div><span class="k">x-trace</span>: <span class="enc">6f726465722d73657276696365</span></div><div><span class="k">cookie</span>: prefs=<span class="enc">eyJyb2xlIjoidXNlciIsInRlYW0iOiJiaWxsaW5nIn0=</span></div><div><span class="k">x-forwarded-for</span>: <span class="enc">10.20.4.17</span></div><div><span class="k">origin</span>: https://www.brightcart.example</div><div><span class="k">referer</span>: https://www.brightcart.example/account</div><div><span class="k">accept</span>: application/json</div><div><span class="k">sec-fetch-site</span>: same-site</div></pre>
+          <pre class="http decoded" aria-hidden="true"><div><span class="m">GET</span> /v2/me?next=<span class="dec">/account/settings</span><span class="tag">URL-ENCODED ×2</span></div><div><span class="k">host</span>: api.brightcart.example</div><div><span class="k">authorization</span>: Bearer <span class="dec">{"alg":"HS256"} {"sub":"1042","email":"maya.lopez@mail.example"}</span><span class="tag">JWT</span></div><div><span class="k">x-trace</span>: <span class="dec">order-service</span><span class="tag">HEX</span></div><div><span class="k">cookie</span>: prefs=<span class="dec">{"role":"user","team":"billing"}</span><span class="tag">BASE64</span></div><div><span class="k">x-forwarded-for</span>: <span class="dec">10.20.4.17</span><span class="tag">INTERNAL IP</span></div><div><span class="k">origin</span>: https://www.brightcart.example</div><div><span class="k">referer</span>: https://www.brightcart.example/account</div><div><span class="k">accept</span>: application/json</div><div><span class="k">sec-fetch-site</span>: same-site</div></pre>
           <div class="ring-el" aria-hidden="true"></div>
         </div>
       </div>
@@ -462,8 +470,8 @@ footer a:hover { color: var(--fg); }
 <section class="showcase" id="showcase">
   <div class="wrap">
     <div class="shot">
-      <div class="bar"><i></i><i></i><i></i><span>Plonix · shop.acme.test</span></div>
-      <img src="assets/window.webp" width="1440" height="900" fetchpriority="high" alt="The Plonix window: live traffic with a search filter, a suggestion to add a new domain to scope with its evidence, and the Lens showing a request and its response.">
+      <div class="bar"><i></i><i></i><i></i><span>Plonix</span></div>
+      <img class="shot-light" src="assets/window-light.webp" fetchpriority="high" width="1920" height="1200" alt="The Plonix window: live traffic with filter chips, a scope suggestion for a newly seen domain, and the Lens showing a request and its response."><img class="shot-dark" src="assets/window-dark.webp" loading="lazy" width="1920" height="1200" alt="The Plonix window: live traffic with filter chips, a scope suggestion for a newly seen domain, and the Lens showing a request and its response.">
     </div>
     <p class="shot-caption">The Plonix window, capturing. A new domain is suggested for scope with the evidence behind it.</p>
   </div>
@@ -480,7 +488,7 @@ footer a:hover { color: var(--fg); }
         <div class="txt"><h3>AI-first, built for Claude Code</h3><p>Built-in MCP gives Claude Code your live traffic, scope and findings in one command. Ask about any request with one click.</p><span class="more">AI and agents &rarr;</span></div>
       </a>
       <a class="fcard" href="#projects">
-        <div class="demo"><div class="proj"><span class="av">S</span><b>Shop API</b><span class="on">&#9679; :8081</span></div><div class="proj"><span class="av">A</span><b>Acme staging</b><span class="on">&#9679; :8080</span></div><div class="proj"><span class="av" style="opacity:.45">B</span><b>Bank portal</b><span class="off">closed</span></div></div>
+        <div class="demo"><div class="proj"><span class="av">S</span><b>Shop API</b><span class="on">&#9679; :8081</span></div><div class="proj"><span class="av">A</span><b>Brightcart staging</b><span class="on">&#9679; :8080</span></div><div class="proj"><span class="av" style="opacity:.45">B</span><b>Bank portal</b><span class="off">closed</span></div></div>
         <div class="txt"><h3>Several projects at the same time</h3><p>Every project is its own folder, window, proxy and database. Open as many as you need; nothing collides.</p><span class="more">Projects &rarr;</span></div>
       </a>
       <a class="fcard" href="#market">
@@ -488,11 +496,11 @@ footer a:hover { color: var(--fg); }
         <div class="txt"><h3>A community Market for everything modular</h3><p>Skills, rule packs, filter packs and bundles, maintained by the community and signed before they install.</p><span class="more">Market &rarr;</span></div>
       </a>
       <a class="fcard" href="#scope">
-        <div class="demo"><div class="sug"><div><b>static.acmecdn.test</b> looks like part of your target</div><div>&#8599; called from shop.acme.test &middot; shares a certificate</div><div class="btns"><span class="acc">Accept</span><span>+ subdomains</span><span class="rej">Reject</span></div></div></div>
+        <div class="demo"><div class="sug"><div><b>cdn.bcstatic.example</b> looks like part of your target</div><div>&#8599; called from www.brightcart.example &middot; shares a certificate</div><div class="btns"><span class="acc">Accept</span><span>+ subdomains</span><span class="rej">Reject</span></div></div></div>
         <div class="txt"><h3>Scope that works, and stays easy</h3><p>Scope grows as you browse, with evidence for every suggestion. One click to accept or reject, and noise like trackers is excluded for you.</p><span class="more">Adaptive scope &rarr;</span></div>
       </a>
       <a class="fcard" href="#search">
-        <div class="demo"><div class="qb">status:5xx method:POST -is:trackers</div><div class="chips2"><span class="c in">+ Auth flows</span><span class="c in">+ host:api.acme.test</span><span class="c out">&minus; Analytics &amp; trackers</span><span class="c out">&minus; static files</span></div></div>
+        <div class="demo"><div class="qb">status:5xx method:POST -is:trackers</div><div class="chips2"><span class="c in">+ Auth flows</span><span class="c in">+ host:api.brightcart.example</span><span class="c out">&minus; Analytics &amp; trackers</span><span class="c out">&minus; static files</span></div></div>
         <div class="txt"><h3>Advanced filtering</h3><p>Type a query or click chips to show only or hide. Save named filters, and use the same query in the CLI and API.</p><span class="more">Filtering &rarr;</span></div>
       </a>
       <a class="fcard wide tint" href="#start">
@@ -534,9 +542,9 @@ footer a:hover { color: var(--fg); }
     <div class="agents reveal">
       <div class="term">
         <div class="bar"><i></i><i></i><i></i><span>Terminal</span></div>
-<pre><span class="p">$ </span>plonix open acme.test        <span class="c"># capture while you browse</span>
+<pre><span class="p">$ </span>plonix open brightcart.example        <span class="c"># capture while you browse</span>
 <span class="ok">✓</span> Proxy   127.0.0.1:8080
-<span class="ok">✓</span> Scope   acme.test (+ subdomains)
+<span class="ok">✓</span> Scope   brightcart.example (+ subdomains)
 <span class="p">$ </span>plonix connect claude        <span class="c"># once</span>
 <span class="ok">✓</span> Plonix added to Claude Code (read-only)
 <span class="p">$ </span>claude
@@ -544,7 +552,7 @@ footer a:hover { color: var(--fg); }
   returned errors, then read the most interesting
   request and tell me what stands out.</span></pre>
       </div>
-      <div class="light-shot"><img src="assets/ask.webp" loading="lazy" width="1520" height="950" alt="The Ask Claude Code dialog: a question, the request, response, spotted values and detected technologies it will share, each with a token count, and a context limit."></div>
+      <div class="light-shot"><img class="shot-light" src="assets/ask-light.webp" loading="lazy" width="1440" height="820" alt="The Ask Claude Code dialog: a question and the request, response, spotted values and technologies it will share, each with a token count."><img class="shot-dark" src="assets/ask-dark.webp" loading="lazy" width="1440" height="820" alt="The Ask Claude Code dialog: a question and the request, response, spotted values and technologies it will share, each with a token count."></div>
     </div>
     <div class="guard reveal">
       <div><b>Read-only by default</b><span>Agents sign in with their own token. Anything but reading is refused by the engine.</span></div>
@@ -570,7 +578,7 @@ footer a:hover { color: var(--fg); }
         </div>
         <p style="font-size:.93rem">Detection runs locally, on traffic you already captured. A token's signature is never claimed valid.</p>
       </div>
-      <div class="light-shot"><img src="assets/lens.webp" loading="lazy" width="1108" height="550" alt="The Lens with a JWT spotted in the authorization header, its header and payload decoded, and the token highlighted in the request."></div>
+      <div class="light-shot"><img class="shot-light" src="assets/lens-light.webp" loading="lazy" width="1920" height="733" alt="The Lens with a JWT spotted in the authorization header, its header decoded, and the token highlighted in the request."><img class="shot-dark" src="assets/lens-dark.webp" loading="lazy" width="1920" height="733" alt="The Lens with a JWT spotted in the authorization header, its header decoded, and the token highlighted in the request."></div>
     </div>
   </div>
 </section>
@@ -588,7 +596,7 @@ footer a:hover { color: var(--fg); }
           <li><div>Enforced in one place <span>replays, sends and agents can only reach accepted hosts</span></div></li>
         </ul>
       </div>
-      <div class="light-shot"><img src="assets/scope.webp" loading="lazy" width="1600" height="893" alt="The Scope screen: four suggested domains, each with the evidence that it was called from an in-scope page, and buttons to accept or reject."></div>
+      <div class="light-shot"><img class="shot-light" src="assets/scope-light.webp" loading="lazy" width="1920" height="1304" alt="The Scope screen: suggested domains, each with the evidence that links it to the target, and buttons to accept or reject."><img class="shot-dark" src="assets/scope-dark.webp" loading="lazy" width="1920" height="1304" alt="The Scope screen: suggested domains, each with the evidence that links it to the target, and buttons to accept or reject."></div>
     </div>
   </div>
 </section>
@@ -602,13 +610,13 @@ footer a:hover { color: var(--fg); }
     <div class="qbox reveal">
       <label class="qbar" for="q">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="q" name="q" type="text" spellcheck="false" autocomplete="off" value="host:api.acme.com method:POST status:5xx -logout" aria-label="Try a query">
+        <input id="q" name="q" type="text" spellcheck="false" autocomplete="off" value="host:api.brightcart.example method:POST status:5xx -logout" aria-label="Try a query">
         <span class="count" id="qcount"></span>
       </label>
       <div class="qexamples" role="group" aria-label="Example queries">
-        <button type="button">host:api.acme.com method:POST status:5xx -logout</button>
+        <button type="button">host:api.brightcart.example method:POST status:5xx -logout</button>
         <button type="button">scope:in mime:json path:/api</button>
-        <button type="button">status:4xx,5xx -kind:static -host:cdn.acme.com</button>
+        <button type="button">status:4xx,5xx -kind:static -host:cdn.bcstatic.example</button>
         <button type="button">"set-cookie: sid" source:proxy</button>
         <button type="button">ext:js passw</button>
       </div>
@@ -629,7 +637,7 @@ footer a:hover { color: var(--fg); }
           <li><div>Turn a send into a finding in one click</div></li>
         </ul>
       </div>
-      <div class="light-shot"><img src="assets/bench.webp" loading="lazy" width="1108" height="747" alt="The Bench: a POST request on the left, its JSON response on the right, and the send history below with Restore, Branch and Finding buttons."></div>
+      <div class="light-shot"><img class="shot-light" src="assets/bench-light.webp" loading="lazy" width="1920" height="1304" alt="The Bench: a request on the left, its JSON response on the right, and the send history below with Restore, Branch and Finding buttons."><img class="shot-dark" src="assets/bench-dark.webp" loading="lazy" width="1920" height="1304" alt="The Bench: a request on the left, its JSON response on the right, and the send history below with Restore, Branch and Finding buttons."></div>
     </div>
   </div>
 </section>
@@ -642,7 +650,7 @@ footer a:hover { color: var(--fg); }
         <p>A project is a folder you choose. It holds its own traffic, scope, findings and settings. Open several at once: each gets its own window, proxy port, API and database. Trust the certificate once and it covers them all.</p>
         <p style="font-size:.93rem">Turn on <b style="color:var(--fg);font-weight:600">Keep only in-scope traffic</b> and out-of-scope requests are deleted from disk when the project closes.</p>
       </div>
-      <div class="light-shot"><img src="assets/projects.webp" loading="lazy" width="1600" height="432" alt="The Projects screen with two open projects, Shop API on proxy port 8081 and Acme staging on port 8080."></div>
+      <div class="light-shot"><img class="shot-light" src="assets/projects-light.webp" loading="lazy" width="1896" height="660" alt="The Projects screen with two open projects, Shop API on proxy port 8081 and the Brightcart demo on port 8080."><img class="shot-dark" src="assets/projects-dark.webp" loading="lazy" width="1896" height="660" alt="The Projects screen with two open projects, Shop API on proxy port 8081 and the Brightcart demo on port 8080."></div>
     </div>
   </div>
 </section>
@@ -660,7 +668,7 @@ footer a:hover { color: var(--fg); }
           <li><div>Host your own <span>a team Market with its own signing key</span></div></li>
         </ul>
       </div>
-      <div class="light-shot"><img src="assets/market.webp" loading="lazy" width="1600" height="940" alt="The Market: skills, rule packs, filter packs, a bundle and an extension, each marked Built in or Verified, with Remove buttons on installed items."></div>
+      <div class="light-shot"><img class="shot-light" src="assets/market-light.webp" loading="lazy" width="1920" height="1304" alt="The Market: skills, extensions and rule packs, each marked Built in or Verified, with Install buttons."><img class="shot-dark" src="assets/market-dark.webp" loading="lazy" width="1920" height="1304" alt="The Market: skills, extensions and rule packs, each marked Built in or Verified, with Install buttons."></div>
     </div>
   </div>
 </section>
@@ -680,21 +688,21 @@ footer a:hover { color: var(--fg); }
           <button type="button" role="tab" aria-selected="false" data-tab="mcp">MCP</button>
           <button type="button" class="copybtn" id="copy" aria-live="polite">Copy</button>
         </div>
-<pre data-panel="cli"><span class="p">$ </span>plonix search host:acme.test status:5xx
+<pre data-panel="cli"><span class="p">$ </span>plonix search host:brightcart.example status:5xx
 <span class="p">$ </span>plonix show 42
 <span class="p">$ </span>plonix watch scope:in
 <span class="p">$ </span>plonix scope review
-<span class="p">$ </span>plonix scope accept '*.acme-cdn.test'
+<span class="p">$ </span>plonix scope accept '*.bcstatic.example'
 <span class="p">$ </span>plonix replay 42 -H 'Authorization: Bearer other-user' -t /api/users/2
 <span class="p">$ </span>plonix -p shop search status:5xx --json</pre>
 <pre data-panel="api" hidden><span class="p">$ </span>TOKEN=$(cat ~/.plonix/api-token)
 <span class="p">$ </span>API=http://127.0.0.1:8090/api
 
 <span class="p">$ </span>curl -H "Authorization: Bearer $TOKEN" -G "$API/traffic" \
-    --data-urlencode 'q=host:acme.test status:2xx'
+    --data-urlencode 'q=host:brightcart.example status:2xx'
 <span class="p">$ </span>curl -H "Authorization: Bearer $TOKEN" "$API/scope"
 <span class="p">$ </span>curl -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-    -d '{"domain":"*.acme.test"}' "$API/scope/accept"</pre>
+    -d '{"domain":"*.brightcart.example"}' "$API/scope/accept"</pre>
 <pre data-panel="mcp" hidden><span class="p">$ </span>plonix connect claude     <span class="c"># adds Plonix to Claude Code, read-only</span>
 <span class="ok">✓</span> Plonix added to Claude Code (read-only)
 
@@ -881,41 +889,41 @@ footer a:hover { color: var(--fg); }
     // what one click does, and the result the researcher sees. Content is authored, so the HTML is trusted.
     const SCENES = [
       { key: 'token', label: 'A session comes back',
-        where: 'POST api.acme.test/login', st: '200 · in scope', ok: true,
+        where: 'POST api.brightcart.example/login', st: '200 · in scope', ok: true,
         code: '<span class="k">HTTP/1.1</span> 200 OK\n<span class="k">Set-Cookie:</span> <mark>sid=S3yJ9f…; HttpOnly; Secure</mark>\n<span class="k">Content-Type:</span> application/json\n\n{ "user": "maya", "role": "member" }',
         chip: 'Save login as a user', cls: '',
         does: 'Captures the session this response just set as a <b>reusable identity</b>, ready in the Bench “As…” picker and the Access check.',
         result: 'Saved “maya”. Now switch to her in one click, or replay anything as her.' },
       { key: 'idor', label: 'A tell-tale id',
-        where: 'GET api.acme.test/v2/orders/1041', st: '200 · in scope', ok: true,
+        where: 'GET api.brightcart.example/v2/orders/1041', st: '200 · in scope', ok: true,
         code: '<span class="k">GET</span> /v2/orders/<mark>1041</mark> HTTP/1.1\n<span class="k">Cookie:</span> sid=S3yJ9f…\n\n<span class="k">HTTP/1.1</span> 200 OK\n{ "id": 1041, "total": "$84.00", "name": "Maya R." }',
         chip: 'Check this id across users', cls: '',
         does: 'Replays this request as <b>every saved user and signed out</b>, then lines up who can read record <b>1041</b>: the “can I see someone else’s?” question, answered.',
         result: 'Replayed as 3 identities and signed out. Dana and signed-out both got 200, so it is flagged.' },
       { key: 'reflect', label: 'A value echoes back',
-        where: 'GET shop.acme.test/search', st: '200 · in scope', ok: true,
+        where: 'GET www.brightcart.example/search', st: '200 · in scope', ok: true,
         code: '<span class="k">GET</span> /search?q=<mark>plonix-test</mark> HTTP/1.1\n\n<span class="k">HTTP/1.1</span> 200 OK\n<span class="k">Content-Type:</span> text/html\n\n&lt;h2&gt;No results for <mark>plonix-test</mark>&lt;/h2&gt;',
         chip: 'Reflected value → Bench', cls: '',
         does: 'Opens this request on the <b>Bench</b> with the reflected value marked, ready to vary it and compare how the page changes.',
         result: 'Opened on the Bench with “q” marked as a position, response ready to compare.' },
       { key: 'redirect', label: 'A redirect target',
-        where: 'GET acme.test/go', st: '302 · in scope', ok: true,
+        where: 'GET brightcart.example/go', st: '302 · in scope', ok: true,
         code: '<span class="k">GET</span> /go?next=<mark>//elsewhere.test/dash</mark> HTTP/1.1\n\n<span class="k">HTTP/1.1</span> 302 Found\n<span class="k">Location:</span> <mark>//elsewhere.test/dash</mark>',
         chip: 'Trace this redirect', cls: '',
         does: 'Opens it on the <b>Bench</b> with the “next” parameter marked, so you can change where it points and watch where the server actually sends you.',
         result: 'Opened on the Bench. Change “next”, send, and the Location it follows is shown.' },
       { key: 'cors', label: 'A cross-origin header',
-        where: 'GET api.acme.test/v2/me', st: '200 · look closer', ok: false,
-        code: '<span class="k">HTTP/1.1</span> 200 OK\n<span class="k">Access-Control-Allow-Origin:</span> <mark>*</mark>\n<span class="k">Access-Control-Allow-Credentials:</span> <mark>true</mark>\n\n{ "email": "maya@acme.test" }',
+        where: 'GET api.brightcart.example/v2/me', st: '200 · look closer', ok: false,
+        code: '<span class="k">HTTP/1.1</span> 200 OK\n<span class="k">Access-Control-Allow-Origin:</span> <mark>*</mark>\n<span class="k">Access-Control-Allow-Credentials:</span> <mark>true</mark>\n\n{ "email": "maya.lopez@mail.example" }',
         chip: '+ Finding: open CORS policy', cls: 'warn',
         does: 'Spots that any origin can read this response on a signed-in user’s behalf, and <b>drafts the finding</b> with this request as evidence. Claude can write it up.',
         result: 'Finding drafted: “Permissive cross-origin policy on /v2/me”, evidence attached.' },
       { key: 'trace', label: 'A verbose error',
-        where: 'GET api.acme.test/v2/report', st: '500 · look closer', ok: false,
+        where: 'GET api.brightcart.example/v2/report', st: '500 · look closer', ok: false,
         code: '<span class="k">HTTP/1.1</span> 500 Internal Server Error\n\n<mark>Traceback (most recent call last):\n  File "app/report.py", line 88, in build\n    rows = db.query(sql)</mark>',
         chip: 'Find others like this', cls: 'warn',
         does: 'Jumps to <b>every matching error</b> from this host in Traffic, so one leaked trace shows you the whole class of endpoints that behave the same.',
-        result: 'Traffic filtered to api.acme.test 500s: 7 more endpoints leak the same trace.' },
+        result: 'Traffic filtered to api.brightcart.example 500s: 7 more endpoints leak the same trace.' },
     ];
     let active = SCENES[0];
     SCENES.forEach((s, i) => {
