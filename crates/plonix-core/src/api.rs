@@ -135,6 +135,8 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/market/remove", post(market_remove))
         .route("/api/market/update", post(market_update))
         .route("/api/market/add", post(market_add))
+        .route("/api/market/pick", post(market_pick))
+        .route("/api/market/added-updates", get(market_added_updates))
         .route("/api/market/recommended", get(market_recommended))
         .route("/api/market/profile", post(market_profile))
         .route("/api/market/{name}", get(market_detail))
@@ -1325,6 +1327,8 @@ async fn market_list(State(s): State<AppState>, Query(p): Query<MarketParams>) -
             "location": cat.location(),
             "trust": cat.trust,
             "offline_reason": cat.offline_reason,
+            "community": cat.community.len(),
+            "community_note": cat.community_note,
             "packages": m.listing(&cat),
         }))
     })
@@ -1539,16 +1543,7 @@ async fn market_add(State(s): State<AppState>, Json(b): Json<MarketAddBody>) -> 
     let home = s.home.clone();
     let out = tokio::task::spawn_blocking(move || -> Result<Value, (StatusCode, String)> {
         let bad = |e: String| (StatusCode::BAD_REQUEST, e);
-        let loc = registry::location(&b.source).map_err(&bad)?;
-        let bytes = match &loc {
-            registry::Location::File(p) => crate::extension::read_source(p),
-            registry::Location::Url(_) => registry::fetch(&loc, market::max_bytes(registry::Kind::Extension)),
-        }
-        .map_err(|e| bad(format!("{e:#}")))?;
-        let label = match &loc {
-            registry::Location::File(p) => std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()).display().to_string(),
-            registry::Location::Url(u) => u.clone(),
-        };
+        let (bytes, label) = market::read_external(&b.source).map_err(|e| bad(format!("{e:#}")))?;
         let m = market::Market::new(&home);
         let ext = m.inspect_external(bytes, &label).map_err(&bad)?;
         if !b.confirm {
@@ -1570,6 +1565,43 @@ async fn market_add(State(s): State<AppState>, Json(b): Json<MarketAddBody>) -> 
     match out {
         Ok(Ok(v)) => Json(v).into_response(),
         Ok(Err((status, msg))) => err(status, "cannot_add", &msg),
+        Err(e) => internal(e.into()),
+    }
+}
+
+#[derive(Deserialize)]
+struct PickBody {
+    /// A folder (an extension being written) rather than a file.
+    #[serde(default)]
+    folder: bool,
+}
+
+/// In the app: asks for a package file or an extension's folder with the
+/// system's dialog, for the Add sheet. `{"cancelled": true}` when the user cancels.
+async fn market_pick(caller: MaybeCaller, Json(b): Json<PickBody>) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    let Some(d) = dialogs::get() else { return no_dialogs() };
+    let picked = tokio::task::spawn_blocking(move || {
+        if b.folder {
+            d.folder("Choose an Extension's Folder")
+        } else {
+            d.open("Choose a Package", &[("Plonix package", &["plonixext", "md", "json"])])
+        }
+    })
+    .await;
+    match picked.ok().flatten() {
+        Some(path) => Json(json!({ "path": path })).into_response(),
+        None => Json(json!({ "cancelled": true })).into_response(),
+    }
+}
+
+/// Newer releases of packages added from GitHub repositories.
+async fn market_added_updates(State(s): State<AppState>) -> Response {
+    let home = s.home.clone();
+    match tokio::task::spawn_blocking(move || market::Market::new(&home).added_updates()).await {
+        Ok(updates) => Json(json!({ "updates": updates })).into_response(),
         Err(e) => internal(e.into()),
     }
 }

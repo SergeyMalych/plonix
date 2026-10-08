@@ -1041,6 +1041,8 @@ button.agfhit:hover { background: var(--surface-2); color: var(--accent); }
 .trust.warn i { background: var(--warn); color: #fff; }
 .trust.bad { color: var(--crit); background: var(--crit-soft); }
 .trust.bad i { background: var(--crit); color: #fff; }
+.trust.com { color: var(--accent); background: var(--accent-soft); }
+.trust.com i { background: var(--accent); color: var(--accent-fg); }
 .mpkg.unv { border-color: var(--warn); }
 .mpf .trust { margin-right: auto; }
 .mtrustbox { border: 1px solid var(--line-2); border-radius: 9px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
@@ -1048,6 +1050,9 @@ button.agfhit:hover { background: var(--surface-2); color: var(--accent); }
 .mtrustbox.ok { background: var(--ok-soft); border-color: transparent; }
 .mtrustbox.warn { background: var(--warn-soft); border-color: transparent; }
 .mtrustbox.bad { background: var(--crit-soft); border-color: transparent; }
+.mtrustbox.com { background: var(--accent-soft); border-color: transparent; }
+.xpick { display: flex; gap: 6px; flex-wrap: wrap; }
+.mreview { margin: 0; font-size: 12px; font-weight: 650; color: var(--crit); }
 .xpreview { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; max-height: 340px; overflow: auto; }
 .xpreview p { margin: 0; line-height: 1.45; }
 .xhead { font-size: 13px; }

@@ -93,4 +93,4 @@ A platform pack is a JSON file that tells Plonix where a platform's API is and w
 - `asset_kinds` maps the platform's asset types to `web`, `wildcard`, `ip`, `cidr`, `mobile`, `source` or `other`. Only the first four become scope rules.
 - `api` must be an `https://` origin with no path. Plain `http://127.0.0.1` is accepted so you can try a pack against a local stand-in.
 
-Check a pack by adding it from a file in the Market (**Add from a file or link**): it is validated in full and shown before it is installed.
+Check a pack by adding it from a file in the Market (**Add your own**): it is validated in full and shown before it is installed.

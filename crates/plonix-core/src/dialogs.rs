@@ -16,6 +16,10 @@ pub trait FileDialogs: Send + Sync {
     fn save(&self, title: &str, file_name: &str, filters: &[Filter<'_>]) -> Option<PathBuf>;
     /// Asks for a file to open. `None` when the user cancels.
     fn open(&self, title: &str, filters: &[Filter<'_>]) -> Option<PathBuf>;
+    /// Asks for a folder. `None` when the user cancels.
+    fn folder(&self, _title: &str) -> Option<PathBuf> {
+        None
+    }
 }
 
 static DIALOGS: OnceLock<Box<dyn FileDialogs>> = OnceLock::new();

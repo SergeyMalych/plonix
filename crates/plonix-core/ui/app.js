@@ -473,6 +473,13 @@ const TOUR_STEPS = [
     text: 'Extensions, skills, filter packs and word lists, each signed and checked before it installs. Tools such as Saved users and the Access check, which replays requests as each user and signed out, are switched on from here in your own projects.',
   },
   {
+    view: 'market',
+    target: '#mkinds',
+    title: 'Official, Community and Your own',
+    text: 'Each item says who stands behind it. Official items are reviewed by the Plonix maintainers. Community items are written by their authors and checked automatically. Your own are what you add from a GitHub repository, a folder or a file. Plonix asks before anything sensitive, and says when nobody has reviewed the code.',
+    action: { label: 'Add your own', run: () => addExternal() },
+  },
+  {
     view: 'programs',
     target: ['#progbody', '#main .view'],
     title: 'Programs',
@@ -9698,7 +9705,7 @@ const KIND_INFO = {
 const GROUP_LABELS = { traffic: 'Traffic', insights: 'Insights', map: 'Map', scope: 'Scope', findings: 'Findings', scan: 'Scans' };
 const groupLabel = (g) => GROUP_LABELS[g] || g;
 
-const MK = { data: null, kind: 'all', q: '', sel: null, busy: null, ext: {}, rec: null, peek: '' };
+const MK = { data: null, kind: 'all', q: '', sel: null, busy: null, ext: {}, rec: null, peek: '', added: {} };
 
 function renderMarket(main) {
   const q = h('input', {
@@ -9724,7 +9731,7 @@ function renderMarket(main) {
         h('h2', { text: 'Market' }),
         h('div', { class: 'search' }, h('span', { class: 'mg', text: '⌕' }), q),
         h('button', { class: 'btn sm', id: 'mupdate', hidden: true, onclick: updateAll }),
-        h('button', { class: 'btn sm', text: 'Add from a file or link', title: 'Add a skill, pack or extension from outside the Market. It is marked Not verified.', onclick: addExternal }),
+        h('button', { class: 'btn sm', text: 'Add your own', title: 'Add a skill, pack or extension from a GitHub repository, a folder, a file or a link. It is marked Your own.', onclick: () => addExternal() }),
         h('button', { class: 'iconbtn', title: 'Check the Market again', text: '↻', onclick: () => loadMarket(true) }),
       ),
       h('div', { class: 'mtrust', id: 'mtrust' }),
@@ -9749,21 +9756,39 @@ async function loadMarket(refresh) {
   if (S.view !== 'market') return;
   drawMarket();
   if (MK.sel) showPackage(MK.sel);
+  // Newer releases of what was added from GitHub: checked after the list shows, never installed on their own.
+  if (MK.data.packages.some((p) => p.local && (p.added_from || '').startsWith('github:'))) {
+    api('/api/market/added-updates')
+      .then((r) => {
+        MK.added = Object.fromEntries((r.updates || []).map((u) => [u.name, u]));
+        if (S.view === 'market') drawMarket();
+      })
+      .catch(() => {});
+  }
 }
 
-/** The trust mark shown next to every package: verified, built in, not verified, or changed. */
+/** The shelf a package is on: Official, Community, a publisher you trust, Your own, or Changed. */
+const trustClass = (v) => (v.level === 'changed' ? 'bad' : v.level === 'built_in' ? 'in' : { official: 'ok', publisher: 'ok', community: 'com', own: 'warn' }[v.shelf] || 'warn');
+
+/** The trust mark shown next to every package. */
 function trustBadge(v, full) {
   if (!v) return null;
-  const cls = { verified: 'ok', built_in: 'in', unverified: 'warn', changed: 'bad' }[v.level] || 'warn';
-  const mark = v.level === 'verified' || v.level === 'built_in' ? '✓' : '!';
-  return h('span', { class: 'trust ' + cls, title: v.detail }, h('i', { text: mark }), full ? v.label : v.level === 'verified' ? 'Verified' : v.level === 'built_in' ? 'Built in' : v.level === 'changed' ? 'Changed' : 'Not verified');
+  const short = v.level === 'built_in' ? 'Built in' : v.level === 'changed' ? 'Changed' : v.shelf === 'publisher' ? 'Verified' : v.label;
+  const mark = v.level === 'verified' && v.shelf !== 'community' ? '✓' : v.level === 'built_in' ? '✓' : v.shelf === 'community' ? '◇' : '!';
+  return h('span', { class: 'trust ' + trustClass(v), title: v.detail }, h('i', { text: mark }), full ? v.label : short);
 }
 
 const isUnverified = (p) => p.verification && ['unverified', 'changed'].includes(p.verification.level);
+const isCommunity = (p) => p.verification && p.verification.shelf === 'community';
+/** Code nobody at Plonix has reviewed: a red line next to what it may do. */
+const notReviewed = (v) => (v && ['community', 'own'].includes(v.shelf) ? h('p', { class: 'mreview', text: 'Plonix has not reviewed this code. Only say yes to what you are happy for its author to do.' }) : null);
 
 function marketStatus(p) {
   const st = p.status.state;
   if (st === 'built_in') return { text: 'Built in', cls: 'tag in', action: null };
+  const up = MK.added[p.name];
+  if (p.local && up && !up.error) return { text: 'Release ' + up.latest + ' is out', cls: 'tag upd', action: 'readd' };
+  if (p.local && p.added_from && p.added_from.startsWith('/') && !/\.(plonixext|md|json)$/.test(p.added_from)) return { text: 'From a folder', cls: 'tag in', action: 'readd' };
   const x = p.kind === 'extension' && MK.ext[p.name];
   if (st === 'installed' && x && x.disabled_reason) return { text: 'Stopped', cls: 'tag bad', action: 'remove' };
   if (st === 'installed' && x && !x.enabled) return { text: 'Installed · off', cls: 'tag out', action: 'remove' };
@@ -9785,17 +9810,20 @@ function drawMarket() {
       h('b', { text: ok ? 'Signed by ' + d.trust.publisher : 'Not signed' }),
       h('span', { class: 'muted', text: ok ? ' · every package is checked against the signed list before it installs' : ' · nobody vouches for this list' }),
       d.offline_reason ? h('span', { class: 'muted', title: d.offline_reason, text: ' · showing the copy built into Plonix' }) : null,
+      d.community ? h('span', { class: 'muted', text: ` · ${d.community} from the community, checked but not reviewed` }) : null,
+      d.community_note ? h('span', { class: 'muted', title: d.community_note, text: ' · the community Market is not available right now' }) : null,
     );
   }
   const counts = { all: d.packages.length };
   for (const p of d.packages) counts[p.kind] = (counts[p.kind] || 0) + 1;
   counts.installed = d.packages.filter((p) => ['installed', 'update'].includes(p.status.state)).length;
   counts.unverified = d.packages.filter(isUnverified).length;
+  counts.community = d.packages.filter(isCommunity).length;
   const kinds = $('#mkinds');
   if (kinds) {
     const chip = (key, label) =>
       h('button', { class: 'chip' + (MK.kind === key ? ' on' : ''), onclick: () => ((MK.kind = key), drawMarket()) }, h('span', { text: label }), h('span', { class: 'n', text: counts[key] || 0 }));
-    clear(kinds, chip('all', 'All'), Object.entries(KIND_INFO).map(([k, v]) => chip(k, v.label)), h('span', { class: 'fsep' }), chip('installed', 'Installed'), counts.unverified ? chip('unverified', 'Not verified') : null);
+    clear(kinds, chip('all', 'All'), Object.entries(KIND_INFO).map(([k, v]) => chip(k, v.label)), h('span', { class: 'fsep' }), chip('installed', 'Installed'), counts.community ? chip('community', 'Community') : null, counts.unverified ? chip('unverified', 'Your own') : null);
   }
   drawRecommended();
   const updates = d.packages.filter((p) => p.status.state === 'update');
@@ -9807,7 +9835,7 @@ function drawMarket() {
   const q = MK.q.trim().toLowerCase();
   const list = d.packages.filter(
     (p) =>
-      (MK.kind === 'all' || p.kind === MK.kind || (MK.kind === 'installed' && ['installed', 'update'].includes(p.status.state)) || (MK.kind === 'unverified' && isUnverified(p))) &&
+      (MK.kind === 'all' || p.kind === MK.kind || (MK.kind === 'installed' && ['installed', 'update'].includes(p.status.state)) || (MK.kind === 'unverified' && isUnverified(p)) || (MK.kind === 'community' && isCommunity(p))) &&
       (!q || p.name.includes(q) || p.description.toLowerCase().includes(q) || (KIND_INFO[p.kind] || {}).one.toLowerCase().includes(q)),
   );
   const grid = $('#mgrid');
@@ -9910,6 +9938,18 @@ function drawRecommended() {
 }
 
 function marketButton(p, action, small) {
+  if (action === 'readd') {
+    const up = MK.added[p.name];
+    return h('button', {
+      class: 'btn' + (small ? ' sm' : '') + ' primary',
+      text: up ? 'Look at ' + up.latest : 'Read again',
+      title: up ? 'See what the new release asks for before adding it' : 'Read the folder again, after you rebuild it',
+      onclick: (e) => {
+        e.stopPropagation();
+        addExternal(up ? up.source : p.added_from);
+      },
+    });
+  }
   const label = { install: p.kind === 'bundle' ? 'Install all' : 'Install', update: 'Update', remove: 'Remove' }[action];
   const busy = MK.busy === p.name;
   return h('button', {
@@ -9989,7 +10029,7 @@ async function extensionConsent(p, action) {
   const go = h('button', { class: 'btn primary', text: action === 'update' ? 'Update' : 'Install' });
   modal(
     `${action === 'update' ? 'Update' : 'Install'} ${p.name}?`,
-    [p.description ? h('p', { class: 'mnote', text: p.description }) : null, rows, h('div', { class: 'mhow' }, h('div', { class: 'mcaph', text: 'How it runs' }), h('p', { text: x.sandbox }))],
+    [p.description ? h('p', { class: 'mnote', text: p.description }) : null, rows, notReviewed(p.verification), h('div', { class: 'mhow' }, h('div', { class: 'mcaph', text: 'How it runs' }), h('p', { text: x.sandbox }))],
     [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), go],
   );
   go.onclick = () => {
@@ -10065,20 +10105,37 @@ function extensionState(name) {
   return box;
 }
 
-/** Adds a file from outside the Market: look at it first, then confirm. It is always marked Not verified. */
-function addExternal() {
-  const input = h('input', { placeholder: 'https://example.com/skill.md  or  /path/to/pack.json  or  /path/to/extension', spellcheck: 'false', autocomplete: 'off' });
+/** Adds your own package from a GitHub repository, a folder, a file or a link: look at it first, then confirm. It is marked Your own. */
+function addExternal(prefill) {
+  const input = h('input', { placeholder: 'github:owner/repo   or   /path/to/extension-folder   or   https://…/skill.md', spellcheck: 'false', autocomplete: 'off', value: prefill || '' });
   let boxes = [];
   // The sha256 of the file the preview showed: confirming adds only that file.
   let shown = null;
   const preview = h('div', { class: 'xpreview' });
   const check = h('button', { class: 'btn', text: 'Look at it' });
-  const confirmBtn = h('button', { class: 'btn primary', text: 'Add it, not verified', hidden: true });
+  const confirmBtn = h('button', { class: 'btn primary', text: 'Add it as your own', hidden: true });
+  const pick = (folder) =>
+    h('button', {
+      class: 'btn sm',
+      text: folder ? 'Choose a folder…' : 'Choose a file…',
+      onclick: async () => {
+        try {
+          const r = await api('/api/market/pick', { method: 'POST', body: { folder } });
+          if (r.path) {
+            input.value = r.path;
+            run(false);
+          }
+        } catch (e) {
+          m.err.textContent = e.message;
+        }
+      },
+    });
   const m = modal(
-    'Add from a file or link',
+    'Add your own',
     [
-      h('p', { class: 'muted mnote', text: 'A skill (Markdown), a rule, filter or list pack, or an extension (a .plonixext file or its folder). Plonix checks it in full, shows you what it does, and adds it only after you confirm. Nobody vouches for it, so it is marked Not verified.' }),
-      h('label', null, 'Address or path', input),
+      h('p', { class: 'muted mnote', text: 'From a GitHub repository (Plonix takes the package attached to its latest release, or add @tag), an extension\'s folder while you write it, a file or a link. Plonix checks it in full, shows you what it does, and adds it only after you confirm. Nobody has reviewed it, so it is marked Your own.' }),
+      h('label', null, 'Repository, folder, file or address', input),
+      nativeFiles() ? h('div', { class: 'xpick' }, pick(true), pick(false)) : null,
       preview,
     ],
     [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), check, confirmBtn],
@@ -10088,13 +10145,15 @@ function addExternal() {
     const source = input.value.trim();
     if (!source) return input.focus();
     check.disabled = confirmBtn.disabled = true;
+    if (!confirm) check.textContent = 'Reading…';
     try {
       const grant = boxes.filter((b) => b.checked).map((b) => b.value);
       const r = await api('/api/market/add', { method: 'POST', body: { source, confirm, grant, sha256: confirm ? shown : undefined } });
       if (r.added) {
         closeModal();
-        toast(`Added ${r.file.name} (not verified)`, 'ok');
+        toast(`Added ${r.file.name} as your own`, 'ok');
         MK.kind = 'unverified';
+        delete MK.added[r.file.name];
         await loadMarket(true);
         return showPackage(r.file.name);
       }
@@ -10106,9 +10165,15 @@ function addExternal() {
         preview,
         h('div', { class: 'xhead' }, h('b', { class: 'mono', text: f.name }), h('span', { class: 'muted', text: ` ${KIND_INFO[f.kind].one} · ${f.version} · ${f.author}` })),
         h('p', { text: f.description }),
+        h('p', { class: 'muted fine', text: 'From ' + f.source }),
         f.kind === 'extension' ? [caps.rows, h('div', { class: 'mhow' }, h('div', { class: 'mcaph', text: 'How it runs' }), h('p', { text: f.effects[f.effects.length - 1] }))] : f.effects.map((e) => h('div', { class: 'mcap' }, h('span', { class: 'mdot', text: '•' }), h('span', { text: e }))),
         f.replaces ? h('p', { class: 'muted', text: `This replaces ${f.name} ${f.replaces}, which is installed.` }) : null,
-        h('div', { class: 'mtrustbox warn' }, h('span', { class: 'trust warn' }, h('i', { text: '!' }), 'Not verified'), h('p', { text: f.kind === 'extension' ? 'It did not come from a signed Market. Its code only runs in the sandbox, but nobody has reviewed what it does.' : 'It did not come from a signed Market. It is checked and cannot run code, but nobody has reviewed what it says or does.' })),
+        h(
+          'div',
+          { class: 'mtrustbox warn' },
+          h('span', { class: 'trust warn' }, h('i', { text: '!' }), 'Your own'),
+          f.kind === 'extension' ? notReviewed({ shelf: 'own' }) : h('p', { text: 'It did not come from a signed Market. It is checked and cannot run code, but nobody has reviewed what it says or does.' }),
+        ),
         h('p', { class: 'muted fine mono', text: 'sha256 ' + f.sha256 }),
       );
       confirmBtn.hidden = false;
@@ -10117,12 +10182,14 @@ function addExternal() {
       confirmBtn.hidden = true;
       clear(preview);
     }
+    check.textContent = 'Look at it';
     check.disabled = confirmBtn.disabled = false;
   };
   check.onclick = () => run(false);
   confirmBtn.onclick = () => run(true);
   input.addEventListener('input', () => ((confirmBtn.hidden = true), (shown = null), clear(preview)));
   input.addEventListener('keydown', (e) => e.key === 'Enter' && run(false));
+  if (prefill) run(false);
 }
 
 async function updateAll() {
@@ -10236,7 +10303,7 @@ async function showPackage(name) {
     h('div', { class: 'mside-h' }, h('span', { class: 'mico big k-' + p.kind, text: k.ico }), h('div', null, h('h3', { text: p.name }), h('div', { class: 'muted', text: `${k.one} · ${p.version} · ${p.author}` }))),
     h('p', { class: 'mdesc', text: p.description }),
     h('div', { class: 'mact' }, h('span', { class: st.cls, text: st.text }), st.action ? marketButton(p, st.action, false) : null, st.action === 'update' ? marketButton(p, 'remove', false) : null),
-    h('div', { class: 'mtrustbox ' + ({ verified: 'ok', built_in: 'ok', unverified: 'warn', changed: 'bad' }[p.verification.level] || 'warn') }, trustBadge(p.verification, true), h('p', { text: p.verification.detail })),
+    h('div', { class: 'mtrustbox ' + (trustClass(p.verification) === 'in' ? 'ok' : trustClass(p.verification)) }, trustBadge(p.verification, true), h('p', { text: p.verification.detail })),
     parts,
   );
 }
