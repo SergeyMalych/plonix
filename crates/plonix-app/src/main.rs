@@ -205,6 +205,10 @@ impl plonix_core::dialogs::FileDialogs for Dialogs {
     fn open(&self, title: &str, filters: &[plonix_core::dialogs::Filter<'_>]) -> Option<std::path::PathBuf> {
         self.builder(title, filters).blocking_pick_file()?.into_path().ok()
     }
+
+    fn folder(&self, title: &str) -> Option<std::path::PathBuf> {
+        self.builder(title, &[]).blocking_pick_folder()?.into_path().ok()
+    }
 }
 
 /// Starts the Start screen server in this process and shows it.

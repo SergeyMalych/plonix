@@ -59,6 +59,16 @@ pub const DEFAULT_INDEX: &str = "https://raw.githubusercontent.com/SergeyMalych/
 pub const OFFICIAL_KEY: &str = "ed25519:r8Td25nYRpgJ3QwK/UapBC93gNVchFzwcSzA3g/Er/Q=";
 pub const OFFICIAL_PUBLISHER: &str = "Plonix maintainers";
 
+/// The community Market: packages written and maintained by their authors,
+/// listed after automatic checks and a review of what they ask for. Shown
+/// next to the Plonix Market, with its own badge.
+pub const COMMUNITY_INDEX: &str = "https://raw.githubusercontent.com/SergeyMalych/plonix/main/community/index.json";
+
+/// The key that signs the community Market. It is trusted for that list
+/// only, never for the Plonix Market or a Market set in Settings.
+pub const COMMUNITY_KEY: &str = "ed25519:3JdDT5Ou9mJaCe0CGoqVydHgXg/93tj45VZH1bGgCqw=";
+pub const COMMUNITY_PUBLISHER: &str = "Plonix community";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Index {

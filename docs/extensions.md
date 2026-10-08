@@ -332,12 +332,14 @@ The engine delivers traffic **to** the extension in batches. The extension never
 
 ## Store and distribution
 
-The store is a static JSON index, already implemented for rule packs (`plonix_core::registry`). Extensions use the same index with `"kind": "extension"`:
+The store is a static JSON index (`plonix_core::registry`). Extensions use the same index with `"kind": "extension"`:
 
-- **Hosted anywhere.** The community index lives in this repository (`store/index.json`). Teams can host private indexes on any https server, or a folder, and point Plonix at them with `--index` or `$PLONIX_STORE_INDEX`.
-- **Reviewed by pull request.** Adding or updating a community package means a PR that changes `store/index.json`, including the new SHA-256. Review approves specific bytes, and the checksum makes that approval stick.
-- **The index is the root of trust.** Whoever controls an index decides which bytes are acceptable. Later hardening: signed indexes (minisign or Sigstore), so a mirror can serve the index without being trusted.
-- **No install scripts, ever.** Installing copies verified bytes. Nothing in a package runs at install time.
+- **Three shelves.** The Plonix Market (`store/index.json`, reviewed by the maintainers), the community Market (`community/index.json`, written by its authors and checked automatically) and what you add yourself from a GitHub release, a folder, a file or a link. Each package is badged Official, Community or Your own. See [market.md](market.md#three-shelves).
+- **Reviewed by pull request.** Adding or updating a package in either Market is a pull request that changes its index, including the new SHA-256. Review approves specific bytes, and the checksum makes that approval stick.
+- **Signed indexes.** Both indexes are signed with Ed25519 keys, so a mirror can serve them without being trusted. CI signs them when a pull request changes them ([How the Markets are signed](market.md#how-the-markets-are-signed)).
+- **A block list.** The maintainers can pull a package from every shelf at once ([The block list](market.md#the-block-list)); an extension on it is switched off and cannot be switched back on.
+- **Hosted anywhere.** Teams can host private indexes on any https server, or a folder, and point Plonix at them with `--index` or `$PLONIX_STORE_INDEX`.
+- **No install scripts, ever.** Installing copies verified bytes. Nothing in a package runs at install time, and a GitHub repository's source never reaches the user's machine: only the release file does.
 
 ## Versioning
 
@@ -356,7 +358,7 @@ The store is a static JSON index, already implemented for rule packs (`plonix_co
    Lens detectors come next in the same format: today's built-in pattern detectors (`crates/plonix-core/src/insight.rs`) are already plain data, so a pack only needs a schema for them. Decoders that need code (JWT, Base64, hex) stay built in.
 5. ✅ WASM runtime: a sandbox with fuel, time and memory limits; analyzers with `read-traffic`, `read-out-of-scope` and `passive-analysis`; installs from a file, a folder or the signed Market.
 6. ✅ `propose-findings`. Next: `scoped-requests`, reusing the engine's scope enforcement and recording.
-7. Signed store indexes.
+7. ✅ Signed store indexes, a community Market, adding from GitHub releases and folders, and a block list.
 8. ✅ GUI: install with the same consent flow, switch on and off, run, and see why one was stopped, from the Market screen.
 9. Tweak packs: allowlisted settings, with a diff before applying and one-step undo.
 10. `ui-panels`, then `ui-tab`: view trees rendered with Plonix components.

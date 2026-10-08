@@ -8,7 +8,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Subcommand};
 use plonix_core::access::{AgentSettings, Group};
 use plonix_core::profile;
-use plonix_core::market::{self, Action, Catalog, Change, Market, OpenOptions, Status, Trust, TrustLevel, Verification};
+use plonix_core::market::{self, Action, Catalog, Change, Market, OpenOptions, Shelf, Status, Trust, TrustLevel, Verification};
 use plonix_core::registry::{self, Kind};
 use plonix_core::settings;
 use plonix_core::skill::{self, SkillLibrary};
@@ -71,11 +71,11 @@ enum MarketCmd {
         #[arg(required = true)]
         names: Vec<String>,
     },
-    /// Add a skill, rule pack, filter pack or extension from a file or link, marked Not verified
+    /// Add a package from a GitHub repository, a folder, a file or a link; it is marked Your own
     Add {
-        /// Path or https:// address of the file
+        /// github:owner/repo[@tag], a path (an extension's folder too), or an https:// address
         source: String,
-        /// Add it without asking (it is still marked Not verified)
+        /// Add it without asking (it is still marked Your own)
         #[arg(long)]
         yes: bool,
     },
@@ -159,13 +159,16 @@ fn status_label(s: &Status) -> String {
     }
 }
 
-/// A short mark for a table: ✓ verified, ! not verified or changed.
+/// A short mark for a table: who stands behind it.
 fn trust_mark(v: &Verification) -> &'static str {
-    match v.level {
-        TrustLevel::BuiltIn => "built-in",
-        TrustLevel::Verified => "✓ verified",
-        TrustLevel::Unverified => "! NOT VERIFIED",
-        TrustLevel::Changed => "! CHANGED",
+    match (v.level, v.shelf) {
+        (TrustLevel::BuiltIn, _) => "built-in",
+        (TrustLevel::Changed, _) => "! CHANGED",
+        (TrustLevel::Verified, Shelf::Official) => "✓ official",
+        (TrustLevel::Verified, Shelf::Community) => "community",
+        (TrustLevel::Verified, _) => "✓ verified",
+        (TrustLevel::Unverified, _) if v.label == "Your own" => "! your own",
+        (TrustLevel::Unverified, _) => "! NOT VERIFIED",
     }
 }
 
@@ -245,7 +248,10 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
             }
             let unverified = rows.iter().filter(|l| matches!(l.verification.level, TrustLevel::Unverified | TrustLevel::Changed)).count();
             if unverified > 0 {
-                println!("\n{unverified} not verified: added by hand, from an unsigned Market, or changed since install. `plonix market show <name>` says why.");
+                println!("\n{unverified} not reviewed: added by you, from an unsigned Market, or changed since install. `plonix market show <name>` says why.");
+            }
+            if rows.iter().any(|l| l.verification.shelf == Shelf::Community) {
+                println!("Community packages are written by their authors and checked automatically; the Plonix maintainers have not reviewed their code.");
             }
             println!("\nDetails with `plonix market show <name>`, install with `plonix market install <name>`.");
         }
@@ -386,8 +392,9 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
         MarketCmd::Update => {
             let cat = market::open(&ctx.home, &opts)?;
             let u = m.update(&cat);
+            let added = m.added_updates();
             if ctx.json {
-                ctx.print_json(&json!({ "changes": u.changes, "failed": u.failed }))?;
+                ctx.print_json(&json!({ "changes": u.changes, "failed": u.failed, "added_updates": added }))?;
             } else {
                 if u.changes.is_empty() && u.failed.is_empty() {
                     println!("Everything installed from the Market is up to date.");
@@ -395,6 +402,16 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
                 print_changes(&u.changes, "");
                 for f in &u.failed {
                     eprintln!("{}: not updated: {}", f.name, f.error);
+                }
+                // Added by you: never updated on their own, so what a new release asks for is seen first.
+                for a in &added {
+                    match &a.error {
+                        Some(e) => eprintln!("{}: could not check for a newer release: {e}", a.name),
+                        None => {
+                            let cmd = if a.kind == Kind::Extension { "extensions" } else { "market" };
+                            println!("{}: release {} is out (you have {}). Look at it with `plonix {cmd} add {}`.", a.name, a.latest, a.installed, a.source)
+                        }
+                    }
                 }
             }
             if !u.failed.is_empty() {
@@ -415,15 +432,7 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
             }
         }
         MarketCmd::Add { source, yes } => {
-            let loc = registry::location(&source).map_err(|e| anyhow!(e))?;
-            let bytes = match &loc {
-                registry::Location::File(p) => plonix_core::extension::read_source(p)?,
-                registry::Location::Url(_) => registry::fetch(&loc, market::max_bytes(Kind::Extension))?,
-            };
-            let label = match &loc {
-                registry::Location::File(p) => std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()).display().to_string(),
-                registry::Location::Url(u) => u.clone(),
-            };
+            let (bytes, label) = market::read_external(&source)?;
             let ext = m.inspect_external(bytes, &label).map_err(|e| anyhow!(e))?;
             if ext.kind == Kind::Extension {
                 bail!("that is an extension: add it with `plonix extensions add {source}`, which shows what it asks to do first");
@@ -435,7 +444,7 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
                     println!("  - {e}");
                 }
                 println!("sha256 {}", ext.sha256);
-                println!("! NOT VERIFIED: it did not come from a signed Market, so nobody has vouched for it. It is validated and cannot run code.");
+                println!("! YOUR OWN: it comes from {}, not a signed Market, so nobody has reviewed it. It is validated and cannot run code.", market::describe_source(&ext.source));
             }
             if !yes {
                 if ctx.json {
@@ -448,7 +457,7 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
                 return ctx.print_json(&json!({ "added": true, "file": ext, "change": change }));
             }
             print_changes(&[change], &ext.name);
-            println!("It shows as Not verified in the Market.");
+            println!("It shows as Your own in the Market.");
         }
         MarketCmd::Trust { key } => {
             registry::parse_public_key(&key).map_err(|e| anyhow!(e))?;
@@ -475,7 +484,13 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
         MarketCmd::Sign { catalog: index, key } => {
             let private = std::fs::read_to_string(&key).with_context(|| format!("reading {}", key.display()))?;
             let bytes = std::fs::read(&index).with_context(|| format!("reading {}", index.display()))?;
-            registry::parse(&bytes).map_err(|e| anyhow!("{}: {e}", index.display()))?;
+            // A Market list, or the block list that sits next to one.
+            let is_blocklist = serde_json::from_slice::<Value>(&bytes).ok().is_some_and(|v| v.get("plonix_blocked").is_some());
+            if is_blocklist {
+                plonix_core::blocklist::parse(&bytes).map_err(|e| anyhow!("{}: {e}", index.display()))?;
+            } else {
+                registry::parse(&bytes).map_err(|e| anyhow!("{}: {e}", index.display()))?;
+            }
             let sig = registry::sign(&bytes, &private).map_err(|e| anyhow!(e))?;
             let out = registry::signature_location(&registry::Location::File(index.clone()));
             let registry::Location::File(out) = out else { unreachable!() };
@@ -502,7 +517,11 @@ fn parse_kind(s: &str) -> Result<Kind> {
 /// Validates an index and every package it lists, and reports its signature.
 fn check_index(ctx: &Ctx, index: &str) -> Result<()> {
     let opts = OpenOptions { index: Some(index.to_string()), allow_unsigned: true };
-    let cat = market::open(&ctx.home, &opts)?;
+    let mut cat = market::open(&ctx.home, &opts)?;
+    // The community Market's key is trusted for that list only, so check it separately.
+    if !cat.verified() && market::open_community(index).is_ok() {
+        cat.trust = Trust::Verified { key: registry::COMMUNITY_KEY.into(), publisher: registry::COMMUNITY_PUBLISHER.into() };
+    }
     let mut problems = vec![];
     for p in cat.index.packages.iter().filter(|p| p.kind != Kind::Bundle) {
         if let Err(e) = cat.fetch(p) {

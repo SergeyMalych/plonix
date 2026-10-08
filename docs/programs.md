@@ -2,7 +2,7 @@
 
 Bug bounty and vulnerability disclosure programs say which assets you may test and under which rules. Plonix reads a program, shows you what it will change, and from then on follows it: the program's scope becomes the project's scope, and its rules of engagement apply to every request Plonix sends.
 
-Open **Programs** in the sidebar (⌘9 in the app), or use the CLI:
+Programs is a tool you switch on from the **Market**: install **Programs** there and the Programs screen appears in the sidebar (⌘9 in the app). A project that already follows a program, and the demo project, keep the screen either way. The CLI works without it:
 
 ```sh
 plonix program follow hackerone:acme          # read a program and show what would change
@@ -93,4 +93,4 @@ A platform pack is a JSON file that tells Plonix where a platform's API is and w
 - `asset_kinds` maps the platform's asset types to `web`, `wildcard`, `ip`, `cidr`, `mobile`, `source` or `other`. Only the first four become scope rules.
 - `api` must be an `https://` origin with no path. Plain `http://127.0.0.1` is accepted so you can try a pack against a local stand-in.
 
-Check a pack by adding it from a file in the Market (**Add from a file or link**): it is validated in full and shown before it is installed.
+Check a pack by adding it from a file in the Market (**Add your own**): it is validated in full and shown before it is installed.

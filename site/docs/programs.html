@@ -45,7 +45,7 @@
 <article>
 <h1 id="programs">Programs</h1>
 <p>Bug bounty and vulnerability disclosure programs say which assets you may test and under which rules. Plonix reads a program, shows you what it will change, and from then on follows it: the program's scope becomes the project's scope, and its rules of engagement apply to every request Plonix sends.</p>
-<p>Open <strong>Programs</strong> in the sidebar (⌘9 in the app), or use the CLI:</p>
+<p>Programs is a tool you switch on from the <strong>Market</strong>: install <strong>Programs</strong> there and the Programs screen appears in the sidebar (⌘9 in the app). A project that already follows a program, and the demo project, keep the screen either way. The CLI works without it:</p>
 <pre><code class="language-sh">plonix program follow hackerone:acme          # read a program and show what would change
 plonix program follow hackerone:acme --yes    # follow it
 plonix program                                # what this project follows
@@ -91,7 +91,7 @@ plonix program stop                           # stop following it (scope rules s
   &quot;asset_kinds&quot;: { &quot;url&quot;: &quot;web&quot;, &quot;wildcard&quot;: &quot;wildcard&quot;, &quot;cidr&quot;: &quot;cidr&quot;, &quot;android&quot;: &quot;mobile&quot;, &quot;other&quot;: &quot;other&quot; }
 }</code></pre>
 <ul><li><code>auth.kind</code> is <code>basic</code> (a user name and a token; give <code>user_label</code>) or <code>bearer</code> (a token).</li><li><code>items</code>, <code>next</code> and every field are <a href="https://www.rfc-editor.org/rfc/rfc6901" rel="noopener">JSON pointers</a> into the API's answers. <code>next</code> may be a full address on the same origin or a path.</li><li><code>{handle}</code> in a path or <code>program_url</code> is replaced by the program's handle.</li><li><code>asset_kinds</code> maps the platform's asset types to <code>web</code>, <code>wildcard</code>, <code>ip</code>, <code>cidr</code>, <code>mobile</code>, <code>source</code> or <code>other</code>. Only the first four become scope rules.</li><li><code>api</code> must be an <code>https://</code> origin with no path. Plain <code>http://127.0.0.1</code> is accepted so you can try a pack against a local stand-in.</li></ul>
-<p>Check a pack by adding it from a file in the Market (<strong>Add from a file or link</strong>): it is validated in full and shown before it is installed.</p>
+<p>Check a pack by adding it from a file in the Market (<strong>Add your own</strong>): it is validated in full and shown before it is installed.</p>
 </article>
 <p class="edit">This page is <a href="https://github.com/SergeyMalych/plonix/blob/main/docs/programs.md">docs/programs.md</a> in the Plonix repository. Spotted something wrong? <a href="https://github.com/SergeyMalych/plonix/edit/main/docs/programs.md">Suggest a change</a>.</p>
 </main>

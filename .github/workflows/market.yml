@@ -1,0 +1,101 @@
+name: Market lists
+
+# Checks the Plonix Market (store/) and the community Market (community/)
+# on every pull request that changes them, and signs them so nobody has to
+# sign by hand. Merging the pull request is the review: the signature only
+# reaches users once main carries it.
+#
+# Signing needs two repository secrets (Settings › Secrets and variables ›
+# Actions): PLONIX_MARKET_KEY, the Plonix Market's private key, and
+# PLONIX_COMMUNITY_KEY, the community Market's. Pull requests from forks get
+# the checks but not the secrets; a maintainer brings the change into a
+# branch of this repository to have it signed. See docs/market.md.
+
+on:
+  pull_request:
+    paths: ['store/**', 'community/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: market-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  check-and-sign:
+    runs-on: ubuntu-latest
+    env:
+      PLONIX_HOME: ${{ github.workspace }}/../plonix-home
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BRANCH }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the plonix command
+        run: cargo build --locked -q -p plonix
+
+      # Every package matches its checksum and validates; the community
+      # Market's packages are downloaded from their authors' releases.
+      - name: Check both Markets
+        run: |
+          target/debug/plonix --accept-terms market check store/index.json
+          target/debug/plonix --accept-terms market check community/index.json
+
+      # The keys are only handed to a signer built from main, never to code
+      # from the branch being signed.
+      - name: Build the signer from main
+        if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          git worktree add "$RUNNER_TEMP/signer" "origin/${{ github.event.repository.default_branch }}"
+          cargo build --locked -q -p plonix --manifest-path "$RUNNER_TEMP/signer/Cargo.toml" --target-dir "$RUNNER_TEMP/signer-target"
+
+      - name: Sign
+        id: sign
+        if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          MARKET_KEY: ${{ secrets.PLONIX_MARKET_KEY }}
+          COMMUNITY_KEY: ${{ secrets.PLONIX_COMMUNITY_KEY }}
+        run: |
+          set -euo pipefail
+          signer="$RUNNER_TEMP/signer-target/debug/plonix"
+          key="$RUNNER_TEMP/signing.key"
+          trap 'rm -f "$key"' EXIT
+          sign() {
+            ( umask 077; printf '%s\n' "$2" > "$key" )
+            "$signer" --accept-terms market sign "$1" --key "$key" || echo "::warning::$1 was not signed"
+            rm -f "$key"
+          }
+          if [ -n "$MARKET_KEY" ]; then
+            sign store/index.json "$MARKET_KEY"
+            sign store/blocked.json "$MARKET_KEY"
+          else
+            echo "::notice::PLONIX_MARKET_KEY is not set, so the Plonix Market was not signed"
+          fi
+          if [ -n "$COMMUNITY_KEY" ]; then
+            sign community/index.json "$COMMUNITY_KEY"
+          else
+            echo "::notice::PLONIX_COMMUNITY_KEY is not set, so the community Market was not signed"
+          fi
+          git add store/*.sig community/*.sig
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Sign the Market lists"
+          git push origin "HEAD:$BRANCH"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Run CI on the signed commit
+        if: steps.sign.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --ref "$BRANCH"

@@ -19,7 +19,7 @@
 //! `market/bundles.json` with the packages they added, so removing a bundle
 //! removes what it brought in and nothing else.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -27,6 +27,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::blocklist::{self, Blocklist};
 use crate::detect::clean;
 use crate::extension::{self, Capability, Consent, ExtensionLibrary};
 use crate::detectorpack::{self, DetectorLibrary};
@@ -34,7 +35,7 @@ use crate::filterpack::{self, FilterLibrary};
 use crate::listpack::{self, ListLibrary};
 use crate::paths::{Home, write_private};
 use crate::platform::{self, PlatformLibrary};
-use crate::registry::{self, Index, Kind, Location, OFFICIAL_PUBLISHER, Package, TrustedKey};
+use crate::registry::{self, COMMUNITY_PUBLISHER, Index, Kind, Location, OFFICIAL_PUBLISHER, Package, TrustedKey};
 use crate::rulepack::{self, Library, MAX_PACK_BYTES, newer, sha256_hex};
 use crate::settings::{self, Field, Level, Section};
 use crate::skill::{self, SkillLibrary};
@@ -60,6 +61,7 @@ pub const SNAPSHOT: &[(&str, &str)] = &[
     ("tools/saved-users.json", include_str!("../../../store/tools/saved-users.json")),
     ("tools/access-check.json", include_str!("../../../store/tools/access-check.json")),
     ("tools/callbacks.json", include_str!("../../../store/tools/callbacks.json")),
+    ("tools/programs.json", include_str!("../../../store/tools/programs.json")),
     ("skills/triage-host.md", include_str!("../../../store/skills/triage-host.md")),
     ("skills/explain-request.md", include_str!("../../../store/skills/explain-request.md")),
     ("skills/review-sign-in.md", include_str!("../../../store/skills/review-sign-in.md")),
@@ -101,6 +103,14 @@ const BUILTIN_TOOLS: &[(&str, &[&str])] = &[
             "Adds a Callbacks screen. Make a host for each test, put it in a request (a URL parameter, a header, a webhook field), and see every DNS lookup, HTTP request or mail that later reaches it, with the time, the address it came from and the raw request.",
             "Each host carries its own name, so a callback points straight at the test it came from. Insert one from the Bench in a click, find the request that carried it, and turn a callback into a finding.",
             "Nothing runs on its own: listening starts when you press Start and registers only with the callback server. It uses interactsh, the open-source callback tool by ProjectDiscovery (MIT license), which you install with `brew install interactsh`. Use the public servers or your own, with a token.",
+        ],
+    ),
+    (
+        "tools/programs.json",
+        &[
+            "Adds a Programs screen. Bring in a bug bounty or disclosure program from a connected platform such as HackerOne, from its pasted policy, or from a domain's security.txt, and review it before you follow it.",
+            "Following a program turns its in-scope assets into scope rules and keeps its rules while you test: the rate limit, the headers it asks for, and whether it allows automated testing. Connect a platform with your own token and every program you can see is pulled in, so you can search them by name or by asset.",
+            "Nothing is sent on its own. Plonix only talks to the platform you connect, with the token you give it, and keeps the token in the Keychain.",
         ],
     ),
 ];
@@ -164,6 +174,10 @@ pub fn settings_section() -> Section {
                 .help("Public keys of other Markets you trust, one per line. A Market is only used when a trusted key signed it."),
         )
         .field(
+            Field::toggle("community", "Show the community Market", true)
+                .help("Packages written and maintained by their authors, listed next to the Plonix Market with a Community badge. Plonix checks them automatically; the maintainers do not review their code."),
+        )
+        .field(
             Field::toggle("allow_unsigned", "Allow Markets that are not signed", false)
                 .help("Off by default. When on, a Market list without a trusted signature can be used, and everything from it is marked Not verified."),
         )
@@ -190,6 +204,7 @@ pub struct MarketSettings {
     pub index: String,
     pub trusted_keys: Vec<String>,
     pub allow_unsigned: bool,
+    pub community: bool,
 }
 
 impl MarketSettings {
@@ -198,6 +213,7 @@ impl MarketSettings {
         Self {
             index: v.get("index").and_then(Value::as_str).unwrap_or("").trim().to_string(),
             allow_unsigned: v.get("allow_unsigned").and_then(Value::as_bool).unwrap_or(false),
+            community: v.get("community").and_then(Value::as_bool).unwrap_or(true),
             trusted_keys: v
                 .get("trusted_keys")
                 .and_then(Value::as_array)
@@ -234,6 +250,12 @@ pub struct Catalog {
     pub trust: Trust,
     /// Why the online index was not used, when this is the bundled copy.
     pub offline_reason: Option<String>,
+    /// Packages that came from the community Market, by name.
+    pub community: BTreeSet<String>,
+    /// Why the community Market is not shown, when it is not.
+    pub community_note: Option<String>,
+    /// What the Plonix maintainers have pulled.
+    pub blocklist: Blocklist,
 }
 
 impl Catalog {
@@ -248,6 +270,25 @@ impl Catalog {
         matches!(self.trust, Trust::Verified { .. })
     }
 
+    /// Signed by the Plonix maintainers.
+    pub fn official(&self) -> bool {
+        matches!(&self.trust, Trust::Verified { key, .. } if key == registry::OFFICIAL_KEY)
+    }
+
+    /// Listed in the community Market rather than this catalog itself.
+    pub fn is_community(&self, p: &Package) -> bool {
+        self.community.contains(&p.name)
+    }
+
+    /// Where a package's file is downloaded from.
+    pub fn source(&self, p: &Package) -> String {
+        match &self.origin {
+            _ if self.is_community(p) => p.url.clone(),
+            Origin::Bundled => format!("Plonix Market (built in) {}", p.url),
+            Origin::Remote(base) => registry::resolve(base, &p.url).map(|l| l.to_string()).unwrap_or_default(),
+        }
+    }
+
     /// Downloads a package and checks it against the index: checksum,
     /// format, name and version. Nothing is installed.
     pub fn fetch(&self, p: &Package) -> Result<Vec<u8>> {
@@ -260,6 +301,11 @@ impl Catalog {
         });
         let bytes = match &self.origin {
             _ if builtin.is_some() => builtin.unwrap().as_bytes().to_vec(),
+            // A community package's address was made absolute when the list was read.
+            _ if self.is_community(p) => {
+                let src = registry::location(&p.url).map_err(|e| anyhow!("{}: {e}", p.name))?;
+                registry::fetch(&src, max_bytes(p.kind)).with_context(|| format!("downloading {}", p.name))?
+            }
             Origin::Bundled => SNAPSHOT
                 .iter()
                 .find(|(path, _)| *path == p.url)
@@ -271,6 +317,9 @@ impl Catalog {
             }
         };
         let actual = sha256_hex(&bytes);
+        if let Some(why) = self.blocklist.blocked(p.kind, &p.name, &actual) {
+            bail!("{}", Blocklist::message(&p.name, why));
+        }
         if actual != p.sha256 {
             bail!("{}: checksum mismatch: the Market lists sha256 {}, the download is {actual}. Nothing was installed.", p.name, p.sha256);
         }
@@ -358,16 +407,63 @@ pub fn index_address(home: &Home, opts: &OpenOptions) -> String {
 /// by the same key, so falling back never lowers the bar.
 pub fn open(home: &Home, opts: &OpenOptions) -> Result<Catalog> {
     let address = index_address(home, opts);
-    let trusted = registry::trusted_keys(&MarketSettings::load(home).trusted_keys);
+    let settings = MarketSettings::load(home);
+    let trusted = registry::trusted_keys(&settings.trusted_keys);
     let loc = registry::location(&address).map_err(|e| anyhow!(e))?;
-    match open_at(&loc, &trusted, opts.allow_unsigned || MarketSettings::load(home).allow_unsigned) {
-        Ok(c) => Ok(c),
+    let mut cat = match open_at(&loc, &trusted, opts.allow_unsigned || settings.allow_unsigned) {
+        Ok(c) => c,
         Err(e) if address == registry::DEFAULT_INDEX => {
             let mut c = bundled(&trusted)?;
             c.offline_reason = Some(format!("{e:#}"));
-            Ok(c)
+            c
         }
-        Err(e) => Err(e),
+        Err(e) => return Err(e),
+    };
+    // The block list and the community Market sit next to the Plonix Market only.
+    if cat.official()
+        && let Origin::Remote(loc) = &cat.origin
+    {
+        let _ = blocklist::refresh(&home.root, loc);
+    }
+    cat.blocklist = blocklist::load(&home.root);
+    let community = std::env::var("PLONIX_COMMUNITY_INDEX").ok().filter(|s| !s.trim().is_empty());
+    if cat.official() && settings.community && (community.is_some() || address == registry::DEFAULT_INDEX) {
+        let address = community.unwrap_or_else(|| registry::COMMUNITY_INDEX.to_string());
+        match open_community(&address) {
+            Ok((loc, index)) => merge_community(&mut cat, &loc, index),
+            Err(e) => cat.community_note = Some(format!("{e:#}")),
+        }
+    }
+    let blocked = cat.blocklist.clone();
+    cat.index.packages.retain(|p| blocked.blocked(p.kind, &p.name, &p.sha256).is_none());
+    Market::new(home).enforce(&blocked);
+    Ok(cat)
+}
+
+/// Reads the community Market and checks it was signed with the community key.
+pub fn open_community(address: &str) -> Result<(Location, Index)> {
+    let loc = registry::location(address).map_err(|e| anyhow!(e))?;
+    let bytes = registry::fetch(&loc, registry::MAX_INDEX_BYTES).with_context(|| format!("fetching the community Market {loc}"))?;
+    let index = registry::parse(&bytes).map_err(|e| anyhow!("community Market {loc}: {e}"))?;
+    let sig = registry::fetch(&registry::signature_location(&loc), registry::MAX_SIGNATURE_BYTES).with_context(|| format!("the community Market {loc} is not signed"))?;
+    let keys = [TrustedKey { key: registry::COMMUNITY_KEY.into(), publisher: COMMUNITY_PUBLISHER.into() }];
+    registry::verify(&bytes, &sig, &keys).map_err(|e| anyhow!("community Market {loc} failed verification: {e}"))?;
+    Ok((loc, index))
+}
+
+/// Adds the community Market's packages to the catalog. The Plonix Market
+/// wins a name both use; bundles, tools (which only switch on what Plonix
+/// itself ships) and packages that require others are left out, so a
+/// community package never pulls in anything by name.
+fn merge_community(cat: &mut Catalog, loc: &Location, index: Index) {
+    for mut p in index.packages {
+        if matches!(p.kind, Kind::Bundle | Kind::Tool) || !p.requires.is_empty() || cat.index.get(&p.name).is_some() || Market::builtin(p.kind, &p.name) {
+            continue;
+        }
+        let Ok(src) = registry::resolve(loc, &p.url) else { continue };
+        p.url = src.to_string();
+        cat.community.insert(p.name.clone());
+        cat.index.packages.push(p);
     }
 }
 
@@ -377,8 +473,12 @@ fn open_at(loc: &Location, trusted: &[TrustedKey], allow_unsigned: bool) -> Resu
     let sig = registry::fetch(&registry::signature_location(loc), registry::MAX_SIGNATURE_BYTES);
     let trust = match sig {
         Ok(sig) => {
-            let key = registry::verify(&bytes, &sig, trusted).map_err(|e| anyhow!("Market index {loc} failed verification: {e}"))?;
-            Trust::Verified { key: key.key, publisher: key.publisher }
+            match registry::verify(&bytes, &sig, trusted) {
+                Ok(key) => Trust::Verified { key: key.key, publisher: key.publisher },
+                // Someone writing a Market checks it before signing it again.
+                Err(_) if allow_unsigned => Trust::Unverified,
+                Err(e) => bail!("Market index {loc} failed verification: {e}"),
+            }
         }
         Err(_) if allow_unsigned => Trust::Unverified,
         Err(e) => bail!(
@@ -389,7 +489,7 @@ fn open_at(loc: &Location, trusted: &[TrustedKey], allow_unsigned: bool) -> Resu
     inject_builtin_tools(&mut index, &trust);
     inject_builtin_platforms(&mut index, &trust);
     inject_builtin_detectors(&mut index, &trust);
-    Ok(Catalog { origin: Origin::Remote(loc.clone()), index, trust, offline_reason: None })
+    Ok(Catalog { origin: Origin::Remote(loc.clone()), index, trust, offline_reason: None, community: BTreeSet::new(), community_note: None, blocklist: Blocklist::default() })
 }
 
 /// Lists the platform packs built into Plonix in the official Market. They
@@ -458,7 +558,7 @@ pub fn bundled(trusted: &[TrustedKey]) -> Result<Catalog> {
     inject_builtin_tools(&mut index, &trust);
     inject_builtin_platforms(&mut index, &trust);
     inject_builtin_detectors(&mut index, &trust);
-    Ok(Catalog { origin: Origin::Bundled, index, trust, offline_reason: None })
+    Ok(Catalog { origin: Origin::Bundled, index, trust, offline_reason: None, community: BTreeSet::new(), community_note: None, blocklist: Blocklist::default() })
 }
 
 /// Recently opened catalogs, so the window does not refetch on every click.
@@ -512,9 +612,25 @@ pub enum TrustLevel {
     Changed,
 }
 
+/// Which shelf of the Market a package is on: who stands behind it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Shelf {
+    /// Built in, or from the Plonix Market: reviewed by the maintainers.
+    Official,
+    /// From the community Market: checked automatically, not reviewed.
+    Community,
+    /// From a Market whose publisher you chose to trust.
+    Publisher,
+    /// Added by you from a repository, a folder, a file or a link, or from an
+    /// unsigned Market: nobody has looked at it.
+    Own,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Verification {
     pub level: TrustLevel,
+    pub shelf: Shelf,
     /// Short, for a badge: "Verified by Plonix maintainers".
     pub label: String,
     /// One or two sentences for the details.
@@ -523,7 +639,7 @@ pub struct Verification {
 
 impl Verification {
     fn built_in() -> Self {
-        Self { level: TrustLevel::BuiltIn, label: "Built in".into(), detail: "Ships inside Plonix, reviewed with the app itself.".into() }
+        Self { level: TrustLevel::BuiltIn, shelf: Shelf::Official, label: "Built in".into(), detail: "Ships inside Plonix, reviewed with the app itself.".into() }
     }
 
     fn signed(publisher: &str, has_file: bool) -> Self {
@@ -532,17 +648,24 @@ impl Verification {
         } else {
             "Listed in the signed Market list; the packages it installs are each checked the same way."
         };
-        let who = if publisher == OFFICIAL_PUBLISHER {
-            "Reviewed by the Plonix maintainers, who signed the Market list."
+        let (shelf, label, who) = if publisher == OFFICIAL_PUBLISHER {
+            (Shelf::Official, "Official".to_string(), "Reviewed by the Plonix maintainers, who signed the Market list.")
+        } else if publisher == COMMUNITY_PUBLISHER {
+            (
+                Shelf::Community,
+                "Community".to_string(),
+                "Written and maintained by its author, and listed in the community Market after automatic checks and a review of what it asks for. The Plonix maintainers have not reviewed its code.",
+            )
         } else {
-            "Signed by a publisher whose key you chose to trust."
+            (Shelf::Publisher, format!("Verified by {publisher}"), "Signed by a publisher whose key you chose to trust.")
         };
-        Self { level: TrustLevel::Verified, label: format!("Verified by {publisher}"), detail: format!("{who} {checked}") }
+        Self { level: TrustLevel::Verified, shelf, label, detail: format!("{who} {checked}") }
     }
 
     fn unsigned_catalog() -> Self {
         Self {
             level: TrustLevel::Unverified,
+            shelf: Shelf::Own,
             label: "Not verified".into(),
             detail: "This Market list is not signed, so nobody vouches for it. The file still matches the list and is validated, but read what it does before you install it.".into(),
         }
@@ -550,16 +673,17 @@ impl Verification {
 
     fn by_hand(kind: Kind, source: &str) -> Self {
         let still = if kind == Kind::Extension {
-            "It is still checked, and its code only runs in the sandbox with the capabilities you granted."
+            "It is still checked, and it can only do what you said yes to when you added it."
         } else {
             "It is still validated and cannot run code."
         };
         Self {
             level: TrustLevel::Unverified,
-            label: "Not verified".into(),
+            shelf: Shelf::Own,
+            label: "Your own".into(),
             detail: format!(
-                "You added this yourself ({}), not through a signed Market, so nobody has vouched for it. {still}",
-                crate::detect::clean(source, 120)
+                "You added this yourself from {}, not through a signed Market, so nobody has reviewed it. {still}",
+                crate::detect::clean(&describe_source(source), 140)
             ),
         }
     }
@@ -567,10 +691,25 @@ impl Verification {
     fn changed() -> Self {
         Self {
             level: TrustLevel::Changed,
+            shelf: Shelf::Own,
             label: "Changed since install".into(),
             detail: "The file on disk is no longer the one that was checked. Plonix does not load it. Remove it and install it again.".into(),
         }
     }
+}
+
+/// Where something added by hand came from, in words.
+pub fn describe_source(source: &str) -> String {
+    if let Some(Ok(r)) = crate::github::parse(source) {
+        return match &r.tag {
+            Some(t) => format!("the GitHub repository {}/{} (release {t})", r.owner, r.repo),
+            None => format!("the GitHub repository {}/{}", r.owner, r.repo),
+        };
+    }
+    if std::path::Path::new(source).is_dir() {
+        return format!("the folder {source}");
+    }
+    source.to_string()
 }
 
 /// One row of the Market.
@@ -587,6 +726,11 @@ pub struct Listing {
     /// Packages this one installs (bundles and requirements), by name.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub includes: Vec<String>,
+    /// For something added by hand: where from (`github:owner/repo@tag`, a
+    /// folder, a file or a link), so it can be checked for a newer release
+    /// or read again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub added_from: Option<String>,
 }
 
 /// What an install, update or removal did to one package.
@@ -711,6 +855,7 @@ impl Market {
         for c in changes.iter().filter(|c| matches!(c.action, Action::Installed | Action::Updated)) {
             let Some(p) = packages.iter().find(|p| p.name == c.name) else { continue };
             let publisher = match &cat.trust {
+                _ if cat.is_community(p) => Some(COMMUNITY_PUBLISHER.to_string()),
                 Trust::Verified { publisher, .. } => Some(publisher.clone()),
                 Trust::Unverified => None,
             };
@@ -768,12 +913,47 @@ impl Market {
     /// What the Market would say about a package before it is installed.
     fn offered(cat: &Catalog, p: &Package) -> Verification {
         match &cat.trust {
+            _ if cat.is_community(p) => Verification::signed(COMMUNITY_PUBLISHER, true),
             Trust::Verified { publisher, .. } => Verification::signed(publisher, p.kind != Kind::Bundle),
             Trust::Unverified => Verification::unsigned_catalog(),
         }
     }
 
     }
+
+/// A newer release of something added from a GitHub repository.
+#[derive(Debug, Clone, Serialize)]
+pub struct AddedUpdate {
+    pub name: String,
+    pub kind: Kind,
+    /// The release installed now.
+    pub installed: String,
+    pub latest: String,
+    /// What to add to get it: `github:owner/repo@latest`.
+    pub source: String,
+    /// Why the repository could not be checked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Reads a package from outside the Market: a GitHub repository
+/// (`github:owner/repo`), an https address, a file, or an extension's
+/// folder (packed on the fly). Returns the bytes and how to record where
+/// they came from. Nothing is checked or installed yet.
+pub fn read_external(source: &str) -> Result<(Vec<u8>, String)> {
+    if let Some(repo) = crate::github::parse(source) {
+        let repo = repo.map_err(|e| anyhow!(e))?;
+        return crate::github::download(&repo, max_bytes(Kind::Extension));
+    }
+    let loc = registry::location(source).map_err(|e| anyhow!(e))?;
+    match &loc {
+        Location::File(p) => {
+            let bytes = extension::read_source(p)?;
+            Ok((bytes, std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()).display().to_string()))
+        }
+        Location::Url(u) => Ok((registry::fetch(&loc, max_bytes(Kind::Extension))?, u.clone())),
+    }
+}
 
 /// A file someone wants to add from outside the Market, looked at but not installed.
 #[derive(Debug, Clone, Serialize)]
@@ -951,8 +1131,12 @@ impl Market {
         if Self::builtin(kind, &name) {
             return Err(format!("`{name}` is the name of a built-in {}; give it a different name", kind.noun()));
         }
+        let sha256 = sha256_hex(&bytes);
+        if let Some(why) = blocklist::load(&self.home.root).blocked(kind, &name, &sha256) {
+            return Err(Blocklist::message(&name, why));
+        }
         let replaces = self.installed_version(kind, &name);
-        Ok(External { kind, name, version, description, author, sha256: sha256_hex(&bytes), source: source.to_string(), effects, capabilities, replaces, bytes })
+        Ok(External { kind, name, version, description, author, sha256, source: source.to_string(), effects, capabilities, replaces, bytes })
     }
 
     /// Installs a file from outside the Market. It is recorded as not
@@ -982,6 +1166,60 @@ impl Market {
             action: if previous.is_some() { Action::Updated } else { Action::Installed },
             from: previous,
         })
+    }
+
+    /// Applies the block list to what is installed: a blocked extension is
+    /// switched off with the reason, anything else blocked is removed.
+    /// Returns what it did, in words.
+    pub fn enforce(&self, list: &Blocklist) -> Vec<String> {
+        if list.entries.is_empty() {
+            return vec![];
+        }
+        let mut done = vec![];
+        for (kind, item) in self.installed_all() {
+            let Some(why) = list.blocked(kind, &item.name, &item.entry.sha256) else { continue };
+            let msg = Blocklist::message(&item.name, why);
+            if kind == Kind::Extension {
+                let already = self.extensions.info(&item.name).is_some_and(|i| !i.state.enabled && i.state.disabled_reason.as_deref() == Some(msg.as_str()));
+                if !already && self.extensions.disable(&item.name, &msg).is_ok() {
+                    done.push(format!("{msg} It is switched off."));
+                }
+            } else if self.remove_one(&item.name).is_ok() {
+                done.push(format!("{msg} It was removed."));
+            }
+        }
+        done
+    }
+
+    /// Newer releases of packages added from a GitHub repository. Plonix
+    /// never installs them on its own: adding one again shows what it asks
+    /// for first.
+    pub fn added_updates(&self) -> Vec<AddedUpdate> {
+        let mut out = vec![];
+        for (kind, item) in self.installed_all() {
+            let Some(Ok(repo)) = crate::github::parse(&item.entry.source) else { continue };
+            let Some(installed) = repo.tag.clone() else { continue };
+            match crate::github::latest_tag(&repo) {
+                Ok(latest) if latest != installed => out.push(AddedUpdate {
+                    name: item.name.clone(),
+                    kind,
+                    installed,
+                    latest: latest.clone(),
+                    source: repo.latest().label(&latest),
+                    error: None,
+                }),
+                Ok(_) => {}
+                Err(e) => out.push(AddedUpdate {
+                    name: item.name.clone(),
+                    kind,
+                    installed: installed.clone(),
+                    latest: installed,
+                    source: item.entry.source.clone(),
+                    error: Some(format!("{e:#}")),
+                }),
+            }
+        }
+        out
     }
 
     /// Installed packages that are not in the catalog: added by hand.
@@ -1027,12 +1265,13 @@ impl Market {
                 verification: self.verification(kind, &item.name),
                 includes: vec![],
                 local: true,
+                added_from: (!item.entry.source.is_empty()).then(|| item.entry.source.clone()),
             });
         }
         out
     }
 
-    fn builtin(kind: Kind, name: &str) -> bool {
+    pub fn builtin(kind: Kind, name: &str) -> bool {
         let list = match kind {
             Kind::Rules => rulepack::BUILTIN,
             Kind::Filters => filterpack::BUILTIN,
@@ -1091,6 +1330,7 @@ impl Market {
                     status,
                     verification,
                     local: false,
+                    added_from: None,
                     includes: registry::install_order(&cat.index, &p.name).unwrap_or_default().into_iter().filter(|n| *n != p.name).collect(),
                     package: p.clone(),
                 }
@@ -1130,10 +1370,7 @@ impl Market {
             let bytes = if needed && p.kind != Kind::Bundle { Some(cat.fetch(p)?) } else { None };
             planned.push((*p, status, needed, bytes));
         }
-        let source = |p: &Package| match &cat.origin {
-            Origin::Bundled => format!("Plonix Market (built in) {}", p.url),
-            Origin::Remote(base) => registry::resolve(base, &p.url).map(|l| l.to_string()).unwrap_or_default(),
-        };
+        let source = |p: &Package| cat.source(p);
         let mut changes = vec![];
         let mut failed = None;
         for (p, status, needed, bytes) in planned {
@@ -1555,5 +1792,82 @@ mod tests {
         assert_eq!(m2.listing(&unsigned).into_iter().find(|l| l.package.name == "api-inventory").unwrap().verification.level, TrustLevel::Unverified);
         m2.install(&unsigned, "api-inventory").unwrap();
         assert_eq!(m2.verification(Kind::Skill, "api-inventory").level, TrustLevel::Unverified);
+    }
+
+    fn community_skill(dir: &std::path::Path, name: &str) -> Index {
+        let text = format!("---\nplonix_skill: 1\nname: {name}\nversion: 1.0.0\ntitle: T\ndescription: From the community.\nauthor: jsmith\nuses: [traffic]\n---\nLook at traffic.\n");
+        std::fs::write(dir.join(format!("{name}.md")), &text).unwrap();
+        let index = format!(
+            r#"{{"plonix_index":2,"name":"Plonix community Market","packages":[
+                {{"name":"{name}","kind":"skill","version":"1.0.0","description":"d","author":"jsmith","url":"{name}.md","sha256":"{}"}},
+                {{"name":"api-inventory","kind":"skill","version":"9.0.0","description":"d","author":"jsmith","url":"{name}.md","sha256":"{}"}}]}}"#,
+            sha256_hex(text.as_bytes()),
+            sha256_hex(text.as_bytes())
+        );
+        registry::parse(index.as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn community_packages_sit_on_their_own_shelf() {
+        let (_d, home) = home();
+        let market = Market::new(&home);
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = official();
+        let loc = Location::File(dir.path().join("index.json"));
+        merge_community(&mut cat, &loc, community_skill(dir.path(), "graphql-notes"));
+        // The Plonix Market keeps a name both use.
+        assert_eq!(cat.index.get("api-inventory").unwrap().author, "Plonix contributors");
+        assert!(cat.community.contains("graphql-notes") && !cat.community.contains("api-inventory"));
+
+        let row = |name: &str| market.listing(&cat).into_iter().find(|l| l.package.name == name).unwrap();
+        assert_eq!(row("graphql-notes").verification.shelf, Shelf::Community);
+        assert_eq!(row("graphql-notes").verification.label, "Community");
+        assert!(row("graphql-notes").verification.detail.contains("have not reviewed its code"));
+        assert_eq!(row("api-inventory").verification.shelf, Shelf::Official);
+
+        // Installing it records the community Market as the one that vouched for it.
+        market.install(&cat, "graphql-notes").unwrap();
+        let v = market.verification(Kind::Skill, "graphql-notes");
+        assert_eq!((v.level, v.shelf), (TrustLevel::Verified, Shelf::Community));
+    }
+
+    #[test]
+    fn added_by_hand_is_your_own() {
+        let (_d, home) = home();
+        let market = Market::new(&home);
+        let mine = "---\nplonix_skill: 1\nname: mine\nversion: 1.0.0\ntitle: Mine\ndescription: My skill.\nauthor: me\nuses: [traffic]\n---\nLook at traffic.\n";
+        market.skills.install(mine.as_bytes(), "github:jsmith/notes@v1.0.0", None).unwrap();
+        let row = market.listing(&official()).into_iter().find(|l| l.package.name == "mine").unwrap();
+        assert_eq!((row.verification.shelf, row.verification.label.as_str()), (Shelf::Own, "Your own"));
+        assert!(row.verification.detail.contains("GitHub repository jsmith/notes (release v1.0.0)"), "{}", row.verification.detail);
+        assert_eq!(row.added_from.as_deref(), Some("github:jsmith/notes@v1.0.0"));
+    }
+
+    #[test]
+    fn the_block_list_switches_off_extensions_and_removes_the_rest() {
+        let (_d, home) = home();
+        let market = Market::new(&home);
+        let cat = official();
+        market.install(&cat, "security-headers").unwrap();
+        market.install(&cat, "admin-panels").unwrap();
+        let list = blocklist::parse(
+            br#"{"plonix_blocked":1,"entries":[
+                {"name":"security-headers","kind":"extension","reason":"Misreads cookies."},
+                {"name":"admin-panels","reason":"Pulled."}]}"#,
+        )
+        .unwrap();
+        let done = market.enforce(&list);
+        assert_eq!(done.len(), 2, "{done:?}");
+        let info = market.extensions.info("security-headers").unwrap();
+        assert!(!info.state.enabled && info.state.disabled_reason.unwrap().contains("Misreads cookies."));
+        assert!(market.installed_version(Kind::Rules, "admin-panels").is_none());
+        // Running it again changes nothing.
+        assert!(market.enforce(&list).is_empty());
+
+        // A blocked package is not downloaded from a Market either.
+        let mut blocked = official();
+        blocked.blocklist = list;
+        let p = blocked.index.get("admin-panels").unwrap().clone();
+        assert!(format!("{:#}", blocked.fetch(&p).unwrap_err()).contains("blocked admin-panels"));
     }
 }
