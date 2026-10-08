@@ -795,7 +795,12 @@ button.agfhit:hover { background: var(--surface-2); color: var(--accent); }
 .navlink { display: flex; align-items: center; gap: 6px; width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; }
 .navlink:hover { color: var(--fg); }
 .navlink .qn { margin-left: auto; background: var(--accent); color: #fff; border-radius: 10px; padding: 0 6px; font-size: 10px; letter-spacing: 0; }
-.alllist { max-height: 220px; overflow: auto; border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 10px; margin-top: 8px; font-size: 12px; line-height: 1.7; background: var(--surface-2); }
+.allbar { display: flex; justify-content: flex-end; margin: -8px 0 -6px; }
+.alllist { max-height: 220px; overflow: auto; border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 10px; margin-top: 4px; font-size: 12px; line-height: 1.7; background: var(--surface-2); }
+.mcard label.allrow { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; min-width: 0; font-size: 12px; font-weight: 400; color: var(--fg); }
+.mcard label.allrow input { margin: 0; padding: 0; flex: none; }
+.allrow span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.allrow:has(input:not(:checked)) span { color: var(--fg-3); text-decoration: line-through; }
 
 /* ask Claude Code */
 .askbtn .askico { color: var(--violet); }

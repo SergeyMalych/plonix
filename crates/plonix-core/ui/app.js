@@ -3462,18 +3462,24 @@ function scopeButtons(s, size, after) {
   ];
 }
 
-/** Accepts (each host only) or rejects every pending suggestion, after asking. */
+/**
+ * Accepts (each host only) or rejects every pending suggestion, after asking.
+ * Every domain in the sheet has a checkbox, so any of them can be left out.
+ */
 function decideAll(action) {
   const list = stillPending(S.scope.suggestions);
   if (!list.length) return;
   const accept = action === 'accept';
+  const shown = (s) => (accept ? suggestionBase(s.domain) : s.domain);
+  const picked = new Set(list.map((s) => s.domain));
   const run = async () => {
+    const chosen = list.filter((s) => picked.has(s.domain));
+    if (!chosen.length) return;
     closeModal();
     let done = 0;
-    for (const s of list) {
-      const domain = accept ? suggestionBase(s.domain) : s.domain;
+    for (const s of chosen) {
       try {
-        await api('/api/scope/' + action, { method: 'POST', body: { domain, include_subdomains: false } });
+        await api('/api/scope/' + action, { method: 'POST', body: { domain: shown(s), include_subdomains: false } });
         done++;
       } catch (e) {
         toast(e.message, 'err');
@@ -3483,14 +3489,27 @@ function decideAll(action) {
     await loadScope();
     if (S.view === 'scope') renderScopeBody();
   };
+  const goBtn = h('button', { class: 'btn ' + (accept ? 'primary' : 'danger'), onclick: run });
+  const toggleAll = h('button', { class: 'link', onclick: () => (picked.size === list.length ? picked.clear() : list.forEach((s) => picked.add(s.domain)), boxes.forEach((b) => (b.checked = picked.has(b.value))), sync()) });
+  const boxes = list.map((s) => h('input', { type: 'checkbox', value: s.domain, checked: true, onchange: (e) => (e.target.checked ? picked.add(s.domain) : picked.delete(s.domain), sync()) }));
+  const sync = () => {
+    const n = picked.size;
+    const all = n === list.length;
+    $('.modal .mcard h3').textContent = (accept ? 'Accept ' : 'Reject ') + (all ? `all ${n} suggested domains?` : `${n} of ${list.length} suggested domains?`);
+    goBtn.textContent = n === 0 ? 'Nothing picked' : all ? (accept ? 'Accept all' : 'Reject all') : `${accept ? 'Accept' : 'Reject'} ${n}`;
+    goBtn.disabled = n === 0;
+    toggleAll.textContent = all ? 'Uncheck all' : 'Check all';
+  };
   modal(
-    accept ? `Accept all ${list.length} suggested domains?` : `Reject all ${list.length} suggested domains?`,
+    '',
     [
-      h('p', { class: 'muted', text: accept ? 'Each host is accepted on its own, without its subdomains. You can change any of them on the Scope screen.' : 'They stay captured, but Bench sends to them are refused. You can change any of them on the Scope screen.' }),
-      h('div', { class: 'alllist' }, list.map((s) => h('div', { class: 'mono', text: accept ? suggestionBase(s.domain) : s.domain }))),
+      h('p', { class: 'muted', text: (accept ? 'Each host is accepted on its own, without its subdomains.' : 'They stay captured, but Bench sends to them are refused.') + ' Uncheck any domain to leave it for later.' }),
+      h('div', { class: 'allbar' }, toggleAll),
+      h('div', { class: 'alllist' }, list.map((s, i) => h('label', { class: 'allrow' }, boxes[i], h('span', { class: 'mono', text: shown(s), title: shown(s) })))),
     ],
-    [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), h('button', { class: 'btn ' + (accept ? 'primary' : 'danger'), text: accept ? 'Accept all' : 'Reject all', onclick: run })],
+    [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), goBtn],
   );
+  sync();
 }
 
 function evidenceList(evidence) {
