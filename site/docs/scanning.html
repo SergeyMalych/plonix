@@ -178,7 +178,7 @@ mode and is still scope-gated at <code>engine.send</code>. Off by default.</li><
 <p>AI assistance is always optional and additive; scanning is fully usable
 without it.</p>
 <h2 id="ux-the-scans-area">UX: the Scans area<a class="anchor" href="#ux-the-scans-area" aria-label="Link to this section">#</a></h2>
-<p>A new <strong>Scans</strong> screen (⌘7), with a simple left-to-right flow:</p>
+<p>A <strong>Scans</strong> screen (⌘8), with a simple left-to-right flow:</p>
 <ol><li><strong>Target</strong> — pick from in-scope hosts/endpoints only (out-of-scope targets
 are not selectable). Shows the fingerprint for context.</li><li><strong>Mode</strong> — Crawl, Crawl with browser, or Active scan.</li><li><strong>Profile</strong> — for active scan: the suggested detectors/tactics from the
 fingerprint, each toggleable, grouped by detector, with intrusiveness and
@@ -186,6 +186,16 @@ variant visible. An &quot;AI suggest&quot; affordance (optional) that fills the
 selection from the agent's recommendation for the user to review.</li><li><strong>Run</strong> — explicit start. A live progress view: targets covered, requests
 sent (and that they stayed in scope), signals found, findings so far.</li><li><strong>Review</strong> — findings flow into the existing <strong>Findings</strong> screen, each with
 its reproducing request/response, so there is one place for results.</li></ol>
+<p>Scans can also open <strong>focused on one endpoint</strong>. When the Lens or the Traffic
+row menu sees an endpoint shape worth a look (a file upload, an input whose
+value looks like a host, URL or IP the server might fetch, or any endpoint that
+takes inputs), it offers a one-click hand-off: Scans opens with a <em>Focused on
+one endpoint</em> banner naming the method and path, the checks that fit it picked,
+and the scan narrowed to that endpoint. The row menu always offers a plain
+<strong>Scan this endpoint</strong> too. Where no built-in check fits yet (uploads, SSRF),
+the banner says so and points to the Market and the Bench instead of picking
+unrelated checks. <strong>Scan the whole host</strong> clears the focus. Nothing runs until
+you press Run, and the hand-off is offered only for hosts in scope.</p>
 <h2 id="guardrails">Guardrails<a class="anchor" href="#guardrails" aria-label="Link to this section">#</a></h2>
 <ul><li><strong>Scope.</strong> Every scan request goes through <code>engine.send</code>; a target outside
 accepted scope is refused there. Discovery and active checks alike cannot

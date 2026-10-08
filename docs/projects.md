@@ -78,6 +78,7 @@ Settings come in sections. A section is either **global** (one value for all pro
 | Client certificates | project | present client certificates (on by default). The certificates themselves are kept in `traffic.db` and managed under this section or with `plonix certs` (see [Client certificates](#client-certificates)) |
 | Storage | project | keep only in-scope traffic |
 | Interface | global | open projects in a Plonix window or the web browser |
+| Appearance | this Mac | theme (match the system, light or dark) and spacing: Dense (the default) fits more on screen, Roomy gives rows and panels more air. Kept by the window itself, not the engine, and applied right away |
 | AI agents | global | let agents read projects or not, in-scope hosts only or everything, which kinds of data, and the Ask Claude size limits. Stored in `agents.json` through a section storage hook (`Section::stored_by`) |
 
 Proxy changes apply to a running session right away: the listener moves to the new address (connections already open keep working), and the upstream client is rebuilt. An address that cannot be bound is refused and nothing is saved. `plonix start --port` and `--insecure-upstream` override the settings for one session without changing them.
