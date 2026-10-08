@@ -2680,7 +2680,7 @@ async function openInspector(id) {
     ? h(
         'span',
         { class: 'seg r', title: 'Rules changed this request on its way out' },
-        [['sent', 'As sent'], ['original', 'Original'], ['both', 'Side by side']].map(([v, l]) => h('button', { 'data-v': v, text: l, onclick: () => ((T.ruleView = v), drawReq()) })),
+        [['sent', 'As sent'], ['original', 'Original'], ['both', 'Both']].map(([v, l]) => h('button', { 'data-v': v, text: l, onclick: () => ((T.ruleView = v), drawReq()) })),
       )
     : null;
   const reqCol = h(
@@ -10903,7 +10903,7 @@ function lensHeaderMenu(e, pre, side) {
     'div',
     { class: 'ctxmenu', role: 'menu' },
     h('div', { class: 'mnote rlctxhead' }, h('b', { text: 'Create a rule from ' + name }), h('span', { text: 'You review it before it’s saved. It then applies to new traffic.' })),
-    item('New rule: send on ' + every, `Adds ${name}: ${value.length > 40 ? value.slice(0, 40) + '…' : value} wherever it’s missing`, { kind: 'add_header' }),
+    item('New rule: send on ' + every, `Adds ${name}: ${value.length > 24 ? value.slice(0, 24) + '…' : value} where it’s missing`, { kind: 'add_header' }),
     item('New rule: always use this value', `Gives ${name} this value on ${every}`, { kind: 'set_header' }),
     item('New rule: remove from ' + every, `Takes ${name} out before it ${side === 'response' ? 'reaches the browser' : 'leaves'}`, { kind: 'remove_header' }),
     h('div', { class: 'msep' }),
@@ -10914,11 +10914,12 @@ function lensHeaderMenu(e, pre, side) {
 
 /** Request as sent, the original before rules changed it, or both side by side with the changed lines marked. */
 function ruleCompare(ex, view) {
-  const sent = asPlain(requestText(ex)).split('\n');
+  // The record keeps the original in HTTP/1.1 form; compare like with like.
+  const sent = asPlain({ ...requestText(ex), lines: [`${ex.method} ${target(ex)} HTTP/1.1`, ...requestText(ex).lines.slice(1)] }).split('\n');
   const orig = (ex.original_request || '').replace(/\n$/, '').split('\n');
   const inSent = new Set(sent);
   const inOrig = new Set(orig);
-  const pre = (lines, other, cls) => h('pre', { class: 'raw rlcmp' }, lines.map((l) => [other.has(l) ? l : h('span', { class: cls, text: l || ' ' }), '\n']));
+  const pre = (lines, other, cls) => h('pre', { class: 'raw rlcmp' }, lines.map((l) => [other.has(l) || !l ? l : h('span', { class: cls, text: l }), '\n']));
   if (view === 'original') return pre(orig, inSent, 'd-del');
   return h(
     'div',

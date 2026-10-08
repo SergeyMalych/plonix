@@ -1576,3 +1576,6 @@ body:has(.modal.tourmodal) .tourspot { z-index: 52; }
 body:has(.modal.tourmodal) .tourcard { z-index: 55; }
 .ctxmenu .rlctxhead { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px 6px; max-width: 300px; }
 .ctxmenu .rlctxhead b { color: var(--fg); font-size: 12px; }
+.rlcmpgrid .rlhint { display: block; padding: 4px 12px 0; }
+.reqbody { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
+.lbl .seg button { white-space: nowrap; }
