@@ -324,6 +324,10 @@ impl<'a> Req<'a> {
         self.body = body.into();
         self
     }
+    fn body(mut self, b: impl Into<String>) -> Self {
+        self.body = b.into();
+        self
+    }
 }
 
 fn resp<'a>(status: u16, mime: &str) -> Resp<'a> {
@@ -539,6 +543,29 @@ export async function api(path, opts = {{}}) {{
     s.add(api_get("https://api.brightcart.example/v1/products/1001/reviews?limit=5"), resp(200, "application/json").api().json(json!({ "items": [ { "rating": 5, "text": "Great grip on wet rock.", "author": "J." } ], "total": 42 })))?;
     s.add(api_get("https://api.brightcart.example/v1/products/1002"), resp(200, "application/json").api().json(product(1002, "Merino hoodie", 7400)))?;
     s.add(api_get("https://api.brightcart.example/v1/products/9999"), resp(404, "application/json").api().json(json!({ "error": "not_found", "message": "No product 9999" })))?;
+    // A link-preview endpoint: the server fetches whatever URL the client hands
+    // it. A parameter carrying a URL or hostname is the classic server-side
+    // request smell the Scans hand-off points at.
+    s.add(
+        api_get("https://api.brightcart.example/v1/preview?url=https%3A%2F%2Fmedia.brightcart.example%2Fp%2F1001%2Fmain.jpg"),
+        resp(200, "application/json").api().json(json!({ "title": "Trail running shoes", "image": "https://media.brightcart.example/p/1001/main.jpg", "width": 1200, "height": 800 })),
+    )?;
+    // A report export that takes a file path. A path-valued parameter is the
+    // "could this be pointed at another file?" smell a detector hands to Scans.
+    s.add(
+        api_get("https://api.brightcart.example/v1/reports/export?path=%2Freports%2F2025%2Fq1-summary.pdf&format=pdf"),
+        resp(200, "application/pdf").api().body("%PDF-1.7\n% demo report\n").ms(120),
+    )?;
+    // A back-office import that accepts XML. An XML body is the "how does the
+    // parser treat entities and referenced documents?" smell behind the XML scan.
+    s.add(
+        req("POST", "https://api.brightcart.example/v1/catalog/import")
+            .h("Accept", "application/json")
+            .h("Origin", page(""))
+            .h("Content-Type", "application/xml")
+            .body("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<catalog><item sku=\"TRX-01\"><name>Trail shoes</name><price>120.00</price></item></catalog>"),
+        resp(202, "application/json").api().json(json!({ "accepted": 1, "job": "imp_5531" })),
+    )?;
 
     // The API describes itself: the Map lists what it offers that nobody has
     // visited yet.

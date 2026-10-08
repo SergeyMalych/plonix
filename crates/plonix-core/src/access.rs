@@ -36,7 +36,8 @@
 //! access off, switch off groups of capabilities, and choose whether agents
 //! see all captured traffic or only in-scope hosts.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, RwLock};
 use std::time::SystemTime;
 
@@ -403,11 +404,22 @@ fn path_matches(pattern: &str, path: &str) -> bool {
     }
 }
 
-/// Agent clients seen since the engine started, for the Agents screen.
+/// Agent clients seen since the engine started, and what they read, for the
+/// Agents screen.
 #[derive(Default)]
 pub struct AgentActivity {
     clients: Mutex<HashMap<String, ClientActivity>>,
+    /// The latest agent requests, oldest first, at most [`MAX_HITS`].
+    hits: Mutex<VecDeque<Hit>>,
+    next_hit: AtomicU64,
 }
+
+/// How many agent requests the activity feed remembers.
+pub const MAX_HITS: usize = 500;
+
+/// Routes agents call on their own to stay connected or to list what they
+/// offer. They are counted, but the activity feed leaves them out.
+const QUIET_ROUTES: &[&str] = &["/api/agents", "/api/skills"];
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ClientActivity {
@@ -420,28 +432,63 @@ pub struct ClientActivity {
     pub last_request: String,
 }
 
+/// One request an agent made, for the activity feed.
+#[derive(Debug, Clone, Serialize)]
+pub struct Hit {
+    /// Increasing id, so the screen can ask for what is new.
+    pub seq: u64,
+    pub at: i64,
+    /// The agent's full name, e.g. `claude-code`, or `plonix-ask/<run>` for
+    /// an Ask Claude conversation inside Plonix.
+    pub client: String,
+    pub method: String,
+    pub path: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub query: String,
+    pub refused: bool,
+}
+
+/// The name an agent is listed under: an Ask Claude run inside Plonix
+/// (`plonix-ask/<run>`) counts as one client, whatever the run.
+fn client_key(client: &str) -> &str {
+    client.split('/').next().unwrap_or(client)
+}
+
 impl AgentActivity {
-    pub fn record(&self, client: &str, method: &str, path: &str, refused: bool) {
+    pub fn record(&self, client: &str, method: &str, path: &str, query: &str, refused: bool) {
         let now = now_ms();
-        let mut map = self.clients.lock().unwrap();
-        let c = map.entry(client.to_string()).or_insert_with(|| ClientActivity {
-            name: client.to_string(),
-            first_seen: now,
-            last_seen: now,
-            requests: 0,
-            refused: 0,
-            last_request: String::new(),
-        });
-        c.last_seen = now;
-        // Reading this policy is how idle agents say they are still connected.
-        if path == "/api/agents" && !refused {
+        let key = client_key(client);
+        {
+            let mut map = self.clients.lock().unwrap();
+            let c = map.entry(key.to_string()).or_insert_with(|| ClientActivity {
+                name: key.to_string(),
+                first_seen: now,
+                last_seen: now,
+                requests: 0,
+                refused: 0,
+                last_request: String::new(),
+            });
+            c.last_seen = now;
+            // Reading this policy is how idle agents say they are still connected.
+            if path == "/api/agents" && !refused {
+                return;
+            }
+            c.requests += 1;
+            if refused {
+                c.refused += 1;
+            }
+            c.last_request = format!("{method} {path}");
+        }
+        if !refused && QUIET_ROUTES.iter().any(|r| path == *r || path.starts_with(&format!("{r}/"))) {
             return;
         }
-        c.requests += 1;
-        if refused {
-            c.refused += 1;
+        let seq = self.next_hit.fetch_add(1, Ordering::Relaxed) + 1;
+        let query: String = query.chars().take(300).collect();
+        let mut hits = self.hits.lock().unwrap();
+        hits.push_back(Hit { seq, at: now, client: client.to_string(), method: method.to_string(), path: path.to_string(), query, refused });
+        while hits.len() > MAX_HITS {
+            hits.pop_front();
         }
-        c.last_request = format!("{method} {path}");
     }
 
     /// Most recently active first.
@@ -449,6 +496,11 @@ impl AgentActivity {
         let mut v: Vec<_> = self.clients.lock().unwrap().values().cloned().collect();
         v.sort_by_key(|c| std::cmp::Reverse(c.last_seen));
         v
+    }
+
+    /// Requests newer than `since` (a [`Hit::seq`]), newest first, at most `limit`.
+    pub fn hits(&self, since: u64, limit: usize) -> Vec<Hit> {
+        self.hits.lock().unwrap().iter().rev().take_while(|h| h.seq > since).take(limit).cloned().collect()
     }
 }
 
@@ -575,12 +627,41 @@ mod tests {
     #[test]
     fn activity_is_recorded() {
         let a = AgentActivity::default();
-        a.record("mcp", "GET", "/api/agents", false);
-        a.record("mcp", "GET", "/api/traffic", false);
-        a.record("mcp", "POST", "/api/send", true);
+        a.record("mcp", "GET", "/api/agents", "", false);
+        a.record("mcp", "GET", "/api/traffic", "q=login", false);
+        a.record("mcp", "POST", "/api/send", "", true);
         let c = &a.clients()[0];
         assert_eq!((c.requests, c.refused), (2, 1));
         assert_eq!(c.last_request, "POST /api/send");
+    }
+
+    #[test]
+    fn activity_feed_keeps_what_agents_read() {
+        let a = AgentActivity::default();
+        a.record("claude-code", "GET", "/api/agents", "", false);
+        a.record("claude-code", "GET", "/api/skills", "", false);
+        a.record("claude-code", "GET", "/api/traffic", "q=login", false);
+        a.record("plonix-ask/c1", "GET", "/api/traffic/42", "", false);
+        a.record("plonix-ask/c2", "POST", "/api/scope/accept", "", true);
+        // Keep-alives and skill listings stay out of the feed.
+        let hits = a.hits(0, 10);
+        assert_eq!(hits.iter().map(|h| h.path.as_str()).collect::<Vec<_>>(), ["/api/scope/accept", "/api/traffic/42", "/api/traffic"]);
+        assert_eq!(hits[2].query, "q=login");
+        assert!(hits[0].refused);
+        // Only what is new since the last look.
+        assert_eq!(a.hits(hits[1].seq, 10).len(), 1);
+        // Ask Claude runs inside Plonix count as one client.
+        let names: Vec<_> = a.clients().into_iter().map(|c| c.name).collect();
+        assert!(names.contains(&"plonix-ask".to_string()) && names.len() == 2);
+    }
+
+    #[test]
+    fn activity_feed_is_bounded() {
+        let a = AgentActivity::default();
+        for i in 0..MAX_HITS + 20 {
+            a.record("mcp", "GET", &format!("/api/traffic/{i}"), "", false);
+        }
+        assert_eq!(a.hits(0, usize::MAX).len(), MAX_HITS);
     }
 
     #[test]
