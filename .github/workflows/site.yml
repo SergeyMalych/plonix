@@ -1,0 +1,28 @@
+name: Website
+
+# Publishes plonix.io to Cloudflare Pages, only when the site changes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "functions/**"
+  workflow_dispatch:
+
+concurrency:
+  group: site
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy site --project-name=plonix --branch=main --commit-hash=${{ github.sha }}

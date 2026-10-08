@@ -19,7 +19,7 @@ Preview it locally:
 python3 -m http.server -d site 8000   # then open http://localhost:8000
 ```
 
-It is hosted on Cloudflare Pages, connected to this repository. Every push to `main` publishes it, and pull requests get a preview link. The Pages project uses these settings:
+It is hosted on Cloudflare Pages. The [Website workflow](../.github/workflows/site.yml) publishes it when a push to `main` changes `site/` or `functions/`, and it can be run by hand from the Actions tab. It needs two repository secrets: `CLOUDFLARE_API_TOKEN` (a token with the Cloudflare Pages: Edit permission) and `CLOUDFLARE_ACCOUNT_ID`. Automatic Git deployments are turned off in the Pages project, so other pushes don't publish anything. The Pages project uses these settings:
 
 | Setting | Value |
 | --- | --- |
