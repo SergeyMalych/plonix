@@ -29,7 +29,7 @@ use crate::filterpack::{FilterLibrary, FilterSet};
 use crate::listpack::{ListLibrary, ListSet};
 use crate::intercept::{InterceptOptions, Interceptor};
 use crate::project::PruneReport;
-use crate::replace::RuleSet;
+use crate::replace::{Passing, Reach, RuleSet, Target};
 use crate::rulepack::{Library, PackInfo, sha256_hex};
 use crate::crawl;
 use crate::exclude::{self, ExcludedDomain, Exclusions, Group, GroupStatus};
@@ -994,7 +994,17 @@ impl Engine {
     }
 
     /// Sends an active request. Refused unless the target host is accepted.
-    pub async fn send(&self, mut req: SendRequest, initiator: &str) -> Result<Exchange, SendError> {
+    pub async fn send(&self, req: SendRequest, initiator: &str) -> Result<Exchange, SendError> {
+        self.send_from(req, initiator, Reach::Bench).await
+    }
+
+    /// Like [`Self::send`], for Scans, crawls and extensions: the rules that
+    /// apply to them may differ from the Bench's.
+    pub async fn send_scan(&self, req: SendRequest, initiator: &str) -> Result<Exchange, SendError> {
+        self.send_from(req, initiator, Reach::Scans).await
+    }
+
+    async fn send_from(&self, mut req: SendRequest, initiator: &str, reach: Reach) -> Result<Exchange, SendError> {
         // Sending as a saved user: its headers replace the auth headers the
         // draft carried. The values come from the project database, so they
         // are never round-tripped through the client.
@@ -1044,11 +1054,37 @@ impl Engine {
             (None, Some(s)) => s.clone().into_bytes(),
             (None, None) => vec![],
         };
-        let (path, query) = match target.split_once('?') {
+        let split = |target: &str| match target.split_once('?') {
             Some((p, q)) => (p.to_string(), q.to_string()),
-            None => (target.clone(), String::new()),
+            None => (target.to_string(), String::new()),
         };
-        let method = req.method.to_ascii_uppercase();
+        let (mut target, mut body, mut method) = (target, body, req.method.to_ascii_uppercase());
+        // Rules the user set for this kind of traffic (Settings › Match and replace).
+        let rules = self.replace_rules();
+        let (mut replaced, mut original_request) = (vec![], None);
+        if rules.reaches(reach) {
+            let (path, query) = split(&target);
+            let before = Exchange {
+                scheme: scheme.clone(),
+                host: host.clone(),
+                port,
+                method: method.clone(),
+                path,
+                query,
+                req_headers: req.headers.clone(),
+                req_body: body.clone(),
+                source: Some(Source::Replay),
+                ..Default::default()
+            };
+            let ctx = Passing { reach, in_scope: true, ex: &before };
+            replaced.extend(rules.request_line(ctx, &mut method, &mut target));
+            replaced.extend(rules.headers(Target::RequestHeader, ctx, &mut req.headers));
+            replaced.extend(rules.body(Target::RequestBody, ctx, &mut body));
+            if !replaced.is_empty() {
+                original_request = Some(crate::ask::request_text(&before, self.body_limit()).0);
+            }
+        }
+        let (path, query) = split(&target);
         let started = Instant::now();
         let mut ex = Exchange {
             ts: now_ms(),
@@ -1062,6 +1098,7 @@ impl Engine {
             req_body: body.clone(),
             source: Some(Source::Replay),
             initiator: Some(initiator.to_string()),
+            original_request,
             ..Default::default()
         };
         let outbound = OutboundRequest { scheme, host, port, method, target, headers: req.headers, body: Bytes::from(body), extra_headers: vec![] };
@@ -1075,6 +1112,9 @@ impl Engine {
                 ex.status = Some(up.status);
                 ex.resp_headers = up.headers;
                 ex.resp_body = up.body.to_vec();
+                if rules.reaches(reach) {
+                    self.replace_response(&rules, reach, &mut ex, &mut replaced);
+                }
                 ex.resp_truncated = up.truncated_from.is_some();
                 ex.resp_size = up.truncated_from.map(|n| n as i64);
                 ex.tls_sans = up.tls_sans;
@@ -1083,9 +1123,33 @@ impl Engine {
             }
             Err(e) => ex.error = Some(format!("{e:#}")),
         }
+        ex.replaced = replaced;
         let id = self.record(ex.clone())?;
         ex.id = id;
         Ok(ex)
+    }
+
+    /// Applies the response rules to a response the engine received: what
+    /// the Bench or Scans see is then what the rules made of it. A
+    /// compressed body is matched decoded and kept decoded when changed.
+    fn replace_response(&self, rules: &RuleSet, reach: Reach, ex: &mut Exchange, replaced: &mut Vec<String>) {
+        let seen = ex.clone();
+        let ctx = Passing { reach, in_scope: true, ex: &seen };
+        replaced.extend(rules.headers(Target::ResponseHeader, ctx, &mut ex.resp_headers));
+        if !rules.has(Target::ResponseBody, ctx) {
+            return;
+        }
+        let encoded = crate::model::header(&ex.resp_headers, "content-encoding").is_some();
+        let decoded = if encoded { crate::codec::decode_whole(&ex.resp_headers, &ex.resp_body, self.body_limit()) } else { Some(ex.resp_body.clone()) };
+        if let Some(mut text) = decoded {
+            let changed = rules.body(Target::ResponseBody, ctx, &mut text);
+            if !changed.is_empty() {
+                ex.resp_headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-encoding") && !k.eq_ignore_ascii_case("content-length"));
+                ex.resp_headers.push(("Content-Length".into(), text.len().to_string()));
+                ex.resp_body = text;
+                replaced.extend(changed);
+            }
+        }
     }
 
     /// Replays a stored exchange with optional modifications (same scope rules as `send`).
@@ -1244,7 +1308,7 @@ impl Engine {
                     ran = true;
                     report.requests_sent += 1;
                     let sent = self
-                        .send(
+                        .send_scan(
                             SendRequest { method: planned.method.clone(), url: planned.url.clone(), headers: planned.headers.clone(), body: None, body_base64: None, as_user: None },
                             initiator,
                         )
@@ -1353,7 +1417,7 @@ impl Engine {
                 break;
             }
             report.pages_fetched += 1;
-            let ex = match self.send(SendRequest { method: "GET".into(), url: url.clone(), ..Default::default() }, initiator).await {
+            let ex = match self.send_scan(SendRequest { method: "GET".into(), url: url.clone(), ..Default::default() }, initiator).await {
                 Ok(ex) => ex,
                 Err(SendError::OutOfScope { .. }) => continue,
                 Err(e) => {
@@ -1989,8 +2053,8 @@ impl Engine {
 
         // Baseline, then a calibration probe with a name nothing should read,
         // to tell whether responses are stable enough to compare by length.
-        let baseline = self.send(probe_request(target_url, None, MARKER), &initiator).await?;
-        let calib = self.send(probe_request(target_url, Some("plnxcalib9z"), MARKER), &initiator).await.ok();
+        let baseline = self.send_scan(probe_request(target_url, None, MARKER), &initiator).await?;
+        let calib = self.send_scan(probe_request(target_url, Some("plnxcalib9z"), MARKER), &initiator).await.ok();
         let base_len = baseline.resp_body.len() as i64;
         let base_status = baseline.status;
         let calib_len = calib.as_ref().map(|c| c.resp_body.len() as i64);
@@ -1999,7 +2063,7 @@ impl Engine {
         let mut report = ParamProbeReport { target: target_url.to_string(), baseline_exchange: baseline.id, ..Default::default() };
         let mut influential: Vec<(String, i64)> = vec![];
         for cand in crate::program::PARAM_NAMES.iter().take(crate::program::MAX_PROBES) {
-            let ex = match self.send(probe_request(target_url, Some(cand), MARKER), &initiator).await {
+            let ex = match self.send_scan(probe_request(target_url, Some(cand), MARKER), &initiator).await {
                 Ok(ex) => ex,
                 // Scope is the same host throughout: a refusal stops the probe.
                 Err(e @ SendError::OutOfScope { .. }) => return Err(e),

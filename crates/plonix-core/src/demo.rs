@@ -102,6 +102,8 @@ pub fn create(dir: &Path) -> Result<Project> {
 
 const WWW: &str = "www.brightcart.example";
 const API: &str = "api.brightcart.example";
+/// The handle the demo's researcher header carries.
+const RESEARCHER: &str = "brightcart-researcher";
 /// The two demo shoppers' session cookies, so the Access check can replay a
 /// request as each of them. Session A is the one in the captured traffic.
 const SESSION_A: &str = "s%3Ah7Qd2kXvR9wLm4ZpT8yB1cN6.Jf0aWq3Ue5rYt7Io9Pl2Kj4Hg6Fd8Sa";
@@ -385,6 +387,16 @@ impl Seeder<'_> {
             vec![]
         };
         self.ts += 700 + (self.ts % 1900);
+        // The demo's first rule sends a researcher header to the shop's API,
+        // so captured API calls carry it and show what the rule changed.
+        let (mut replaced, mut original_request) = (vec![], None);
+        if source == Source::Proxy && authority == API {
+            let mut before = Exchange { method: r.method.into(), path: path.into(), query: query.into(), req_headers: req_headers.clone(), ..Default::default() };
+            before.req_body = r.body.clone().into_bytes();
+            original_request = Some(crate::ask::request_text(&before, 64 * 1024).0);
+            req_headers.push(("X-Bug-Bounty".into(), RESEARCHER.into()));
+            replaced.push("#1 add header X-Bug-Bounty".to_string());
+        }
         let ex = Exchange {
             ts: self.ts,
             scheme: scheme.into(),
@@ -403,6 +415,8 @@ impl Seeder<'_> {
             source: Some(source),
             initiator: (source == Source::Replay).then(|| "gui".to_string()),
             http_version: "HTTP/2".into(),
+            replaced,
+            original_request,
             ..Default::default()
         };
         let id = self.store.insert_exchange(&ex)?;
@@ -887,6 +901,49 @@ export async function api(path, opts = {{}}) {{
     ])?;
 
     seed_filters(store)?;
+    seed_traffic_rules(store)?;
+    Ok(())
+}
+
+/// Rules that change traffic as it passes: a researcher header on every
+/// request to the shop, fresh responses instead of cached ones, and a text
+/// rule kept switched off.
+fn seed_traffic_rules(store: &Store) -> Result<()> {
+    use crate::replace::{Kind, Rule as TrafficRule, Target};
+    let base = TrafficRule {
+        id: 0,
+        kind: Kind::AddHeader,
+        target: Target::RequestHeader,
+        pattern: String::new(),
+        replace: String::new(),
+        regex: false,
+        enabled: true,
+        in_scope_only: true,
+        note: String::new(),
+        browser: true,
+        bench: true,
+        scans: true,
+        when: String::new(),
+    };
+    for r in [
+        TrafficRule { pattern: "X-Bug-Bounty".into(), replace: RESEARCHER.into(), ..base.clone() },
+        TrafficRule { kind: Kind::RemoveHeader, pattern: "If-None-Match".into(), bench: false, scans: false, ..base.clone() },
+        TrafficRule {
+            kind: Kind::Replace,
+            target: Target::ResponseBody,
+            pattern: r#""beta_checkout":false"#.into(),
+            replace: r#""beta_checkout":true"#.into(),
+            enabled: false,
+            bench: false,
+            scans: false,
+            when: format!("host:{API} path:/v1/config"),
+            note: "Try the new checkout".into(),
+            ..base
+        },
+    ] {
+        crate::replace::check(&r).map_err(anyhow::Error::msg)?;
+        store.add_replace_rule(&r)?;
+    }
     Ok(())
 }
 

@@ -436,11 +436,22 @@ const TOUR_STEPS = [
     text: 'Plonix lists what it sees in an in-scope host and recommends checks that fit it. You pick the checks and press Run; nothing scans on its own.',
   },
   {
-    view: 'settings',
-    prep: () => (S.settingsSection = 'replace'),
-    target: ['.spane', '#main .view'],
-    title: 'Match and replace',
-    text: 'Rules that rewrite requests and responses as they pass through the proxy, such as swapping a header or switching a feature flag on. Requests they changed are tagged in Traffic.',
+    view: 'rules',
+    target: ['.rllist', '#main .view'],
+    title: 'Rules',
+    text: 'Rules change traffic as it passes: send a header on every request, change or remove one, or replace any text. Each rule says where it applies (your browser, the Bench, Scans) and can have a condition, written like a Traffic search.',
+  },
+  {
+    view: 'rules',
+    prep: () => {
+      ruleDialog({ pattern: 'X-Bug-Bounty', replace: 'brightcart-researcher' });
+      // Shown, not for typing yet: the walk's keys and buttons stay in charge.
+      $('.modal').classList.add('tourmodal');
+      document.activeElement.blur();
+    },
+    target: '.rldialog',
+    title: 'Adding a rule',
+    text: 'Pick what the rule does, fill in a name and a value, and the preview shows what every request will carry. You can also right-click any header in the Lens to start a rule from it. The green pill in Traffic shows when rules are on.',
   },
   {
     view: 'market',
@@ -477,7 +488,7 @@ function startTour(at = 0) {
   TOUR.el = h('div', { class: 'tourcard', role: 'dialog', 'aria-label': 'Demo walkthrough' });
   document.body.append(TOUR.spot, TOUR.el);
   TOUR.keys = (e) => {
-    if ($('.modal, .popover, .ctxmenu')) return;
+    if ($('.modal:not(.tourmodal), .popover, .ctxmenu')) return;
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName)) return;
     const k = { ArrowRight: 1, ArrowLeft: -1, Escape: 0 }[e.key];
     if (k === undefined || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -629,6 +640,7 @@ const VIEWS = {
   market: { label: 'Market', ico: '⬢', render: renderMarket },
   scans: { label: 'Scans', ico: '⌖', render: renderScans },
   programs: { label: 'Programs', ico: '◈', render: renderPrograms },
+  rules: { label: 'Rules', ico: '⇄', render: renderRules },
   settings: { label: 'Settings', ico: '⚙', render: renderSettings, footer: true },
 };
 
@@ -1574,6 +1586,7 @@ function renderTraffic(main) {
         h('div', { class: 'search', id: 'searchbox' }, h('span', { class: 'mg', text: '⌕' }), input, h('kbd', { text: '/' })),
         h('span', { class: 'count', id: 'tcount' }),
         h('span', { class: 'seg groupseg', id: 'groupseg' }),
+        h('span', { id: 'rulespill' }),
         liveBtn,
         interceptButton(),
         h('button', { class: 'btn sm', id: 'harbtn', text: 'HAR ▾', title: 'Import a HAR file, or export traffic as one', onclick: (e) => harMenu(e.currentTarget) }),
@@ -1587,6 +1600,7 @@ function renderTraffic(main) {
   ]);
   renderChips();
   drawGroupToggle();
+  loadRules();
   renderBanner();
   IC.drawn = null;
   drawInterceptPanel();
@@ -2446,6 +2460,7 @@ function drawRows(freshAbove) {
     if (ex.source === 'replay') tags.push(h('span', { class: 'tag replay', text: 'sent' }));
     if (ex.source === 'import') tags.push(h('span', { class: 'tag imported', text: 'har', title: 'Imported from a HAR file' }));
     if (ex.edited) tags.push(h('span', { class: 'tag edited', text: 'edited', title: 'Changed in Intercept before it went on' }));
+  if (ex.replaced) tags.push(h('span', { class: 'tag edited', text: 'changed', title: 'Changed by rules on the way' }));
     const tr = h(
       'tr',
       {
@@ -2653,14 +2668,38 @@ async function openInspector(id) {
   };
   drawResp();
   if (msgBox) drawMessages(msgBox, ex);
+  // Changed by rules on the way out: the Lens can show it as sent, as it was, or both.
+  const ruled = !ex.edited && ex.original_request && ex.replaced && ex.replaced.length;
+  const reqBody = h('div', { class: 'reqbody' });
+  const drawReq = () => {
+    const view = ruled ? T.ruleView || 'sent' : 'sent';
+    clear(reqBody, view === 'sent' ? rawPre(requestText(ex)) : ruleCompare(ex, view));
+    if (ruleSeg) for (const b of ruleSeg.children) b.classList.toggle('on', b.dataset.v === view);
+  };
+  const ruleSeg = ruled
+    ? h(
+        'span',
+        { class: 'seg r', title: 'Rules changed this request on its way out' },
+        [['sent', 'As sent'], ['original', 'Original'], ['both', 'Side by side']].map(([v, l]) => h('button', { 'data-v': v, text: l, onclick: () => ((T.ruleView = v), drawReq()) })),
+      )
+    : null;
   const reqCol = h(
     'div',
     { class: 'col' },
-    h('div', { class: 'lbl' }, 'Request', cutTag(ex.req_truncated, ex.req_size, ex.req_body), h('span', { class: 'r', text: '#' + ex.id + ' · ' + fmtTime(ex.ts) + ' · ' + (ex.initiator || ex.source || 'proxy') })),
+    h('div', { class: 'lbl' }, 'Request', cutTag(ex.req_truncated, ex.req_size, ex.req_body), ruleSeg, h('span', { class: 'r', text: '#' + ex.id + ' · ' + fmtTime(ex.ts) + ' · ' + (ex.initiator || ex.source || 'proxy') })),
     h('div', { class: 'spotslot' }),
     h('div', { class: 'selslot' }),
-    rawPre(requestText(ex)),
+    reqBody,
   );
+  drawReq();
+  reqCol.addEventListener('contextmenu', (e) => {
+    const pre = e.target.closest('pre.raw');
+    if (pre && !pre.classList.contains('rlcmp')) lensHeaderMenu(e, pre, 'request');
+  });
+  respCol.addEventListener('contextmenu', (e) => {
+    const pre = e.target.closest('pre.raw');
+    if (pre) lensHeaderMenu(e, pre, 'response');
+  });
   wireLensSelection(reqCol, ex, 'request');
   append(insp, [
     h(
@@ -2677,7 +2716,7 @@ async function openInspector(id) {
         h('span', { text: fmtSize(ex.resp_size != null ? ex.resp_size : b64len(ex.resp_body)) }),
         ex.http_version ? h('span', { text: ex.http_version, title: 'The protocol spoken with the server' }) : null,
         ex.edited ? h('button', { class: 'tag edited', text: 'edited', title: 'Changed in Intercept before it went on. Show the original', onclick: () => showOriginal(ex) }) : null,
-        ex.replaced && ex.replaced.length ? h('span', { class: 'tag edited', text: 'replaced', title: 'Changed by match-and-replace rules:\n' + ex.replaced.join('\n') }) : null,
+        ex.replaced && ex.replaced.length ? h('button', { class: 'tag edited', text: 'changed', title: 'Changed by rules:\n' + ex.replaced.join('\n') + '\n\nClick to open Rules', onclick: () => leaveTo('rules') }) : null,
         clientCertTag(ex),
         ex.source === 'import' ? h('span', { class: 'tag imported', text: 'har', title: 'Imported from a HAR file' }) : null,
         h('span', { class: 'tag ' + scopeTag(decide(ex.host)), text: scopeLabel(decide(ex.host)) }),
@@ -10479,6 +10518,11 @@ function storagePanel() {
   return panel;
 }
 
+/* ---------- rules: change traffic as it passes ----------
+   Plain header rules (add, change, remove) and text rules, each with where
+   it applies (browser, Bench, Scans) and an optional condition written as a
+   traffic search. The proxy and the engine apply them; nothing here sends. */
+
 const REPLACE_TARGETS = [
   ['request_line', 'Request line'],
   ['request_header', 'Request headers'],
@@ -10487,74 +10531,411 @@ const REPLACE_TARGETS = [
   ['response_body', 'Response body'],
 ];
 
-/** Match-and-replace rules: list, switch on or off, remove, add. */
-function replacePanel() {
-  const panel = h('div', { class: 'spanel replace' }, h('h4', { text: 'Rules' }), h('p', { text: 'Loading…' }));
-  const label = (t) => (REPLACE_TARGETS.find(([k]) => k === t) || [t, t])[1];
-  const call = async (path, opts) => {
-    try {
-      await api(path, opts);
-      load();
-      return true;
-    } catch (e) {
-      toast(e.message, 'err');
-      return false;
+const RULE_KINDS = [
+  ['add_header', 'Add header', 'Sends a header that isn’t there yet'],
+  ['change_header', 'Change header', 'Gives a header a new value'],
+  ['remove_header', 'Remove header', 'Takes a header out'],
+  ['replace', 'Replace text', 'Finds text and puts other text in its place'],
+];
+
+/** The rules and the all-rules switch, as last loaded. */
+const RL = { data: null };
+
+async function loadRules() {
+  try {
+    RL.data = await api('/api/replace');
+  } catch {
+    RL.data = null;
+  }
+  drawRulesPill();
+  drawRulesCount();
+  return RL.data;
+}
+
+const activeRules = () => (RL.data && RL.data.enabled ? RL.data.rules.filter((r) => r.enabled) : []);
+
+function drawRulesCount() {
+  const ct = $('#ct-rules');
+  if (!ct || !RL.data) return;
+  const n = activeRules().length;
+  ct.textContent = RL.data.enabled ? (n ? n + ' on' : '') : RL.data.rules.length ? 'paused' : '';
+}
+
+const ruleSide = (r) => (r.target.startsWith('response') ? 'response' : 'request');
+
+/** One line that says what a rule does, in plain words. */
+function ruleSummary(r) {
+  const side = ruleSide(r) === 'response' ? ' (response)' : '';
+  switch (r.kind) {
+    case 'add_header':
+      return { tag: 'Add header', cls: 'add', text: `${r.pattern}: ${r.replace}${side}` };
+    case 'set_header':
+      return { tag: 'Add header', cls: 'add', text: `${r.pattern}: ${r.replace}${side}`, note: 'replaces any value already there' };
+    case 'change_header':
+      return { tag: 'Change header', cls: 'chg', text: `${r.pattern} → ${r.replace}${side}` };
+    case 'remove_header':
+      return { tag: 'Remove header', cls: 'del', text: r.pattern + side };
+    default: {
+      const where = (REPLACE_TARGETS.find(([k]) => k === r.target) || [r.target, r.target])[1].toLowerCase();
+      return { tag: 'Replace text', cls: 'txt', text: `${r.pattern} → ${r.replace === '' ? '(nothing)' : r.replace}`, note: where + (r.regex ? ', regex' : '') };
     }
-  };
-  const row = (r) =>
+  }
+}
+
+async function setRulesOn(on) {
+  try {
+    await api('/api/settings/replace', { method: 'PUT', body: { values: { enabled: on } } });
+    toast(on ? 'Rules are on again.' : 'All rules are paused. Traffic passes unchanged.', 'ok');
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+  await loadRules();
+  if (S.view === 'rules') drawRules();
+}
+
+async function renderRules(main) {
+  const toggle = h('label', { class: 'rltoggle', id: 'rltoggle' });
+  clear(
+    main,
     h(
       'div',
-      { class: 'rrule' + (r.enabled ? '' : ' off') },
-      h('input', { type: 'checkbox', checked: r.enabled, title: r.enabled ? 'On: switch off' : 'Off: switch on', onchange: (e) => call('/api/replace/' + r.id, { method: 'PATCH', body: { enabled: e.target.checked } }) }),
-      h('span', { class: 'rtarget', text: label(r.target) }),
-      h('span', { class: 'mono rpat', text: r.pattern, title: r.regex ? 'Regular expression' : 'Literal text' }),
-      h('span', { class: 'muted', text: '→' }),
-      h('span', { class: 'mono rpat', text: r.replace === '' ? '(removed)' : r.replace }),
-      r.regex ? h('span', { class: 'tag', text: 'regex' }) : null,
-      r.in_scope_only ? h('span', { class: 'tag', text: 'in scope only' }) : null,
-      r.note ? h('span', { class: 'muted', text: r.note }) : null,
-      h('button', { class: 'iconbtn', text: '✕', title: 'Remove this rule', onclick: () => call('/api/replace/' + r.id, { method: 'DELETE' }) }),
-    );
-  const form = () => {
-    const target = h('select', null, REPLACE_TARGETS.map(([k, l]) => h('option', { value: k, text: l })));
-    const pattern = h('input', { type: 'text', placeholder: 'Match, e.g. (?i)^user-agent: .*$', spellcheck: false });
-    const replace = h('input', { type: 'text', placeholder: 'Replace with (empty removes the match)', spellcheck: false });
-    const regex = h('input', { type: 'checkbox' });
-    const scoped = h('input', { type: 'checkbox' });
-    const note = h('input', { type: 'text', placeholder: 'Note (optional)' });
-    const add = async () => {
-      if (!pattern.value) return pattern.focus();
-      // In a text field, \n stands for a line break, so header rules can add a header.
-      const body = { target: target.value, match: pattern.value, replace: replace.value.replace(/\\n/g, '\n'), regex: regex.checked, in_scope_only: scoped.checked, note: note.value };
-      if (await call('/api/replace', { method: 'POST', body })) toast('Rule added. It applies to traffic from now on.', 'ok');
-    };
-    return h(
-      'div',
-      { class: 'rform' },
-      h('div', { class: 'row' }, target, pattern, replace),
+      { class: 'view rulesview' },
       h(
         'div',
-        { class: 'row' },
-        h('label', null, regex, ' Regular expression ($1 inserts a capture)'),
-        h('label', null, scoped, ' In-scope hosts only'),
-        note,
-        h('button', { class: 'btn primary', text: 'Add Rule', onclick: add }),
+        { class: 'toolbar' },
+        backButton(),
+        h('h2', { text: 'Rules' }),
+        h('span', { class: 'muted', text: 'Change traffic as it passes. Applied top to bottom.' }),
+        h('span', { class: 'spacer' }),
+        toggle,
+        h('button', { class: 'btn sm primary', text: '+ Add rule', onclick: () => ruleDialog() }),
       ),
-      h('p', { class: 'muted', text: 'Header rules see one "Name: value" line per header: replace a whole line with nothing to remove a header, or use \\n in the replacement to add one.' }),
+      h('div', { class: 'rlbody', id: 'rlbody' }, h('div', { class: 'empty', text: 'Loading rules…' })),
+    ),
+  );
+  await loadRules();
+  drawRules();
+}
+
+function drawRules() {
+  const body = $('#rlbody');
+  if (!body) return;
+  const d = RL.data;
+  if (!d) return clear(body, h('div', { class: 'empty', text: 'The rules could not be loaded.' }));
+  clear(
+    $('#rltoggle'),
+    h('input', { type: 'checkbox', class: 'switch', checked: d.enabled, onchange: (e) => setRulesOn(e.target.checked) }),
+    d.enabled ? 'All rules on' : 'All rules paused',
+  );
+  if (!d.rules.length) {
+    return clear(
+      body,
+      h(
+        'div',
+        { class: 'rlempty' },
+        h('h3', { text: 'No rules yet' }),
+        h('p', { class: 'muted', text: 'A rule changes traffic as it passes: send a header on every request, change one, remove one, or replace any text. Right-click a header in the Lens to make a rule from it.' }),
+        h('button', { class: 'btn primary', text: '+ Add rule', onclick: () => ruleDialog() }),
+      ),
+    );
+  }
+  const reach = (r) =>
+    [r.browser ? 'Browser' : null, r.bench ? 'Bench' : null, r.scans ? 'Scans' : null, r.in_scope_only ? 'In scope' : null]
+      .filter(Boolean)
+      .map((t) => h('span', { class: 'rlchip' + (t === 'In scope' ? ' scope' : ''), text: t }));
+  const row = (r) => {
+    const s = ruleSummary(r);
+    return h(
+      'div',
+      { class: 'rlrow' + (r.enabled && d.enabled ? '' : ' off'), onclick: (e) => !e.target.closest('input, button') && ruleDialog(r) },
+      h('input', {
+        type: 'checkbox',
+        class: 'switch sm',
+        checked: r.enabled,
+        title: r.enabled ? 'On: switch this rule off' : 'Off: switch this rule on',
+        onchange: async (e) => {
+          try {
+            await api('/api/replace/' + r.id, { method: 'PATCH', body: { enabled: e.target.checked } });
+          } catch (err) {
+            toast(err.message, 'err');
+          }
+          await loadRules();
+          drawRules();
+        },
+      }),
+      h('span', { class: 'rlkind ' + s.cls, text: s.tag }),
+      h(
+        'span',
+        { class: 'rlwhat' },
+        h('span', { class: 'mono', text: s.text }),
+        s.note ? h('span', { class: 'muted', text: s.note }) : null,
+        r.when ? h('span', { class: 'rlwhen', title: 'Only when the exchange matches this search' }, 'only when ', h('code', { text: r.when })) : null,
+        r.note ? h('span', { class: 'muted', text: '· ' + r.note }) : null,
+      ),
+      h('span', { class: 'rlreach' }, reach(r)),
+      h('button', {
+        class: 'iconbtn',
+        text: '✕',
+        title: 'Remove this rule',
+        onclick: async () => {
+          try {
+            await api('/api/replace/' + r.id, { method: 'DELETE' });
+          } catch (err) {
+            toast(err.message, 'err');
+          }
+          await loadRules();
+          drawRules();
+        },
+      }),
     );
   };
-  const load = () =>
-    api('/api/replace')
-      .then((v) => {
-        const rows = [h('h4', { text: 'Rules, in the order they apply' })];
-        if (!v.enabled) rows.push(h('p', { class: 'muted', text: 'Match and replace is switched off above; these rules change nothing until it is on.' }));
-        if (!v.rules.length) rows.push(h('p', { class: 'muted', text: 'No rules yet.' }));
-        rows.push(v.rules.map(row), form());
-        clear(panel, rows);
-      })
-      .catch((e) => clear(panel, h('p', { text: e.message })));
-  load();
-  return panel;
+  clear(
+    body,
+    d.enabled ? null : h('div', { class: 'rlnote', text: 'All rules are paused: traffic passes unchanged until you switch them back on.' }),
+    h('div', { class: 'rllist' }, d.rules.map(row)),
+    h('p', { class: 'muted rltip', text: 'Click a rule to edit it. Right-click any header in the Lens to make a rule from it.' }),
+  );
+}
+
+/**
+ * The Add rule popup, empty, filled in from the Lens (`seed`), or for editing
+ * an existing rule (one with an id). Nothing applies until Save.
+ */
+function ruleDialog(seed = {}) {
+  const editing = seed.id != null;
+  const st = {
+    kind: seed.kind === 'set_header' ? 'add_header' : seed.kind || 'add_header',
+    side: seed.target && seed.target.startsWith('response') ? 'response' : 'request',
+    target: seed.target && seed.kind === 'replace' ? seed.target : 'request_header',
+    browser: seed.browser != null ? seed.browser : true,
+    bench: seed.bench != null ? seed.bench : true,
+    scans: seed.scans != null ? seed.scans : true,
+    scoped: seed.in_scope_only != null ? seed.in_scope_only : true,
+  };
+  const field = (label, input, hint) => h('label', null, label, input, hint ? h('span', { class: 'rlhint', text: hint }) : null);
+  const name = h('input', { type: 'text', class: 'mono', placeholder: 'X-Bug-Bounty', spellcheck: false, value: st.kind !== 'replace' ? seed.pattern || '' : '' });
+  const value = h('input', { type: 'text', class: 'mono', placeholder: 'your-handle', spellcheck: false, value: st.kind !== 'replace' ? seed.replace || '' : '' });
+  const overwrite = h('input', { type: 'checkbox', checked: seed.kind === 'set_header' });
+  const find = h('input', { type: 'text', class: 'mono', placeholder: '"beta":false', spellcheck: false, value: st.kind === 'replace' ? seed.pattern || '' : '' });
+  const repl = h('input', { type: 'text', class: 'mono', placeholder: '"beta":true  (empty removes it)', spellcheck: false, value: st.kind === 'replace' ? seed.replace || '' : '' });
+  const regex = h('input', { type: 'checkbox', checked: !!seed.regex });
+  const target = h('select', null, REPLACE_TARGETS.map(([k, l]) => h('option', { value: k, text: l, selected: k === st.target })));
+  const when = h('input', { type: 'text', class: 'mono', placeholder: 'e.g. host:api.example.com method:POST', spellcheck: false, value: seed.when || '' });
+  const note = h('input', { type: 'text', placeholder: 'Note (optional)', value: seed.note || '' });
+  const kinds = h('div', { class: 'rlkinds' });
+  const sideSeg = h('span', { class: 'seg rlside' });
+  const reachBox = h('div', { class: 'rlreachpick' });
+  const fields = h('div', { class: 'rlfields' });
+  const preview = h('div', { class: 'rlpreview mono' });
+
+  const drawPreview = () => {
+    const who = st.side === 'response' ? 'Every response will' : 'Every request will';
+    const n = name.value.trim() || 'Header';
+    const lines = {
+      add_header: [[`${who} carry`], ['add', `+ ${n}: ${value.value.trim()}`], overwrite.checked ? [`replacing any ${n} already there`] : [`unless it already has ${n}`]],
+      change_header: [[`Where ${n} is sent, it becomes`], ['chg', `${n}: ${value.value.trim()}`]],
+      remove_header: [[`${who} lose`], ['del', `− ${n}`]],
+      replace: [[`In ${(REPLACE_TARGETS.find(([k]) => k === target.value) || ['', ''])[1].toLowerCase()}`], ['del', '− ' + (find.value || '…')], ['add', '+ ' + (repl.value || '(nothing)')]],
+    }[st.kind];
+    if (when.value.trim()) lines.push(['only when ' + when.value.trim()]);
+    clear(preview, lines.map(([a, b]) => h('div', { class: b ? 'p-' + a : '', text: b || a })));
+  };
+  const drawKinds = () =>
+    clear(
+      kinds,
+      RULE_KINDS.map(([k, label, hint]) =>
+        h('button', { type: 'button', class: 'rlkindbtn' + (st.kind === k ? ' on' : ''), title: hint, onclick: () => ((st.kind = k), draw()) }, h('b', { text: label }), h('span', { text: hint })),
+      ),
+    );
+  const drawSide = () =>
+    clear(
+      sideSeg,
+      ['request', 'response'].map((s) => h('button', { type: 'button', class: st.side === s ? 'on' : '', text: s === 'request' ? 'Requests' : 'Responses', onclick: () => ((st.side = s), draw()) })),
+    );
+  const chip = (key, label, hint) =>
+    h('button', { type: 'button', class: 'rlpick' + (st[key] ? ' on' : ''), title: hint, text: label, onclick: () => ((st[key] = !st[key]), drawReach(), drawPreview()) });
+  const drawReach = () =>
+    clear(
+      reachBox,
+      chip('browser', 'Browser', 'Traffic from your browser, through the proxy'),
+      chip('bench', 'Bench', 'Requests you send from the Bench, Run and Access check'),
+      chip('scans', 'Scans', 'Requests sent by Scans, crawls and extensions'),
+      chip('scoped', 'In-scope hosts only', 'Leave hosts outside your scope alone'),
+    );
+  const draw = () => {
+    drawKinds();
+    drawSide();
+    const header = st.kind !== 'replace';
+    clear(
+      fields,
+      header ? h('div', { class: 'rlsiderow' }, h('span', { class: 'rlhint', text: 'Change' }), sideSeg) : null,
+      header ? field('Header name', name) : null,
+      st.kind === 'add_header' || st.kind === 'change_header' ? field('Value', value) : null,
+      st.kind === 'add_header' ? h('label', { class: 'domrow' }, overwrite, 'If it’s already there, replace its value') : null,
+      header ? null : field('In', target),
+      header ? null : field('Find', find),
+      header ? null : field('Replace with', repl),
+      header ? null : h('label', { class: 'domrow' }, regex, 'Regular expression ($1 puts back what a group matched)'),
+    );
+    drawPreview();
+  };
+  for (const el of [name, value, find, repl, when]) el.addEventListener('input', drawPreview);
+  for (const el of [overwrite, target]) el.addEventListener('change', drawPreview);
+  drawReach();
+  draw();
+
+  const save = async () => {
+    const header = st.kind !== 'replace';
+    const body = {
+      kind: header ? (st.kind === 'add_header' && overwrite.checked ? 'set_header' : st.kind) : 'replace',
+      target: header ? st.side + '_header' : target.value,
+      match: header ? name.value.trim() : find.value,
+      replace: header ? (st.kind === 'remove_header' ? '' : value.value.trim()) : repl.value,
+      regex: header ? false : regex.checked,
+      browser: st.browser,
+      bench: st.bench,
+      scans: st.scans,
+      in_scope_only: st.scoped,
+      when: when.value.trim(),
+      note: note.value,
+    };
+    if (!body.match) return (header ? name : find).focus();
+    try {
+      if (editing) await api('/api/replace/' + seed.id, { method: 'PATCH', body });
+      else await api('/api/replace', { method: 'POST', body });
+    } catch (e) {
+      m.err.textContent = e.message;
+      return;
+    }
+    closeModal();
+    toast(editing ? 'Rule saved.' : 'Rule added. It applies to traffic from now on.', 'ok');
+    await loadRules();
+    if (S.view === 'rules') drawRules();
+  };
+  const m = modal(
+    editing ? 'Edit rule' : 'New rule',
+    [
+      kinds,
+      fields,
+      h('div', { class: 'rlsection' }, h('span', { class: 'rlhint', text: 'Applies to' }), reachBox),
+      field('Only when (optional)', when, 'A traffic search, the same as in Traffic: host:, path:, method:, status:, mime:, or any text.'),
+      note,
+      preview,
+    ],
+    [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), h('button', { class: 'btn primary', text: editing ? 'Save' : 'Add rule', onclick: save })],
+  );
+  m.el.querySelector('.mcard').classList.add('rldialog');
+  m.el.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeModal();
+    if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type === 'text') save();
+  });
+  (st.kind === 'replace' ? find : name).focus();
+}
+
+/** The "3 rules on" pill in the Traffic toolbar: always shows when rules change traffic. */
+function drawRulesPill() {
+  const slot = $('#rulespill');
+  if (!slot) return;
+  const d = RL.data;
+  if (!d || !d.rules.length) return clear(slot);
+  const n = activeRules().length;
+  const on = d.enabled && n > 0;
+  clear(
+    slot,
+    h(
+      'button',
+      {
+        class: 'rlpill' + (on ? ' on' : ''),
+        title: on ? 'Rules are changing traffic. Click to see them or pause them' : 'Rules are paused or all off',
+        onclick: (e) => rulesMenu(e.currentTarget),
+      },
+      h('span', { class: 'dot' }),
+      on ? `${n} rule${n === 1 ? '' : 's'} on` : 'Rules paused',
+    ),
+  );
+}
+
+function rulesMenu(anchor) {
+  closePopover();
+  const d = RL.data;
+  const items = activeRules().map((r) => {
+    const s = ruleSummary(r);
+    return h('button', { role: 'menuitem', class: 'rlmenuitem', onclick: () => (closePopover(), ruleDialog(r)) }, h('span', { class: 'rlkind ' + s.cls, text: s.tag }), h('span', { class: 'mono', text: s.text }));
+  });
+  const menu = h(
+    'div',
+    { class: 'ctxmenu', role: 'menu' },
+    items.length ? items : h('div', { class: 'mnote', text: d.enabled ? 'Every rule is switched off.' : 'All rules are paused.' }),
+    h('div', { class: 'msep' }),
+    h('button', { role: 'menuitem', text: d.enabled ? 'Pause all rules' : 'Resume rules', onclick: () => (closePopover(), setRulesOn(!d.enabled)) }),
+    h('button', { role: 'menuitem', text: 'Open Rules', onclick: () => (closePopover(), leaveTo('rules')) }),
+  );
+  showPopover(menu, anchor.getBoundingClientRect());
+}
+
+/** Right-click on a header line in the Lens: make a rule from it, filled in. */
+function lensHeaderMenu(e, pre, side) {
+  const pos = document.caretRangeFromPoint ? document.caretRangeFromPoint(e.clientX, e.clientY) : null;
+  if (!pos || !pre.contains(pos.startContainer)) return;
+  const upto = document.createRange();
+  upto.setStart(pre, 0);
+  upto.setEnd(pos.startContainer, pos.startOffset);
+  const text = pre.textContent;
+  const at = upto.toString().length;
+  const start = text.lastIndexOf('\n', at - 1) + 1;
+  const end = text.indexOf('\n', at);
+  const line = text.slice(start, end < 0 ? text.length : end);
+  // Header lines only: not the first line, and before the blank line that starts the body.
+  const head = text.slice(0, text.indexOf('\n\n') < 0 ? text.length : text.indexOf('\n\n'));
+  if (start === 0 || start > head.length) return;
+  const c = line.indexOf(':');
+  if (c < 1) return;
+  const name = line.slice(0, c).trim();
+  const value = line.slice(c + 1).trim();
+  if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)) return;
+  e.preventDefault();
+  closePopover();
+  const target = side + '_header';
+  const every = side === 'response' ? 'every response' : 'every request';
+  const item = (label, hint, seed) =>
+    h('button', { role: 'menuitem', class: 'rlctx', onclick: () => (closePopover(), ruleDialog({ target, pattern: name, replace: value, ...seed })) }, h('b', { text: label }), h('span', { text: hint }));
+  const menu = h(
+    'div',
+    { class: 'ctxmenu', role: 'menu' },
+    h('div', { class: 'mnote rlctxhead' }, h('b', { text: 'Create a rule from ' + name }), h('span', { text: 'You review it before it’s saved. It then applies to new traffic.' })),
+    item('New rule: send on ' + every, `Adds ${name}: ${value.length > 40 ? value.slice(0, 40) + '…' : value} wherever it’s missing`, { kind: 'add_header' }),
+    item('New rule: always use this value', `Gives ${name} this value on ${every}`, { kind: 'set_header' }),
+    item('New rule: remove from ' + every, `Takes ${name} out before it ${side === 'response' ? 'reaches the browser' : 'leaves'}`, { kind: 'remove_header' }),
+    h('div', { class: 'msep' }),
+    h('button', { role: 'menuitem', text: 'Copy header', onclick: () => (closePopover(), copyText(line)) }),
+  );
+  showPopover(menu, { left: e.clientX, bottom: e.clientY - 6 });
+}
+
+/** Request as sent, the original before rules changed it, or both side by side with the changed lines marked. */
+function ruleCompare(ex, view) {
+  const sent = asPlain(requestText(ex)).split('\n');
+  const orig = (ex.original_request || '').replace(/\n$/, '').split('\n');
+  const inSent = new Set(sent);
+  const inOrig = new Set(orig);
+  const pre = (lines, other, cls) => h('pre', { class: 'raw rlcmp' }, lines.map((l) => [other.has(l) ? l : h('span', { class: cls, text: l || ' ' }), '\n']));
+  if (view === 'original') return pre(orig, inSent, 'd-del');
+  return h(
+    'div',
+    { class: 'rlcmpgrid' },
+    h('div', null, h('div', { class: 'rlhint', text: 'Original, before the rules' }), pre(orig, inSent, 'd-del')),
+    h('div', null, h('div', { class: 'rlhint', text: 'As sent' }), pre(sent, inOrig, 'd-add')),
+  );
+}
+
+/** In Settings, the switch stays; the rules themselves live on the Rules screen. */
+function replacePanel() {
+  return h(
+    'div',
+    { class: 'spanel replace' },
+    h('p', { class: 'muted', text: 'Rules are kept on their own screen, where you can add, edit and switch them on or off one by one.' }),
+    h('button', { class: 'btn', text: 'Open Rules', onclick: () => leaveTo('rules') }),
+  );
 }
 
 /** Client certificates: list, remove, add from PEM or .p12 files. Keys never come back from the engine. */

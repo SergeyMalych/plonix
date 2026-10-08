@@ -523,6 +523,7 @@ mod tests {
             source: String::new(),
             in_scope: true,
             edited: false,
+            replaced: false,
         };
         let p = prompt(&[ex], false, &["Old idea".into()], &["Open idea".into()]);
         assert!(p.contains("#7 GET api.example.com/v1/orders/1?x=1 -> 200"));
