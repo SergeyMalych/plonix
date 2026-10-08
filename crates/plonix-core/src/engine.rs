@@ -1060,7 +1060,7 @@ impl Engine {
         let outbound = OutboundRequest { scheme, host, port, method, target, headers: req.headers, body: Bytes::from(body), extra_headers: vec![] };
         let result = match self.responder().and_then(|r| r(&outbound)) {
             Some(resp) => Ok(resp),
-            None => self.upstream().send(outbound).await,
+            None => self.upstream().send_capped(outbound, self.body_limit()).await,
         };
         ex.duration_ms = started.elapsed().as_millis() as i64;
         match result {
@@ -1068,6 +1068,8 @@ impl Engine {
                 ex.status = Some(up.status);
                 ex.resp_headers = up.headers;
                 ex.resp_body = up.body.to_vec();
+                ex.resp_truncated = up.truncated_from.is_some();
+                ex.resp_size = up.truncated_from.map(|n| n as i64);
                 ex.tls_sans = up.tls_sans;
                 ex.http_version = up.version;
                 ex.client_cert = up.client_cert;
