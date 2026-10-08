@@ -5905,7 +5905,7 @@ function callbacksInstallCard() {
     'div',
     { class: 'empty cbinstall' },
     h('h3', { text: 'One thing to install' }),
-    h('p', { class: 'mnote', text: 'Callbacks are collected by interactsh-client, an open-source tool that runs on this Mac. Install it once:' }),
+    h('p', { class: 'mnote', text: 'Callbacks are collected by interactsh, the open-source callback tool by ProjectDiscovery, which runs on this Mac. Install it once:' }),
     h('div', { class: 'cbcmd' }, h('code', { text: cmd }), h('button', { class: 'btn sm', text: 'Copy', onclick: () => copyText(cmd) })),
     h('div', { class: 'cbacts' }, h('button', { class: 'btn primary', text: 'Check again', onclick: () => renderCallbacks($('#main')) })),
   );
@@ -5963,6 +5963,7 @@ function drawCallbackHosts(box) {
     h('div', { class: 'cbnewrow' }, label, h('button', { class: 'btn sm primary', text: 'New host', disabled: !ready, onclick: make })),
     h('div', { class: 'cbhint muted', text: 'Each test gets a host of its own, so a callback points at the test it came from. A new host is copied for you.' }),
     h('div', { class: 'cbhostlist' }, all, rows.length ? rows : h('div', { class: 'cbnone muted', text: ready ? 'No hosts yet. Name one above, or insert one from the Bench.' : 'Hosts appear once listening has started.' })),
+    h('div', { class: 'cbcredit muted', text: 'Uses interactsh by ProjectDiscovery · MIT license' }),
   );
   if (typing) label.focus();
 }

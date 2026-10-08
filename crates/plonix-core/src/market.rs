@@ -98,7 +98,7 @@ const BUILTIN_TOOLS: &[(&str, &[&str])] = &[
         &[
             "Adds a Callbacks screen. Make a host for each test, put it in a request (a URL parameter, a header, a webhook field), and see every DNS lookup, HTTP request or mail that later reaches it, with the time, the address it came from and the raw request.",
             "Each host carries its own name, so a callback points straight at the test it came from. Insert one from the Bench in a click, find the request that carried it, and turn a callback into a finding.",
-            "Nothing runs on its own: listening starts when you press Start and registers only with the callback server. It drives interactsh-client, which you install with `brew install interactsh`. Use the public servers or your own, with a token.",
+            "Nothing runs on its own: listening starts when you press Start and registers only with the callback server. It uses interactsh, the open-source callback tool by ProjectDiscovery (MIT license), which you install with `brew install interactsh`. Use the public servers or your own, with a token.",
         ],
     ),
 ];

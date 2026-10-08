@@ -1165,6 +1165,7 @@ tr.acnote > td { border-bottom: none; }
 .cbhost.on .cbhacts, .cbhost:hover .cbhacts { display: flex; }
 .cbhacts .link { font-family: var(--ui); }
 .cbhacts .link.danger { color: var(--crit); }
+.cbcredit { flex: 0 0 auto; font-size: 11px; padding: 8px 12px 10px; border-top: 1px solid var(--line-2); }
 .cbnone { font-size: 12px; line-height: 1.5; padding: 10px; }
 .cbfeed { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 .cbfeedhead { display: flex; align-items: center; gap: 4px; padding: 10px 14px; border-bottom: 1px solid var(--line-2); }

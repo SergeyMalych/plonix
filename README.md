@@ -181,7 +181,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 
 ### Callbacks
 - **Callbacks** hand out a unique host for each test. Put one in a request (Bench › **Insert callback host** puts it where the cursor is) and every DNS lookup, HTTP request or mail that later reaches it is listed with its time, sender and raw request, next to the test it came from. **Find the request** shows the captured request that carried the host, and **+ Finding** writes it up with both as evidence.
-- Listening starts only when you press **Start listening** and talks only to the callback server: the public servers, or your own with a token. It drives `interactsh-client` (`brew install interactsh`), and keeps each project's session so earlier hosts keep working after a restart.
+- Listening starts only when you press **Start listening** and talks only to the callback server: the public servers, or your own with a token. It uses [interactsh](https://github.com/projectdiscovery/interactsh), the open-source callback tool by ProjectDiscovery (MIT license), which you install with `brew install interactsh`. Plonix keeps each project's session so earlier hosts keep working after a restart.
 
 ### Programs
 - **Programs** (⌘9, `plonix program`) bring in a bug bounty or vulnerability disclosure program: connect HackerOne, paste a program's policy, or look up a domain's `security.txt`, then review and follow it.
