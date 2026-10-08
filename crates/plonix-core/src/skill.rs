@@ -180,8 +180,8 @@ pub fn parse(bytes: &[u8]) -> Result<Skill, String> {
     if instructions.chars().count() > MAX_INSTRUCTIONS {
         return Err(format!("instructions are longer than {MAX_INSTRUCTIONS} characters"));
     }
-    if instructions.chars().any(|c| c.is_control() && c != '\n' && c != '\t') {
-        return Err("instructions must not contain control characters".into());
+    if instructions.chars().any(|c| (c.is_control() && c != '\n' && c != '\t') || crate::detect::is_invisible(c)) {
+        return Err("instructions must not contain control characters or invisible characters".into());
     }
     for placeholder in placeholders(&instructions) {
         if !arguments.iter().any(|a| a.name == placeholder) {
@@ -388,6 +388,10 @@ optional_argument: focus: What to look at\n---\nStart with {{host}}. Focus: {{fo
         assert!(bad("author: red team\n", "").contains("author"));
         assert!(bad("author: red team", "author: red team\nrun: rm -rf /").contains("unknown header"));
         assert!(parse(b"no header").is_err());
+        for hidden in ["\u{200b}", "\u{202e}", "\u{2066}", "\u{feff}", "\u{e0041}"] {
+            assert!(bad("Start with", &format!("Start{hidden} with")).contains("invisible"), "{hidden:?}");
+            assert!(bad("title: Review Acme", &format!("title: Review{hidden} Acme")).contains("invisible"), "{hidden:?}");
+        }
     }
 
     #[test]

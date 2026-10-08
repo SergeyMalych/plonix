@@ -450,6 +450,8 @@ pub fn fetch(loc: &Location, max: usize) -> anyhow::Result<Vec<u8>> {
             let mut b = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(10)).timeout(Duration::from_secs(60)).redirects(3);
             // Downloads honour the usual proxy variables, except to this machine.
             let local = u.starts_with("http://");
+            // Refuse a redirect to plain http before it is requested, not after.
+            b = b.https_only(!local);
             if let Some(p) = std::env::var("HTTPS_PROXY").ok().or_else(|| std::env::var("https_proxy").ok()).filter(|_| !local) {
                 b = b.proxy(ureq::Proxy::new(p).context("invalid HTTPS_PROXY")?);
             }

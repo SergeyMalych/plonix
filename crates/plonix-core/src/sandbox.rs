@@ -264,10 +264,7 @@ pub fn check_untrusted(s: &str, max: usize, multiline: bool) -> Result<(), Strin
     if s.chars().count() > max {
         return Err(format!("at most {max} characters"));
     }
-    let bad = |c: char| {
-        (c.is_control() && !(multiline && matches!(c, '\n' | '\t')))
-            || matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{feff}')
-    };
+    let bad = |c: char| (c.is_control() && !(multiline && matches!(c, '\n' | '\t'))) || crate::detect::is_invisible(c);
     if s.chars().any(bad) {
         return Err("must not contain control or invisible characters".into());
     }

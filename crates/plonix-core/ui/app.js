@@ -9140,6 +9140,8 @@ function extensionState(name) {
 function addExternal() {
   const input = h('input', { placeholder: 'https://example.com/skill.md  or  /path/to/pack.json  or  /path/to/extension', spellcheck: 'false', autocomplete: 'off' });
   let boxes = [];
+  // The sha256 of the file the preview showed: confirming adds only that file.
+  let shown = null;
   const preview = h('div', { class: 'xpreview' });
   const check = h('button', { class: 'btn', text: 'Look at it' });
   const confirmBtn = h('button', { class: 'btn primary', text: 'Add it, not verified', hidden: true });
@@ -9159,7 +9161,7 @@ function addExternal() {
     check.disabled = confirmBtn.disabled = true;
     try {
       const grant = boxes.filter((b) => b.checked).map((b) => b.value);
-      const r = await api('/api/market/add', { method: 'POST', body: { source, confirm, grant } });
+      const r = await api('/api/market/add', { method: 'POST', body: { source, confirm, grant, sha256: confirm ? shown : undefined } });
       if (r.added) {
         closeModal();
         toast(`Added ${r.file.name} (not verified)`, 'ok');
@@ -9168,6 +9170,7 @@ function addExternal() {
         return showPackage(r.file.name);
       }
       const f = r.file;
+      shown = f.sha256;
       const caps = f.capabilities ? capabilityList(f.capabilities) : { rows: [], boxes: [] };
       boxes = caps.boxes;
       clear(
@@ -9189,14 +9192,17 @@ function addExternal() {
   };
   check.onclick = () => run(false);
   confirmBtn.onclick = () => run(true);
-  input.addEventListener('input', () => ((confirmBtn.hidden = true), clear(preview)));
+  input.addEventListener('input', () => ((confirmBtn.hidden = true), (shown = null), clear(preview)));
   input.addEventListener('keydown', (e) => e.key === 'Enter' && run(false));
 }
 
 async function updateAll() {
   try {
     const r = await api('/api/market/update', { method: 'POST', body: {} });
-    toast(`Updated ${(r.changes || []).length} package(s)`, 'ok');
+    const failed = r.failed || [];
+    const done = `Updated ${(r.changes || []).length} package(s)`;
+    if (failed.length) toast(`${done}. Not updated: ${failed.map((f) => `${f.name} (${f.error})`).join('; ')}`, 'err');
+    else toast(done, 'ok');
   } catch (e) {
     toast(e.message, 'err');
   }
