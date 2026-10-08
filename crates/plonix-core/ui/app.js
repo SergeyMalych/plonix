@@ -6375,28 +6375,157 @@ async function drawHostDetail() {
         )
       : h('div', { class: 'muted', style: { padding: '8px 12px' }, text: 'No technologies detected yet.' }),
     spec ? specSection(spec) : null,
-    h('div', { class: 'lbl', style: { padding: '12px 12px 6px' }, text: 'Endpoints' }),
+    endpointsSection(eps),
+  );
+}
+
+const MCOLS = [
+  { key: 'method', label: 'Method', w: 84 },
+  { key: 'path', label: 'Path' },
+  { key: 'status', label: 'Status', w: 76 },
+  { key: 'params', label: 'Parameters', w: 240 },
+  { key: 'requests', label: 'Requests', w: 92, th: 'num' },
+];
+
+/** Values a column sorts by. Status sorts by the lowest code seen, Parameters by how many there are. */
+const MSORT = {
+  method: (e) => e.method,
+  path: (e) => e.path,
+  status: (e) => Math.min(...e.statuses, 999),
+  params: (e) => e.params.length,
+  requests: (e) => e.requests,
+};
+
+/**
+ * Does an endpoint match the filter? Words match the method, path, status
+ * or a parameter; `method:`, `path:`, `status:` (4xx works) and `param:`
+ * narrow a word to one field, and a leading `-` hides what matches.
+ */
+function endpointMatches(e, q) {
+  return q
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((t) => {
+      const neg = t.startsWith('-') && t.length > 1;
+      if (neg) t = t.slice(1);
+      const [, field, val] = t.match(/^(method|path|status|param|params):(.*)$/) || [null, null, t];
+      const status = (v) => e.statuses.some((s) => (/^\dxx$/.test(v) ? String(s)[0] === v[0] : String(s).startsWith(v)));
+      const hit = !val
+        ? true
+        : field === 'method'
+          ? e.method.toLowerCase().startsWith(val)
+          : field === 'path'
+            ? e.path.toLowerCase().includes(val)
+            : field === 'status'
+              ? status(val)
+              : field
+                ? e.params.some((p) => p.toLowerCase().includes(val))
+                : e.method.toLowerCase() === val || e.path.toLowerCase().includes(val) || status(val) || e.params.some((p) => p.toLowerCase().includes(val));
+      return neg ? !hit : hit;
+    });
+}
+
+/** The host's endpoints: filter as you type, click a column title to sort, drag its edge to resize. */
+function endpointsSection(eps) {
+  const saved = store('plonix.map.columns') || {};
+  M.colW = saved.widths || {};
+  M.sort = typeof saved.sort === 'string' ? saved.sort : '';
+  const save = () => store('plonix.map.columns', { widths: M.colW, sort: M.sort });
+  const flex = MCOLS.findIndex((c) => !c.w);
+  const cols = MCOLS.map((c) => h('col', { style: c.w ? { width: (M.colW[c.key] || c.w) + 'px' } : null }));
+  const setW = (c, i, w) => {
+    if (w == null) delete M.colW[c.key];
+    else M.colW[c.key] = w;
+    cols[i].style.width = (w || c.w) + 'px';
+    save();
+  };
+  const resize = (e, c, i) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const dir = i < flex ? 1 : -1;
+    const startX = e.clientX;
+    const startW = e.currentTarget.parentElement.getBoundingClientRect().width;
+    document.body.classList.add('colresize');
+    const move = (ev) => setW(c, i, Math.round(Math.max(TCOL_MIN, Math.min(600, startW + dir * (ev.clientX - startX)))));
+    const up = () => {
+      document.body.classList.remove('colresize');
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
+  const ths = MCOLS.map((c, i) =>
     h(
-      'table',
-      { class: 'grid' },
-      h('thead', null, h('tr', null, h('th', { text: 'Method' }), h('th', { text: 'Path' }), h('th', { text: 'Status' }), h('th', { text: 'Parameters' }), h('th', { class: 'num', text: 'Requests' }))),
-      h(
-        'tbody',
-        null,
-        eps.map((e) =>
-          h(
-            'tr',
-            { class: 'click' + (T.sel === e.sample_id ? ' sel' : ''), 'data-ex': e.sample_id, title: 'Open a sample request', onclick: () => showExchange(e.sample_id) },
-            h('td', null, h('span', { class: 'meth m-' + e.method, text: e.method })),
-            pathCell(e.path),
-            h('td', null, e.statuses.map((s) => [h('span', { class: statusClass(s), text: s }), ' '])),
-            h('td', null, e.params.map((p) => h('span', { class: 'param', text: p }))),
-            h('td', { class: 'num', text: e.requests }),
-          ),
-        ),
-      ),
+      'th',
+      {
+        class: (c.th ? c.th + ' ' : '') + 'sortable',
+        'data-col': c.key,
+        title: 'Sort by ' + c.label,
+        onclick: () => {
+          M.sort = M.sort === c.key ? '-' + c.key : M.sort === '-' + c.key ? '' : c.key;
+          save();
+          draw();
+        },
+      },
+      h('span', { class: 'sortarrow' }),
+      h('span', { text: c.label }),
+      c.w ? h('span', { class: 'colgrip ' + (i < flex ? 'r' : 'l'), title: 'Drag to resize · double-click to reset', onclick: (e) => e.stopPropagation(), onmousedown: (e) => resize(e, c, i), ondblclick: (e) => (e.stopPropagation(), setW(c, i, null)) }) : null,
     ),
   );
+  const tbody = h('tbody');
+  const count = h('span');
+  const input = h('input', {
+    type: 'search',
+    placeholder: 'Filter: admin, method:POST, status:4xx, param:limit',
+    value: M.filter || '',
+    spellcheck: 'false',
+    oninput: () => ((M.filter = input.value), draw()),
+    onkeydown: (e) => e.key === 'Escape' && input.value && (e.stopPropagation(), (input.value = M.filter = ''), draw()),
+  });
+  function draw() {
+    const key = M.sort.replace(/^-/, '');
+    const desc = M.sort.startsWith('-');
+    for (const th of ths) {
+      const on = th.dataset.col === key;
+      th.classList.toggle('sorted', on);
+      th.querySelector('.sortarrow').textContent = on ? (desc ? '↓' : '↑') : '';
+      th.setAttribute('aria-sort', on ? (desc ? 'descending' : 'ascending') : 'none');
+    }
+    let rows = M.filter ? eps.filter((e) => endpointMatches(e, M.filter)) : eps.slice();
+    if (MSORT[key]) {
+      const v = MSORT[key];
+      rows.sort((a, b) => {
+        const x = v(a);
+        const y = v(b);
+        const c = typeof x === 'number' ? x - y : String(x).localeCompare(String(y));
+        return (desc ? -c : c) || a.path.localeCompare(b.path);
+      });
+    }
+    count.textContent = rows.length === eps.length ? `(${eps.length})` : `(${rows.length} of ${eps.length})`;
+    clear(
+      tbody,
+      rows.length
+        ? rows.map((e) =>
+            h(
+              'tr',
+              { class: 'click' + (T.sel === e.sample_id ? ' sel' : ''), 'data-ex': e.sample_id, title: 'Open a sample request', onclick: () => showExchange(e.sample_id) },
+              h('td', null, h('span', { class: 'meth m-' + e.method, text: e.method })),
+              pathCell(e.path),
+              h('td', null, e.statuses.map((s) => [h('span', { class: statusClass(s), text: s }), ' '])),
+              h('td', null, e.params.map((p) => h('span', { class: 'param', text: p }))),
+              h('td', { class: 'num', text: e.requests }),
+            ),
+          )
+        : h('tr', null, h('td', { colspan: MCOLS.length, class: 'muted', text: 'No endpoints match the filter.' })),
+    );
+  }
+  draw();
+  return [
+    h('div', { class: 'lbl eplbl' }, 'Endpoints ', count, h('div', { class: 'search r' }, h('span', { class: 'mg', text: '⌕' }), input)),
+    h('table', { class: 'grid eps' }, h('colgroup', null, cols), h('thead', null, h('tr', null, ths)), tbody),
+  ];
 }
 
 /** A path cell that never widens the table: the folder part gives way first, so the resource name stays readable. Folded ids and tokens are tinted. Hover shows the whole path. */
