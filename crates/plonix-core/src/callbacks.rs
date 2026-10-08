@@ -34,7 +34,9 @@ use crate::store::Store;
 
 /// The executable Plonix drives.
 pub const PROGRAM: &str = "interactsh-client";
-pub const INSTALL: &str = "brew install interactsh";
+/// interactsh has no Homebrew formula, so the client is built with Go. It
+/// lands in ~/go/bin, which [`crate::program::locate_exe`] searches.
+pub const INSTALL: &str = "brew install go && go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest";
 pub const HOMEPAGE: &str = "https://github.com/projectdiscovery/interactsh";
 /// Where a project keeps its hosts and callbacks.
 const STATE_VIEW: &str = "callbacks";
