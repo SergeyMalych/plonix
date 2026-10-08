@@ -52,6 +52,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 6, what: "client certificates for upstream servers, and which one an exchange used", run: v6_client_certs },
     Migration { version: 7, what: "what program extensions found in each exchange", run: v7_extension_hits },
     Migration { version: 8, what: "scope evidence that came from a tool, not an exchange", run: v8_evidence_without_exchange },
+    Migration { version: 9, what: "plain header rules, where each rule applies and its condition", run: v9_rule_kinds },
 ];
 
 /// The schema version this build reads and writes.
@@ -137,6 +138,25 @@ fn v5_replace_rules(tx: &rusqlite::Transaction) -> Result<()> {
     )?;
     if !has_column(tx, "exchanges", "replaced")? {
         tx.execute_batch("ALTER TABLE exchanges ADD COLUMN replaced TEXT")?;
+    }
+    Ok(())
+}
+
+/// Rules gain a kind (add, change or remove a header, or replace text),
+/// where they apply (browser, Bench, Scans) and an optional condition.
+/// Existing rules keep working as they did: text rules on browser traffic.
+fn v9_rule_kinds(tx: &rusqlite::Transaction) -> Result<()> {
+    let columns = [
+        ("kind", "TEXT NOT NULL DEFAULT 'replace'"),
+        ("browser", "INTEGER NOT NULL DEFAULT 1"),
+        ("bench", "INTEGER NOT NULL DEFAULT 0"),
+        ("scans", "INTEGER NOT NULL DEFAULT 0"),
+        ("cond", "TEXT NOT NULL DEFAULT ''"),
+    ];
+    for (name, def) in columns {
+        if !has_column(tx, "replace_rules", name)? {
+            tx.execute_batch(&format!("ALTER TABLE replace_rules ADD COLUMN {name} {def}"))?;
+        }
     }
     Ok(())
 }
@@ -289,7 +309,7 @@ pub struct Store {
     conn: Mutex<Connection>,
 }
 
-const SUMMARY_COLS: &str = "e.id, e.ts, e.method, e.scheme, e.host, e.port, e.path, e.query, e.status, e.mime, e.resp_len, e.duration_ms, e.source, e.edited";
+const SUMMARY_COLS: &str = "e.id, e.ts, e.method, e.scheme, e.host, e.port, e.path, e.query, e.status, e.mime, e.resp_len, e.duration_ms, e.source, e.edited, e.replaced IS NOT NULL";
 
 /// The ORDER BY for a Traffic column sort (see [`Store::search_sorted`]).
 /// Only known columns map to SQL, so the value is never spliced in raw.
@@ -497,6 +517,7 @@ impl Store {
                 duration_ms: r.get(11)?,
                 source: r.get(12)?,
                 edited: r.get(13)?,
+                replaced: r.get(14)?,
             })
         })?;
         Ok((rows.collect::<Result<_, _>>()?, total))
@@ -1053,8 +1074,9 @@ impl Store {
     pub fn add_replace_rule(&self, r: &ReplaceRule) -> Result<ReplaceRule> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO replace_rules (target, pattern, replacement, regex, enabled, in_scope_only, note) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![r.target.as_str(), r.pattern, r.replace, r.regex, r.enabled, r.in_scope_only, r.note],
+            "INSERT INTO replace_rules (target, pattern, replacement, regex, enabled, in_scope_only, note, kind, browser, bench, scans, cond)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![r.target.as_str(), r.pattern, r.replace, r.regex, r.enabled, r.in_scope_only, r.note, r.kind.as_str(), r.browser, r.bench, r.scans, r.when],
         )?;
         Ok(ReplaceRule { id: conn.last_insert_rowid(), ..r.clone() })
     }
@@ -1062,8 +1084,9 @@ impl Store {
     /// Saves a changed rule. False when there is no such rule.
     pub fn update_replace_rule(&self, r: &ReplaceRule) -> Result<bool> {
         let changed = self.conn.lock().unwrap().execute(
-            "UPDATE replace_rules SET target = ?2, pattern = ?3, replacement = ?4, regex = ?5, enabled = ?6, in_scope_only = ?7, note = ?8 WHERE id = ?1",
-            params![r.id, r.target.as_str(), r.pattern, r.replace, r.regex, r.enabled, r.in_scope_only, r.note],
+            "UPDATE replace_rules SET target = ?2, pattern = ?3, replacement = ?4, regex = ?5, enabled = ?6, in_scope_only = ?7, note = ?8,
+             kind = ?9, browser = ?10, bench = ?11, scans = ?12, cond = ?13 WHERE id = ?1",
+            params![r.id, r.target.as_str(), r.pattern, r.replace, r.regex, r.enabled, r.in_scope_only, r.note, r.kind.as_str(), r.browser, r.bench, r.scans, r.when],
         )?;
         Ok(changed > 0)
     }
@@ -1073,7 +1096,7 @@ impl Store {
     }
 }
 
-const RULE_COLS: &str = "id, target, pattern, replacement, regex, enabled, in_scope_only, note";
+const RULE_COLS: &str = "id, target, pattern, replacement, regex, enabled, in_scope_only, note, kind, browser, bench, scans, cond";
 
 fn row_to_rule(r: &Row) -> rusqlite::Result<ReplaceRule> {
     let target: String = r.get(1)?;
@@ -1086,6 +1109,11 @@ fn row_to_rule(r: &Row) -> rusqlite::Result<ReplaceRule> {
         enabled: r.get(5)?,
         in_scope_only: r.get(6)?,
         note: r.get(7)?,
+        kind: crate::replace::Kind::parse(&r.get::<_, String>(8)?).unwrap_or_default(),
+        browser: r.get(9)?,
+        bench: r.get(10)?,
+        scans: r.get(11)?,
+        when: r.get(12)?,
     })
 }
 

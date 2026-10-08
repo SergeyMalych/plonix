@@ -196,6 +196,9 @@ pub struct ExchangeSummary {
     pub in_scope: bool,
     #[serde(default)]
     pub edited: bool,
+    /// Rules changed it on the way (see [`crate::replace`]).
+    #[serde(default)]
+    pub replaced: bool,
 }
 
 /// What the captured traffic contains, for suggesting filters that matter.
