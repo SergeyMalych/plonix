@@ -23,7 +23,7 @@ use crate::extension::{self, Capability, ExtensionLibrary, Loaded, LoadedSet, Ru
 use crate::insight::{Category as InsightCategory, Insight, Side as InsightSide};
 use crate::sandbox;
 use crate::model::{Exchange, Headers, Source, WsMessage, now_ms};
-use crate::paths::{EngineInfo, Home};
+use crate::paths::EngineInfo;
 use crate::detectorpack::{DetectorLibrary, DetectorSet};
 use crate::filterpack::{FilterLibrary, FilterSet};
 use crate::listpack::{ListLibrary, ListSet};
@@ -1561,6 +1561,7 @@ impl Engine {
         if targets.is_empty() {
             return Err(SendError::BadRequest("no requests were selected to check".into()));
         }
+        self.check_automation("Access check")?;
 
         let delay = std::time::Duration::from_millis(req.delay_ms.unwrap_or(authcheck::DEFAULT_DELAY_MS).min(authcheck::MAX_DELAY_MS));
         let mut report = authcheck::AuthCheckReport { identities: identities.clone(), planned: targets.len() * identities.len(), ..Default::default() };
@@ -2048,6 +2049,7 @@ impl Engine {
         if !ext.granted.contains(&Capability::ScopedRequests) || !ext.granted.contains(&Capability::RunProgram) {
             return Err(SendError::BadRequest(format!("{name} needs permission to send scoped requests and run its probe")));
         }
+        self.check_automation("parameter probes")?;
         let initiator = extension_author(name);
         const MARKER: &str = "plnxprobe7q";
 
@@ -2149,27 +2151,6 @@ pub fn extension_author(name: &str) -> String {
     format!("extension:{name}")
 }
 
-/// Configuration for running an engine process.
-#[derive(Debug, Clone)]
-pub struct EngineConfig {
-    pub home: Home,
-    pub project: String,
-    pub proxy_addr: SocketAddr,
-    /// When true and `proxy_addr`'s port is taken, use the next free port.
-    pub proxy_port_fallback: bool,
-    pub api_addr: SocketAddr,
-    pub insecure_upstream: bool,
-}
-
-/// A started engine: listeners are bound, servers are running.
-pub struct Running {
-    pub engine: Arc<Engine>,
-    pub proxy_addr: SocketAddr,
-    pub api_addr: SocketAddr,
-    pub token: String,
-    pub agent_token: String,
-}
-
 /// Runs scope analysis over exchanges in order and stores what it learned
 /// in one go. A token the batch itself teaches counts for the exchanges after
 /// it, as if each had been written right away.
@@ -2215,47 +2196,6 @@ pub fn reanalyze(store: &Store, rules: &ScopeRules) -> Result<()> {
         analyze_into(store, batch.iter().map(|ex| (ex, ex.id)), rules)?;
     }
     Ok(())
-}
-
-/// Starts an engine for a project by name, the way earlier versions did.
-/// Opening a [`crate::session`] is the full version: a project folder,
-/// its settings and a lock.
-pub async fn start(config: &EngineConfig) -> Result<Running> {
-    config.home.ensure()?;
-    let ca = Arc::new(CertAuthority::load_or_create(&config.home)?);
-    let project = crate::project::resolve(&config.home, &config.project)?;
-    let store = Store::open(&project.db_path())?;
-    let upstream = Upstream::new(config.insecure_upstream, vec![])?;
-    let engine = Engine::new(project.name(), store, ca, upstream)?;
-    engine.set_rule_library(Library::new(&config.home));
-    engine.set_filter_library(FilterLibrary::new(&config.home));
-    engine.set_detector_library(DetectorLibrary::new(&config.home));
-    engine.set_list_library(ListLibrary::new(&config.home));
-    engine.set_extension_library(ExtensionLibrary::new(&config.home));
-    if project.file.demo {
-        engine.set_responder(crate::demo::responder());
-    }
-    start_with(engine, config).await
-}
-
-pub async fn start_with(engine: Arc<Engine>, config: &EngineConfig) -> Result<Running> {
-    let token = config.home.load_or_create_token()?;
-    let agent_token = config.home.load_or_create_agent_token()?;
-    engine.start_recorder();
-    let api = TcpListener::bind(config.api_addr).await.with_context(|| format!("binding API to {}", config.api_addr))?;
-    let proxy_addr = engine.bind_proxy(config.proxy_addr, config.proxy_port_fallback).await?;
-    let api_addr = api.local_addr()?;
-    let router = crate::api::router(
-        engine.clone(),
-        crate::api::Tokens { user: token.clone(), agent: agent_token.clone() },
-        api_addr,
-        config.home.clone(),
-    );
-    let shutdown_engine = engine.clone();
-    tokio::spawn(async move {
-        let _ = axum::serve(api, router).with_graceful_shutdown(async move { shutdown_engine.stopped().await }).await;
-    });
-    Ok(Running { engine, proxy_addr, api_addr, token, agent_token })
 }
 
 /// Binds `addr`. With `fallback`, a taken port moves to the next free one

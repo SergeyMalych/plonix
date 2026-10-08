@@ -2155,8 +2155,23 @@ async fn callbacks_remove_payload(State(s): State<AppState>, caller: MaybeCaller
     Json(callbacks_view(&s, u64::MAX)).into_response()
 }
 
-async fn findings(State(s): State<AppState>) -> Response {
-    match s.engine.store.findings() {
+async fn findings(State(s): State<AppState>, caller: MaybeCaller) -> Response {
+    let in_scope_only = agent_in_scope_only(&s, &caller);
+    let list = s.engine.store.findings().and_then(|all| {
+        if !in_scope_only {
+            return Ok(all);
+        }
+        let rules = s.engine.rules();
+        let visible = |ex: &Exchange| rules.in_scope(&ex.host);
+        let mut out = Vec::with_capacity(all.len());
+        for f in all {
+            if report::shown(&s.engine.store, &f, &visible)? {
+                out.push(f);
+            }
+        }
+        Ok(out)
+    });
+    match list {
         Ok(f) => Json(f).into_response(),
         Err(e) => internal(e),
     }
@@ -2183,8 +2198,16 @@ fn finding_not_found(id: i64) -> Response {
     err(StatusCode::NOT_FOUND, "not_found", &format!("finding {id} not found"))
 }
 
-async fn finding(State(s): State<AppState>, Path(id): Path<i64>) -> Response {
+async fn finding(State(s): State<AppState>, caller: MaybeCaller, Path(id): Path<i64>) -> Response {
     match s.engine.store.finding(id) {
+        Ok(Some(f)) if agent_in_scope_only(&s, &caller) => {
+            let rules = s.engine.rules();
+            match report::shown(&s.engine.store, &f, &|ex: &Exchange| rules.in_scope(&ex.host)) {
+                Ok(true) => Json(f).into_response(),
+                Ok(false) => outside_agent_data(),
+                Err(e) => internal(e),
+            }
+        }
         Ok(Some(f)) => Json(f).into_response(),
         Ok(None) => finding_not_found(id),
         Err(e) => internal(e),

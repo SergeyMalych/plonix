@@ -140,6 +140,9 @@ pub fn build(store: &Store, project: &str, sel: &Selection, visible: &dyn Fn(&Ex
     findings.sort_by_key(|f| (std::cmp::Reverse(severity_rank(&f.severity)), f.id));
     let mut out = Vec::with_capacity(findings.len());
     for f in findings {
+        if !shown(store, &f, visible)? {
+            continue;
+        }
         let mut evidence = Vec::new();
         for &id in f.exchange_ids.iter().take(MAX_EVIDENCE) {
             evidence.push(match store.get_exchange(id)? {
@@ -168,6 +171,21 @@ pub fn build(store: &Store, project: &str, sel: &Selection, visible: &dyn Fn(&Ex
         out.push(ReportFinding { finding: f, evidence });
     }
     Ok(Report { project: project.to_string(), generated_at: now_ms(), plonix_version: env!("CARGO_PKG_VERSION"), statuses, findings: out })
+}
+
+/// Whether a reader limited by `visible` may see this finding at all: it is
+/// hidden only when every captured request behind it that still exists is
+/// one they may not see (its title and description describe that host).
+pub fn shown(store: &Store, f: &Finding, visible: &dyn Fn(&Exchange) -> bool) -> Result<bool> {
+    let mut hidden = false;
+    for &id in &f.exchange_ids {
+        match store.get_exchange(id)? {
+            Some(ex) if visible(&ex) => return Ok(true),
+            Some(_) => hidden = true,
+            None => {}
+        }
+    }
+    Ok(!hidden)
 }
 
 fn severity_rank(s: &str) -> usize {
