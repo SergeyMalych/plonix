@@ -47,6 +47,7 @@ pub mod platform;
 pub mod blocklist;
 pub mod bounty;
 pub mod profile;
+pub mod guide;
 pub mod program;
 pub mod project;
 pub mod proposal;

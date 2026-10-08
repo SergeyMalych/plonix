@@ -453,6 +453,8 @@ pub struct Info {
 #[derive(Debug, Clone, Serialize)]
 pub struct ProgramStatus {
     pub id: String,
+    /// What running it does: scan traffic, enumerate subdomains or probe an address.
+    pub kind: crate::program::Kind,
     pub found: bool,
     /// How to install it.
     pub install: String,
@@ -463,7 +465,7 @@ impl ProgramStatus {
     pub fn of(m: &Manifest) -> Option<Self> {
         let p = crate::program::get(m.program.as_deref()?)?;
         let install = if p.builtin { "Built in to Plonix." } else { p.install };
-        Some(Self { id: p.id.into(), found: crate::program::available(p.id), install: install.into(), homepage: p.homepage.into() })
+        Some(Self { id: p.id.into(), kind: p.kind, found: crate::program::available(p.id), install: install.into(), homepage: p.homepage.into() })
     }
 }
 
@@ -580,6 +582,26 @@ impl ExtensionLibrary {
         if on {
             s.disabled_reason = None;
             s.disabled_at = None;
+        }
+        let out = s.clone();
+        self.write_state(&state)?;
+        Ok(out)
+    }
+
+    /// Allows or takes back one capability an installed extension asks for,
+    /// after install: the same yes the install sheet asks for, given later.
+    pub fn set_granted(&self, name: &str, capability: Capability, allowed: bool) -> Result<ExtState> {
+        let Some(info) = self.info(name) else {
+            bail!("no extension named `{}` is installed (see `plonix extensions`)", clean(name, 64));
+        };
+        if !info.requested.contains(&capability) {
+            bail!("{name} does not ask to {}", capability.describe());
+        }
+        let mut state = self.read_state();
+        let s = state.extensions.entry(name.to_string()).or_default();
+        s.granted.retain(|c| *c != capability);
+        if allowed {
+            s.granted.push(capability);
         }
         let out = s.clone();
         self.write_state(&state)?;

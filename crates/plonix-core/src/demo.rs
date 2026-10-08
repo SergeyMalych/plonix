@@ -159,13 +159,13 @@ fn respond(req: &OutboundRequest) -> Option<InboundResponse> {
     if !req.host.ends_with(".example") {
         return None;
     }
-    let path = req.target.split('?').next().unwrap_or("/");
-    let (status, mime, body) = route(&req.method, &req.host, path, &req.headers);
+    let (path, query) = req.target.split_once('?').unwrap_or((&req.target, ""));
+    let (status, mime, body) = route(&req.method, &req.host, path, query, &req.headers);
     Some(inbound(req, status, mime, body))
 }
 
 /// Routes one demo request to a status and body.
-fn route(method: &str, host: &str, path: &str, headers: &Headers) -> (u16, &'static str, String) {
+fn route(method: &str, host: &str, path: &str, query: &str, headers: &Headers) -> (u16, &'static str, String) {
     let json = "application/json";
     let auth = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("authorization")).map(|(_, v)| v.as_str()).unwrap_or("");
 
@@ -203,6 +203,12 @@ fn route(method: &str, host: &str, path: &str, headers: &Headers) -> (u16, &'sta
             } else {
                 (401, json, json!({ "error": "unauthorized", "message": "sign in to continue" }).to_string())
             };
+        }
+        // The catalog reads an undocumented `debug` parameter and answers
+        // with internals, so the parameter probe has something to find.
+        if method == "GET" && path.starts_with("/v1/products") && query.split('&').any(|p| p.split('=').next() == Some("debug")) {
+            let debug = json!({ "db": "products-replica-2.internal", "query_ms": 14, "cache": "miss", "build": "2026.09.3-rc1", "feature_flags": ["new-checkout", "bulk-pricing"] });
+            return (200, json, json!({ "ok": true, "path": path, "debug": debug }).to_string());
         }
         if method == "GET" {
             // The catalog is public; everything else wants a session. So the

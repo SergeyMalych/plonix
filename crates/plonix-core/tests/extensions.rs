@@ -135,7 +135,12 @@ fn subdomain_discovery_needs_permission_to_run_its_tool() {
     lib.install(SUBDOMAIN, "test", None, &Consent::default()).unwrap();
     let engine = engine(dir.path());
     let run = engine.run_extension_on_traffic("subdomain-discovery").unwrap();
-    assert!(run.problem.as_deref().unwrap_or("").contains("permission"), "{run:?}");
+    let problem = run.problem.as_deref().unwrap_or("");
+    assert!(problem.contains("not allowed to run subfinder") && problem.contains("plonix extensions allow subdomain-discovery"), "{run:?}");
+    // Allowed later, without reinstalling, it gets past the permission check.
+    lib.set_granted("subdomain-discovery", Capability::RunProgram, true).unwrap();
+    let run = engine.run_extension_on_traffic("subdomain-discovery").unwrap();
+    assert!(!run.problem.as_deref().unwrap_or("").contains("not allowed"), "{run:?}");
     assert_eq!(run.exchanges, 0, "it does not read traffic");
 }
 
@@ -160,5 +165,5 @@ fn parameter_probe_refuses_out_of_scope_and_needs_permission() {
     lib2.install(PARAM_PROBE, "test", None, &Consent::default()).unwrap();
     let eng2 = engine(dir2.path());
     let err = rt.block_on(eng2.run_param_probe("parameter-probe", "https://shop.test/api")).unwrap_err();
-    assert!(matches!(err, SendError::BadRequest(m) if m.contains("permission")), "expected a permission error");
+    assert!(matches!(err, SendError::BadRequest(m) if m.contains("not allowed to send its requests")), "expected a permission error");
 }

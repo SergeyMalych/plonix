@@ -114,91 +114,90 @@
       "name": "secret-sweep",
       "kind": "extension",
       "version": "1.0.0",
-      "description": "Finds API keys, tokens and passwords for hundreds of services in captured traffic and shows each one in the Lens.",
+      "description": "Finds leaked API keys, tokens and passwords in your captured traffic and marks each one in the Lens.",
       "author": "Plonix contributors",
       "url": "extensions/secret-sweep.plonixext",
       "sha256": "ef25531f683e4206d866613db15e0b83a8f92d6417f6d5dc3341835805c0f202",
       "homepage": "https://github.com/SergeyMalych/plonix",
       "about": [
-        "Looks through every request and response you capture for credentials that should not be there: cloud keys, payment and source control tokens, database addresses with passwords, private keys and hundreds more. Each one shows in the Lens as a Spotted chip, next to what Plonix finds on its own, and can become a finding from there.",
-        "It runs trufflehog, an open-source scanner you install yourself. On a Mac: brew install trufflehog. Plonix finds it on its own once it is installed.",
-        "Everything stays on your Mac. Plonix gives the program copies of requests and responses in a private temporary folder, deleted when it finishes, and runs it so it does not check keys with the services they belong to and does not update itself.",
-        "New traffic is checked as it arrives. To check what you captured before installing it, use Run on captured traffic on this page."
+        "Checks every request and response you capture for secrets from hundreds of services, such as cloud keys, payment keys and access tokens, using trufflehog, which you install on your Mac.",
+        "Each secret it finds shows in the Lens as a Spotted chip on the request it came from. It works offline: Plonix tells trufflehog not to check keys with the services they belong to and not to update itself.",
+        "Use it on any target where keys might leak into pages, scripts or API answers. It reads in-scope traffic only."
       ]
     },
     {
       "name": "js-endpoints",
       "kind": "extension",
       "version": "0.1.0",
-      "description": "Reads captured JavaScript and pulls out the API paths and URLs it references, so endpoints nothing has visited yet stand out.",
+      "description": "Lists the API paths and URLs mentioned in captured JavaScript, so you can try endpoints the app has not called yet.",
       "author": "Plonix contributors",
       "url": "extensions/js-endpoints.plonixext",
       "sha256": "d467f39779ee23ad7fb911af4ad040d3eed155d194d67e5b170e97a26ca0562d",
       "homepage": "https://github.com/SergeyMalych/plonix",
       "about": [
-        "Modern apps keep most of their API in their JavaScript. This reads the scripts you have already captured and pulls out the paths and URLs they call, so the endpoints nothing has visited yet are laid out for you.",
-        "It shows what it finds in the Lens on each script, under the extension's name. It reads captured responses only and sends nothing.",
-        "Capture the app's pages once, then look at its scripts in Traffic to see where else the app talks."
+        "Front-end code often names more of the API than you see while clicking around: admin routes, older versions, internal tools. This reads every JavaScript file you capture and pulls those paths and URLs out.",
+        "They show in the Lens on the script they came from. Copy one, or open the script's request on the Bench and point it at a new path.",
+        "It runs in the Plonix sandbox and sends nothing. Scripts on hosts outside scope are skipped until you accept their host."
       ]
     },
     {
       "name": "subdomain-discovery",
       "kind": "extension",
       "version": "0.1.0",
-      "description": "Enumerates an accepted domain's subdomains with a recon tool you install, and adds the ones it finds to Scope as suggestions to review. It never changes scope on its own.",
+      "description": "Finds more of your target's subdomains and adds them to Scope as suggestions. You decide which ones to test.",
       "author": "Plonix contributors",
       "url": "extensions/subdomain-discovery.plonixext",
       "sha256": "eb4cfe101f135cc31b7384f7e10858bf4f63333b92381cad0e14a4582114e63a",
       "homepage": "https://github.com/SergeyMalych/plonix",
       "about": [
-        "Finds a target's other subdomains so your scope can grow to match the real application. It runs a subdomain enumeration tool you install, over a domain you have already accepted into scope.",
-        "Everything it finds is added to Scope as a suggestion, with the evidence that it was enumerated, for you to accept or reject. It never brings anything into scope on its own, and it reads public sources rather than touching the target.",
-        "Install subfinder (brew install subfinder), accept your first domain in Scope, then run it from its page or with `plonix extensions run subdomain-discovery`."
+        "Looks up subdomains of the domains you accepted in Scope, such as staging. or admin., from public sources, using subfinder, which you install on your Mac. It never sends anything to the target.",
+        "Each one it finds waits in Scope as a suggestion marked Found by lookup. Nothing joins your scope until you accept it.",
+        "Run it from the Find subdomains button in Scope, from its page here, or with `plonix extensions run subdomain-discovery`."
       ]
     },
     {
       "name": "parameter-probe",
       "kind": "extension",
       "version": "0.1.0",
-      "description": "Probes an in-scope endpoint for undocumented query parameters. Plonix sends a bounded set of candidate names through its scope-gated path and proposes one unconfirmed finding for any that change the response.",
+      "description": "Tries about a hundred common parameter names on one in-scope address and tells you which ones change the response.",
       "author": "Plonix contributors",
       "url": "extensions/parameter-probe.plonixext",
       "sha256": "d81a6e2341a171ffce095b66059ec63244f876ee8bb057abdcf92649d5882694",
       "homepage": "https://github.com/SergeyMalych/plonix",
       "about": [
-        "Finds query parameters an endpoint reads but does not advertise. Point it at one in-scope request and it tries a bounded set of common parameter names, one at a time.",
-        "Plonix sends every request itself, through the same scope-gated path as replay, so it only ever reaches accepted hosts and each request is recorded in Traffic. The extension supplies candidate names only, never a payload.",
-        "Parameters that change the response become one unconfirmed finding for you to review. Run it with `plonix extensions probe parameter-probe <url>`."
+        "Applications often read query parameters nobody documented, such as debug, admin or fields. Pick one in-scope address and this sends it once per candidate name, then compares each answer with the original.",
+        "Names that change the status, the size or show up in the answer are listed, and saved as one unconfirmed finding for you to check by hand. Every request goes through Plonix's scope check and shows in Traffic.",
+        "Right-click an in-scope request in Traffic and choose Probe for hidden parameters, or paste an address on its page here."
       ]
     },
     {
       "name": "graphql-explorer",
       "kind": "extension",
       "version": "0.1.0",
-      "description": "A GraphQL tab: every operation seen in traffic, grouped by type, with its variables and the requests that used it.",
+      "description": "Planned: a tab listing every GraphQL operation seen in traffic. Not available yet.",
       "author": "Plonix contributors",
       "url": "extensions/graphql-explorer.json",
       "sha256": "fe718c7077583e33b631d2769e14b4ad1a27c671614e96edac8118e92f3c834c",
       "homepage": "https://github.com/SergeyMalych/plonix",
       "about": [
-        "A planned extension that adds a GraphQL tab: browse a schema, see queries in a readable form and build requests from them.",
-        "Extensions that run code need the sandboxed extension runtime, which is not in this version of Plonix yet. It is listed so you can see what is coming and what it would be allowed to do.",
-        "It cannot be installed yet."
+        "A planned extension that would add a GraphQL tab: every query and mutation seen in traffic, grouped by type, with its variables and the requests that used it.",
+        "It is not built yet, so it cannot be installed. Until then, filter Traffic with is:graphql to see GraphQL requests, and open one in the Lens.",
+        "It is listed so you can see what is coming and what it would be allowed to do."
       ]
     },
     {
       "name": "security-headers",
       "kind": "extension",
       "version": "0.1.0",
-      "description": "Notes HTML pages that miss common security headers or set cookies without Secure or HttpOnly, and proposes one finding per host.",
+      "description": "Notes pages that are missing common security headers or set cookies without Secure or HttpOnly, and proposes one finding per host.",
       "author": "Plonix contributors",
       "url": "extensions/security-headers.plonixext",
       "sha256": "351804ba5a079471d432caaf630378530123c91aeadba479450df932683d6d43",
       "homepage": "https://github.com/SergeyMalych/plonix/tree/main/examples/extensions/security-headers",
       "about": [
-        "A passive analyzer that runs in the WebAssembly sandbox. It reads in-scope traffic and notes HTML pages that miss common security headers, and cookies set without Secure or HttpOnly.",
-        "It proposes one finding per host, which stays open until you confirm it. It has no network, file or process access.",
-        "A small example to start from when you write your own extension."
+        "Checks every HTML page you capture for the headers that protect users, such as Content-Security-Policy and X-Content-Type-Options, and for cookies set without Secure or HttpOnly.",
+        "What is missing shows in the Lens on each page. Plonix also opens one unconfirmed finding per host, listing the gaps, for you to confirm or dismiss in Findings.",
+        "It runs in the Plonix sandbox and sends nothing. A small, readable example of how to write a Plonix extension."
       ]
     },
     {
@@ -310,7 +309,7 @@
       "name": "leaks",
       "kind": "filters",
       "version": "1.0.0",
-      "description": "Find traffic that leaks secrets, stack traces or debug output.",
+      "description": "Traffic filters for keys, tokens, stack traces, SQL errors, debug pages, source maps and internal addresses.",
       "author": "Plonix contributors",
       "url": "filterpacks/leaks.json",
       "sha256": "3e8bb6c56270ba8b6ab817d13f905fe4af97bf058ae38ca1e079443757457e3e",

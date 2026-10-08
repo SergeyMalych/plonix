@@ -324,13 +324,16 @@ pub fn enumerate(id: &str, domain: &str) -> Result<Vec<String>, String> {
     Ok(parse_hosts(&stdout, &domain))
 }
 
-/// Keeps the tool local and quiet. subfinder prints one hostname per line with
-/// `-silent`; a fallback is asked for the same, and read the same tolerant way.
+/// Keeps the tool quiet and inside Plonix's time limit. subfinder prints one
+/// hostname per line with `-silent`, skips its update check with `-duc`, and
+/// is told to wrap up after a minute (`-max-time` is in minutes; its own
+/// default of ten would run past [`ENUMERATE_TIMEOUT`] and lose every result).
+/// A fallback is asked for the same, and read the same tolerant way.
 fn enumerate_args(name: &str, domain: &str) -> Vec<String> {
     match name {
         "bbot" => ["-t", domain, "-f", "subdomain-enum", "-y", "--silent"].map(String::from).to_vec(),
         // subfinder and anything else: bare hostnames, one per line.
-        _ => ["-d", domain, "-silent"].map(String::from).to_vec(),
+        _ => ["-d", domain, "-silent", "-duc", "-max-time", "1", "-timeout", "20"].map(String::from).to_vec(),
     }
 }
 
@@ -479,7 +482,7 @@ mod tests {
     fn only_enumerate_programs_enumerate_and_the_domain_is_checked() {
         assert!(enumerate("trufflehog", "example.com").unwrap_err().contains("does not enumerate"));
         assert!(enumerate("subfinder", "not a domain").unwrap_err().contains("not a domain"));
-        assert_eq!(enumerate_args("subfinder", "example.com"), ["-d", "example.com", "-silent"]);
+        assert_eq!(enumerate_args("subfinder", "example.com"), ["-d", "example.com", "-silent", "-duc", "-max-time", "1", "-timeout", "20"]);
         assert!(get("param-probe").unwrap().builtin && available("param-probe"));
     }
 }

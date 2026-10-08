@@ -42,6 +42,8 @@ plonix market install --starter       # install the starter set (extensions are 
 
 Profiles never name items. Each one weighs a fixed list of tags, and each item carries a few tags and a noise level (`passive`, `light` or `active`) in [`store/profiles.json`](../store/profiles.json). An item's score is the sum of the profile's weights for its tags; items scoring 4 or more are suggested, best first. A bundle replaces the items inside it unless one of them scores higher on its own, and items noisier than the profile allows are listed under *Also for you* without being picked. To make a new Market item show up for the right people, add its tags there; `cargo test` fails if a Market item has no entry.
 
+Every Plonix item also has a **How to use it** guide in [`store/guides.json`](../store/guides.json): where it shows up in Plonix, the steps to get it working, and optionally a screenshot from `store/guides/`. Guides ship inside the app, not in the signed list, so improving one never needs a new signature. `cargo test` fails if a Market item has no guide.
+
 ## Three shelves
 
 Every package in the Market carries a badge that says who stands behind it:

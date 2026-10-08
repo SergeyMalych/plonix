@@ -33,6 +33,16 @@ pub enum ExtensionsCmd {
         #[arg(long, value_name = "CAPABILITY")]
         grant: Vec<String>,
     },
+    /// Allow what an installed extension asks for that needs your yes, such as
+    /// running its program (all of it, or the capabilities you name)
+    Allow {
+        name: String,
+        /// Only these, e.g. run-program or read-out-of-scope [default: every sensitive one it asks for]
+        capabilities: Vec<String>,
+        /// Take them back instead
+        #[arg(long)]
+        revoke: bool,
+    },
     /// Switch an extension on (clears why Plonix switched it off)
     Enable { name: String },
     /// Switch an extension off; it stays installed
@@ -174,6 +184,19 @@ pub fn extensions_cmd(ctx: &Ctx, cmd: ExtensionsCmd) -> Result<()> {
             }
             println!("Installed {} {} and switched it on. A running engine starts using it right away.", change.name, change.version);
         }
+        ExtensionsCmd::Allow { name, capabilities, revoke } => {
+            let i = lib.info(&name).ok_or_else(|| anyhow!("no extension named `{}` is installed (see `plonix extensions`)", clip(&name, 64)))?;
+            let caps = if capabilities.is_empty() { i.requested.iter().copied().filter(|c| c.sensitive()).collect() } else { parse_grants(&capabilities)? };
+            if caps.is_empty() {
+                println!("{name} asks for nothing that needs a separate yes.");
+                return Ok(());
+            }
+            let program = i.program.as_ref().map(|p| p.id.as_str());
+            for c in caps {
+                lib.set_granted(&name, c, !revoke)?;
+                println!("{} {name} to {}.", if revoke { "No longer allowing" } else { "Allowed" }, c.describe_for(program));
+            }
+        }
         ExtensionsCmd::Enable { name } => {
             lib.set_enabled(&name, true)?;
             println!("{name} is on.");
@@ -198,18 +221,23 @@ pub fn extensions_cmd(ctx: &Ctx, cmd: ExtensionsCmd) -> Result<()> {
             if ctx.json {
                 return ctx.print_json(&r);
             }
-            println!(
-                "{} looked at {} exchange(s): {} note(s), {} new finding(s) proposed.",
-                name,
-                r["exchanges"].as_u64().unwrap_or(0),
-                r["notes"].as_u64().unwrap_or(0),
-                r["proposed"].as_u64().unwrap_or(0)
-            );
+            if let Some(why) = r["stopped"].as_str().or(r["problem"].as_str()) {
+                bail!("{name}: {why}");
+            }
+            let n = |k: &str| r[k].as_u64().unwrap_or(0);
+            let program = lib.info(&name).and_then(|i| i.program).and_then(|p| plonix_core::program::get(&p.id)).map(|p| p.kind);
+            match program {
+                Some(plonix_core::program::Kind::Enumerate) => {
+                    println!("{name} added {} new subdomain(s) to Scope as suggestions. Review them with `plonix scope`.", n("suggested"))
+                }
+                Some(_) => println!("{name} checked {} new request(s) and found {} secret(s). They show in the Lens.", n("exchanges"), n("notes")),
+                None => println!("{name} looked at {} request(s): {} note(s), {} new finding(s) proposed.", n("exchanges"), n("notes"), n("proposed")),
+            }
             for l in r["logs"].as_array().into_iter().flatten().filter_map(|l| l.as_str()) {
                 println!("  log: {l}");
             }
-            if let Some(why) = r["stopped"].as_str().or(r["problem"].as_str()) {
-                bail!("{name}: {why}");
+            if n("skipped") > 0 {
+                println!("It skipped {} request(s) to hosts outside scope. Accept their hosts in Scope to include them.", n("skipped"));
             }
             if r["proposed"].as_u64().unwrap_or(0) > 0 {
                 println!("Proposed findings are open until you confirm them: `plonix findings`.");

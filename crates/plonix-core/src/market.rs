@@ -1708,6 +1708,25 @@ mod tests {
     }
 
     #[test]
+    fn a_sensitive_capability_can_be_allowed_after_install() {
+        let (_d, home) = home();
+        let market = Market::new(&home);
+        let cat = official();
+        // Installed without its yes: it stays installed, but its tool may not run.
+        market.install(&cat, "subdomain-discovery").unwrap();
+        let lib = &market.extensions;
+        assert!(!lib.info("subdomain-discovery").unwrap().state.granted.contains(&Capability::RunProgram));
+        let st = lib.set_granted("subdomain-discovery", Capability::RunProgram, true).unwrap();
+        assert!(st.granted.contains(&Capability::RunProgram) && st.granted.contains(&Capability::SuggestScope));
+        assert!(lib.load().extensions[0].granted.contains(&Capability::RunProgram));
+        let st = lib.set_granted("subdomain-discovery", Capability::RunProgram, false).unwrap();
+        assert!(!st.granted.contains(&Capability::RunProgram));
+        // Only what it asks for, and only for what is installed.
+        assert!(lib.set_granted("subdomain-discovery", Capability::ReadOutOfScope, true).unwrap_err().to_string().contains("does not ask"));
+        assert!(lib.set_granted("nothing-here", Capability::RunProgram, true).is_err());
+    }
+
+    #[test]
     fn refuses_extensions_and_tampered_packages() {
         let (_d, home) = home();
         let market = Market::new(&home);

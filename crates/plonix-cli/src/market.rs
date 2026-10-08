@@ -383,6 +383,15 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
                 if !ctx.json {
                     print_changes(&changes, name);
                 }
+                // Already installed: --grant still gives the yes it was missing.
+                if let Some(info) = m.extensions.info(name).filter(|_| changes.iter().any(|c| c.name == *name && c.action == market::Action::Unchanged)) {
+                    for c in consent.grant.iter().filter(|c| info.requested.contains(c) && !info.state.granted.contains(c)) {
+                        m.extensions.set_granted(name, *c, true)?;
+                        if !ctx.json {
+                            println!("Allowed {name} to {}.", c.describe_for(info.program.as_ref().map(|p| p.id.as_str())));
+                        }
+                    }
+                }
                 all.extend(changes);
             }
             if ctx.json {

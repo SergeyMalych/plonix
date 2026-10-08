@@ -1,0 +1,255 @@
+{
+  "plonix_guides": 1,
+  "items": {
+    "triage-host": {
+      "where": "Agents",
+      "open": "agents",
+      "steps": [
+        "Open Agents and click Get to know a host, or ask Claude about a host from its Map card.",
+        "Pick the host you want a briefing on.",
+        "Read what it serves, how it is built, how it signs users in and which requests to look at first."
+      ],
+      "cli": "/mcp__plonix__triage-host in Claude Code"
+    },
+    "explain-request": {
+      "where": "Agents and the Lens",
+      "open": "traffic",
+      "steps": [
+        "Pick a request in Traffic.",
+        "Click Ask Claude in the Lens, or open Agents and click Explain a request with its number.",
+        "Read the walk-through: what the request does, and what its tokens and encoded values hold."
+      ],
+      "cli": "/mcp__plonix__explain-request in Claude Code"
+    },
+    "review-sign-in": {
+      "where": "Agents",
+      "open": "agents",
+      "steps": [
+        "Sign in to the app once while Plonix captures, so the sign-in requests are there.",
+        "Open Agents and click Review sign-in and sessions.",
+        "Read which requests sign in and out, which cookie or token keeps you signed in, and what to test next."
+      ],
+      "cli": "/mcp__plonix__review-sign-in in Claude Code"
+    },
+    "check-scope": {
+      "where": "Agents, for Scope",
+      "open": "agents",
+      "steps": [
+        "Browse the target for a while so Scope has suggested domains.",
+        "Open Agents and click Check scope suggestions.",
+        "Accept or reject each domain yourself in Scope. The agent only recommends."
+      ],
+      "cli": "/mcp__plonix__check-scope in Claude Code"
+    },
+    "draft-finding": {
+      "where": "Agents, for Findings",
+      "open": "agents",
+      "steps": [
+        "Find something worth reporting and note the requests that show it.",
+        "Open Agents and click Draft a finding report, describing the issue in a line.",
+        "Review the draft, then record it in Findings yourself."
+      ],
+      "cli": "/mcp__plonix__draft-finding in Claude Code"
+    },
+    "api-inventory": {
+      "where": "Agents",
+      "open": "agents",
+      "steps": [
+        "Install it, then use the API's client or browse the app so its calls are captured.",
+        "Open Agents and click Inventory an API, then pick the API host.",
+        "Work through the table of operations it returns, with their parameters, sign-in and data."
+      ],
+      "cli": "/mcp__plonix__api-inventory in Claude Code"
+    },
+    "api-kit": {
+      "where": "Agents, Traffic and Map",
+      "open": "agents",
+      "steps": [
+        "Install it once: it brings the API inventory skill, the leak filters and admin console detection.",
+        "In Traffic, filter with is:aws-keys, is:jwts or is:stack-traces to find leaks.",
+        "Open Agents and click Inventory an API for a table of every operation."
+      ]
+    },
+    "secret-sweep": {
+      "where": "The Lens, on any request",
+      "open": "traffic",
+      "shot": "secret-sweep",
+      "steps": [
+        "Install trufflehog on your Mac (brew install trufflehog).",
+        "Install secret-sweep and allow it to run trufflehog.",
+        "Click Check captured traffic on this page once. New traffic is checked as it arrives.",
+        "Open a request in Traffic: every key or token it found shows in the Lens as a Spotted chip with its name."
+      ]
+    },
+    "js-endpoints": {
+      "where": "The Lens, on JavaScript files",
+      "open": "traffic",
+      "shot": "js-endpoints",
+      "steps": [
+        "Install js-endpoints. Nothing else is needed.",
+        "Browse the app so its JavaScript files are captured. Their hosts must be in scope, or it skips them.",
+        "Click Read captured traffic on this page once. New files are read as they arrive.",
+        "Open a JavaScript file in Traffic: the Lens lists the API paths and URLs the script mentions. Send one to the Bench to try it."
+      ]
+    },
+    "subdomain-discovery": {
+      "where": "Scope",
+      "open": "scope",
+      "shot": "subdomain-discovery",
+      "steps": [
+        "Install subfinder on your Mac (brew install subfinder).",
+        "Install subdomain-discovery and allow it to run subfinder.",
+        "Accept your target's domain in Scope, for example example.com.",
+        "Click Find subdomains in Scope, or on this page. It asks public sources and adds what it finds as suggestions.",
+        "Accept or reject each suggestion in Scope. Nothing joins your scope until you do."
+      ]
+    },
+    "parameter-probe": {
+      "where": "Traffic, on an in-scope request",
+      "open": "traffic",
+      "shot": "parameter-probe",
+      "steps": [
+        "Install parameter-probe and allow it to send its requests.",
+        "In Traffic, right-click an in-scope request and choose Probe for hidden parameters. Or paste an address on this page.",
+        "It sends about a hundred requests, one per parameter name, each recorded in Traffic.",
+        "Names that change the response show in the result and in an unconfirmed finding for you to check."
+      ]
+    },
+    "graphql-explorer": {
+      "where": "Not available yet",
+      "steps": [
+        "Not built yet. Until it is, filter Traffic with is:graphql to see GraphQL requests, and open one in the Lens."
+      ]
+    },
+    "security-headers": {
+      "where": "The Lens and Findings",
+      "open": "findings",
+      "shot": "security-headers",
+      "steps": [
+        "Install security-headers. Nothing else is needed.",
+        "Browse the app's pages, or click Read captured traffic on this page once.",
+        "Open an HTML page in Traffic: the Lens notes each missing header and each cookie without Secure or HttpOnly.",
+        "Findings gets one unconfirmed finding per host. Confirm or dismiss it there."
+      ]
+    },
+    "web-servers": {
+      "where": "Map, under Technologies",
+      "open": "map",
+      "steps": ["Built in and always on. Open a host in Map to see its web server under Technologies."]
+    },
+    "frameworks": {
+      "where": "Map, under Technologies",
+      "open": "map",
+      "steps": ["Built in and always on. Open a host in Map to see the languages and frameworks it runs on."]
+    },
+    "cms": {
+      "where": "Map, under Technologies",
+      "open": "map",
+      "steps": ["Built in and always on. Open a host in Map to see whether it runs a content management system or shop platform."]
+    },
+    "edge": {
+      "where": "Map, under Technologies",
+      "open": "map",
+      "steps": ["Built in and always on. Open a host in Map to see the CDN, WAF or cache in front of it."]
+    },
+    "api-surface": {
+      "where": "Map, under Technologies",
+      "open": "map",
+      "steps": ["Built in and always on. Open a host in Map to see API styles, API documentation and identity endpoints it found."]
+    },
+    "admin-panels": {
+      "where": "Map, under Technologies",
+      "open": "map",
+      "steps": [
+        "Install it. It works on traffic you already have and everything captured later.",
+        "Open a host in Map: an exposed console such as Jenkins, Grafana or phpMyAdmin shows under Technologies."
+      ]
+    },
+    "common": {
+      "where": "Traffic filters",
+      "open": "traffic",
+      "steps": ["Built in. In Traffic, click + Filter and pick one, or type is:api, is:auth, is:admin or is:trackers in the search box."]
+    },
+    "leaks": {
+      "where": "Traffic filters",
+      "open": "traffic",
+      "steps": [
+        "Install it.",
+        "In Traffic, click + Filter, or type a filter in the search box: is:aws-keys, is:jwts, is:private-keys, is:stack-traces, is:java-traces, is:sql-errors, is:debug-pages, is:source-maps or is:internal-ips.",
+        "Each shows only the requests whose text matches it."
+      ]
+    },
+    "starter-lists": {
+      "where": "Bench, under Run",
+      "open": "bench",
+      "steps": ["Built in. On the Bench, switch to Run, point at a value to vary and choose From a list."]
+    },
+    "extra-wordlists": {
+      "where": "Bench, under Run",
+      "open": "bench",
+      "steps": [
+        "Install it.",
+        "On the Bench, switch to Run, point at a value to vary and choose From a list.",
+        "Pick Identifier formats, Common ports or API paths."
+      ]
+    },
+    "saved-users": {
+      "where": "Users, and the Bench",
+      "open": "users",
+      "shot": "saved-users",
+      "steps": [
+        "Install it. A Users screen appears in the sidebar.",
+        "Add each account you test with: its cookies or token, copied from a request where it was signed in.",
+        "On the Bench, pick who to send as from the As… menu, or act as a user everywhere from the title bar."
+      ]
+    },
+    "access-check": {
+      "where": "Access, and Traffic",
+      "open": "access",
+      "shot": "access-check",
+      "steps": [
+        "Install it with Saved users, and save at least two users.",
+        "Pick requests in Traffic and choose Replay signed out or Check this id across users, or open Access and pick a host.",
+        "Read the table: each request as each user and signed out, with what looks wrong flagged under it."
+      ]
+    },
+    "callbacks": {
+      "where": "Callbacks",
+      "open": "callbacks",
+      "steps": [
+        "Install interactsh on your Mac (brew install interactsh), then install Callbacks.",
+        "Open Callbacks, press Start listening, then click New host for a test.",
+        "Put the host in a request on the Bench, such as a URL parameter or a webhook field, and send it.",
+        "Anything that reaches the host shows in Callbacks, with the test it belongs to."
+      ]
+    },
+    "programs": {
+      "where": "Programs",
+      "open": "programs",
+      "shot": "programs",
+      "steps": [
+        "Install it. A Programs screen appears in the sidebar.",
+        "Connect HackerOne with your own token, paste a program's policy, or look up a domain's security.txt.",
+        "Review a program, then follow it: its assets become scope rules and its rules are kept while you test."
+      ]
+    },
+    "hackerone": {
+      "where": "Programs",
+      "open": "programs",
+      "steps": [
+        "Install Programs first.",
+        "In Programs, connect HackerOne with your API username and token.",
+        "Every program you can hack on is listed and searchable by name or asset."
+      ]
+    },
+    "mind-reader": {
+      "where": "Traffic, in the Lens and on right-click",
+      "open": "traffic",
+      "steps": [
+        "Built in and always on.",
+        "Open a request in Traffic: when Plonix recognises a shape, such as a token, an XML body or a GraphQL call, the Lens offers the next step as a chip.",
+        "Click the chip to run it. Nothing runs until you do."
+      ]
+    }
+  }
+}

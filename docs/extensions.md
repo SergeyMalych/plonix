@@ -35,6 +35,7 @@ plonix extensions add ./my-extension           # a folder with plonix-extension.
 plonix extensions add ./x.plonixext --yes --grant read-out-of-scope
 plonix market install security-headers         # from the signed Market: checksum and signature verified
 plonix extensions show security-headers        # what it is allowed to do
+plonix extensions allow subdomain-discovery     # give a sensitive yes skipped at install (--revoke takes it back)
 plonix extensions run security-headers         # hand it everything captured so far
 plonix extensions disable security-headers     # or enable; enable clears a "stopped" state
 plonix extensions remove security-headers
@@ -42,7 +43,9 @@ plonix extensions pack ./my-extension          # for authors: one .plonixext fil
 plonix extensions check ./my-extension         # for authors: validate without installing
 ```
 
-In the window, the **Market** shows each extension's capabilities before it installs, with a separate tick box for each sensitive one. An installed extension's page has **Switch on / Switch off**, **Run on captured traffic**, and the reason when Plonix stopped it. The Market's **Installed** tab lists it with its state.
+In the window, the **Market** shows each extension's capabilities before it installs, with a separate tick box for each sensitive one. The boxes start ticked for Plonix's own extensions and unticked for anything from the community or added by you. A sensitive capability can be allowed or taken back later on the extension's page, with no reinstall. An installed extension's page has **Switch on / Switch off**, a run button that fits how it runs (**Check captured traffic**, **Read captured traffic**, **Find subdomains**, or an address box with **Probe**), and the reason when Plonix stopped it. Every Plonix item's page also has a **How to use it** section: where it shows up, the steps, and a screenshot. The Market's **Installed** tab lists it with its state.
+
+Extensions also show up where they are used: **Find subdomains** on the Scope screen while a subdomain finder is on, and **Probe for hidden parameters** when you right-click an in-scope request in Traffic while a probe is on.
 
 What happens once it is on:
 
@@ -63,7 +66,7 @@ A program extension has no code of its own. Its manifest has `"runtime": "progra
 ```
 
 - **Programs are a closed list** in `crates/plonix-core/src/program.rs`: a manifest names one by id, never a path, command or flags. Plonix looks for an installed one on `PATH` and in the usual install folders, since apps started from the Dock do not get the shell's `PATH`.
-- **Running it needs `run-program`**, a sensitive capability you say yes to at install.
+- **Running it needs `run-program`**, a sensitive capability you say yes to at install, or later on its page or with `plonix extensions allow <name>`. Until then, running it says exactly that.
 - **Each program has a kind** that decides how Plonix drives it and which other capabilities the extension must ask for:
   - **`scan`** reads copies of captured requests and responses in a private temporary folder, deleted when the program finishes, and reads its output back onto the exchanges they came from. It needs `read-traffic` and `passive-analysis` (and may add `read-out-of-scope`). `trufflehog` is one; it stays local (`--no-verification --no-update`), and what it finds shows in the Lens under **Spotted**, labelled with the extension's name. New traffic is checked as it arrives; **Run on captured traffic** checks the rest, once per version.
   - **`enumerate`** takes a domain you have already accepted into scope and runs a subdomain tool over it. It needs `suggest-scope`. The tool reads public sources — Plonix sends nothing to the target — and every host it returns is added to **Scope as a suggestion**, with its evidence, for you to accept or reject. It never changes scope. `subfinder` is one (`brew install subfinder`), with another installed recon tool used as a fallback.

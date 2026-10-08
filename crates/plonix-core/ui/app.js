@@ -1103,6 +1103,8 @@ const VIEWS = {
 const IN_APP = !!window.__PLONIX_APP__;
 
 /** Whether a built-in tool has been switched on from the Market. */
+/** Extensions switched on that run a given way (enumerate, probe, scan or sandbox), by name. */
+const extsThat = (kind) => Object.entries((S.status && S.status.extensions) || {}).filter(([, k]) => k === kind).map(([n]) => n);
 const toolOn = (id) => !!(S.status && ((S.status.tools && S.status.tools.includes(id)) || (S.status.demo && DEMO_TOOLS.includes(id))));
 /** Tools the demo project shows without installing them, so its walkthrough can stop on them. */
 const DEMO_TOOLS = ['saved-users', 'programs'];
@@ -1560,6 +1562,7 @@ async function poll() {
     if (S.view === 'agents' && (Date.now() - (S.agentsAt || 0) > 4000 || st.agent_inbox_unread !== prev.agent_inbox_unread)) loadAgents();
     if (st.intercept && st.intercept.seq !== IC.seq) loadIntercept();
     if (prev.tools && String(st.tools) !== String(prev.tools)) redrawNav();
+    if (S.view === 'scope' && JSON.stringify(st.extensions) !== JSON.stringify(prev.extensions)) renderScopeBody();
     if (st.callbacks !== prev.callbacks || (S.view === 'callbacks' && CB.data && CB.data.phase === 'starting')) callbacksChanged();
   } catch (e) {
     if (e.code === 'unauthorized') return;
@@ -2826,6 +2829,7 @@ function rowMenu(e, ex) {
     actions.push({ label: 'Replay signed out', run: () => startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}`, onlyAnon: true }) });
   }
   if (decide(ex.host) === 'accepted') {
+    for (const name of extsThat('probe')) actions.push({ label: 'Probe for hidden parameters', run: () => probeExchange(name, ex) });
     const leads = scanLeadsFor(ex);
     actions.push({ label: leads.length ? leads[0].chip : 'Scan this endpoint', run: () => scanEndpoint(ex, leads[0] || null) });
     for (const { d, cap } of detectorLeadsSync(ex)) {
@@ -4307,6 +4311,7 @@ const EV = {
   redirected_from: 'Redirected from',
   requested_from: 'Called from',
   linked_from: 'Linked from',
+  discovered: 'Found by lookup',
 };
 
 /**
@@ -4428,7 +4433,8 @@ function evidenceList(evidence) {
         { class: 'ev' },
         h('span', { class: 'k', text: EV[e.kind] || e.kind }),
         h('span', { class: 'd' }, e.summary, e.detail ? ' · ' + e.detail : ''),
-        h('span', { class: 'w' }, e.count > 1 ? '×' + e.count + ' ' : '', h('button', { class: 'link', text: '#' + e.exchange_id, title: 'Show the request this came from', onclick: () => showExchange(e.exchange_id) })),
+        // A lookup (subdomain discovery) has no request behind it.
+        h('span', { class: 'w' }, e.count > 1 ? '×' + e.count + ' ' : '', e.exchange_id ? h('button', { class: 'link', text: '#' + e.exchange_id, title: 'Show the request this came from', onclick: () => showExchange(e.exchange_id) }) : null),
       );
     }),
   );
@@ -6523,6 +6529,27 @@ function renderScope(main) {
   renderScopeBody();
 }
 
+/** Scope's Find subdomains button, there while a subdomain finder is switched on. */
+function findSubdomainsButton(name) {
+  const b = h('button', {
+    class: 'btn sm',
+    text: 'Find subdomains',
+    title: `Run ${name}: ask public sources for subdomains of the domains you accepted, and add them here as suggestions`,
+    onclick: async () => {
+      b.disabled = true;
+      b.textContent = 'Looking up subdomains…';
+      try {
+        toast(await findSubdomains(name), 'ok');
+      } catch (e) {
+        toast(e.message, 'err');
+      }
+      b.disabled = false;
+      b.textContent = 'Find subdomains';
+    },
+  });
+  return b;
+}
+
 function renderScopeBody() {
   const box = $('#scopebody');
   if (!box) return;
@@ -6548,9 +6575,12 @@ function renderScopeBody() {
       'div',
       { class: 'sechead' },
       h('h3', { text: `Suggested domains (${sugg.length})` }),
-      sugg.length > 1
-        ? h('span', { class: 'shacts' }, h('button', { class: 'btn sm', text: 'Accept all', title: 'Accept every suggested host on its own', onclick: () => decideAll('accept') }), h('button', { class: 'btn sm danger', text: 'Reject all', onclick: () => decideAll('reject') }))
-        : null,
+      h(
+        'span',
+        { class: 'shacts' },
+        extsThat('enumerate').map((name) => findSubdomainsButton(name)),
+        sugg.length > 1 ? [h('button', { class: 'btn sm', text: 'Accept all', title: 'Accept every suggested host on its own', onclick: () => decideAll('accept') }), h('button', { class: 'btn sm danger', text: 'Reject all', onclick: () => decideAll('reject') })] : null,
+      ),
     ),
     sugg.length
       ? sugg.map((s) =>
@@ -10637,22 +10667,25 @@ function capIcon(kind) {
   return h('span', { class: 'mi ' + kind }, svg);
 }
 
-/** What an extension asks for: what it gets on install, then a checkbox for each sensitive one. Returns the boxes. */
-function capabilityList(caps) {
+/** What an extension asks for: what it gets on install, then a checkbox for each sensitive one. Returns the boxes.
+ * `o.ticked` starts the boxes ticked (Plonix's own items); `o.needed` says it cannot run without them. */
+function capabilityList(caps, o = {}) {
   const boxes = [];
   const given = caps.filter((c) => !c.sensitive).map((c) => h('div', { class: 'mcap' }, capIcon('ok'), h('span', { text: c.what })));
   const asks = caps
     .filter((c) => c.sensitive)
     .map((c) => {
-      const box = h('input', { type: 'checkbox', value: c.id });
+      const box = h('input', { type: 'checkbox', value: c.id, checked: !!o.ticked });
+      const warn = h('span', { class: 'mcapwarn', text: 'Without this it cannot run.', hidden: !o.needed || !!o.ticked });
+      box.addEventListener('change', () => (warn.hidden = !o.needed || box.checked));
       boxes.push(box);
-      return h('label', { class: 'mcap ask' }, box, h('span', { text: c.what }));
+      return h('label', { class: 'mcap ask' }, box, h('span', null, c.what, ' ', warn));
     });
   const rows = h(
     'div',
     { class: 'mcaps' },
     given.length ? [h('div', { class: 'mcaph', text: 'It will be allowed to' }), given] : null,
-    asks.length ? [h('div', { class: 'mcaph', text: 'Only if you tick it' }), asks, h('p', { class: 'muted fine', text: 'It installs either way. Whatever stays unticked does not run.' })] : null,
+    asks.length ? [h('div', { class: 'mcaph', text: 'Needs your yes' }), asks, h('p', { class: 'muted fine', text: 'You can change this later on its page.' })] : null,
   );
   return { rows, boxes };
 }
@@ -10667,11 +10700,19 @@ async function extensionConsent(p, action) {
   }
   const x = (d.detail && d.detail.extension) || {};
   if (!x.installable) return toast(x.why_not || `${p.name} cannot be installed in this version of Plonix`, 'err');
-  const { rows, boxes } = capabilityList(x.capabilities || []);
+  // Plonix's own extensions come ready to run; code nobody at Plonix reviewed waits for a tick.
+  const own = p.verification && ['official', 'publisher'].includes(p.verification.shelf);
+  const { rows, boxes } = capabilityList(x.capabilities || [], { ticked: own, needed: !!x.program });
   const go = h('button', { class: 'btn primary', text: action === 'update' ? 'Update' : 'Install' });
   modal(
     `${action === 'update' ? 'Update' : 'Install'} ${p.name}?`,
-    [p.description ? h('p', { class: 'mnote', text: p.description }) : null, rows, notReviewed(p.verification), h('div', { class: 'mhow' }, h('div', { class: 'mcaph', text: 'How it runs' }), h('p', { text: x.sandbox }))],
+    [
+      p.description ? h('p', { class: 'mnote', text: p.description }) : null,
+      rows,
+      x.program && !x.program.found ? h('div', { class: 'mcaps' }, programNeeds(x.program)) : null,
+      notReviewed(p.verification),
+      h('div', { class: 'mhow' }, h('div', { class: 'mcaph', text: 'How it runs' }), h('p', { text: x.sandbox })),
+    ],
     [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), go],
   );
   go.onclick = () => {
@@ -10689,13 +10730,82 @@ function programNeeds(pr) {
   ];
 }
 
-/** An installed extension: on or off, why Plonix stopped it, and a run over captured traffic. */
+/** What running an installed extension does, by how it runs. */
+const EXT_RUN = {
+  enumerate: { label: 'Find subdomains', busy: 'Looking up subdomains…', title: 'Ask public sources for subdomains of every domain you accepted in Scope', view: 'scope', open: 'Open Scope' },
+  scan: { label: 'Check captured traffic', busy: 'Checking…', title: 'Check everything captured so far. New traffic is checked as it arrives.', view: 'traffic', open: 'Open Traffic' },
+  sandbox: { label: 'Read captured traffic', busy: 'Reading…', title: 'Hand everything captured so far to this extension. New traffic reaches it on its own.', view: 'traffic', open: 'Open Traffic' },
+};
+
+/** How an installed extension runs: scan, enumerate, probe, or sandbox for one with its own code. */
+const extKind = (x) => (x.program ? x.program.kind : 'sandbox');
+
+/** What it asks for that needs a yes but has not had one, when it cannot run without it. */
+const extMissing = (x) => (x.program ? (x.requested || []).filter((c) => ['run-program', 'scoped-requests'].includes(c) && !(x.granted || []).includes(c)) : []);
+
+/** Gives (or takes back) one capability of an installed extension, then redraws its page. */
+async function allowCapability(name, capability, allowed) {
+  try {
+    await api('/api/extensions/' + encodeURIComponent(name) + '/allowed', { method: 'PUT', body: { capability, allowed } });
+    toast(allowed ? `${name} is allowed to do that now` : `${name} may no longer do that`, 'ok');
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+  await loadMarket(false);
+  poll();
+}
+
+/** The full address of a captured request. */
+function exchangeUrl(ex) {
+  const scheme = ex.scheme || 'https';
+  const port = ex.port && !((scheme === 'https' && ex.port === 443) || (scheme === 'http' && ex.port === 80)) ? ':' + ex.port : '';
+  return `${scheme}://${ex.host}${port}${ex.path || '/'}${ex.query ? '?' + ex.query : ''}`;
+}
+
+/** Runs a subdomain finder over the accepted scope domains and says what it added. */
+async function findSubdomains(name) {
+  const r = await api('/api/extensions/' + encodeURIComponent(name) + '/run', { method: 'POST', body: {} });
+  if (r.problem || r.stopped) throw new Error(r.problem || r.stopped);
+  loadScope();
+  return r.suggested ? `Added ${r.suggested} new subdomain${r.suggested === 1 ? '' : 's'} to Scope as suggestions. Accept or reject each one there.` : 'No new subdomains this time. Everything it found is already in Scope or was decided before.';
+}
+
+/** Probes one in-scope address for hidden query parameters and says what changed the response. */
+async function probeParameters(name, url) {
+  const r = await api('/api/extensions/' + encodeURIComponent(name) + '/probe', { method: 'POST', body: { url } });
+  const found = r.influential || [];
+  if (!found.length) return `Sent ${r.sent} parameter names to ${url}. None changed the response.`;
+  return `Sent ${r.sent} parameter names. ${found.length === 1 ? 'This one changes' : 'These change'} the response: ${found.join(', ')}. ${r.proposed ? 'Check ' + (found.length === 1 ? 'it' : 'them') + ' in the new finding.' : 'A finding for ' + (found.length === 1 ? 'it' : 'them') + ' is already open.'}`;
+}
+
+/** Right-click › Probe for hidden parameters, from Traffic. */
+async function probeExchange(name, ex) {
+  const url = exchangeUrl(ex);
+  toast(`Probing ${url}…`);
+  try {
+    toast(await probeParameters(name, url), 'ok');
+    if (S.view === 'findings') loadFindings();
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+/** An installed extension: on or off, why Plonix stopped it, what it is missing, and how to run it. */
 function extensionState(name) {
   const x = MK.ext[name];
   if (!x) return null;
   const box = h('div', { class: 'extstate' + (x.disabled_reason ? ' stopped' : '') });
+  const kind = extKind(x);
+  const result = h('div', { class: 'extresult', hidden: true });
+  const show = (text, kindOf, view) => {
+    result.hidden = false;
+    result.className = 'extresult ' + kindOf;
+    clear(result, h('span', { text }), view ? h('button', { class: 'btn sm', text: view.open, onclick: () => leaveTo(view.view) }) : null);
+  };
   const draw = () => {
     const on = x.enabled;
+    const missing = extMissing(x);
+    const blocked = !on || missing.length > 0;
     const toggle = h('button', {
       class: 'btn sm' + (on ? '' : ' primary'),
       text: on ? 'Switch off' : 'Switch on',
@@ -10711,35 +10821,88 @@ function extensionState(name) {
         box.className = 'extstate' + (x.disabled_reason ? ' stopped' : '');
         draw();
         drawMarket();
+        poll();
       },
     });
-    const run = h('button', {
-      class: 'btn sm',
-      text: 'Run on captured traffic',
-      disabled: !on,
-      title: 'Hand everything captured so far to this extension. New traffic reaches it on its own.',
-      onclick: async () => {
-        run.disabled = true;
-        run.textContent = 'Running…';
-        try {
-          const r = await api('/api/extensions/' + encodeURIComponent(name) + '/run', { method: 'POST', body: {} });
-          if (r.stopped) toast(`${name}: ${r.stopped}`, 'err');
-          else if (r.problem) toast(`${name}: ${r.problem}`, 'err');
-          else if (x.program) toast(`${name} checked ${r.exchanges} new request(s) and found ${r.notes} secret(s). They show in the Lens.`, 'ok');
-          else toast(`${name} looked at ${r.exchanges} request(s): ${r.notes} note(s), ${r.proposed} new finding(s) to review`, 'ok');
-        } catch (e) {
-          toast(e.message, 'err');
-        }
-        await loadMarket(false);
-      },
-    });
+    let action;
+    if (kind === 'probe') {
+      const url = h('input', { class: 'exturl', placeholder: 'https://api.example.com/v1/items', spellcheck: 'false', autocomplete: 'off', disabled: blocked });
+      const go = h('button', {
+        class: 'btn sm primary',
+        text: 'Probe',
+        disabled: blocked,
+        title: 'Send each candidate parameter name once to this in-scope address and compare the responses',
+        onclick: async () => {
+          if (!url.value.trim()) return url.focus();
+          go.disabled = true;
+          go.textContent = 'Probing…';
+          try {
+            show(await probeParameters(name, url.value.trim()), 'ok', { view: 'findings', open: 'Open Findings' });
+          } catch (e) {
+            show(e.message, 'err');
+          }
+          go.disabled = false;
+          go.textContent = 'Probe';
+        },
+      });
+      url.addEventListener('keydown', (e) => e.key === 'Enter' && go.click());
+      action = h('div', { class: 'row extprobe' }, url, go);
+    } else {
+      const how = EXT_RUN[kind] || EXT_RUN.sandbox;
+      const run = h('button', {
+        class: 'btn sm primary',
+        text: how.label,
+        disabled: blocked,
+        title: how.title,
+        onclick: async () => {
+          run.disabled = true;
+          run.textContent = how.busy;
+          try {
+            if (kind === 'enumerate') {
+              show(await findSubdomains(name), 'ok', how);
+            } else {
+              const r = await api('/api/extensions/' + encodeURIComponent(name) + '/run', { method: 'POST', body: {} });
+              if (r.stopped || r.problem) show(r.stopped || r.problem, 'err');
+              else {
+                const said = kind === 'scan' ? `Checked ${r.exchanges} new request(s) and found ${r.notes} secret(s). They show in the Lens.` : `Read ${r.exchanges} request(s): ${r.notes} note(s) in the Lens, ${r.proposed} new finding(s) to review.`;
+                const skipped = r.skipped ? ` It skipped ${r.skipped} request(s) to hosts outside scope; accept their hosts in Scope to include them.` : '';
+                show(said + skipped, 'ok', r.proposed ? { view: 'findings', open: 'Open Findings' } : how);
+              }
+            }
+          } catch (e) {
+            show(e.message, 'err');
+          }
+          run.disabled = false;
+          run.textContent = how.label;
+        },
+      });
+      action = run;
+    }
     clear(
       box,
-      h('div', { class: 'row' }, h('b', { text: x.disabled_reason ? 'Stopped' : on ? 'On' : 'Off' }), toggle, run),
+      h('div', { class: 'row' }, h('b', { text: x.disabled_reason ? 'Stopped' : on ? 'On' : 'Off' }), toggle, kind === 'probe' ? null : action),
       x.disabled_reason ? h('p', { text: x.disabled_reason }) : null,
+      missing.length
+        ? h(
+            'div',
+            { class: 'extneeds' },
+            h('span', { text: `It cannot run until you allow it to ${kind === 'probe' ? 'send its requests' : 'run ' + x.program.id}.` }),
+            h('button', { class: 'btn sm primary', text: 'Allow', onclick: async () => { for (const c of missing) await allowCapability(name, c, true); } }),
+          )
+        : null,
+      kind === 'probe' ? action : null,
+      result,
       h('p', {
         class: 'muted',
-        text: !on ? 'It is installed but does not run.' : x.program ? 'Secrets it finds show in the Lens as Spotted chips, marked with its name.' : 'Its notes show in the Lens, marked with its name. Findings it proposes stay open until you confirm them.',
+        text: !on
+          ? 'It is installed but does not run.'
+          : kind === 'enumerate'
+            ? 'What it finds waits in Scope as suggestions. Nothing joins your scope until you accept it. Find subdomains is also on the Scope screen.'
+            : kind === 'probe'
+              ? 'Paste an in-scope address, or right-click a request in Traffic and choose Probe for hidden parameters. Every request it sends shows in Traffic.'
+              : kind === 'scan'
+                ? 'Secrets it finds show in the Lens as Spotted chips, marked with its name.'
+                : 'Its notes show in the Lens, marked with its name. Findings it proposes stay open until you confirm them.',
       }),
     );
   };
@@ -10856,6 +11019,20 @@ function closePackage() {
   for (const c of document.querySelectorAll('.mpkg')) c.classList.remove('sel');
 }
 
+/** How to use an item: where it shows up, the steps, a screenshot of it at work, and a way to get there. */
+function guideSection(g) {
+  const view = g.open && VIEWS[g.open] && (!VIEWS[g.open].tool || toolOn(VIEWS[g.open].tool)) ? g.open : null;
+  return h(
+    'div',
+    { class: 'msec mguide' },
+    h('h4', { text: 'How to use it' }),
+    h('div', { class: 'mwhere' }, h('span', { class: 'muted', text: 'Where: ' }), h('b', { text: g.where }), view ? h('button', { class: 'btn sm', text: 'Open ' + VIEWS[view].label, onclick: () => leaveTo(view) }) : null),
+    h('ol', { class: 'msteps' }, g.steps.map((t) => h('li', { text: t }))),
+    g.shot ? h('img', { class: 'mshot', src: '/ui/guide/' + g.shot + '.jpg', alt: 'Screenshot of ' + g.where, loading: 'lazy' }) : null,
+    g.cli ? h('p', { class: 'muted fine' }, 'Also: ', h('code', { text: g.cli })) : null,
+  );
+}
+
 /** An item's own page: what it is, what it does, what it needs, who made it and how far to trust it. */
 async function showPackage(name) {
   MK.sel = name;
@@ -10881,6 +11058,7 @@ async function showPackage(name) {
   const sec = (title, ...kids) => h('div', { class: 'msec' }, h('h4', { text: title }), kids);
   const parts = [];
   const about = p.about && p.about.length ? p.about : [p.description];
+  if (d.guide) parts.push(guideSection(d.guide));
   parts.push(sec('About', about.map((t) => h('p', { class: 'mabout', text: t }))));
   const rows = [
     ['Type', k.one],
@@ -10920,7 +11098,9 @@ async function showPackage(name) {
         granted ? 'Allowed to' : 'Would be allowed to',
         x.capabilities.map((c) => {
           const off = granted && !granted.includes(c.id);
-          return h('div', { class: 'mcap' + (off ? ' off' : '') }, capIcon(off ? 'off' : c.sensitive ? 'warn' : 'ok'), h('span', { text: c.what + (off ? ' (not granted)' : c.sensitive && !granted ? ' (asks for your OK when you install)' : '') }));
+          // A sensitive one can be allowed, or taken back, here at any time.
+          const change = granted && c.sensitive ? h('button', { class: 'btn sm' + (off ? ' primary' : ' ghost'), text: off ? 'Allow' : 'Take back', onclick: () => allowCapability(name, c.id, off) }) : null;
+          return h('div', { class: 'mcap' + (off ? ' off' : '') }, capIcon(off ? 'off' : c.sensitive ? 'warn' : 'ok'), h('span', { text: c.what + (off ? ' (not allowed yet)' : c.sensitive && !granted ? ' (asks for your yes when you install)' : '') }), change);
         }),
         h('p', { class: 'muted fine', text: x.installable ? x.sandbox : x.why_not ? 'Not installable in this version: ' + x.why_not : 'Listed so you can see what is coming; its code is not published yet.' }),
       ),

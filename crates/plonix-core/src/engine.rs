@@ -1728,6 +1728,10 @@ pub struct ExtensionRun {
     pub notes: usize,
     /// Findings it proposed that were not already there.
     pub proposed: usize,
+    /// For a subdomain finder: new subdomains it added to Scope as suggestions.
+    pub suggested: usize,
+    /// Captured requests to hosts outside scope that it was not allowed to read.
+    pub skipped: usize,
     /// Lines it logged, capped.
     pub logs: Vec<String>,
     /// Set when it was stopped and switched off.
@@ -1912,24 +1916,29 @@ impl Engine {
             match crate::program::get(program).map(|p| p.kind) {
                 Some(crate::program::Kind::Enumerate) => {
                     match self.discover_subdomains(&ext) {
-                        Ok(found) => run.notes += found,
+                        Ok(found) => run.suggested += found,
                         Err(e) => run.problem = Some(e),
                     }
                     return Ok(run);
                 }
                 Some(crate::program::Kind::Probe) => {
                     run.problem = Some(format!(
-                        "{} probes one endpoint at a time. Run it on an in-scope request instead (`plonix extensions probe {} <url>`).",
+                        "{} probes one address at a time. Pick an in-scope request in Traffic and choose Probe parameters, or run `plonix extensions probe {} <url>`.",
                         ext.name, ext.name
                     ));
                     return Ok(run);
                 }
                 _ => {}
             }
+            if !ext.granted.contains(&Capability::RunProgram) {
+                run.problem = Some(not_allowed(ext, program));
+                return Ok(run);
+            }
             loop {
                 let batch = self.store.exchanges_after(last, crate::program::BATCH)?;
                 let Some(tail) = batch.last() else { break };
                 last = tail.id;
+                run.skipped += self.out_of_scope_for(ext, &batch);
                 match self.run_program(ext, program, &batch) {
                     Ok((seen, hits)) => {
                         run.exchanges += seen;
@@ -1947,6 +1956,7 @@ impl Engine {
             let batch = self.store.exchanges_after(last, EXTENSION_BATCH)?;
             let Some(tail) = batch.last() else { break };
             last = tail.id;
+            run.skipped += self.out_of_scope_for(ext, &batch);
             match self.run_extension(ext, &batch) {
                 Ok((out, seen)) => {
                     run.exchanges += seen;
@@ -1961,6 +1971,16 @@ impl Engine {
             }
         }
         Ok(run)
+    }
+
+    /// How many of these exchanges an extension may not read because their
+    /// host is outside scope.
+    fn out_of_scope_for(&self, ext: &Loaded, exchanges: &[Exchange]) -> usize {
+        if ext.granted.contains(&Capability::ReadOutOfScope) {
+            return 0;
+        }
+        let rules = self.rules();
+        exchanges.iter().filter(|ex| !rules.in_scope(&ex.host)).count()
     }
 
     /// Notes from the enabled extensions on one exchange, shown in the Lens
@@ -2032,10 +2052,10 @@ impl Engine {
     /// to the target and brings nothing into scope — each suggestion waits for
     /// the user's own accept/reject decision.
     fn discover_subdomains(&self, ext: &Loaded) -> std::result::Result<usize, String> {
-        if !ext.granted.contains(&Capability::RunProgram) || !ext.granted.contains(&Capability::SuggestScope) {
-            return Err(format!("{} needs permission to run its tool and to suggest scope", ext.name));
-        }
         let Runner::Program(program) = &ext.runner else { return Ok(0) };
+        if !ext.granted.contains(&Capability::RunProgram) || !ext.granted.contains(&Capability::SuggestScope) {
+            return Err(not_allowed(ext, program));
+        }
         let rules = self.rules();
         // The accepted domains to enumerate, deduplicated so a seed and one of
         // its own subdomains are not both enumerated.
@@ -2064,7 +2084,7 @@ impl Engine {
                     domain: h,
                     kind: crate::scope::EvidenceKind::Discovered,
                     via: domain.clone(),
-                    detail: format!("subdomain enumeration of {domain} ({})", ext.name),
+                    detail: format!("looked up by {}", ext.name),
                 })
                 .collect();
             suggested += evidence.len();
@@ -2091,7 +2111,10 @@ impl Engine {
             return Err(SendError::BadRequest(format!("{name} is not a parameter probe")));
         }
         if !ext.granted.contains(&Capability::ScopedRequests) || !ext.granted.contains(&Capability::RunProgram) {
-            return Err(SendError::BadRequest(format!("{name} needs permission to send scoped requests and run its probe")));
+            return Err(SendError::BadRequest(match &ext.runner {
+                Runner::Program(p) => not_allowed(&ext, p),
+                Runner::Wasm(_) => format!("{name} is not allowed to send requests"),
+            }));
         }
         self.check_automation("parameter probes")?;
         let initiator = extension_author(name);
@@ -2202,6 +2225,19 @@ fn program_insights(ext: &Loaded, json: &str) -> Vec<Insight> {
 }
 
 /// How findings an extension proposed are attributed.
+/// Why a program extension did not run: the user has not allowed its
+/// program yet, and how to allow it.
+fn not_allowed(ext: &Loaded, program: &str) -> String {
+    let what = match crate::program::get(program) {
+        Some(p) if p.builtin => "send its requests".to_string(),
+        _ => format!("run {program}"),
+    };
+    format!(
+        "{} is not allowed to {what} yet. Allow it on its page in the Market, or run `plonix extensions allow {}`.",
+        ext.name, ext.name
+    )
+}
+
 pub fn extension_author(name: &str) -> String {
     format!("extension:{name}")
 }
