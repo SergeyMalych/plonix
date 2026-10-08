@@ -255,20 +255,6 @@ section.block { padding-block: 110px; }
   .fcard.wide .demo { min-height: 0; height: 168px; }
 }
 
-/* ---------- flow ---------- */
-.flow { list-style: none; padding: 0; margin: 40px 0 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: var(--ink-2); border: 1px solid var(--line); border-radius: 18px; }
-.flow li { position: relative; padding: 24px 22px 26px; display: grid; gap: 6px; align-content: start; }
-.flow li + li { border-left: 1px solid var(--line); }
-.flow li + li::before { content: "\203A"; position: absolute; left: -13px; top: 26px; width: 24px; height: 24px; border-radius: 50%; background: var(--ink-2); border: 1px solid var(--line); display: grid; place-items: center; color: var(--indigo); font: 600 1rem/1 var(--body); }
-.flow b { font: 600 1.2rem var(--display); letter-spacing: -.01em; }
-.flow i { justify-self: start; font: normal .72rem var(--mono); color: var(--tok-fg); background: color-mix(in srgb, var(--indigo) 12%, transparent); border-radius: 999px; padding: 2px 9px; }
-.flow span { color: var(--muted); font-size: .9rem; margin-top: 4px; }
-@media (max-width: 900px) {
-  .flow { grid-template-columns: minmax(0, 1fr); }
-  .flow li + li { border-left: 0; border-top: 1px solid var(--line); }
-  .flow li + li::before { left: 22px; top: -13px; content: "\2304"; line-height: .6; }
-}
-
 /* ---------- theme switch ---------- */
 .theme-btn { width: 38px; height: 36px; border-radius: 10px; border: 1px solid var(--line); background: var(--ink-2); color: var(--fg); display: grid; place-items: center; cursor: pointer; margin-left: 4px; }
 .theme-btn:hover { border-color: var(--indigo); }
@@ -426,11 +412,12 @@ footer a:hover { color: var(--fg); }
     </a>
     <nav class="nav-links" aria-label="Sections">
       <a href="#features">Features</a>
-      <a href="#scope">Scope</a>
-      <a href="#search">Filtering</a>
-      <a href="#actions">Actions</a>
+      <a href="#mind-reader">Mind Reader</a>
       <a href="#agents">AI</a>
+      <a href="#lens">Lens</a>
+      <a href="#search">Filtering</a>
       <a href="#market">Market</a>
+      <a href="#cli">MCP</a>
       <a href="docs/">Docs</a>
     </nav>
     <button type="button" class="theme-btn" id="theme" aria-label="Switch to dark mode" title="Switch theme"></button>
@@ -517,99 +504,11 @@ footer a:hover { color: var(--fg); }
   </div>
 </section>
 
-<section class="block" id="flow" style="padding-block:40px 30px">
+<section class="block" id="mind-reader">
   <div class="wrap">
     <div class="head reveal">
-      <h2>From first request to proven finding.</h2>
-    </div>
-    <ol class="flow reveal">
-      <li><b>Capture</b><i>Traffic</i><span>Every request and response, HTTPS included.</span></li>
-      <li><b>Discover</b><i>Scope &middot; Map</i><span>Domains, hosts, endpoints and tech.</span></li>
-      <li><b>Investigate</b><i>Search &middot; Lens</i><span>Filter fast, decode as you read.</span></li>
-      <li><b>Experiment</b><i>Bench</i><span>Edit, send, branch and compare.</span></li>
-      <li><b>Validate</b><i>Findings</i><span>Write it up with the proof attached.</span></li>
-    </ol>
-  </div>
-</section>
-
-<section class="block" id="scope">
-  <div class="wrap">
-    <div class="feature reveal">
-      <div class="copy">
-        <span class="eyebrow">Adaptive scope</span>
-        <h2>Scope that learns the target while you browse.</h2>
-        <p>Static allow-lists assume you already know every domain an app uses. You find out by using it. Plonix records everything, then suggests domains to bring into scope, each one backed by evidence you can click.</p>
-        <ul class="ticks">
-          <li><div>Called from an in-scope page <span>Referer or Origin</span></div></li>
-          <li><div>Redirected or linked <span>Location, page links, CSP</span></div></li>
-          <li><div>Shares a session or a certificate <span>tokens and TLS SANs</span></div></li>
-          <li><div>Enforced in one place <span>replays, sends and agents can only reach accepted hosts</span></div></li>
-        </ul>
-      </div>
-      <div class="light-shot"><img src="assets/scope.webp" loading="lazy" width="1600" height="893" alt="The Scope screen: four suggested domains, each with the evidence that it was called from an in-scope page, and buttons to accept or reject."></div>
-    </div>
-
-    <div class="feature stack reveal" id="lens">
-      <div class="copy">
-        <h2>It points at what matters before you go looking.</h2>
-        <p>The Lens shows the selected request and its response, decoded and pretty-printed. Above them, Plonix lists what it spotted. Click one to highlight it in place, copy the decoded value, or find it across everything you captured.</p>
-        <div class="chips">
-          <span class="chip">JWT</span>
-          <span class="chip">Base64, hex, URL-encoded</span>
-          <span class="chip">Leaked secrets</span>
-          <span class="chip">Emails and card numbers</span>
-          <span class="chip">Basic auth</span>
-          <span class="chip">Internal IPs</span>
-        </div>
-        <p style="font-size:.93rem">Detection runs locally, on traffic you already captured. A token's signature is never claimed valid.</p>
-      </div>
-      <div class="light-shot"><img src="assets/lens.webp" loading="lazy" width="1108" height="550" alt="The Lens with a JWT spotted in the authorization header, its header and payload decoded, and the token highlighted in the request."></div>
-    </div>
-
-    <div class="feature flip reveal" id="bench">
-      <div class="copy">
-        <h2>Experiments, kept and comparable.</h2>
-        <p>Press <code>b</code> on any request to take it to the Bench. Edit it, send it, and every send stays in that tab's history. Restore or branch any earlier send into a new tab, and put two sends side by side to see what changed.</p>
-        <ul class="ticks">
-          <li><div>Side-by-side response and request diff</div></li>
-          <li><div>Sends only reach in-scope hosts <span>accept a host right there</span></div></li>
-          <li><div>Turn a send into a finding in one click</div></li>
-        </ul>
-      </div>
-      <div class="light-shot"><img src="assets/bench.webp" loading="lazy" width="1108" height="747" alt="The Bench: a POST request on the left, its JSON response on the right, and the send history below with Restore, Branch and Finding buttons."></div>
-    </div>
-  </div>
-</section>
-
-<section class="block search-band" id="search">
-  <div class="wrap">
-    <div class="head reveal">
-      <h2>Filters you can type.</h2>
-      <p class="lede">A small query language over URLs, headers and decoded bodies. Search stays quick as a project grows, because every project has its own database. The same query works in the window, the CLI and the API.</p>
-    </div>
-    <div class="qbox reveal">
-      <label class="qbar" for="q">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="q" name="q" type="text" spellcheck="false" autocomplete="off" value="host:api.acme.com method:POST status:5xx -logout" aria-label="Try a query">
-        <span class="count" id="qcount"></span>
-      </label>
-      <div class="qexamples" role="group" aria-label="Example queries">
-        <button type="button">host:api.acme.com method:POST status:5xx -logout</button>
-        <button type="button">scope:in mime:json path:/api</button>
-        <button type="button">status:4xx,5xx -kind:static -host:cdn.acme.com</button>
-        <button type="button">"set-cookie: sid" source:proxy</button>
-        <button type="button">ext:js passw</button>
-      </div>
-      <ul class="qparse" id="qparse" aria-live="polite"></ul>
-    </div>
-  </div>
-</section>
-
-<section class="block" id="actions">
-  <div class="wrap">
-    <div class="head reveal">
-      <h2>Quick actions that read the room.</h2>
-      <p class="lede">A set of one-click actions that surface the single most useful next step for whatever is on screen: the right chip, in the right pane, at the moment you notice something. Nothing fires on its own: you click to run, and anything that sends stays in scope.</p>
+      <h2>Mind Reader suggests the next step.</h2>
+      <p class="lede">One-click actions that surface the single most useful next step for whatever is on screen: the right chip, in the right pane, at the moment you notice something. Nothing fires on its own: you click to run, and anything that sends stays in scope.</p>
     </div>
     <div class="mr reveal" id="mr">
       <div class="mr-pick" role="tablist" aria-label="Pick a moment"></div>
@@ -655,6 +554,86 @@ footer a:hover { color: var(--fg); }
   </div>
 </section>
 
+<section class="block" id="lens">
+  <div class="wrap">
+    <div class="feature stack reveal">
+      <div class="copy">
+        <h2>It points at what matters before you go looking.</h2>
+        <p>The Lens shows the selected request and its response, decoded and pretty-printed. Above them, Plonix lists what it spotted. Click one to highlight it in place, copy the decoded value, or find it across everything you captured.</p>
+        <div class="chips">
+          <span class="chip">JWT</span>
+          <span class="chip">Base64, hex, URL-encoded</span>
+          <span class="chip">Leaked secrets</span>
+          <span class="chip">Emails and card numbers</span>
+          <span class="chip">Basic auth</span>
+          <span class="chip">Internal IPs</span>
+        </div>
+        <p style="font-size:.93rem">Detection runs locally, on traffic you already captured. A token's signature is never claimed valid.</p>
+      </div>
+      <div class="light-shot"><img src="assets/lens.webp" loading="lazy" width="1108" height="550" alt="The Lens with a JWT spotted in the authorization header, its header and payload decoded, and the token highlighted in the request."></div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="scope" style="padding-top:0">
+  <div class="wrap">
+    <div class="feature reveal">
+      <div class="copy">
+        <h2>Scope that learns the target while you browse.</h2>
+        <p>Static allow-lists assume you already know every domain an app uses. You find out by using it. Plonix records everything, then suggests domains to bring into scope, each one backed by evidence you can click.</p>
+        <ul class="ticks">
+          <li><div>Called from an in-scope page <span>Referer or Origin</span></div></li>
+          <li><div>Redirected or linked <span>Location, page links, CSP</span></div></li>
+          <li><div>Shares a session or a certificate <span>tokens and TLS SANs</span></div></li>
+          <li><div>Enforced in one place <span>replays, sends and agents can only reach accepted hosts</span></div></li>
+        </ul>
+      </div>
+      <div class="light-shot"><img src="assets/scope.webp" loading="lazy" width="1600" height="893" alt="The Scope screen: four suggested domains, each with the evidence that it was called from an in-scope page, and buttons to accept or reject."></div>
+    </div>
+  </div>
+</section>
+
+<section class="block search-band" id="search">
+  <div class="wrap">
+    <div class="head reveal">
+      <h2>Filters you can type.</h2>
+      <p class="lede">A small query language over URLs, headers and decoded bodies. Search stays quick as a project grows, because every project has its own database. The same query works in the window, the CLI and the API.</p>
+    </div>
+    <div class="qbox reveal">
+      <label class="qbar" for="q">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" name="q" type="text" spellcheck="false" autocomplete="off" value="host:api.acme.com method:POST status:5xx -logout" aria-label="Try a query">
+        <span class="count" id="qcount"></span>
+      </label>
+      <div class="qexamples" role="group" aria-label="Example queries">
+        <button type="button">host:api.acme.com method:POST status:5xx -logout</button>
+        <button type="button">scope:in mime:json path:/api</button>
+        <button type="button">status:4xx,5xx -kind:static -host:cdn.acme.com</button>
+        <button type="button">"set-cookie: sid" source:proxy</button>
+        <button type="button">ext:js passw</button>
+      </div>
+      <ul class="qparse" id="qparse" aria-live="polite"></ul>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="bench">
+  <div class="wrap">
+    <div class="feature flip reveal">
+      <div class="copy">
+        <h2>Experiments, kept and comparable.</h2>
+        <p>Press <code>b</code> on any request to take it to the Bench. Edit it, send it, and every send stays in that tab's history. Restore or branch any earlier send into a new tab, and put two sends side by side to see what changed.</p>
+        <ul class="ticks">
+          <li><div>Side-by-side response and request diff</div></li>
+          <li><div>Sends only reach in-scope hosts <span>accept a host right there</span></div></li>
+          <li><div>Turn a send into a finding in one click</div></li>
+        </ul>
+      </div>
+      <div class="light-shot"><img src="assets/bench.webp" loading="lazy" width="1108" height="747" alt="The Bench: a POST request on the left, its JSON response on the right, and the send history below with Restore, Branch and Finding buttons."></div>
+    </div>
+  </div>
+</section>
+
 <section class="block" id="projects" style="padding-top:0">
   <div class="wrap">
     <div class="feature stack reveal">
@@ -691,13 +670,14 @@ footer a:hover { color: var(--fg); }
     <div class="feature reveal">
       <div class="copy">
         <h2>Anything you can click, you can script.</h2>
-        <p>The window, the <code>plonix</code> command and agents are equal clients of one local API. Every command takes <code>--json</code>, and exit codes tell a script what happened, down to a request refused by scope.</p>
+        <p>The window, the <code>plonix</code> command and agents are equal clients of one local API, and <code>plonix mcp</code> serves it to any MCP client. Every command takes <code>--json</code>, and exit codes tell a script what happened, down to a request refused by scope.</p>
         <p style="font-size:.93rem">The API listens on loopback only and needs a token from <code>~/.plonix/api-token</code>.</p>
       </div>
       <div class="term">
         <div class="tabs" role="tablist" aria-label="Examples">
           <button type="button" role="tab" aria-selected="true" data-tab="cli">CLI</button>
           <button type="button" role="tab" aria-selected="false" data-tab="api">API</button>
+          <button type="button" role="tab" aria-selected="false" data-tab="mcp">MCP</button>
           <button type="button" class="copybtn" id="copy" aria-live="polite">Copy</button>
         </div>
 <pre data-panel="cli"><span class="p">$ </span>plonix search host:acme.test status:5xx
@@ -715,6 +695,11 @@ footer a:hover { color: var(--fg); }
 <span class="p">$ </span>curl -H "Authorization: Bearer $TOKEN" "$API/scope"
 <span class="p">$ </span>curl -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
     -d '{"domain":"*.acme.test"}' "$API/scope/accept"</pre>
+<pre data-panel="mcp" hidden><span class="p">$ </span>plonix connect claude     <span class="c"># adds Plonix to Claude Code, read-only</span>
+<span class="ok">✓</span> Plonix added to Claude Code (read-only)
+
+<span class="c"># any other MCP client runs it over stdio:</span>
+{ "mcpServers": { "plonix": { "command": "plonix", "args": ["mcp"] } } }</pre>
       </div>
     </div>
   </div>

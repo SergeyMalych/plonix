@@ -200,14 +200,14 @@ Facts, badges and trust strips go below the hero, never inside it.
 
 ### Small uppercase labels
 The mono uppercase label (with the ring mark) is rationed to about one per three sections. Today: the hero,
-Adaptive scope, AI-native and Get started. A heading alone is enough everywhere else.
+AI-native and Get started. A heading alone is enough everywhere else.
 
 ## Elevation and depth
 
 | Level | Treatment | Use |
 |---|---|---|
 | Flat | No border, no shadow | Section bands |
-| Hairline | 1px `{colors.hairline}` on `{colors.surface}` | Tiles, the flow strip, the guard strip |
+| Hairline | 1px `{colors.hairline}` on `{colors.surface}` | Tiles, the guard strip |
 | Lifted | Hairline plus a long soft shadow tinted to the page | Screenshots, the Lens demo |
 
 ## Shapes
