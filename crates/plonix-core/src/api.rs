@@ -110,6 +110,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/ui/settings.js", get(ui::settings_js))
         .route("/ui/app.css", get(ui::app_css))
         .route("/ui/icon.svg", get(ui::icon))
+        .route("/ui/guide/{file}", get(ui::guide_shot))
         .route("/ui/session", post(ui_session))
         .route("/api/ui/launch", post(ui_launch))
         .route("/api/status", get(status))
@@ -142,6 +143,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/market/{name}", get(market_detail))
         .route("/api/extensions", get(extensions_list))
         .route("/api/extensions/{name}/enabled", put(extension_enabled))
+        .route("/api/extensions/{name}/allowed", put(extension_allowed))
         .route("/api/extensions/{name}/run", post(extension_run))
         .route("/api/extensions/{name}/probe", post(extension_probe))
         .route("/api/scope", get(scope))
@@ -363,6 +365,29 @@ fn tools_on(s: &AppState) -> std::collections::BTreeSet<String> {
     on
 }
 
+/// Each extension switched on, with how it runs: `scan`, `enumerate` or
+/// `probe` for one that drives a program, `sandbox` for one with its own code.
+fn extensions_on(s: &AppState) -> std::collections::BTreeMap<String, &'static str> {
+    use crate::extension::Runner;
+    use crate::program::Kind;
+    s.engine
+        .extensions()
+        .extensions
+        .iter()
+        .map(|e| {
+            let how = match &e.runner {
+                Runner::Wasm(_) => "sandbox",
+                Runner::Program(p) => match crate::program::get(p).map(|p| p.kind) {
+                    Some(Kind::Enumerate) => "enumerate",
+                    Some(Kind::Probe) => "probe",
+                    _ => "scan",
+                },
+            };
+            (e.name.clone(), how)
+        })
+        .collect()
+}
+
 async fn status(State(s): State<AppState>, caller: MaybeCaller) -> Response {
     let rules = s.engine.rules();
     let pending = s.engine.store.suggestions(&rules).map(|v| v.len()).unwrap_or(0);
@@ -389,6 +414,9 @@ async fn status(State(s): State<AppState>, caller: MaybeCaller) -> Response {
         "tools": tools_on(&s),
         // The newest callback's number, so the sidebar can count new ones.
         "callbacks": s.engine.callbacks.latest(),
+        // Extensions switched on, by what running one does, so screens offer
+        // the ones that fit them (Find subdomains on Scope, Probe on a request).
+        "extensions": extensions_on(&s),
     });
     // The window watches this to know when the held queue changes. Agents
     // learn nothing about Intercept.
@@ -1466,7 +1494,10 @@ async fn market_detail(State(s): State<AppState>, Path(name): Path<String>) -> R
                 registry::Kind::Bundle => unreachable!(),
             };
         }
-        Ok(Some(json!({ "package": l, "trust": cat.trust, "detail": detail })))
+        // Help for Plonix's own items only: something added by hand or from
+        // the community could share a name with one.
+        let guide = (!l.local && !cat.is_community(&l.package)).then(|| crate::guide::get(&name)).flatten();
+        Ok(Some(json!({ "package": l, "trust": cat.trust, "detail": detail, "guide": guide })))
     })
     .await;
     match out {
@@ -1644,6 +1675,30 @@ async fn extension_enabled(State(s): State<AppState>, Path(name): Path<String>, 
     match tokio::task::spawn_blocking(move || crate::extension::ExtensionLibrary::new(&home).set_enabled(&name, b.enabled)).await {
         Ok(Ok(state)) => Json(json!({ "state": state })).into_response(),
         Ok(Err(e)) => err(StatusCode::NOT_FOUND, "not_found", &format!("{e:#}")),
+        Err(e) => internal(e.into()),
+    }
+}
+
+#[derive(Deserialize)]
+struct AllowedBody {
+    capability: String,
+    allowed: bool,
+}
+
+/// Allows or takes back one sensitive capability of an installed extension,
+/// so a yes skipped at install can be given later without reinstalling.
+async fn extension_allowed(State(s): State<AppState>, caller: MaybeCaller, Path(name): Path<String>, Json(b): Json<AllowedBody>) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    let cap = match crate::extension::Capability::parse(&b.capability) {
+        Ok(c) => c,
+        Err(e) => return err(StatusCode::BAD_REQUEST, "bad_capability", &e),
+    };
+    let home = s.home.clone();
+    match tokio::task::spawn_blocking(move || crate::extension::ExtensionLibrary::new(&home).set_granted(&name, cap, b.allowed)).await {
+        Ok(Ok(state)) => Json(json!({ "state": state })).into_response(),
+        Ok(Err(e)) => err(StatusCode::BAD_REQUEST, "cannot_allow", &format!("{e:#}")),
         Err(e) => internal(e.into()),
     }
 }

@@ -191,13 +191,12 @@ pub fn suggestion(s: &Value) -> String {
     );
     for e in s["evidence"].as_array().into_iter().flatten() {
         let times = e["count"].as_i64().filter(|c| *c > 1).map(|c| format!(" ×{c}")).unwrap_or_default();
-        out.push_str(&format!(
-            "      - {}{}  [#{}: {}]\n",
-            e["summary"].as_str().unwrap_or(""),
-            times,
-            e["exchange_id"],
-            clip(e["detail"].as_str().unwrap_or(""), 90)
-        ));
+        // A lookup (subdomain discovery) has no request behind it.
+        let from = match e["exchange_id"].as_i64().filter(|id| *id > 0) {
+            Some(id) => format!("#{id}: "),
+            None => String::new(),
+        };
+        out.push_str(&format!("      - {}{}  [{from}{}]\n", e["summary"].as_str().unwrap_or(""), times, clip(e["detail"].as_str().unwrap_or(""), 90)));
     }
     out
 }

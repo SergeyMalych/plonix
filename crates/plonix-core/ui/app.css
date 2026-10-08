@@ -1028,6 +1028,19 @@ button.agfhit:hover { background: var(--surface-2); color: var(--accent); }
 .extstate.stopped { background: var(--crit-soft); border-color: transparent; }
 .extstate p { margin: 0; font-size: 12px; line-height: 1.5; color: var(--fg-2); }
 .extstate .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mcap > .btn { margin-left: auto; flex: none; }
+.mcapwarn { color: var(--warn); font-weight: 600; }
+.extneeds { display: flex; gap: 10px; align-items: center; justify-content: space-between; font-size: 12px; line-height: 1.45; background: var(--warn-soft); border-radius: 7px; padding: 7px 10px; }
+.extprobe .exturl { flex: 1; min-width: 200px; font-family: var(--mono); font-size: 12px; }
+.extresult { display: flex; gap: 10px; align-items: center; justify-content: space-between; font-size: 12px; line-height: 1.45; border-radius: 7px; padding: 7px 10px; }
+.extresult.ok { background: var(--ok-soft); }
+.extresult.err { background: var(--crit-soft); }
+.extresult .btn { flex: none; }
+.mguide .mwhere { display: flex; align-items: center; gap: 4px; font-size: 12.5px; margin-bottom: 6px; }
+.mguide .mwhere .btn { margin-left: 8px; }
+.msteps { margin: 0 0 10px; padding-left: 20px; font-size: 12.5px; line-height: 1.55; }
+.msteps li { margin: 2px 0; padding-left: 2px; }
+.mshot { display: block; width: 100%; border: 1px solid var(--line-2); border-radius: 9px; margin: 2px 0 8px; }
 .skillrow { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-top: 1px solid var(--line-2); }
 .skillrow .sk-main { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .skillrow .sk-main .muted { font-size: 11.5px; }

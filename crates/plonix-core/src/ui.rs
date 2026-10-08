@@ -61,7 +61,10 @@ impl LaunchCodes {
 }
 
 fn asset(content_type: &'static str, body: impl Into<String>) -> Response {
-    let body: String = body.into();
+    asset_bytes(content_type, body.into().into_bytes())
+}
+
+fn asset_bytes(content_type: &'static str, body: Vec<u8>) -> Response {
     let mut r = (StatusCode::OK, body).into_response();
     let h = r.headers_mut();
     h.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
@@ -104,6 +107,14 @@ pub async fn app_css() -> Response {
 
 pub async fn icon() -> Response {
     asset("image/svg+xml", ICON_SVG)
+}
+
+/// A screenshot from a Market item's guide (see [`crate::guide`]).
+pub async fn guide_shot(axum::extract::Path(file): axum::extract::Path<String>) -> Response {
+    match file.strip_suffix(".jpg").and_then(crate::guide::shot) {
+        Some(bytes) => asset_bytes("image/jpeg", bytes.to_vec()),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 #[cfg(test)]
