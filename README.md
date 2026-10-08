@@ -1,3 +1,5 @@
+<div align="center">
+
 <img src="docs/images/plonix-mark.svg" width="64" height="64" alt="Plonix logo">
 
 # Plonix
@@ -13,9 +15,11 @@
 [![Last commit](https://img.shields.io/github/last-commit/SergeyMalych/plonix)](https://github.com/SergeyMalych/plonix/commits/main)
 [![Stars](https://img.shields.io/github/stars/SergeyMalych/plonix?style=flat)](https://github.com/SergeyMalych/plonix/stargazers)
 
-**🌐 [plonix.io](https://plonix.io)**
-
 **The open-source web security workbench for macOS. Fast, native, and scriptable from day one.**
+
+**[Website](https://plonix.io)** · **[Documentation](https://plonix.io/docs/)** · **[Download for Mac](https://github.com/SergeyMalych/plonix/releases/latest)**
+
+</div>
 
 Plonix captures everything your browser does, learns the real shape of the target as you explore it, and lets you search, replay and prove what you find, from a GUI, a terminal, or an AI agent.
 
@@ -27,8 +31,6 @@ Plonix is an assistant, not an automatic vulnerability finder. It analyzes what 
 </picture>
 
 > **Status: early, and usable today.** [v0.1.0](https://github.com/SergeyMalych/plonix/releases/latest) is out for Mac. The core engine (proxy, traffic store, search, adaptive scope, local API), the `plonix` CLI, the Plonix app, the Bench with payload runs, the Market, Programs, scope-gated crawl and scans, and read-only MCP access for AI agents work today and are covered by tests. See [Roadmap](#roadmap).
-
-**Website:** [plonix.io](https://plonix.io) · **Documentation:** [plonix.io/docs](https://plonix.io/docs/) (the same pages as [docs/](docs/)) · **Download:** [latest release](https://github.com/SergeyMalych/plonix/releases/latest)
 
 ---
 
