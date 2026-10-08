@@ -28,7 +28,7 @@ colors:
 typography:
   display-xl:
     fontFamily: Bricolage Grotesque, Avenir Next, system-ui, sans-serif
-    fontSize: clamp(2.6rem, 5.3vw, 4.5rem)
+    fontSize: clamp(2.4rem, 4.4vw, 3.7rem)
     fontWeight: 800
     lineHeight: 1.04
     letterSpacing: -0.02em
@@ -170,7 +170,7 @@ pills or nav links.
 
 | Role | Face | Size | Weight |
 |---|---|---|---|
-| Hero headline | Bricolage Grotesque | clamp(2.6rem, 5.3vw, 4.5rem) | 800 |
+| Hero headline | Bricolage Grotesque | clamp(2.4rem, 4.4vw, 3.7rem) | 800 |
 | Section headline | Bricolage Grotesque | clamp(2rem, 4.4vw, 3.4rem) | 800 |
 | Tile / step title | Bricolage Grotesque | 1.2-1.35rem | 600 |
 | Body | Hanken Grotesk | 17px / 1.6 | 400 |
