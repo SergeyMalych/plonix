@@ -6,6 +6,17 @@ What changed in each Plonix release. The newest release is at the top.
 
 ### Added
 - A walkthrough of the demo project: the first time the demo opens, it offers a short tour that steps through every part of Plonix over the demo's own data, ringing each part on screen. Skip it, or take it again any time from **Take the tour** in the demo strip.
+- Quick actions in the Lens *Suggested* row and the Traffic row menu: the one next step that fits the request on screen, such as Save login as a user, Check this id across users, Replay signed out, open a reflected value, redirect or GraphQL call on the Bench, draft a finding for an open CORS policy, or find other errors like this one.
+- Hand-offs into Scans focused on one endpoint: a file upload, an input that looks like a host or URL the server fetches, or any endpoint with inputs opens Scans narrowed to that endpoint with the fitting checks picked. You review and press Run.
+- The Agents screen is where you work with Claude: ask about the whole project, start a skill in one click, reopen saved conversations and follow up, and see every read an agent made in plain words. Turn on *Watch my traffic* and Claude leaves a digest, notes and leads as you browse, each with one place to act on it, with an unread count in the sidebar and a daily token limit. Off until you turn it on, and read-only.
+- Traffic search suggests fields and this project's own values as you type, with request counts. Tab completes, Enter adds a filter chip.
+- Map endpoints: long paths stay on one line, long opaque segments fold into `{token}`, and the table resizes, sorts and filters (`method:`, `path:`, `status:`, `param:`).
+- Settings › Appearance: theme and spacing. Dense stays the default; Roomy gives rows and panels more air. Ask Claude buttons and Claude's suggestions wear a rainbow frame, and Scope evidence lines up in columns.
+- Accept all and Reject all in Scope list each domain with a checkbox, so you can leave some out.
+
+### Changed
+- Ask Claude runs in the app use only Plonix's read-only MCP server, with your other MCP servers and Claude Code's shell, file and web tools switched off.
+- ws:// and plain http:// through the capture browser are captured, browser crawls keep to a program's request rate, and Bench and crawl responses keep only the body limit while recording the real size.
 
 ## [0.1.1] - 2026-10-05
 
