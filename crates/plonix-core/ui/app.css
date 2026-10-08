@@ -227,6 +227,13 @@ code, .mono { font-family: var(--mono); }
 .ttable td.host { color: var(--fg-2); }
 .ttable .num { text-align: right; color: var(--fg-2); font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 11px; }
 .ttable tr.out td.url, .ttable tr.out td.host { color: var(--fg-3); }
+.ttable td.url .urlrow { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.ttable td.url .urlrow > .tag { flex: 0 0 auto; }
+.ttable td.url .pc { display: flex; min-width: 0; white-space: nowrap; }
+.ttable td.url .pd { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--fg-3); }
+.ttable td.url .pn { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ttable td.url .ph { color: var(--accent); }
+.ttable td.url .pq { flex: 0 0 auto; color: var(--fg-3); }
 .empty { padding: 48px 20px; text-align: center; color: var(--fg-2); line-height: 1.6; }
 .empty h3 { color: var(--fg); margin: 0 0 6px; font-size: 15px; }
 .empty code { background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 5px; padding: 1px 6px; }

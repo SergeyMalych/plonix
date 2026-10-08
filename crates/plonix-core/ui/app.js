@@ -385,6 +385,13 @@ const TOUR_STEPS = [
   },
   {
     view: 'traffic',
+    target: '#pathseg',
+    title: 'Short paths',
+    text: 'Long paths full of ids and tokens are hard to scan. Short path folds them into {id} and {token}, as the Map does, and keeps the last part of each path in view. Hover a row for the full path.',
+    action: { label: 'Try short paths', run: () => setShortPath(!T.shortPath) },
+  },
+  {
+    view: 'traffic',
     prep: async () => {
       const r = await api('/api/traffic?limit=1&q=' + encodeURIComponent('path:/v1/orders/1042 mime:json'));
       if (r.items.length) await openInspector(r.items[0].id);
@@ -1247,7 +1254,7 @@ function rawPre({ lines, body }) {
    Traffic
    ====================================================================== */
 
-const T = { text: '', filters: [], items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: store('plonix.inspH'), picked: new Set(), pickAnchor: null, group: store('plonix.groupAlike') !== false, open: new Set(), visible: null };
+const T = { text: '', filters: [], items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: store('plonix.inspH'), picked: new Set(), pickAnchor: null, group: store('plonix.groupAlike') !== false, shortPath: store('plonix.shortPath') === true, open: new Set(), visible: null };
 
 const sameKey = (ex) => `${ex.method} ${ex.host}:${ex.port} ${target(ex)}`;
 
@@ -1272,6 +1279,25 @@ function setGrouping(on) {
   store('plonix.groupAlike', on ? null : false);
   drawGroupToggle();
   drawRows(Infinity);
+}
+
+function setShortPath(on) {
+  T.shortPath = on;
+  // Full paths are the default, so only turning short paths on is remembered.
+  store('plonix.shortPath', on ? true : null);
+  drawPathToggle();
+  drawRows(Infinity);
+}
+
+/** Full paths, or the Map's short form: ids and tokens folded, the query left out, the folder giving way to the name. */
+function drawPathToggle() {
+  const box = $('#pathseg');
+  if (!box) return;
+  clear(
+    box,
+    h('button', { class: T.shortPath ? '' : 'on', text: 'Full path', title: 'Show each path and query in full', onclick: () => setShortPath(false) }),
+    h('button', { class: T.shortPath ? 'on' : '', text: 'Short path', title: 'Fold ids and tokens into {id} and {token}, leave out the query, and keep the last part of the path in view. Hover a row for the full path.', onclick: () => setShortPath(true) }),
+  );
 }
 
 /** "21:35:58–36:13" for a run (newest first in the list), or one time if they match. */
@@ -1627,6 +1653,7 @@ function renderTraffic(main) {
         h('div', { class: 'search', id: 'searchbox' }, h('span', { class: 'mg', text: '⌕' }), input, h('kbd', { text: '/' })),
         h('span', { class: 'count', id: 'tcount' }),
         h('span', { class: 'seg groupseg', id: 'groupseg' }),
+        h('span', { class: 'seg groupseg', id: 'pathseg' }),
         h('span', { id: 'rulespill' }),
         liveBtn,
         interceptButton(),
@@ -1641,6 +1668,7 @@ function renderTraffic(main) {
   ]);
   renderChips();
   drawGroupToggle();
+  drawPathToggle();
   loadRules();
   renderBanner();
   IC.drawn = null;
@@ -2522,7 +2550,9 @@ function drawRows(freshAbove) {
       h('td', { class: 'num', text: ex.id }),
       h('td', null, h('span', { class: 'meth m-' + ex.method, text: ex.method })),
       h('td', { class: 'host c-host', text: ex.host + (ex.port !== 443 && ex.port !== 80 ? ':' + ex.port : ''), title: ex.host }),
-      h('td', { class: 'url', title: target(ex) }, tags, tags.length ? ' ' : '', target(ex)),
+      T.shortPath
+        ? h('td', { class: 'url short', title: target(ex) }, h('span', { class: 'urlrow' }, tags, append(pathParts(ex.short_path || ex.path), [ex.query ? h('span', { class: 'pq', text: '?…' }) : null])))
+        : h('td', { class: 'url', title: target(ex) }, tags, tags.length ? ' ' : '', target(ex)),
       h('td', null, h('span', { class: statusClass(ex.status), text: ex.status == null ? 'ERR' : ex.status })),
       h('td', null, ex.in_scope ? null : h('span', { class: 'tag out', text: 'out' }), ' ', h('span', { class: 'mime', text: shortMime(ex.mime) })),
       h('td', { class: 'num c-size', text: fmtSize(ex.resp_len) }),
@@ -6617,10 +6647,15 @@ function endpointsSection(eps) {
 
 /** A path cell that never widens the table: the folder part gives way first, so the resource name stays readable. Folded ids and tokens are tinted. Hover shows the whole path. */
 function pathCell(path) {
+  return h('td', { class: 'pathcell', title: path }, pathParts(path));
+}
+
+/** The folder and the resource name of a path as separate spans, so the folder can give way first. */
+function pathParts(path) {
   const cut = path.lastIndexOf('/', path.length - 2);
   const dir = cut > 0 ? path.slice(0, cut + 1) : '';
   const part = (cls, text) => h('span', { class: cls }, text.split(/(\{\w+\})/).map((t, i) => (i % 2 ? h('span', { class: 'ph', text: t }) : t)));
-  return h('td', { class: 'pathcell', title: path }, h('span', { class: 'pc' }, dir ? part('pd', dir) : null, part('pn', path.slice(dir.length))));
+  return h('span', { class: 'pc' }, dir ? part('pd', dir) : null, part('pn', path.slice(dir.length)));
 }
 
 /** Endpoints an API description lists that captured traffic has not visited yet, each one click from the Bench. */

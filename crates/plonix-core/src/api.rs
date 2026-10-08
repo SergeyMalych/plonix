@@ -892,7 +892,19 @@ async fn traffic(State(s): State<AppState>, caller: MaybeCaller, Query(p): Query
         q.terms.push(crate::query::Term { negate: false, field: crate::query::Field::Scope(true) });
     }
     match s.engine.store.search_sorted(&q, &s.engine.rules(), p.sort.as_deref(), p.limit.min(5000), p.offset) {
-        Ok((items, total)) => Json(json!({ "total": total, "items": items })).into_response(),
+        Ok((items, total)) => {
+            // The same folding the Map uses, for the Traffic "Short path" view.
+            let items: Vec<Value> = items
+                .into_iter()
+                .map(|ex| {
+                    let short = crate::store::fold_path(&ex.path);
+                    let mut v = json!(ex);
+                    v["short_path"] = json!(short);
+                    v
+                })
+                .collect();
+            Json(json!({ "total": total, "items": items })).into_response()
+        }
         Err(e) => internal(e),
     }
 }
