@@ -59,6 +59,7 @@ pub const SNAPSHOT: &[(&str, &str)] = &[
     ("platforms/hackerone.json", include_str!("../../../store/platforms/hackerone.json")),
     ("tools/saved-users.json", include_str!("../../../store/tools/saved-users.json")),
     ("tools/access-check.json", include_str!("../../../store/tools/access-check.json")),
+    ("tools/callbacks.json", include_str!("../../../store/tools/callbacks.json")),
     ("skills/triage-host.md", include_str!("../../../store/skills/triage-host.md")),
     ("skills/explain-request.md", include_str!("../../../store/skills/explain-request.md")),
     ("skills/review-sign-in.md", include_str!("../../../store/skills/review-sign-in.md")),
@@ -92,6 +93,14 @@ const BUILTIN_TOOLS: &[(&str, &[&str])] = &[
             "Adds an Access check screen. Pick some endpoints in Traffic or a branch of the Map, and it replays each request as every saved user, and once signed out, then lines the responses up side by side.",
             "It draws no conclusions on its own. It shows each response's status and size and points out where responses match or where a signed-out request still succeeded, so you can judge what belongs to whom.",
             "It replays only requests you already captured, through the scope-gated send path. Works best with the Saved users tool, so it has identities to replay as.",
+        ],
+    ),
+    (
+        "tools/callbacks.json",
+        &[
+            "Adds a Callbacks screen. Make a host for each test, put it in a request (a URL parameter, a header, a webhook field), and see every DNS lookup, HTTP request or mail that later reaches it, with the time, the address it came from and the raw request.",
+            "Each host carries its own name, so a callback points straight at the test it came from. Insert one from the Bench in a click, find the request that carried it, and turn a callback into a finding.",
+            "Nothing runs on its own: listening starts when you press Start and registers only with the callback server. It uses interactsh, the open-source callback tool by ProjectDiscovery (MIT license), which you install with `brew install interactsh`. Use the public servers or your own, with a token.",
         ],
     ),
 ];
@@ -1249,7 +1258,7 @@ mod tests {
         let market = Market::new(&home);
         let cat = official();
         // The official catalog carries the built-in tools.
-        for name in ["saved-users", "access-check"] {
+        for name in ["saved-users", "access-check", "callbacks"] {
             let p = cat.index.get(name).unwrap_or_else(|| panic!("{name} missing from the official catalog"));
             assert_eq!(p.kind, Kind::Tool);
             assert!(matches!(market.status(p), Status::Available));

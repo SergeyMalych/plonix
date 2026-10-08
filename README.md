@@ -76,6 +76,7 @@ Plonix has a handful of tools, each with its own name. They are the same in the 
 | **Rules** | Community rule packs that teach Plonix to recognise technologies | `plonix rules` |
 | **Saved users** | The cookies and tokens for each user of an application; the Bench sends as whichever one you pick (a Market tool) | Bench › As … |
 | **Access check** | Replays chosen requests as each saved user and signed out, side by side, so differences in what each one may see stand out (a Market tool) | Traffic or Map selection |
+| **Callbacks** | Hands out a unique host for each test and lists every DNS lookup, HTTP request or mail that reaches one (a Market tool) | Callbacks tab, Bench › Insert callback host |
 
 ## What works today
 
@@ -171,12 +172,16 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 
 ### The Market and starter profiles
 - **One signed catalog** (`store/index.json`) of skills, rule packs, filter packs, payload lists, bug bounty platforms, tools, bundles and extensions. Everything is verified against the signature before it installs, and items added from a file or link are marked **Not verified**.
-- **Tools** switch on a capability built into Plonix that ships off until you want it, such as Saved users and the Access check.
+- **Tools** switch on a capability built into Plonix that ships off until you want it, such as Saved users, the Access check and Callbacks.
 - **Starter profiles:** pick bug hunter, red teamer or security researcher on the Start screen, at the top of the Market, in Settings or per project. The Market then shows **Recommended for you**, each item with one line on why, and `plonix market install --starter` installs the set. Pick none and everything stays neutral. See [docs/market.md](docs/market.md).
 
 ### Saved users and the Access check
 - **Saved users** keep each user's cookies and tokens per project. Pick **As …** on the Bench to send a request as one of them; switching never widens scope.
 - The **Access check** replays the requests you select in Traffic or on the Map as each saved user and once signed out, then lines up status, size and content for each. It points out where a signed-out request still succeeds and where different users get the same response; it draws no conclusions, and you decide what they mean.
+
+### Callbacks
+- **Callbacks** hand out a unique host for each test. Put one in a request (Bench › **Insert callback host** puts it where the cursor is) and every DNS lookup, HTTP request or mail that later reaches it is listed with its time, sender and raw request, next to the test it came from. **Find the request** shows the captured request that carried the host, and **+ Finding** writes it up with both as evidence.
+- Listening starts only when you press **Start listening** and talks only to the callback server: the public servers, or your own with a token. It uses [interactsh](https://github.com/projectdiscovery/interactsh), the open-source callback tool by ProjectDiscovery (MIT license), which you install with `brew install interactsh`. Plonix keeps each project's session so earlier hosts keep working after a restart.
 
 ### Programs
 - **Programs** (⌘9, `plonix program`) bring in a bug bounty or vulnerability disclosure program: connect HackerOne, paste a program's policy, or look up a domain's `security.txt`, then review and follow it.
@@ -528,6 +533,7 @@ site/             the plonix.io website; site/docs is generated from docs/ by sc
 - [x] Ask Claude in the app, with live progress and formatted answers; Claude-drafted findings you review before saving
 - [x] Market extensions: secret-sweep, js-endpoints, subdomain-discovery, parameter-probe, graphql-explorer, security-headers
 - [x] Saved users and the Access check
+- [x] Callbacks: per-test hosts and the DNS, HTTP and mail callbacks they get
 - [x] Scan plan: analyze a host into reviewable test proposals (`plonix scan plan`)
 - [x] Starter profiles: Market recommendations for bug hunters, red teamers and researchers
 
