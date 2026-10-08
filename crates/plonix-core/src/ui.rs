@@ -17,13 +17,20 @@ use std::time::{Duration, Instant};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
+use axum::extract::Path;
+
 const INDEX_HTML: &str = include_str!("../ui/index.html");
 const LAUNCHER_HTML: &str = include_str!("../ui/launcher.html");
-const APP_JS: &str = include_str!("../ui/app.js");
-const LAUNCHER_JS: &str = include_str!("../ui/launcher.js");
-const SETTINGS_JS: &str = include_str!("../ui/settings.js");
-const APP_CSS: &str = include_str!("../ui/app.css");
-const ICON_SVG: &str = include_str!("../ui/icon.svg");
+
+/// Everything the two pages load from `/ui/`: name, content type, contents.
+const FILES: &[(&str, &'static str, &str)] = &[
+    ("common.js", "text/javascript; charset=utf-8", include_str!("../ui/common.js")),
+    ("settings.js", "text/javascript; charset=utf-8", include_str!("../ui/settings.js")),
+    ("app.js", "text/javascript; charset=utf-8", include_str!("../ui/app.js")),
+    ("launcher.js", "text/javascript; charset=utf-8", include_str!("../ui/launcher.js")),
+    ("app.css", "text/css; charset=utf-8", include_str!("../ui/app.css")),
+    ("icon.svg", "image/svg+xml", include_str!("../ui/icon.svg")),
+];
 
 /// How long a launch code stays valid.
 pub const CODE_TTL: Duration = Duration::from_secs(120);
@@ -86,24 +93,12 @@ pub async fn launcher() -> Response {
     asset("text/html; charset=utf-8", LAUNCHER_HTML)
 }
 
-pub async fn launcher_js() -> Response {
-    asset("text/javascript; charset=utf-8", LAUNCHER_JS)
-}
-
-pub async fn settings_js() -> Response {
-    asset("text/javascript; charset=utf-8", SETTINGS_JS)
-}
-
-pub async fn app_js() -> Response {
-    asset("text/javascript; charset=utf-8", APP_JS)
-}
-
-pub async fn app_css() -> Response {
-    asset("text/css; charset=utf-8", APP_CSS)
-}
-
-pub async fn icon() -> Response {
-    asset("image/svg+xml", ICON_SVG)
+/// A script, stylesheet or icon the pages load, by name (`/ui/{file}`).
+pub async fn file(Path(name): Path<String>) -> Response {
+    match FILES.iter().find(|(n, ..)| *n == name) {
+        Some((_, content_type, body)) => asset(content_type, *body),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 #[cfg(test)]
@@ -118,6 +113,18 @@ mod tests {
         assert!(!codes.redeem("nope"));
         assert!(codes.redeem(&c));
         assert!(!codes.redeem(&c));
+    }
+
+    /// Every `/ui/…` file a page refers to is served, so a new script
+    /// cannot be added to a page and forgotten here.
+    #[test]
+    fn every_file_a_page_loads_is_served() {
+        for page in [INDEX_HTML, LAUNCHER_HTML] {
+            for part in page.split("\"/ui/").skip(1) {
+                let name = &part[..part.find('"').unwrap()];
+                assert!(FILES.iter().any(|(n, ..)| *n == name), "/ui/{name} is not served");
+            }
+        }
     }
 
     #[test]

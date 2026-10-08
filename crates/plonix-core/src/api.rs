@@ -106,10 +106,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
     let project_id = state.engine.project_ref.get().map(|p| p.id.clone()).unwrap_or_default();
     Router::new()
         .route("/", get(move || ui::index(project_id.clone())))
-        .route("/ui/app.js", get(ui::app_js))
-        .route("/ui/settings.js", get(ui::settings_js))
-        .route("/ui/app.css", get(ui::app_css))
-        .route("/ui/icon.svg", get(ui::icon))
+        .route("/ui/{file}", get(ui::file))
         .route("/ui/session", post(ui_session))
         .route("/api/ui/launch", post(ui_launch))
         .route("/api/status", get(status))
