@@ -3,6 +3,17 @@
 use base64::Engine as _;
 use serde_json::Value;
 
+/// Captured text with terminal control characters shown, not obeyed: a body
+/// holding escape codes could otherwise rewrite the screen or the clipboard.
+/// Newlines and tabs stay.
+pub fn safe(s: &str) -> String {
+    let bad = |c: char| (c.is_control() && c != '\n' && c != '\t') || ('\u{80}'..='\u{9f}').contains(&c);
+    if !s.chars().any(bad) {
+        return s.to_string();
+    }
+    s.chars().map(|c| if bad(c) { c.escape_unicode().to_string() } else { c.to_string() }).collect()
+}
+
 pub fn traffic_table(items: &[Value]) -> String {
     let mut out = String::new();
     for it in items {
@@ -27,7 +38,7 @@ pub fn traffic_line(it: &Value) -> String {
     let url = clip(&url, 110);
     let scope = if it["in_scope"].as_bool() == Some(true) { "in " } else { "out" };
     let src = if it["source"] == "replay" { " ↻" } else { "" };
-    format!(
+    safe(&format!(
         "{:>6}  {:<7} {:>3}  {}  {:>8}  {:<16} {}{}",
         it["id"].as_i64().unwrap_or(0),
         it["method"].as_str().unwrap_or(""),
@@ -37,7 +48,7 @@ pub fn traffic_line(it: &Value) -> String {
         clip(it["mime"].as_str().unwrap_or(""), 16),
         url,
         src
-    )
+    ))
 }
 
 /// Raw HTTP-style rendering of one exchange (as returned by `/api/traffic/{id}`).
@@ -77,7 +88,7 @@ pub fn exchange(v: &Value, max_body: usize) -> String {
         }
         None => out.push_str(&format!("error: {}\n", v["error"].as_str().unwrap_or("unknown"))),
     }
-    out
+    safe(&out)
 }
 
 /// WebSocket messages (as returned by `/api/traffic/{id}/messages`), one per
@@ -101,7 +112,7 @@ pub fn messages(v: &Value, max: usize) -> String {
     if (items.len() as i64) < total {
         out.push_str(&format!("… and {} more\n", total - items.len() as i64));
     }
-    out
+    safe(&out)
 }
 
 /// A note for a body that was longer than the recording limit (`side` is `req` or `resp`).
@@ -253,6 +264,15 @@ pub fn hosts(items: &[Value]) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn control_characters_are_shown_not_obeyed() {
+        let v = json!({ "id": 1, "method": "GET", "url": "https://a.test/", "path": "/", "status": 200, "req_headers": [], "resp_headers": [["X-A", "1"]],
+            "resp_text": "hi\u{1b}]52;c;Zm9v\u{7}\r\nnext\tline" });
+        let out = exchange(&v, 1000);
+        assert!(!out.contains('\u{1b}') && !out.contains('\u{7}') && !out.contains('\r'));
+        assert!(out.contains("\\u{1b}]52;c;Zm9v") && out.contains("next\tline"));
+    }
 
     #[test]
     fn cut_bodies_say_how_much_was_kept() {

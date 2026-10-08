@@ -199,7 +199,7 @@ pub fn certs_cmd(ctx: &Ctx, cmd: CertsCmd) -> Result<()> {
                     let bytes = std::fs::read(&p12).with_context(|| format!("reading {}", p12.display()))?;
                     let password = match password_env {
                         Some(var) => std::env::var(&var).with_context(|| format!("the environment variable {var} is not set"))?,
-                        None => ask_password(&p12)?,
+                        None => ask_secret(&format!("Password for {}", p12.display()))?,
                     };
                     body["pkcs12_base64"] = json!(base64::engine::general_purpose::STANDARD.encode(bytes));
                     body["password"] = json!(password);
@@ -229,7 +229,8 @@ fn read_text(path: &std::path::Path) -> Result<String> {
 }
 
 /// Asks for the .p12 password on the terminal, without echoing it where possible.
-fn ask_password(path: &std::path::Path) -> Result<String> {
+/// Reads a secret from the terminal without echoing it (or a line from a pipe).
+pub(crate) fn ask_secret(prompt: &str) -> Result<String> {
     use std::io::{BufRead, IsTerminal, Write};
     let stdin = std::io::stdin();
     if !stdin.is_terminal() {
@@ -237,7 +238,7 @@ fn ask_password(path: &std::path::Path) -> Result<String> {
         stdin.lock().read_line(&mut line)?;
         return Ok(line.trim_end_matches(['\r', '\n']).to_string());
     }
-    eprint!("Password for {}: ", path.display());
+    eprint!("{prompt}: ");
     std::io::stderr().flush()?;
     let quiet = std::process::Command::new("stty").arg("-echo").stdin(std::process::Stdio::inherit()).status().is_ok_and(|s| s.success());
     let mut line = String::new();

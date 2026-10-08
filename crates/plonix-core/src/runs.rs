@@ -264,7 +264,8 @@ impl Plan {
     }
 
     /// The ordered list of value-assignments this run will send, before the
-    /// budget is applied. Each assignment has one value per position.
+    /// budget is applied (but never more than [`MAX_REQUEST_BUDGET`], so a huge
+    /// product is never built). Each assignment has one value per position.
     pub fn assignments(&self) -> Vec<Vec<String>> {
         let p = self.positions();
         let base = self.base_values();
@@ -274,7 +275,7 @@ impl Plan {
                 for i in 0..p {
                     // One list for all positions, or one list per position.
                     let list = if self.lists.len() == 1 { &self.lists[0] } else { self.lists.get(i).map(|l| l.as_slice()).unwrap_or(&[]) };
-                    for v in list {
+                    for v in list.iter().take(MAX_REQUEST_BUDGET - out.len()) {
                         let mut a = base.clone();
                         a[i] = v.clone();
                         out.push(a);
@@ -293,20 +294,19 @@ impl Plan {
                 for i in 0..p {
                     let list = self.lists.get(i).cloned().unwrap_or_default();
                     let mut next = Vec::new();
-                    for prefix in &out {
+                    // Stop building at the cap: two 50,000-value lists would
+                    // otherwise make 2.5 billion entries before any is sent.
+                    'build: for prefix in &out {
                         for v in &list {
+                            if next.len() == MAX_REQUEST_BUDGET {
+                                break 'build;
+                            }
                             let mut a = prefix.clone();
                             a.push(v.clone());
                             next.push(a);
                         }
                     }
                     out = next;
-                    // Guard against a product that would blow past any budget
-                    // before we even start sending.
-                    if out.len() > MAX_REQUEST_BUDGET {
-                        out.truncate(MAX_REQUEST_BUDGET);
-                        break;
-                    }
                 }
                 // An empty template (no positions) yields a single assignment.
                 if p == 0 { vec![] } else { out }
@@ -453,6 +453,16 @@ mod tests {
         assert_eq!(a.len(), 4);
         assert!(a.contains(&vec!["1".to_string(), "x".to_string()]));
         assert!(a.contains(&vec!["2".to_string(), "y".to_string()]));
+    }
+
+    #[test]
+    fn huge_products_stop_at_the_cap() {
+        let many = Payloads::Range { from: 0, to: 299, step: 1 };
+        let req = RunRequest { url: "https://h/?a=••&b=••".into(), lists: vec![many.clone(), many], mode: RunMode::Matrix, ..Default::default() };
+        assert_eq!(plan(&req, &none).unwrap().assignments().len(), MAX_REQUEST_BUDGET.min(90_000));
+        let long = Payloads::Range { from: 0, to: 29_999, step: 1 };
+        let req = RunRequest { url: "https://h/?a=••&b=••".into(), lists: vec![long], mode: RunMode::Sweep, ..Default::default() };
+        assert_eq!(plan(&req, &none).unwrap().assignments().len(), MAX_REQUEST_BUDGET);
     }
 
     #[test]

@@ -352,6 +352,11 @@ fn global_path(home: &Home) -> std::path::PathBuf {
     home.root.join("settings.json")
 }
 
+/// Whether settings.json exists but cannot be read.
+pub fn unreadable(home: &Home) -> bool {
+    std::fs::read(global_path(home)).is_ok_and(|b| serde_json::from_slice::<GlobalFile>(&b).is_err())
+}
+
 fn read_global(home: &Home) -> GlobalFile {
     std::fs::read(global_path(home)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
@@ -381,6 +386,7 @@ pub fn save_global(home: &Home, id: &str, values: &Values) -> Result<()> {
     if let Some(st) = section(id).and_then(|s| s.storage) {
         return (st.save)(home, values);
     }
+    crate::paths::set_aside_unreadable::<GlobalFile>(&global_path(home));
     let mut file = read_global(home);
     file.sections.insert(id.to_string(), Value::Object(values.clone()));
     write_atomic(&global_path(home), &serde_json::to_vec_pretty(&file)?)
@@ -606,6 +612,20 @@ pub fn synced_folder_warning(path: &Path) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unreadable_file_is_kept_aside_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = Home { root: dir.path().into() };
+        home.ensure().unwrap();
+        std::fs::write(global_path(&home), b"{ \"sections\": { \"usage\": { \"share\": false } ").unwrap();
+        assert!(unreadable(&home));
+        save_global(&home, INTERFACE, &Map::new()).unwrap();
+        assert!(!unreadable(&home));
+        let aside: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().contains(".corrupt-")).collect();
+        assert_eq!(aside.len(), 1);
+        assert!(std::fs::read_to_string(aside[0].path()).unwrap().contains("\"share\": false"));
+    }
 
     #[test]
     fn defaults_fill_in_and_bad_values_fall_back() {

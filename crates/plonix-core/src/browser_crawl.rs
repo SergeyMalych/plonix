@@ -29,6 +29,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
 use tokio::process::{Child, Command};
 
+use crate::bounty::Guard;
 use crate::browser::{self, Kind};
 use crate::cdp::{Cdp, Event};
 use crate::crawl::{self, CrawlReport, CrawlRequest, PageScan};
@@ -87,7 +88,7 @@ pub async fn run(engine: &Engine, host: &str, start: String, req: &CrawlRequest)
     let outcome = async {
         let (port, path) = wait_for_devtools(&profile.0, &mut child).await.with_context(|| format!("starting {} headless", found.name))?;
         let (cdp, events) = Cdp::connect(port, &path).await?;
-        let r = Crawler::start(cdp.clone(), events, engine.rules()).await?.walk(start, req, &mut report).await;
+        let r = Crawler::start(cdp.clone(), events, engine.rules(), engine.program()).await?.walk(start, req, &mut report).await;
         let _ = tokio::time::timeout(Duration::from_secs(2), cdp.call(None, "Browser.close", json!({}))).await;
         r
     }
@@ -132,13 +133,13 @@ struct Crawler {
 impl Crawler {
     /// Opens a page, starts the event pump and arms scope enforcement before
     /// anything is loaded.
-    async fn start(cdp: Cdp, events: tokio::sync::mpsc::UnboundedReceiver<Event>, rules: ScopeRules) -> Result<Crawler> {
+    async fn start(cdp: Cdp, events: tokio::sync::mpsc::UnboundedReceiver<Event>, rules: ScopeRules, program: Option<Arc<Guard>>) -> Result<Crawler> {
         let target = cdp.call(None, "Target.createTarget", json!({ "url": "about:blank" })).await?;
         let target_id = target["targetId"].as_str().context("no target id")?.to_string();
         let attached = cdp.call(None, "Target.attachToTarget", json!({ "targetId": target_id, "flatten": true })).await?;
         let session = attached["sessionId"].as_str().context("no session id")?.to_string();
         let net: Shared = Arc::default();
-        tokio::spawn(pump(cdp.clone(), events, rules.clone(), session.clone(), net.clone()));
+        tokio::spawn(pump(cdp.clone(), events, rules.clone(), session.clone(), net.clone(), program));
 
         let s = Some(session.as_str());
         cdp.call(s, "Fetch.enable", json!({ "patterns": [{ "urlPattern": "*" }] })).await?;
@@ -293,7 +294,7 @@ impl Crawler {
 }
 
 /// Answers the events that cannot wait, and tracks the page's network.
-async fn pump(cdp: Cdp, mut events: tokio::sync::mpsc::UnboundedReceiver<Event>, rules: ScopeRules, main: String, net: Shared) {
+async fn pump(cdp: Cdp, mut events: tokio::sync::mpsc::UnboundedReceiver<Event>, rules: ScopeRules, main: String, net: Shared, program: Option<Arc<Guard>>) {
     while let Some(ev) = events.recv().await {
         let s = ev.session.as_deref();
         let p = &ev.params;
@@ -306,7 +307,18 @@ async fn pump(cdp: Cdp, mut events: tokio::sync::mpsc::UnboundedReceiver<Event>,
                         net.lock().unwrap().blocked.insert(host);
                         cdp.send(s, "Fetch.failRequest", json!({ "requestId": id, "errorReason": "BlockedByClient" })).await
                     }
-                    None => cdp.send(s, "Fetch.continueRequest", json!({ "requestId": id })).await,
+                    // The program's request rate holds for the browser too; waiting apart keeps the other events flowing.
+                    None => match program.clone() {
+                        Some(guard) => {
+                            let (cdp, s) = (cdp.clone(), s.map(str::to_string));
+                            tokio::spawn(async move {
+                                guard.pace().await;
+                                let _ = cdp.send(s.as_deref(), "Fetch.continueRequest", json!({ "requestId": id })).await;
+                            });
+                            Ok(())
+                        }
+                        None => cdp.send(s, "Fetch.continueRequest", json!({ "requestId": id })).await,
+                    },
                 }
             }
             "Page.javascriptDialogOpening" => {

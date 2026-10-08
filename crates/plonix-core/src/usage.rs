@@ -159,7 +159,8 @@ pub fn disabled_by_env() -> bool {
 
 /// Whether statistics are collected in this home.
 pub fn sharing(home: &Home) -> bool {
-    !disabled_by_env() && crate::terms::accepted(home) && settings::global(home, SECTION).get("share").and_then(Value::as_bool).unwrap_or(true)
+    // An unreadable settings file may hold "off": do not guess "on".
+    !disabled_by_env() && crate::terms::accepted(home) && !settings::unreadable(home) && settings::global(home, SECTION).get("share").and_then(Value::as_bool).unwrap_or(true)
 }
 
 /// Whether this build, in this environment, may send at all.

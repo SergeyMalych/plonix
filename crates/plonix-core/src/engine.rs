@@ -1067,7 +1067,7 @@ impl Engine {
         let outbound = OutboundRequest { scheme, host, port, method, target, headers: req.headers, body: Bytes::from(body), extra_headers: vec![] };
         let result = match self.responder().and_then(|r| r(&outbound)) {
             Some(resp) => Ok(resp),
-            None => self.upstream().send(outbound).await,
+            None => self.upstream().send_capped(outbound, self.body_limit()).await,
         };
         ex.duration_ms = started.elapsed().as_millis() as i64;
         match result {
@@ -1075,6 +1075,8 @@ impl Engine {
                 ex.status = Some(up.status);
                 ex.resp_headers = up.headers;
                 ex.resp_body = up.body.to_vec();
+                ex.resp_truncated = up.truncated_from.is_some();
+                ex.resp_size = up.truncated_from.map(|n| n as i64);
                 ex.tls_sans = up.tls_sans;
                 ex.http_version = up.version;
                 ex.client_cert = up.client_cert;
@@ -1153,6 +1155,15 @@ impl Engine {
         Ok(self.scan_catalog().plan(&host, &tech, &exchanges, &endpoints))
     }
 
+    /// A path that can be requested for an endpoint: its folded path holds the
+    /// literal `{id}`, so take the path of the request it was seen in.
+    fn real_path(&self, e: &crate::model::Endpoint) -> String {
+        if !e.path.contains("{id}") {
+            return e.path.clone();
+        }
+        self.store.get_exchange(e.sample_id).ok().flatten().map_or_else(|| e.path.clone(), |x| x.path)
+    }
+
     /// Runs an active scan against one accepted host. Every request goes through
     /// `send`, so the scan can only ever reach a host in accepted scope, and
     /// each request is recorded like any replay. Findings are recorded against
@@ -1221,7 +1232,7 @@ impl Engine {
             let targets: Vec<Option<scan::ScanTarget>> = if t.def.check.path.is_some() {
                 vec![None]
             } else {
-                endpoints.iter().map(|e| Some(scan::ScanTarget { method: e.method.clone(), path: e.path.clone() })).collect()
+                endpoints.iter().map(|e| Some(scan::ScanTarget { method: e.method.clone(), path: self.real_path(e) })).collect()
             };
             let mut ran = false;
             'targets: for target in &targets {
@@ -1331,7 +1342,7 @@ impl Engine {
         };
         enqueue(format!("{scheme}://{authority}{start}"), 0, &mut seen, &mut queue);
         for e in self.store.endpoints(&host).map_err(SendError::Other)?.into_iter().filter(|e| e.method.eq_ignore_ascii_case("GET")) {
-            enqueue(format!("{scheme}://{authority}{}", e.path), 0, &mut seen, &mut queue);
+            enqueue(format!("{scheme}://{authority}{}", self.real_path(&e)), 0, &mut seen, &mut queue);
         }
         report.urls_found = seen.len();
 
@@ -1474,8 +1485,6 @@ impl Engine {
     /// scope-gated send path, so a target outside accepted scope is refused,
     /// never sent.
     pub async fn access_check(&self, req: authcheck::AuthCheckRequest, initiator: &str) -> Result<authcheck::AuthCheckReport, SendError> {
-        use crate::users::AUTH_HEADERS;
-
         let mut identities: Vec<authcheck::Identity> =
             req.users.iter().map(|u| authcheck::Identity { id: u.id.clone(), label: u.name.clone(), anon: false }).collect();
         if req.include_anon {
@@ -1489,7 +1498,6 @@ impl Engine {
             return Err(SendError::BadRequest("no requests were selected to check".into()));
         }
 
-        let remove_auth: Vec<String> = AUTH_HEADERS.iter().map(|h| h.to_string()).collect();
         let delay = std::time::Duration::from_millis(req.delay_ms.unwrap_or(authcheck::DEFAULT_DELAY_MS).min(authcheck::MAX_DELAY_MS));
         let mut report = authcheck::AuthCheckReport { identities: identities.clone(), planned: targets.len() * identities.len(), ..Default::default() };
 
@@ -1497,6 +1505,12 @@ impl Engine {
         let mut first = true;
         'targets: for tid in targets {
             let Some(orig) = self.store.get_exchange(tid).map_err(SendError::Other)? else { continue };
+            // Every credential-looking header this capture carried, not only the fixed list.
+            let remove_auth: Vec<String> = crate::users::AUTH_HEADERS
+                .iter()
+                .map(|h| h.to_string())
+                .chain(orig.req_headers.iter().map(|(k, _)| k.clone()).filter(|k| crate::users::is_auth_header(k)))
+                .collect();
             let mut cells = Vec::with_capacity(identities.len());
             for ident in &identities {
                 if attempts >= authcheck::MAX_REQUESTS {

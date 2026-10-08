@@ -1492,26 +1492,27 @@ fn consent(grant: &[String], approve: bool) -> Result<crate::extension::Consent,
 
 async fn market_change(s: AppState, body: Option<MarketBody>, what: &'static str) -> Response {
     let home = s.home.clone();
-    let out = tokio::task::spawn_blocking(move || -> Result<Vec<market::Change>, (StatusCode, anyhow::Error)> {
+    let out = tokio::task::spawn_blocking(move || -> Result<market::Updated, (StatusCode, anyhow::Error)> {
         let m = market::Market::new(&home);
         let bad = |e: anyhow::Error| (StatusCode::BAD_REQUEST, e);
+        let done = |changes| market::Updated { changes, failed: vec![] };
         match (what, body) {
-            ("remove", Some(b)) => m.remove(&b.name).map_err(bad),
+            ("remove", Some(b)) => m.remove(&b.name).map(done).map_err(bad),
             (_, b) => {
                 let cat = market::open_cached(&home, false).map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
                 match b {
                     Some(b) => {
                         let c = consent(&b.grant, b.approve).map_err(|e| bad(anyhow::anyhow!(e)))?;
-                        m.install_with(&cat, &b.name, &c).map_err(bad)
+                        m.install_with(&cat, &b.name, &c).map(done).map_err(bad)
                     }
-                    None => m.update(&cat).map_err(bad),
+                    None => Ok(m.update(&cat)),
                 }
             }
         }
     })
     .await;
     match out {
-        Ok(Ok(changes)) => Json(json!({ "changes": changes })).into_response(),
+        Ok(Ok(u)) => Json(json!({ "changes": u.changes, "failed": u.failed })).into_response(),
         Ok(Err((status, e))) => err(status, "market_refused", &format!("{e:#}")),
         Err(e) => internal(e.into()),
     }
@@ -1527,6 +1528,9 @@ struct MarketAddBody {
     /// Sensitive extension capabilities the user said yes to.
     #[serde(default)]
     grant: Vec<String>,
+    /// On confirm: the sha256 of the file the preview showed.
+    #[serde(default)]
+    sha256: Option<String>,
 }
 
 /// Adds a skill, rule pack or filter pack from outside the Market. It is
@@ -1550,6 +1554,14 @@ async fn market_add(State(s): State<AppState>, Json(b): Json<MarketAddBody>) -> 
         let ext = m.inspect_external(bytes, &label).map_err(&bad)?;
         if !b.confirm {
             return Ok(json!({ "added": false, "file": ext }));
+        }
+        // The source is read again on confirm, so only add exactly the file that was shown.
+        match b.sha256.as_deref() {
+            None => return Err(bad("say which file you looked at: confirm with the sha256 the preview showed".into())),
+            Some(sha) if !sha.eq_ignore_ascii_case(&ext.sha256) => {
+                return Err((StatusCode::CONFLICT, "the file changed since you looked at it; look at it again before adding it".into()));
+            }
+            Some(_) => {}
         }
         let c = consent(&b.grant, true).map_err(&bad)?;
         let change = m.add_external(&ext, &c).map_err(|e| bad(format!("{e:#}")))?;

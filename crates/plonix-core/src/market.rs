@@ -251,9 +251,15 @@ impl Catalog {
     /// Downloads a package and checks it against the index: checksum,
     /// format, name and version. Nothing is installed.
     pub fn fetch(&self, p: &Package) -> Result<Vec<u8>> {
-        let builtin = (p.kind == Kind::Platform).then(|| platform::BUILTIN.iter().find(|(n, _)| *n == p.name)).flatten();
+        let builtin = (p.kind == Kind::Platform).then(|| platform::BUILTIN.iter().find(|(n, _)| *n == p.name).map(|(_, t)| *t)).flatten();
+        // A built-in tool is listed with the snapshot's checksum, so it comes from the snapshot, never from a remote Market.
+        let builtin = builtin.or_else(|| {
+            (p.kind == Kind::Tool && BUILTIN_TOOLS.iter().any(|(url, _)| *url == p.url))
+                .then(|| SNAPSHOT.iter().find(|(path, text)| *path == p.url && sha256_hex(text.as_bytes()) == p.sha256).map(|(_, t)| *t))
+                .flatten()
+        });
         let bytes = match &self.origin {
-            _ if builtin.is_some() => builtin.unwrap().1.as_bytes().to_vec(),
+            _ if builtin.is_some() => builtin.unwrap().as_bytes().to_vec(),
             Origin::Bundled => SNAPSHOT
                 .iter()
                 .find(|(path, _)| *path == p.url)
@@ -592,6 +598,20 @@ pub struct Change {
     pub action: Action,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
+}
+
+/// What updating everything did: the changes made, and the packages that could not be updated.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct Updated {
+    pub changes: Vec<Change>,
+    pub failed: Vec<UpdateFailure>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateFailure {
+    pub name: String,
+    pub kind: Kind,
+    pub error: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -1097,6 +1117,7 @@ impl Market {
             Origin::Remote(base) => registry::resolve(base, &p.url).map(|l| l.to_string()).unwrap_or_default(),
         };
         let mut changes = vec![];
+        let mut failed = None;
         for (p, status, needed, bytes) in planned {
             let from = match &status {
                 Status::Update { installed } => Some(installed.clone()),
@@ -1107,49 +1128,66 @@ impl Market {
                 changes.push(Change { name: p.name.clone(), kind: p.kind, version: p.version.clone(), action: Action::Unchanged, from: None });
                 continue;
             }
-            match (p.kind, bytes) {
-                (Kind::Rules, Some(b)) => drop(self.rules.install(&b, &source(p), Some(&p.sha256))?),
-                (Kind::Filters, Some(b)) => drop(self.filters.install(&b, &source(p), Some(&p.sha256))?),
-                (Kind::Detectors, Some(b)) => drop(self.detectors.install(&b, &source(p), Some(&p.sha256))?),
-                (Kind::List, Some(b)) => drop(self.lists.install(&b, &source(p), Some(&p.sha256))?),
-                (Kind::Tool, Some(b)) => drop(self.tools.install(&b, &source(p), Some(&p.sha256))?),
-                (Kind::Skill, Some(b)) => drop(self.skills.install(&b, &source(p), Some(&p.sha256))?),
-                (Kind::Extension, Some(b)) => drop(self.extensions.install(&b, &source(p), Some(&p.sha256), consent)?),
-                (Kind::Platform, Some(b)) => drop(self.platforms.install(&b, &source(p), Some(&p.sha256))?),
-                (Kind::Bundle, _) => {}
+            let done = match (p.kind, bytes) {
+                (Kind::Rules, Some(b)) => self.rules.install(&b, &source(p), Some(&p.sha256)).map(drop),
+                (Kind::Filters, Some(b)) => self.filters.install(&b, &source(p), Some(&p.sha256)).map(drop),
+                (Kind::Detectors, Some(b)) => self.detectors.install(&b, &source(p), Some(&p.sha256)).map(drop),
+                (Kind::List, Some(b)) => self.lists.install(&b, &source(p), Some(&p.sha256)).map(drop),
+                (Kind::Tool, Some(b)) => self.tools.install(&b, &source(p), Some(&p.sha256)).map(drop),
+                (Kind::Skill, Some(b)) => self.skills.install(&b, &source(p), Some(&p.sha256)).map(drop),
+                (Kind::Extension, Some(b)) => self.extensions.install(&b, &source(p), Some(&p.sha256), consent).map(drop),
+                (Kind::Platform, Some(b)) => self.platforms.install(&b, &source(p), Some(&p.sha256)).map(drop),
+                (Kind::Bundle, _) => Ok(()),
                 _ => unreachable!("files are fetched for every kind but bundles"),
+            };
+            // Stop at the first failure, but still record below what was installed before it.
+            if let Err(e) = done {
+                failed = Some(e);
+                break;
             }
             let action = if from.is_some() { Action::Updated } else { Action::Installed };
             changes.push(Change { name: p.name.clone(), kind: p.kind, version: p.version.clone(), action, from });
         }
-        if top.kind == Kind::Bundle {
-            let mut lock = self.read_bundles();
+        let mut lock = self.read_bundles();
+        // A bundle that failed part way is not installed, but one installed before keeps track of what this attempt added.
+        if top.kind == Kind::Bundle && (failed.is_none() || lock.bundles.contains_key(&top.name)) {
             let mut added: Vec<String> =
                 changes.iter().filter(|c| c.action == Action::Installed && c.name != top.name).map(|c| c.name.clone()).collect();
+            let mut version = top.version.clone();
             if let Some(old) = lock.bundles.get(&top.name) {
                 for a in &old.added {
                     if !added.contains(a) {
                         added.push(a.clone());
                     }
                 }
+                if failed.is_some() {
+                    version = old.version.clone();
+                }
             }
             let members = order.iter().filter(|n| **n != top.name).cloned().collect();
-            lock.bundles.insert(top.name.clone(), BundleEntry { version: top.version.clone(), members, added });
+            lock.bundles.insert(top.name.clone(), BundleEntry { version, members, added });
             self.write_bundles(&lock)?;
         }
         self.record(cat, &changes, &packages)?;
-        Ok(changes)
+        match failed {
+            Some(e) => Err(e),
+            None => Ok(changes),
+        }
     }
 
-    /// Installs newer versions of everything installed from the catalog.
-    pub fn update(&self, cat: &Catalog) -> Result<Vec<Change>> {
-        let mut changes = vec![];
+    /// Installs newer versions of everything installed from the catalog. One
+    /// package that cannot be updated does not stop the others.
+    pub fn update(&self, cat: &Catalog) -> Updated {
+        let mut out = Updated::default();
         for p in &cat.index.packages {
             if matches!(self.status(p), Status::Update { .. }) {
-                changes.extend(self.install(cat, &p.name)?.into_iter().filter(|c| c.action != Action::Unchanged));
+                match self.install(cat, &p.name) {
+                    Ok(changes) => out.changes.extend(changes.into_iter().filter(|c| c.action != Action::Unchanged)),
+                    Err(e) => out.failed.push(UpdateFailure { name: p.name.clone(), kind: p.kind, error: format!("{e:#}") }),
+                }
             }
         }
-        Ok(changes)
+        out
     }
 
     /// Removes an installed package. Removing a bundle also removes the
@@ -1276,6 +1314,59 @@ mod tests {
         let mut idx = registry::parse(SNAPSHOT.iter().find(|(p, _)| *p == "index.json").unwrap().1.as_bytes()).unwrap();
         inject_builtin_tools(&mut idx, &other.trust);
         assert!(!idx.packages.iter().any(|p| p.kind == Kind::Tool), "third-party catalogs must not get the built-in tools");
+    }
+
+    #[test]
+    fn built_in_tools_come_from_the_snapshot_even_with_a_remote_market() {
+        let mut cat = official();
+        cat.origin = Origin::Remote(Location::Url("https://127.0.0.1:9/".into()));
+        let p = cat.index.get("saved-users").unwrap();
+        let want = SNAPSHOT.iter().find(|(path, _)| *path == p.url).unwrap().1.as_bytes();
+        assert_eq!(cat.fetch(p).unwrap(), want);
+    }
+
+    #[test]
+    fn a_bundle_that_fails_part_way_still_records_what_it_installed() {
+        let (_d, home) = home();
+        let market = Market::new(&home);
+        let mut cat = official();
+        let bundle = Package {
+            name: "test-kit".into(),
+            kind: Kind::Bundle,
+            version: "1.0.0".into(),
+            description: String::new(),
+            author: String::new(),
+            url: String::new(),
+            sha256: String::new(),
+            homepage: String::new(),
+            about: vec![],
+            requires: vec!["leaks".into(), "api-inventory".into()],
+        };
+        cat.index.packages.push(bundle.clone());
+        // Skills cannot be written, so the second member fails after the first is installed.
+        std::fs::write(home.root.join("skills"), "not a folder").unwrap();
+        assert!(market.install(&cat, "test-kit").is_err());
+        assert!(matches!(market.status(cat.index.get("leaks").unwrap()), Status::Installed { .. }));
+        assert_eq!(market.verification(Kind::Filters, "leaks").level, TrustLevel::Verified);
+        assert_eq!(market.status(&bundle), Status::Available);
+    }
+
+    #[test]
+    fn update_keeps_going_past_a_package_that_fails() {
+        let (_d, home) = home();
+        let market = Market::new(&home);
+        let mut cat = official();
+        let file = |path: &str| SNAPSHOT.iter().find(|(p, _)| *p == path).unwrap().1;
+        let skill = file(&cat.index.get("api-inventory").unwrap().url).replace("version: 1.0.0", "version: 0.9.0");
+        market.skills.install(skill.as_bytes(), "old", None).unwrap();
+        let pack = file(&cat.index.get("leaks").unwrap().url).replace("\"version\": \"1.0.0\"", "\"version\": \"0.9.0\"");
+        market.filters.install(pack.as_bytes(), "old", None).unwrap();
+        cat.index.packages.iter_mut().find(|p| p.name == "leaks").unwrap().sha256 = "0".repeat(64);
+
+        let u = market.update(&cat);
+        assert!(u.changes.iter().any(|c| c.name == "api-inventory" && c.action == Action::Updated), "{u:?}");
+        assert!(u.failed.len() == 1 && u.failed[0].name == "leaks" && u.failed[0].error.contains("checksum mismatch"), "{u:?}");
+        assert_eq!(market.installed_version(Kind::Skill, "api-inventory").as_deref(), Some("1.0.0"));
     }
 
     #[test]

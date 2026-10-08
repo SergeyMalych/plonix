@@ -162,7 +162,8 @@ impl Client {
             // Nothing listening: the engine is not running. Anything else (a
             // reset, a timeout) is worth showing as it is.
             Err(ureq::Error::Transport(t)) if t.kind() == ureq::ErrorKind::ConnectionFailed => Err(NotRunning.into()),
-            Err(ureq::Error::Transport(t)) => Err(anyhow!(NotRunning).context(format!("the engine did not answer: {t}"))),
+            // Not `NotRunning`: the engine is up, it was just slow (a long run) or reset the connection.
+            Err(ureq::Error::Transport(t)) => Err(anyhow!("the engine did not answer: {t}")),
         }
     }
 }
