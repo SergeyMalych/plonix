@@ -160,7 +160,7 @@ function modal(title, body, actions) {
 
 async function boot() {
   applyTheme(store('plonix.theme') || 'auto');
-  applyDensity(store('plonix.density') || 'roomy');
+  applyDensity(store('plonix.density') || 'dense');
   const hash = location.hash;
   const code = hash.startsWith('#code=') ? hash.slice(6) : null;
   if (code) {
@@ -602,10 +602,10 @@ function applyTheme(t) {
   S.theme = t;
 }
 
-/** Roomy (the default) gives rows and panels more air; Dense fits more on screen. */
+/** Dense (the default) fits more on screen; Roomy gives rows and panels more air. */
 function applyDensity(d) {
-  document.documentElement.setAttribute('data-density', d === 'dense' ? 'dense' : 'roomy');
-  S.density = d === 'dense' ? 'dense' : 'roomy';
+  document.documentElement.setAttribute('data-density', d === 'roomy' ? 'roomy' : 'dense');
+  S.density = d === 'roomy' ? 'roomy' : 'dense';
 }
 
 function cycleTheme() {
@@ -10033,9 +10033,9 @@ function appearanceSection() {
     applies: 'now',
     fields: [
       { key: 'theme', label: 'Theme', type: 'choice', options: [{ value: 'auto', label: 'Match system' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }] },
-      { key: 'density', label: 'Spacing', type: 'choice', help: 'Roomy gives rows and panels more air. Dense fits more on screen.', options: [{ value: 'roomy', label: 'Roomy' }, { value: 'dense', label: 'Dense' }] },
+      { key: 'density', label: 'Spacing', type: 'choice', help: 'Dense fits more on screen. Roomy gives rows and panels more air.', options: [{ value: 'dense', label: 'Dense' }, { value: 'roomy', label: 'Roomy' }] },
     ],
-    values: { theme: S.theme || 'auto', density: S.density || 'roomy' },
+    values: { theme: S.theme || 'auto', density: S.density || 'dense' },
   };
 }
 
