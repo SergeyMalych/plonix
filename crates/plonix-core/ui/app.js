@@ -193,6 +193,14 @@ async function boot() {
   if (VIEWS[v]) S.view = v;
   renderShell();
   poll();
+  if (S.status.demo && !pstore('plonix.demoTourSeen')) autoTour();
+}
+
+/** Offers the walkthrough the first time the demo opens, once any
+ * first-launch question has been answered. */
+function autoTour() {
+  if ($('.modal')) return setTimeout(autoTour, 400);
+  if (!pstore('plonix.demoTourSeen') && !TOUR.el) startTour();
 }
 
 function signOut(message) {
@@ -259,6 +267,7 @@ function demoBar() {
     h(
       'span',
       { class: 'tour' },
+      h('button', { class: 'btn sm primary', text: 'Take the tour', title: 'A short walk through every part of Plonix  (about two minutes)', onclick: () => startTour() }),
       h('button', { class: 'btn sm', text: 'What Lens spots', title: 'An order with a token, an email and a card number in it', onclick: lensSample }),
       h('button', { class: 'btn sm', text: 'Scope suggestions', title: 'Hosts tied to the shop, with the evidence for each', onclick: () => go('scope') }),
       h('button', { class: 'btn sm', text: 'Filters', title: 'Ready-made include and exclude filters, and how to write your own', onclick: filterTour }),
@@ -341,6 +350,247 @@ async function filterTour() {
     [h('button', { class: 'btn', text: 'Clear filters', onclick: () => (closeModal(), clearFilters(), go('traffic')) }), h('button', { class: 'btn primary', text: 'Done', onclick: closeModal })],
   );
   m.el.querySelector('.mcard').classList.add('wide');
+}
+
+/* ---------- the demo walkthrough ---------- */
+
+/** A guided walk through every part of Plonix, over the demo's own data.
+ * Each step opens a screen and rings the part it talks about; a step whose
+ * part isn't on screen still shows its card, just without the ring. */
+const TOUR_STEPS = [
+  {
+    title: 'Welcome to the Plonix demo',
+    text: 'Brightcart is a made-up shop whose traffic was captured ahead of time. This walk takes about two minutes and stops on each part of Plonix. Use the arrow keys or the buttons, and leave whenever you like.',
+    view: 'traffic',
+  },
+  {
+    view: 'traffic',
+    target: '#searchbox',
+    title: 'Traffic',
+    text: 'Every request your browser makes through Plonix lands here, live. Search any text, or type a filter such as host:, status:, path: or method: and press Enter.',
+  },
+  {
+    view: 'traffic',
+    target: '#chips',
+    title: 'Filters',
+    text: 'Filters are chips: + shows only what matches, − hides it. The Suggested chips come from this traffic, so the useful ones are a click away. Filters are saved with the project.',
+    action: { label: 'See ready-made filters', run: () => filterTour() },
+  },
+  {
+    view: 'traffic',
+    target: '#groupseg',
+    title: 'Grouping',
+    text: 'The same request sent several times in a row folds into one ×N row with its time span. Click the row to expand it, or switch to Every request.',
+  },
+  {
+    view: 'traffic',
+    prep: async () => {
+      const r = await api('/api/traffic?limit=1&q=' + encodeURIComponent('path:/v1/orders/1042 mime:json'));
+      if (r.items.length) await openInspector(r.items[0].id);
+    },
+    target: '#inspector',
+    title: 'Lens',
+    text: 'Lens shows the request and response, and points out what matters in them: tokens, emails and card numbers in this order. Select any text in it to decode it, find it in other traffic or ask Claude about it.',
+  },
+  {
+    view: 'traffic',
+    target: ['.lenssugg:not([hidden])', '#inspector'],
+    title: 'Suggestions',
+    text: 'Plonix reads the request and suggests next steps that fit it, one click each, such as drafting a finding or getting ideas for this endpoint. Nothing is sent until you click.',
+  },
+  {
+    view: 'scope',
+    target: ['#scopebody .card.sugg', '#scopebody'],
+    title: 'Scope',
+    text: 'As you browse, Plonix spots domains that belong to your target and shows why. You accept or reject each one, and anything that sends requests stays inside what you accepted.',
+  },
+  {
+    view: 'map',
+    target: ['#hostlist', '#main .view'],
+    title: 'Map',
+    text: 'Hosts, endpoints and parameters learned from the traffic, with the technologies Plonix detected. Click any endpoint to see its requests in place.',
+  },
+  {
+    view: 'bench',
+    target: ['.reqbar', '#main .view'],
+    title: 'Bench',
+    text: 'Each tab is an experiment: edit a request, send it, branch it and compare the responses. The demo comes with three ready-made experiments.',
+  },
+  {
+    view: 'bench',
+    target: ['.runconf', '#main .view'],
+    title: 'Run',
+    text: 'Mark a value with • and Run sends the request once per value, with a sensible list picked for you. Here it walks the order id through nearby numbers so you can spot orders that aren’t yours.',
+  },
+  {
+    view: 'findings',
+    target: ['#findbody > .finding', '#findbody'],
+    title: 'Findings',
+    text: 'Write up what you found, each finding tied to the requests that prove it, then export the lot as a report.',
+  },
+  {
+    view: 'scans',
+    target: ['#scanbody .scansug', '#scanbody'],
+    title: 'Scans',
+    text: 'Plonix lists what it sees in an in-scope host and recommends checks that fit it. You pick the checks and press Run; nothing scans on its own.',
+  },
+  {
+    view: 'settings',
+    prep: () => (S.settingsSection = 'replace'),
+    target: ['.spane', '#main .view'],
+    title: 'Match and replace',
+    text: 'Rules that rewrite requests and responses as they pass through the proxy, such as swapping a header or switching a feature flag on. Requests they changed are tagged in Traffic.',
+  },
+  {
+    view: 'market',
+    target: ['#mkinds', '#main .view'],
+    title: 'Market',
+    text: 'Extensions, skills, filter packs and word lists, each signed and checked before it installs. Tools such as Saved users and the Access check, which replays requests as each user and signed out, are switched on from here.',
+  },
+  {
+    view: 'programs',
+    target: ['#progbody', '#main .view'],
+    title: 'Programs',
+    text: 'Connect a bug bounty platform and follow a program: its assets become your scope, and its rules, such as rate limits and required headers, are kept for you.',
+  },
+  {
+    view: 'agents',
+    target: '#main .view > .toolbar',
+    title: 'Agents',
+    text: 'Let an AI agent such as Claude Code work with this project over MCP: ask about the traffic, the map and the findings, and see what each answer was based on.',
+  },
+  {
+    title: 'That’s the tour',
+    text: 'Press Open target to capture a site of your own. The demo stays on the Start screen, and you can take this walk again with Take the tour in the demo strip.',
+    view: 'traffic',
+  },
+];
+
+const TOUR = { i: -1, el: null, spot: null, timer: null, keys: null };
+
+/** Starts the walk at the first step, or at `at`. */
+function startTour(at = 0) {
+  endTour();
+  pstore('plonix.demoTourSeen', true);
+  TOUR.spot = h('div', { class: 'tourspot', hidden: true });
+  TOUR.el = h('div', { class: 'tourcard', role: 'dialog', 'aria-label': 'Demo walkthrough' });
+  document.body.append(TOUR.spot, TOUR.el);
+  TOUR.keys = (e) => {
+    if ($('.modal, .popover, .ctxmenu')) return;
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName)) return;
+    const k = { ArrowRight: 1, ArrowLeft: -1, Escape: 0 }[e.key];
+    if (k === undefined || e.metaKey || e.ctrlKey || e.altKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (k === 0) endTour();
+    else tourStep(TOUR.i + k);
+  };
+  document.addEventListener('keydown', TOUR.keys, true);
+  window.addEventListener('resize', placeTour);
+  // Screens draw parts of themselves late; keep the ring on its part.
+  TOUR.timer = setInterval(placeTour, 300);
+  tourStep(at);
+}
+
+function endTour() {
+  clearInterval(TOUR.timer);
+  if (TOUR.keys) document.removeEventListener('keydown', TOUR.keys, true);
+  window.removeEventListener('resize', placeTour);
+  if (TOUR.el) TOUR.el.remove();
+  if (TOUR.spot) TOUR.spot.remove();
+  Object.assign(TOUR, { i: -1, el: null, spot: null, timer: null, keys: null });
+}
+
+async function tourStep(i) {
+  if (!TOUR.el || i < 0) return;
+  if (i >= TOUR_STEPS.length) return endTour();
+  TOUR.i = i;
+  const s = TOUR_STEPS[i];
+  const last = i === TOUR_STEPS.length - 1;
+  closeModal();
+  if (s.prep && s.view !== 'traffic') s.prep();
+  if (s.view && (S.view !== s.view || s.view === 'settings')) go(s.view, true);
+  if (s.prep && s.view === 'traffic') await Promise.resolve(s.prep()).catch(() => {});
+  if (TOUR.i !== i || !TOUR.el) return;
+  const dots = TOUR_STEPS.map((_, n) => h('span', { class: 'tdot' + (n === i ? ' on' : n < i ? ' done' : '') }));
+  clear(
+    TOUR.el,
+    h('div', { class: 'tourhead' }, h('span', { class: 'tcount', text: i && !last ? `${i} of ${TOUR_STEPS.length - 2}` : 'Demo walkthrough' }), h('button', { class: 'iconbtn', title: 'End the walkthrough  (Esc)', text: '✕', onclick: endTour })),
+    h('h4', { text: s.title }),
+    h('p', { text: s.text }),
+    s.action ? h('button', { class: 'linkbtn taction', text: s.action.label + ' →', onclick: s.action.run }) : null,
+    h(
+      'div',
+      { class: 'tourfoot' },
+      h('span', { class: 'tdots' }, dots),
+      i === 0
+        ? h('button', { class: 'btn sm', text: 'Not now', onclick: endTour })
+        : last
+          ? h('button', { class: 'btn sm', text: 'Start over', onclick: () => tourStep(1) })
+          : h('button', { class: 'btn sm', text: 'Back', onclick: () => tourStep(i - 1) }),
+      h('button', { class: 'btn sm primary', text: i === 0 ? 'Start the tour' : last ? 'Done' : 'Next', onclick: () => tourStep(i + 1) }),
+    ),
+  );
+  TOUR.el.classList.remove('in');
+  void TOUR.el.offsetWidth;
+  TOUR.el.classList.add('in');
+  placeTour();
+}
+
+/** The first of a step's targets that is on screen. */
+function tourTarget(s) {
+  for (const sel of [].concat(s.target || [])) {
+    const el = $(sel);
+    if (el && el.getClientRects().length) return el;
+  }
+  return null;
+}
+
+/** Rings the step's part of the screen and sets the card beside it: right,
+ * left, below or above, whichever has room, else inside its lower corner. */
+function placeTour() {
+  if (!TOUR.el || TOUR.i < 0) return;
+  const s = TOUR_STEPS[TOUR.i];
+  const el = tourTarget(s);
+  const vw = innerWidth;
+  const vh = innerHeight;
+  const cw = TOUR.el.offsetWidth;
+  const ch = TOUR.el.offsetHeight;
+  const gap = 14;
+  const pad = 6;
+  let x;
+  let y;
+  if (!el) {
+    // A step about the whole app dims it; one whose part isn't on screen doesn't.
+    TOUR.spot.hidden = !!s.target;
+    TOUR.spot.classList.add('none');
+    TOUR.el.classList.toggle('center', !s.target);
+    if (!s.target) {
+      x = (vw - cw) / 2;
+      y = (vh - ch) / 2;
+    } else {
+      x = vw - cw - 24;
+      y = vh - ch - 48;
+    }
+  } else {
+    TOUR.el.classList.remove('center');
+    TOUR.spot.classList.remove('none');
+    // Keep the ring inside the window, even around a part that fills it.
+    const r0 = el.getBoundingClientRect();
+    const edge = pad + 3;
+    const r = { left: Math.max(r0.left, edge), top: Math.max(r0.top, edge), right: Math.min(r0.right, vw - edge), bottom: Math.min(r0.bottom, vh - edge) };
+    Object.assign(TOUR.spot.style, { left: r.left - pad + 'px', top: r.top - pad + 'px', width: r.right - r.left + pad * 2 + 'px', height: r.bottom - r.top + pad * 2 + 'px' });
+    TOUR.spot.hidden = false;
+    const clampY = (v) => Math.min(Math.max(v, 12), vh - ch - 12);
+    const clampX = (v) => Math.min(Math.max(v, 12), vw - cw - 12);
+    if (vw - r.right - pad >= cw + gap * 2) [x, y] = [r.right + pad + gap, clampY(r.top)];
+    else if (r.left - pad >= cw + gap * 2) [x, y] = [r.left - pad - gap - cw, clampY(r.top)];
+    else if (vh - r.bottom - pad >= ch + gap * 2) [x, y] = [clampX(r.left), r.bottom + pad + gap];
+    else if (r.top - pad >= ch + gap * 2) [x, y] = [clampX(r.left), r.top - pad - gap - ch];
+    else [x, y] = [clampX(r.right - cw - 20), clampY(r.bottom - ch - 20)];
+  }
+  TOUR.el.style.left = Math.round(x) + 'px';
+  TOUR.el.style.top = Math.round(y) + 'px';
 }
 
 /* ---------- theme ---------- */

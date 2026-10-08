@@ -1335,3 +1335,23 @@ tr.acnote > td { border-bottom: none; }
 .selslot:empty { display: none; }
 .selslot .spotdetail { margin-top: 8px; }
 .selslot .sdv { max-height: none; }
+
+/* the demo walkthrough */
+.tourspot { position: fixed; z-index: 40; border-radius: 10px; pointer-events: none; box-shadow: 0 0 0 2px var(--accent), 0 0 0 9999px color-mix(in srgb, var(--bg) 45%, transparent); transition: left 0.22s ease, top 0.22s ease, width 0.22s ease, height 0.22s ease; }
+.tourcard { position: fixed; z-index: 45; width: 340px; max-width: calc(100vw - 24px); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 14px 16px 12px; display: flex; flex-direction: column; gap: 8px; }
+.tourcard.in { animation: tourin 0.18s ease; }
+@keyframes tourin { from { opacity: 0; transform: translateY(4px); } }
+.tourcard.center { width: 400px; }
+.tourcard .tourhead { display: flex; align-items: center; justify-content: space-between; height: 20px; }
+.tourcard .tcount { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
+.tourcard h4 { margin: 0; font-size: 15px; }
+.tourcard p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--fg-2); }
+.tourcard .taction { align-self: flex-start; padding: 0; font-size: 12.5px; color: var(--accent); }
+.tourcard .tourfoot { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.tourcard .tdots { display: flex; gap: 4px; margin-right: auto; }
+.tourcard .tdot { width: 5px; height: 5px; border-radius: 50%; background: var(--line); }
+.tourcard .tdot.done { background: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.tourcard .tdot.on { width: 14px; border-radius: 3px; background: var(--accent); }
+.tourspot.none { left: 0 !important; top: 0 !important; width: 100vw !important; height: 100vh !important; border-radius: 0; background: color-mix(in srgb, var(--bg) 45%, transparent); box-shadow: none; transition: none; }
+.tourcard .tourhead .iconbtn { width: 22px; height: 22px; padding: 0; border: 0; background: transparent; color: var(--fg-3); font-size: 12px; margin-right: -4px; }
+.tourcard .tourhead .iconbtn:hover { color: var(--fg); background: var(--surface-2); }
