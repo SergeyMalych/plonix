@@ -444,6 +444,11 @@ impl Store {
         Ok(self.conn.lock().unwrap().query_row("SELECT count(*) FROM exchanges", [], |r| r.get(0))?)
     }
 
+    /// The newest exchange id, 0 when nothing is captured yet.
+    pub fn max_id(&self) -> Result<i64> {
+        Ok(self.conn.lock().unwrap().query_row("SELECT coalesce(max(id), 0) FROM exchanges", [], |r| r.get(0))?)
+    }
+
     pub fn distinct_hosts(&self) -> Result<Vec<String>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare("SELECT DISTINCT host FROM exchanges")?;
