@@ -479,6 +479,7 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .pathcell .pc { display: flex; white-space: nowrap; }
 .pathcell .pd { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--fg-3); }
 .pathcell .pn { flex: 0 0 auto; min-width: 0; max-width: calc(100% - 2ch); overflow: hidden; text-overflow: ellipsis; }
+.pathcell .ph { color: var(--accent); }
 .techgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; padding: 12px; }
 .tech { border: 1px solid var(--line-2); border-radius: 9px; padding: 8px 10px; background: var(--surface); }
 .tech .tn { font-weight: 650; display: flex; gap: 6px; align-items: baseline; }

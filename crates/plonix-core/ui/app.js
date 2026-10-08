@@ -6368,11 +6368,12 @@ async function drawHostDetail() {
   );
 }
 
-/** A path cell that never widens the table: the folder part gives way first, so the resource name stays readable. Hover shows the whole path. */
+/** A path cell that never widens the table: the folder part gives way first, so the resource name stays readable. Folded ids and tokens are tinted. Hover shows the whole path. */
 function pathCell(path) {
   const cut = path.lastIndexOf('/', path.length - 2);
   const dir = cut > 0 ? path.slice(0, cut + 1) : '';
-  return h('td', { class: 'pathcell', title: path }, h('span', { class: 'pc' }, dir ? h('span', { class: 'pd', text: dir }) : null, h('span', { class: 'pn', text: path.slice(dir.length) })));
+  const part = (cls, text) => h('span', { class: cls }, text.split(/(\{\w+\})/).map((t, i) => (i % 2 ? h('span', { class: 'ph', text: t }) : t)));
+  return h('td', { class: 'pathcell', title: path }, h('span', { class: 'pc' }, dir ? part('pd', dir) : null, part('pn', path.slice(dir.length))));
 }
 
 /** Endpoints an API description lists that captured traffic has not visited yet, each one click from the Bench. */

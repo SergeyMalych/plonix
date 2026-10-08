@@ -572,8 +572,12 @@ export async function api(path, opts = {{}}) {{
         resp(200, "application/json").api().json(json!({ "items": [ { "at": "2025-09-14T09:12:00Z", "status": "out_for_delivery" } ] })),
     )?;
     s.add(
-        api_get("https://api.brightcart.example/v1/exports/download/aW52b2ljZXMtMjAyNS0wOS1icmlnaHRjYXJ0LWV4cG9ydC1hbGwtb3JkZXJzLXdpdGgtbGluZS1pdGVtcw/brightcart-orders-export-2025-09-all-regions-with-line-items-and-tax.csv"),
+        api_get("https://api.brightcart.example/v1/exports/download/aW52b2ljZXMtMjAyNS0wOS1icmlnaHRjYXJ0LWV4cG9ydC1hbGwtb3JkZXJzLXdpdGgtbGluZS1pdGVtcw/orders-2025-09.csv"),
         resp(200, "text/csv").api().body("order,total\n48213,113.00\n").ms(140),
+    )?;
+    s.add(
+        api_get("https://api.brightcart.example/v1/exports/download/b3JkZXJzLTIwMjUtMDgtYnJpZ2h0Y2FydC1leHBvcnQtYWxsLW9yZGVycy13aXRoLWxpbmUtaXRlbXM/orders-2025-09.csv"),
+        resp(200, "text/csv").api().body("order,total\n47990,64.00\n").ms(130),
     )?;
 
     // The API describes itself: the Map lists what it offers that nobody has
