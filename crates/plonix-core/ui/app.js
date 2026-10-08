@@ -3493,8 +3493,27 @@ async function drawLensSuggestions(slot, ex, list) {
     if (rd) {
       chips.push(h('button', { class: 'chip k-bench', title: `The “${rd.name}” parameter carries a URL the server may follow. Open this request on the Bench to change it and watch where it lands.`, onclick: () => benchWithNote(ex.id, `“${rd.name}” carries a redirect target — change it and follow where it goes.`) }, h('span', { text: 'Trace this redirect' })));
     }
-    // GraphQL — open it on the Bench like any other request to explore.
+    // GraphQL — enumerate the schema in Scans, or open it on the Bench.
     if (isGraphql(ex)) {
+      if (inScope) {
+        chips.push(
+          h(
+            'button',
+            {
+              class: 'chip k-scan',
+              title: 'Check whether this GraphQL endpoint exposes its full schema through introspection. Scans will send one read-only introspection query.',
+              onclick: () =>
+                scanEndpoint(ex, {
+                  focus: 'GraphQL schema',
+                  categories: ['API9'],
+                  title: `${ex.method} ${ex.path}`,
+                  note: 'Plonix will send one read-only introspection query and flag the endpoint if the full schema comes back.',
+                }),
+            },
+            h('span', { text: 'Enumerate schema in Scans' }),
+          ),
+        );
+      }
       chips.push(h('button', { class: 'chip k-bench', title: 'Open this GraphQL request on the Bench to edit the operation and explore the schema.', onclick: () => benchWithNote(ex.id, 'GraphQL endpoint — edit the operation to explore what it exposes.') }, h('span', { text: 'GraphQL → Bench' })));
     }
     // Something on this endpoint is worth taking into Scans, scoped to it.

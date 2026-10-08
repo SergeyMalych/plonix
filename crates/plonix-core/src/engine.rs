@@ -1339,7 +1339,7 @@ impl Engine {
                     report.requests_sent += 1;
                     let sent = self
                         .send_scan(
-                            SendRequest { method: planned.method.clone(), url: planned.url.clone(), headers: planned.headers.clone(), body: None, body_base64: None, as_user: req.as_user.clone() },
+                            SendRequest { method: planned.method.clone(), url: planned.url.clone(), headers: planned.headers.clone(), body: planned.body.clone(), body_base64: None, as_user: req.as_user.clone() },
                             initiator,
                         )
                         .await;
