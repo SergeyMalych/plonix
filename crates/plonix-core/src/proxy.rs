@@ -48,8 +48,8 @@ pub const MAGIC_HOST: &str = "plonix";
 struct Ctx {
     engine: Arc<Engine>,
     local: SocketAddr,
-    /// Set inside a CONNECT tunnel: the target host and port.
-    tunnel: Option<(String, u16)>,
+    /// Set inside a CONNECT tunnel: the scheme spoken inside it, the target host and port.
+    tunnel: Option<(&'static str, String, u16)>,
 }
 
 pub async fn serve(listener: TcpListener, engine: Arc<Engine>) {
@@ -88,7 +88,7 @@ async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<ProxyResponse, Infal
     }
 
     let (scheme, host, port) = match &ctx.tunnel {
-        Some((h, p)) => ("https".to_string(), h.clone(), *p),
+        Some((s, h, p)) => (s.to_string(), h.clone(), *p),
         None => match (req.uri().scheme_str(), req.uri().host()) {
             (Some(s), Some(h)) => {
                 let s = s.to_ascii_lowercase();
@@ -760,6 +760,13 @@ fn connect(req: Request<Incoming>, ctx: Ctx) -> ProxyResponse {
                 return;
             }
         };
+        // Browsers also tunnel plain HTTP (ws:// and http:// to port 80) through CONNECT; only a TLS record starts with 0x16.
+        let mut stream = tokio::io::BufReader::new(TokioIo::new(upgraded));
+        match tokio::io::AsyncBufReadExt::fill_buf(&mut stream).await {
+            Ok([0x16, ..]) => {}
+            Ok([_, ..]) => return serve_conn(TokioIo::new(stream), Ctx { tunnel: Some(("http", host, port)), ..ctx }).await,
+            _ => return,
+        }
         let provider = Arc::new(rustls::crypto::ring::default_provider());
         let mut config = match rustls::ServerConfig::builder_with_provider(provider).with_safe_default_protocol_versions() {
             Ok(b) => b
@@ -771,7 +778,7 @@ fn connect(req: Request<Incoming>, ctx: Ctx) -> ProxyResponse {
             }
         };
         config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-        let tls = match TlsAcceptor::from(Arc::new(config)).accept(TokioIo::new(upgraded)).await {
+        let tls = match TlsAcceptor::from(Arc::new(config)).accept(stream).await {
             Ok(t) => t,
             Err(e) => {
                 // Usually the client does not trust the Plonix CA, or pins certificates.
@@ -779,7 +786,7 @@ fn connect(req: Request<Incoming>, ctx: Ctx) -> ProxyResponse {
                 return;
             }
         };
-        let inner = Ctx { tunnel: Some((host, port)), ..ctx };
+        let inner = Ctx { tunnel: Some(("https", host, port)), ..ctx };
         serve_conn(TokioIo::new(tls), inner).await;
     });
     Response::new(full_body(Bytes::new()))

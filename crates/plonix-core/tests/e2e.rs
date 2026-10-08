@@ -236,6 +236,33 @@ async fn intercepts_https_with_minted_certificate() {
     assert_eq!(hits.len(), 1);
 }
 
+/// Browsers send ws:// and http:// to port 80 through a proxy as CONNECT followed by plain HTTP.
+#[tokio::test]
+async fn plain_http_inside_a_connect_tunnel_is_answered_and_recorded() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let up = serve_http().await;
+    let r = start(&home, None).await;
+
+    let mut tcp = TcpStream::connect(r.proxy_addr).await.unwrap();
+    let target = format!("localhost:{}", up.port());
+    tcp.write_all(format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n\r\n").as_bytes()).await.unwrap();
+    let mut buf = [0u8; 1024];
+    let n = tcp.read(&mut buf).await.unwrap();
+    assert!(String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/1.1 200"));
+    let (mut sender, conn) = hyper::client::conn::http1::handshake::<_, Full<Bytes>>(TokioIo::new(tcp)).await.unwrap();
+    tokio::spawn(conn);
+    let req = Request::builder().uri("/echo?plain=1").header("host", &target).body(Full::new(Bytes::new())).unwrap();
+    let resp = tokio::time::timeout(Duration::from_secs(10), sender.send_request(req)).await.expect("answered").unwrap();
+    assert_eq!(resp.status(), 200);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    assert!(String::from_utf8_lossy(&body).starts_with("GET /echo?plain=1"));
+
+    wait_for_count(&r.engine, 1).await;
+    let ex = r.engine.store.get_exchange(1).unwrap().unwrap();
+    assert_eq!((ex.scheme.as_str(), ex.port, ex.path.as_str(), ex.status), ("http", up.port(), "/echo", Some(200)));
+}
+
 #[tokio::test]
 async fn adaptive_scope_suggests_with_evidence() {
     let dir = tempfile::tempdir().unwrap();
@@ -290,7 +317,9 @@ async fn crawl_discovers_linked_pages_and_stays_in_scope() {
 
     // One captured request so the engine knows the host's scheme and port.
     via_proxy(r.proxy_addr, &format!("http://localhost:{}/site", up.port()), &[]).await;
-    wait_for_count(&r.engine, 1).await;
+    // A path with an id, stored folded as /orders/{id}.
+    via_proxy(r.proxy_addr, &format!("http://localhost:{}/orders/123", up.port()), &[]).await;
+    wait_for_count(&r.engine, 2).await;
 
     // Refused until the host is accepted.
     let refused = r.engine.crawl(CrawlRequest { host: "localhost".into(), ..Default::default() }, "crawl").await;
@@ -308,6 +337,9 @@ async fn crawl_discovers_linked_pages_and_stays_in_scope() {
     let endpoints = r.engine.store.endpoints("localhost").unwrap();
     let paths: Vec<&str> = endpoints.iter().map(|e| e.path.as_str()).collect();
     assert!(paths.contains(&"/site/a") && paths.contains(&"/site/c"), "crawl should reach linked pages: {paths:?}");
+    // Folded endpoints are requested by a real path, never the literal `{id}`.
+    let (sent, _) = r.engine.store.search(&plonix_core::query::Query::parse("path:/orders").unwrap(), &r.engine.rules(), 50, 0).unwrap();
+    assert!(sent.len() >= 2 && sent.iter().all(|e| !e.path.contains('{')), "{:?}", sent.iter().map(|e| &e.path).collect::<Vec<_>>());
     assert!(report.forms.iter().any(|f| f.action.ends_with("/login") && f.fields.contains(&"user".to_string())));
     assert!(!r.engine.store.count().is_err());
     // evil.test was never requested.
@@ -1453,6 +1485,19 @@ async fn websockets_are_relayed_and_their_messages_recorded() {
     let ex = r.engine.store.get_exchange(2).unwrap().unwrap();
     assert_eq!((ex.scheme.as_str(), ex.status), ("https", Some(101)));
     assert_captured(&wait_for_messages(&r.engine, 2, 8).await);
+
+    // ws:// inside a CONNECT tunnel, as browsers send it through a proxy.
+    let host = format!("localhost:{}", plain.port());
+    let mut tcp = TcpStream::connect(r.proxy_addr).await.unwrap();
+    tcp.write_all(format!("CONNECT {host} HTTP/1.1\r\nHost: {host}\r\n\r\n").as_bytes()).await.unwrap();
+    let mut buf = [0u8; 1024];
+    let n = tcp.read(&mut buf).await.unwrap();
+    assert!(String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/1.1 200"));
+    tokio::time::timeout(Duration::from_secs(10), ws_session(&mut tcp, "/ws", &host)).await.expect("tunneled plain session");
+    wait_for_count(&r.engine, 3).await;
+    let ex = r.engine.store.get_exchange(3).unwrap().unwrap();
+    assert_eq!((ex.scheme.as_str(), ex.status), ("http", Some(101)));
+    assert_captured(&wait_for_messages(&r.engine, 3, 8).await);
 
     // The API lists them, for the user and (in scope) for agents.
     r.engine.decide("localhost", Decision::Accepted, false, "").unwrap();

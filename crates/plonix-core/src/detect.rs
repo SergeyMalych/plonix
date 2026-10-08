@@ -282,10 +282,16 @@ pub fn check_text(s: &str, max: usize, allow_empty: bool) -> Result<(), String> 
     if s.chars().count() > max {
         return Err(format!("at most {max} characters"));
     }
-    if s.chars().any(|c| c.is_control()) {
-        return Err("must not contain control characters".into());
+    if s.chars().any(|c| c.is_control() || is_invisible(c)) {
+        return Err("must not contain control characters or invisible characters".into());
     }
     Ok(())
+}
+
+/// Characters that do not show, or that change the direction of the text
+/// around them, so untrusted text could hide what it says.
+pub fn is_invisible(c: char) -> bool {
+    matches!(c, '\u{200b}'..='\u{200f}' | '\u{2028}'..='\u{202e}' | '\u{2060}'..='\u{2069}' | '\u{feff}' | '\u{e0000}'..='\u{e007f}')
 }
 
 /// Makes untrusted text safe to show in an error message.

@@ -1212,6 +1212,26 @@ fn external_files_can_be_added_but_stay_unverified() {
         .send_json(serde_json::json!({ "source": path, "confirm": true }))
         .unwrap_err();
     assert!(matches!(err, ureq::Error::Status(403, _)), "{err}");
+
+    // The app adds only the file it showed: a file changed after the preview is refused.
+    let user = std::fs::read_to_string(p.home.path().join("api-token")).unwrap();
+    let add = |body: serde_json::Value| {
+        ureq::post(&format!("{}/api/market/add", api_base(&p))).set("Authorization", &format!("Bearer {}", user.trim())).send_json(body)
+    };
+    let other = dir.path().join("other.md");
+    let text = "---\nplonix_skill: 1\nname: acme-other\nversion: 1.0.0\ntitle: Other\ndescription: Other notes.\nauthor: me\nuses: [traffic]\n---\nLook at traffic.\n";
+    std::fs::write(&other, text).unwrap();
+    let src = other.to_str().unwrap();
+    let shown: serde_json::Value = add(serde_json::json!({ "source": src })).unwrap().into_json().unwrap();
+    let sha = shown["file"]["sha256"].as_str().unwrap().to_string();
+    std::fs::write(&other, text.replace("Look at traffic.", "Look at traffic, then do something else.")).unwrap();
+    let err = add(serde_json::json!({ "source": src, "confirm": true, "sha256": sha })).unwrap_err();
+    assert!(matches!(err, ureq::Error::Status(409, _)), "{err}");
+    assert!(matches!(add(serde_json::json!({ "source": src, "confirm": true })).unwrap_err(), ureq::Error::Status(400, _)));
+    assert!(!p.run(&["skills"]).ok().stdout().contains("acme-other"));
+    std::fs::write(&other, text).unwrap();
+    let added: serde_json::Value = add(serde_json::json!({ "source": src, "confirm": true, "sha256": sha })).unwrap().into_json().unwrap();
+    assert_eq!(added["added"], true);
 }
 
 #[test]

@@ -315,7 +315,11 @@ async fn drive(bin: PathBuf, mcp: Value, cwd: PathBuf, prompt: String, resume: O
         .arg(mcp.to_string())
         // The Plonix MCP server is read-only by design; allow all its tools
         // and nothing else, so `claude` never stops to ask about a tool.
-        .args(["--allowedTools", "mcp__plonix"]);
+        .args(["--allowedTools", "mcp__plonix"])
+        // Captured traffic can carry instructions: ignore the user's other MCP
+        // servers, and take away the built-in tools their own settings may allow.
+        .arg("--strict-mcp-config")
+        .args(["--disallowedTools", "Bash,Edit,Write,MultiEdit,NotebookEdit,Read,Glob,Grep,WebFetch,WebSearch,Task,Agent"]);
     // Token-by-token output, so the panel can show Claude thinking and
     // writing instead of sitting silent until a whole block is done.
     if partial_messages(&bin).await {

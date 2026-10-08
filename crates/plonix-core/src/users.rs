@@ -31,9 +31,11 @@ pub const AUTH_HEADERS: &[&str] =
     &["cookie", "authorization", "x-api-key", "x-auth-token", "x-csrf-token", "x-xsrf-token", "x-session-token"];
 
 /// Whether a header name is one the identities own, so that switching user
-/// replaces it instead of leaving two copies.
+/// replaces it instead of leaving two copies. Beyond the fixed list, any name
+/// that reads like a credential (the same test scope uses for session tokens).
 pub fn is_auth_header(name: &str) -> bool {
-    AUTH_HEADERS.iter().any(|h| name.eq_ignore_ascii_case(h))
+    let k = name.to_ascii_lowercase();
+    AUTH_HEADERS.contains(&k.as_str()) || ["token", "auth", "api-key", "apikey", "session"].iter().any(|w| k.contains(w))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -164,5 +166,6 @@ mod tests {
     fn auth_headers_recognised() {
         assert!(is_auth_header("cookie") && is_auth_header("Authorization") && is_auth_header("X-API-Key"));
         assert!(!is_auth_header("Accept"));
+        assert!(is_auth_header("X-Access-Token") && is_auth_header("Api-Key") && is_auth_header("X-Session-Id"));
     }
 }

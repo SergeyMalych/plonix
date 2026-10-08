@@ -185,6 +185,13 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/run/lists", get(run_lists))
         .route("/api/users", get(saved_users).put(set_saved_users))
         .route("/api/access-check", post(access_check))
+        .route("/api/callbacks", get(callbacks_get))
+        .route("/api/callbacks/start", post(callbacks_start))
+        .route("/api/callbacks/stop", post(callbacks_stop))
+        .route("/api/callbacks/clear", post(callbacks_clear))
+        .route("/api/callbacks/config", put(callbacks_config))
+        .route("/api/callbacks/payloads", post(callbacks_new_payload))
+        .route("/api/callbacks/payloads/{id}", axum::routing::patch(callbacks_rename_payload).delete(callbacks_remove_payload))
         .route("/api/findings", get(findings).post(add_finding))
         .route("/api/findings/export", get(export_findings))
         .route("/api/findings/{id}", get(finding).patch(edit_finding).delete(delete_finding))
@@ -366,6 +373,8 @@ async fn status(State(s): State<AppState>, caller: MaybeCaller) -> Response {
         // so the window shows the Access check tab and the Bench user
         // switcher only once they are installed.
         "tools": crate::tool::ToolLibrary::new(&s.home).enabled_features(),
+        // The newest callback's number, so the sidebar can count new ones.
+        "callbacks": s.engine.callbacks.latest(),
     });
     // The window watches this to know when the held queue changes. Agents
     // learn nothing about Intercept.
@@ -1483,26 +1492,27 @@ fn consent(grant: &[String], approve: bool) -> Result<crate::extension::Consent,
 
 async fn market_change(s: AppState, body: Option<MarketBody>, what: &'static str) -> Response {
     let home = s.home.clone();
-    let out = tokio::task::spawn_blocking(move || -> Result<Vec<market::Change>, (StatusCode, anyhow::Error)> {
+    let out = tokio::task::spawn_blocking(move || -> Result<market::Updated, (StatusCode, anyhow::Error)> {
         let m = market::Market::new(&home);
         let bad = |e: anyhow::Error| (StatusCode::BAD_REQUEST, e);
+        let done = |changes| market::Updated { changes, failed: vec![] };
         match (what, body) {
-            ("remove", Some(b)) => m.remove(&b.name).map_err(bad),
+            ("remove", Some(b)) => m.remove(&b.name).map(done).map_err(bad),
             (_, b) => {
                 let cat = market::open_cached(&home, false).map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
                 match b {
                     Some(b) => {
                         let c = consent(&b.grant, b.approve).map_err(|e| bad(anyhow::anyhow!(e)))?;
-                        m.install_with(&cat, &b.name, &c).map_err(bad)
+                        m.install_with(&cat, &b.name, &c).map(done).map_err(bad)
                     }
-                    None => m.update(&cat).map_err(bad),
+                    None => Ok(m.update(&cat)),
                 }
             }
         }
     })
     .await;
     match out {
-        Ok(Ok(changes)) => Json(json!({ "changes": changes })).into_response(),
+        Ok(Ok(u)) => Json(json!({ "changes": u.changes, "failed": u.failed })).into_response(),
         Ok(Err((status, e))) => err(status, "market_refused", &format!("{e:#}")),
         Err(e) => internal(e.into()),
     }
@@ -1518,6 +1528,9 @@ struct MarketAddBody {
     /// Sensitive extension capabilities the user said yes to.
     #[serde(default)]
     grant: Vec<String>,
+    /// On confirm: the sha256 of the file the preview showed.
+    #[serde(default)]
+    sha256: Option<String>,
 }
 
 /// Adds a skill, rule pack or filter pack from outside the Market. It is
@@ -1541,6 +1554,14 @@ async fn market_add(State(s): State<AppState>, Json(b): Json<MarketAddBody>) -> 
         let ext = m.inspect_external(bytes, &label).map_err(&bad)?;
         if !b.confirm {
             return Ok(json!({ "added": false, "file": ext }));
+        }
+        // The source is read again on confirm, so only add exactly the file that was shown.
+        match b.sha256.as_deref() {
+            None => return Err(bad("say which file you looked at: confirm with the sha256 the preview showed".into())),
+            Some(sha) if !sha.eq_ignore_ascii_case(&ext.sha256) => {
+                return Err((StatusCode::CONFLICT, "the file changed since you looked at it; look at it again before adding it".into()));
+            }
+            Some(_) => {}
         }
         let c = consent(&b.grant, true).map_err(&bad)?;
         let change = m.add_external(&ext, &c).map_err(|e| bad(format!("{e:#}")))?;
@@ -1982,6 +2003,156 @@ async fn access_check(State(s): State<AppState>, caller: MaybeCaller, headers: H
         Err(SendError::Other(e)) => internal(e),
         Err(e) => err(StatusCode::BAD_REQUEST, "bad_request", &e.to_string()),
     }
+}
+
+// ---- callbacks -------------------------------------------------------------
+
+/// The Callbacks screen is the user's alone, and only once its tool is
+/// installed from the Market.
+fn callbacks_gate(s: &AppState, caller: &MaybeCaller) -> Option<Response> {
+    if let Some(r) = user_only(caller) {
+        return Some(r);
+    }
+    (!crate::tool::ToolLibrary::new(&s.home).enabled_features().contains("callbacks"))
+        .then(|| err(StatusCode::NOT_FOUND, "not_installed", "install Callbacks from the Market first"))
+}
+
+fn callbacks_view(s: &AppState, since: u64) -> Value {
+    let cb = &s.engine.callbacks;
+    if let Err(e) = cb.persist(&s.engine.store) {
+        tracing::warn!("callbacks: could not save: {e:#}");
+    }
+    let mut v = cb.snapshot(since);
+    v["installed"] = json!(crate::callbacks::locate().is_some());
+    v["install"] = json!(crate::callbacks::INSTALL);
+    v["homepage"] = json!(crate::callbacks::HOMEPAGE);
+    v["config"] = crate::callbacks::Config::load(&s.home).public();
+    v
+}
+
+#[derive(Deserialize)]
+struct SinceParams {
+    #[serde(default)]
+    since: u64,
+}
+
+async fn callbacks_get(State(s): State<AppState>, caller: MaybeCaller, Query(p): Query<SinceParams>) -> Response {
+    if let Some(r) = callbacks_gate(&s, &caller) {
+        return r;
+    }
+    Json(callbacks_view(&s, p.since)).into_response()
+}
+
+/// Starts listening. Registers with the callback server; sends nothing to
+/// any target.
+async fn callbacks_start(State(s): State<AppState>, caller: MaybeCaller) -> Response {
+    if let Some(r) = callbacks_gate(&s, &caller) {
+        return r;
+    }
+    let Some(exe) = crate::callbacks::locate() else {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "not_installed",
+            &format!("{} is not installed. Install it with `{}`, then start again.", crate::callbacks::PROGRAM, crate::callbacks::INSTALL),
+        );
+    };
+    crate::usage::record("callbacks_start");
+    let project = s.engine.project_ref.get().map(|p| p.id.clone()).unwrap_or_else(|| s.engine.project.clone());
+    let session = crate::callbacks::session_path(&s.home, &project);
+    let config = crate::callbacks::Config::load(&s.home);
+    match s.engine.callbacks.start(&exe, &config, &session) {
+        Ok(()) => Json(callbacks_view(&s, u64::MAX)).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, "start_failed", &e),
+    }
+}
+
+async fn callbacks_stop(State(s): State<AppState>, caller: MaybeCaller) -> Response {
+    if let Some(r) = callbacks_gate(&s, &caller) {
+        return r;
+    }
+    let cb = s.engine.callbacks.clone();
+    let _ = tokio::task::spawn_blocking(move || cb.stop()).await;
+    Json(callbacks_view(&s, u64::MAX)).into_response()
+}
+
+async fn callbacks_clear(State(s): State<AppState>, caller: MaybeCaller) -> Response {
+    if let Some(r) = callbacks_gate(&s, &caller) {
+        return r;
+    }
+    s.engine.callbacks.clear();
+    Json(callbacks_view(&s, 0)).into_response()
+}
+
+#[derive(Deserialize)]
+struct CallbacksConfigBody {
+    #[serde(default)]
+    server: String,
+    /// A new token; left out keeps the saved one.
+    #[serde(default)]
+    token: Option<String>,
+}
+
+/// Which callback server to use. Takes effect the next time listening starts.
+async fn callbacks_config(State(s): State<AppState>, caller: MaybeCaller, Json(b): Json<CallbacksConfigBody>) -> Response {
+    if let Some(r) = callbacks_gate(&s, &caller) {
+        return r;
+    }
+    let server = match crate::callbacks::check_server(&b.server) {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::BAD_REQUEST, "bad_server", &e),
+    };
+    let mut config = crate::callbacks::Config::load(&s.home);
+    config.server = server;
+    if let Some(t) = b.token {
+        let t = t.trim();
+        if t.len() > 512 || t.chars().any(|c| c.is_control() || c == ' ') {
+            return err(StatusCode::BAD_REQUEST, "bad_token", "the token has characters a server token cannot have");
+        }
+        config.token = t.to_string();
+    }
+    if let Err(e) = config.save(&s.home) {
+        return internal(e);
+    }
+    Json(callbacks_view(&s, u64::MAX)).into_response()
+}
+
+#[derive(Deserialize)]
+struct PayloadBody {
+    #[serde(default)]
+    label: String,
+}
+
+async fn callbacks_new_payload(State(s): State<AppState>, caller: MaybeCaller, Json(b): Json<PayloadBody>) -> Response {
+    if let Some(r) = callbacks_gate(&s, &caller) {
+        return r;
+    }
+    match s.engine.callbacks.new_payload(&b.label) {
+        Ok(p) => {
+            let _ = s.engine.callbacks.persist(&s.engine.store);
+            Json(p).into_response()
+        }
+        Err(e) => err(StatusCode::CONFLICT, "not_listening", &e),
+    }
+}
+
+async fn callbacks_rename_payload(State(s): State<AppState>, caller: MaybeCaller, Path(id): Path<String>, Json(b): Json<PayloadBody>) -> Response {
+    if let Some(r) = callbacks_gate(&s, &caller) {
+        return r;
+    }
+    if !s.engine.callbacks.rename_payload(&id, &b.label) {
+        return err(StatusCode::NOT_FOUND, "not_found", "no such host");
+    }
+    Json(callbacks_view(&s, u64::MAX)).into_response()
+}
+
+async fn callbacks_remove_payload(State(s): State<AppState>, caller: MaybeCaller, Path(id): Path<String>) -> Response {
+    if let Some(r) = callbacks_gate(&s, &caller) {
+        return r;
+    }
+    if !s.engine.callbacks.remove_payload(&id) {
+        return err(StatusCode::NOT_FOUND, "not_found", "no such host");
+    }
+    Json(callbacks_view(&s, u64::MAX)).into_response()
 }
 
 async fn findings(State(s): State<AppState>) -> Response {

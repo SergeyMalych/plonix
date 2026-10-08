@@ -239,6 +239,12 @@ fn read_registry(home: &Home) -> Registry {
     std::fs::read(home.projects_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
+/// The list as stored, for a change that rewrites it.
+fn read_registry_for_update(home: &Home) -> Registry {
+    crate::paths::set_aside_unreadable::<Registry>(&home.projects_file());
+    read_registry(home)
+}
+
 fn write_registry(home: &Home, r: &Registry) -> Result<()> {
     write_atomic(&home.projects_file(), &serde_json::to_vec_pretty(r)?)
 }
@@ -252,7 +258,7 @@ pub fn list(home: &Home) -> Vec<Entry> {
 
 /// Adds or refreshes a project in the list.
 pub fn remember(home: &Home, p: &Project, opened: bool) -> Result<()> {
-    let mut r = read_registry(home);
+    let mut r = read_registry_for_update(home);
     let last_opened = r.projects.iter().find(|e| e.id == p.id() || e.path == p.dir).map_or(0, |e| e.last_opened);
     r.projects.retain(|e| e.id != p.id() && e.path != p.dir);
     r.projects.push(Entry {
@@ -266,7 +272,7 @@ pub fn remember(home: &Home, p: &Project, opened: bool) -> Result<()> {
 
 /// Removes a project from the list. Its folder is left alone.
 pub fn forget(home: &Home, id: &str) -> Result<bool> {
-    let mut r = read_registry(home);
+    let mut r = read_registry_for_update(home);
     let before = r.projects.len();
     r.projects.retain(|e| e.id != id);
     write_registry(home, &r)?;

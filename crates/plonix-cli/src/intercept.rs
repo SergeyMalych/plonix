@@ -103,9 +103,9 @@ pub fn intercept_cmd(ctx: &Ctx, cmd: InterceptCmd) -> Result<()> {
                 println!("Nothing is held.{}", if v["on"] == true { "" } else { " Intercept is off; turn it on with `plonix intercept on`." });
             }
             for item in &queue {
-                println!("{}", headline(item));
+                println!("{}", crate::render::safe(&headline(item)));
                 if full {
-                    println!("{}\n", item["raw"].as_str().unwrap_or(""));
+                    println!("{}\n", crate::render::safe(item["raw"].as_str().unwrap_or("")));
                 }
             }
         }

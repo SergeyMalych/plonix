@@ -281,7 +281,7 @@ fn inbound(req: &OutboundRequest, status: u16, mime: &str, body: String) -> Inbo
         ("X-Powered-By".into(), "Express".into()),
     ];
     let tls_sans = if req.scheme == "https" { vec![req.host.clone()] } else { vec![] };
-    InboundResponse { status, headers, body: bytes, tls_sans, version: "HTTP/2".into(), client_cert: None }
+    InboundResponse { status, headers, body: bytes, tls_sans, version: "HTTP/2".into(), client_cert: None, truncated_from: None }
 }
 
 struct Seeder<'a> {

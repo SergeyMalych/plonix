@@ -385,14 +385,21 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
         }
         MarketCmd::Update => {
             let cat = market::open(&ctx.home, &opts)?;
-            let changes = m.update(&cat)?;
+            let u = m.update(&cat);
             if ctx.json {
-                return ctx.print_json(&json!({ "changes": changes }));
+                ctx.print_json(&json!({ "changes": u.changes, "failed": u.failed }))?;
+            } else {
+                if u.changes.is_empty() && u.failed.is_empty() {
+                    println!("Everything installed from the Market is up to date.");
+                }
+                print_changes(&u.changes, "");
+                for f in &u.failed {
+                    eprintln!("{}: not updated: {}", f.name, f.error);
+                }
             }
-            if changes.is_empty() {
-                println!("Everything installed from the Market is up to date.");
+            if !u.failed.is_empty() {
+                bail!("{} package(s) could not be updated", u.failed.len());
             }
-            print_changes(&changes, "");
         }
         MarketCmd::Remove { names } => {
             let mut all = vec![];

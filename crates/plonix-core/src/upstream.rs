@@ -72,6 +72,8 @@ pub struct InboundResponse {
     pub version: String,
     /// The client certificate presented, when the server asked for one.
     pub client_cert: Option<String>,
+    /// The full body size, when only the first part of it is in `body`.
+    pub truncated_from: Option<u64>,
 }
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -347,10 +349,23 @@ impl Upstream {
 
     /// Sends a request and reads the whole response, all within the request timeout.
     pub async fn send(&self, req: OutboundRequest) -> Result<InboundResponse> {
+        self.send_capped(req, usize::MAX).await
+    }
+
+    /// Like [`Upstream::send`], keeping only the first `limit` bytes of the
+    /// response body; the rest is read and counted, not kept.
+    pub async fn send_capped(&self, req: OutboundRequest, limit: usize) -> Result<InboundResponse> {
         let fut = async {
-            let r = self.open_inner(req, None).await?;
-            let body = r.body.collect().await.context("reading response body")?.to_bytes();
-            Ok(InboundResponse { status: r.status, headers: r.headers, body, tls_sans: r.tls_sans, version: r.version, client_cert: r.client_cert })
+            let mut r = self.open_inner(req, None).await?;
+            let (mut body, mut seen) = (Vec::new(), 0u64);
+            while let Some(frame) = r.body.frame().await {
+                if let Ok(data) = frame.context("reading response body")?.into_data() {
+                    seen += data.len() as u64;
+                    body.extend_from_slice(&data[..data.len().min(limit.saturating_sub(body.len()))]);
+                }
+            }
+            let truncated_from = (seen > body.len() as u64).then_some(seen);
+            Ok(InboundResponse { status: r.status, headers: r.headers, body: body.into(), tls_sans: r.tls_sans, version: r.version, client_cert: r.client_cert, truncated_from })
         };
         tokio::time::timeout(self.total_timeout, fut)
             .await
@@ -360,11 +375,27 @@ impl Upstream {
     /// Sends a request and returns once the response head arrives; the
     /// request timeout covers only that part, so long streams are not cut.
     /// With `body`, the request body streams from it instead of `req.body`,
-    /// and the request's own `Content-Length` (if any) is kept.
+    /// and the request's own `Content-Length` (if any) is kept; the timeout
+    /// then counts from the last part of the body sent, so long uploads are not cut either.
     pub async fn open(&self, req: OutboundRequest, body: Option<StreamBody>) -> Result<StreamingResponse> {
-        tokio::time::timeout(self.total_timeout, self.open_inner(req, body))
-            .await
-            .map_err(|_| anyhow!("upstream timed out after {:?}", self.total_timeout))?
+        let timed_out = || anyhow!("upstream timed out after {:?}", self.total_timeout);
+        let Some(body) = body else {
+            return tokio::time::timeout(self.total_timeout, self.open_inner(req, None)).await.map_err(|_| timed_out())?;
+        };
+        let last = Arc::new(std::sync::Mutex::new(tokio::time::Instant::now()));
+        let fut = self.open_inner(req, Some(Progress { inner: body, last: last.clone() }.boxed()));
+        tokio::pin!(fut);
+        loop {
+            let deadline = *last.lock().unwrap() + self.total_timeout;
+            tokio::select! {
+                r = &mut fut => return r,
+                _ = tokio::time::sleep_until(deadline) => {
+                    if *last.lock().unwrap() + self.total_timeout <= tokio::time::Instant::now() {
+                        return Err(timed_out());
+                    }
+                }
+            }
+        }
     }
 
     /// Sends a request that asks to switch protocols (`Connection: Upgrade`
@@ -432,6 +463,33 @@ impl Upstream {
         } else {
             exchange(TokioIo::new(tcp), req, body).await
         }
+    }
+}
+
+/// A request body that notes when it last moved, for [`Upstream::open`]'s timeout.
+struct Progress {
+    inner: StreamBody,
+    last: Arc<std::sync::Mutex<tokio::time::Instant>>,
+}
+
+impl hyper::body::Body for Progress {
+    type Data = Bytes;
+    type Error = BoxError;
+
+    fn poll_frame(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Result<hyper::body::Frame<Bytes>, BoxError>>> {
+        let polled = std::pin::Pin::new(&mut self.inner).poll_frame(cx);
+        if polled.is_ready() {
+            *self.last.lock().unwrap() = tokio::time::Instant::now();
+        }
+        polled
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> hyper::body::SizeHint {
+        self.inner.size_hint()
     }
 }
 
@@ -755,6 +813,68 @@ mod tests {
         let err = up.send(req).await.unwrap_err().to_string();
         assert!(err.starts_with("TLS handshake with 127.0.0.1: "), "{err}");
         assert!(err.contains(&format!("may not serve HTTPS on port {port}; try http://127.0.0.1:{port}")), "{err}");
+    }
+
+    /// A plain HTTP server that reads each request body to its end, then answers with `reply`.
+    async fn echo_len_server(reply: &'static [u8]) -> u16 {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((sock, _)) = listener.accept().await {
+                let svc = hyper::service::service_fn(move |req: http::Request<Incoming>| async move {
+                    let got = req.into_body().collect().await?.to_bytes().len();
+                    let body = if reply.is_empty() { Bytes::from(got.to_string()) } else { Bytes::from_static(reply) };
+                    Ok::<_, hyper::Error>(http::Response::new(Full::new(body)))
+                });
+                tokio::spawn(hyper::server::conn::http1::Builder::new().serve_connection(TokioIo::new(sock), svc));
+            }
+        });
+        port
+    }
+
+    fn get(port: u16, method: &str) -> OutboundRequest {
+        OutboundRequest { scheme: "http".into(), host: "127.0.0.1".into(), port, method: method.into(), target: "/".into(), headers: vec![], body: Bytes::new(), extra_headers: vec![] }
+    }
+
+    #[tokio::test]
+    async fn send_capped_keeps_the_start_and_the_real_size() {
+        static BIG: [u8; 5000] = [b'x'; 5000];
+        let port = echo_len_server(&BIG).await;
+        let up = Upstream::new(false, vec![]).unwrap();
+        let r = up.send_capped(get(port, "GET"), 100).await.unwrap();
+        assert_eq!((r.body.len(), r.truncated_from), (100, Some(5000)));
+        let r = up.send_capped(get(port, "GET"), 5000).await.unwrap();
+        assert_eq!((r.body.len(), r.truncated_from), (5000, None));
+    }
+
+    /// A body that hands out what a channel sends.
+    struct Chan(tokio::sync::mpsc::Receiver<Bytes>);
+
+    impl hyper::body::Body for Chan {
+        type Data = Bytes;
+        type Error = BoxError;
+        fn poll_frame(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Result<hyper::body::Frame<Bytes>, BoxError>>> {
+            self.0.poll_recv(cx).map(|b| b.map(|b| Ok(hyper::body::Frame::data(b))))
+        }
+    }
+
+    #[tokio::test]
+    async fn a_streamed_upload_longer_than_the_timeout_is_not_cut() {
+        let port = echo_len_server(b"").await;
+        let up = Upstream::with_options(UpstreamOptions { total_timeout: Duration::from_millis(300), ..Default::default() }).unwrap();
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        tokio::spawn(async move {
+            for _ in 0..8 {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                tx.send(Bytes::from_static(b"0123456789")).await.unwrap();
+            }
+        });
+        let r = up.open(get(port, "POST"), Some(Chan(rx).boxed())).await.unwrap();
+        assert_eq!(r.body.collect().await.unwrap().to_bytes(), "80");
+        // A body that stalls still times out.
+        let (_tx, rx) = tokio::sync::mpsc::channel(1);
+        let err = up.open(get(port, "POST"), Some(Chan(rx).boxed())).await.unwrap_err();
+        assert!(err.to_string().contains("timed out"), "{err}");
     }
 
     #[test]
