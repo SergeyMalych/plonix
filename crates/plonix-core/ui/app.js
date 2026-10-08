@@ -3973,8 +3973,27 @@ async function drawLensSuggestions(slot, ex, list) {
     if (rd) {
       chips.push(h('button', { class: 'chip k-bench', title: `The “${rd.name}” parameter carries a URL the server may follow. Open this request on the Bench to change it and watch where it lands.`, onclick: () => benchWithNote(ex.id, `“${rd.name}” carries a redirect target — change it and follow where it goes.`) }, h('span', { text: 'Trace this redirect' })));
     }
-    // GraphQL — open it on the Bench like any other request to explore.
+    // GraphQL — enumerate the schema in Scans, or open it on the Bench.
     if (isGraphql(ex)) {
+      if (inScope) {
+        chips.push(
+          h(
+            'button',
+            {
+              class: 'chip k-scan',
+              title: 'Check whether this GraphQL endpoint exposes its full schema through introspection. Scans will send one read-only introspection query.',
+              onclick: () =>
+                scanEndpoint(ex, {
+                  focus: 'GraphQL schema',
+                  categories: ['API9'],
+                  title: `${ex.method} ${ex.path}`,
+                  note: 'Plonix will send one read-only introspection query and flag the endpoint if the full schema comes back.',
+                }),
+            },
+            h('span', { text: 'Enumerate schema in Scans' }),
+          ),
+        );
+      }
       chips.push(h('button', { class: 'chip k-bench', title: 'Open this GraphQL request on the Bench to edit the operation and explore the schema.', onclick: () => benchWithNote(ex.id, 'GraphQL endpoint — edit the operation to explore what it exposes.') }, h('span', { text: 'GraphQL → Bench' })));
     }
     // Something on this endpoint is worth taking into Scans, scoped to it.
@@ -8390,7 +8409,7 @@ function findingForm(f, ids = [], title = '', hint = null) {
  * of Plonix, so nothing ever leaves the hosts you accepted. Any issue a scan
  * records is a normal finding, editable on the Findings screen.
  */
-const SC = { host: null, hosts: [], suggest: null, suggestErr: null, picks: null, intrusive: false, running: false, report: null, focus: null, crawl: null, crawling: false, crawlStart: '/', crawlBrowser: false, crawlClick: false };
+const SC = { host: null, hosts: [], suggest: null, suggestErr: null, picks: null, intrusive: false, running: false, report: null, focus: null, eps: null, epsHost: null, crawl: null, crawling: false, crawlStart: '/', crawlBrowser: false, crawlClick: false };
 
 /**
  * Hands one endpoint to Scans, focused: the scan is narrowed to this endpoint
@@ -8400,6 +8419,7 @@ const SC = { host: null, hosts: [], suggest: null, suggestErr: null, picks: null
 function scanEndpoint(ex, lead) {
   SC.host = ex.host;
   SC.focus = {
+    mode: 'path',
     method: ex.method,
     path: ex.path,
     label: lead ? lead.focus : '',
@@ -8415,16 +8435,6 @@ function scanEndpoint(ex, lead) {
   SC.crawl = null;
   SC.running = false;
   leaveTo('scans');
-}
-
-/** Drops the endpoint focus and goes back to scanning the whole host. */
-function clearScanFocus() {
-  SC.focus = null;
-  if (SC.suggest) {
-    SC.picks = new Set(SC.suggest.recommended.map((t) => t.id));
-    SC.intrusive = false;
-  }
-  drawScans();
 }
 
 const INTRU_LABEL = { passive: 'Passive', safe: 'Safe', active: 'Active', intrusive: 'Intrusive' };
@@ -9156,7 +9166,9 @@ async function loadSuggest() {
   // for "every recommended check, aimed at this endpoint".
   const cats = SC.focus ? SC.focus.categories : null;
   const fits = (t) => (t.owasp || []).some((o) => (cats || []).some((c) => o === c || o.startsWith(c)));
-  const chosen = !SC.focus || cats === null ? sug.recommended : sug.recommended.filter(fits);
+  // A null/absent `categories` (whole host, group, or a plain endpoint focus)
+  // pre-picks every recommended check; an array narrows to the matching ones.
+  const chosen = !SC.focus || cats == null ? sug.recommended : sug.recommended.filter(fits);
   SC.picks = new Set(chosen.map((t) => t.id));
   SC.intrusive = false;
   drawScans();
@@ -9182,6 +9194,9 @@ function drawScans() {
       ),
     );
   }
+  // A path or path-group scope needs the host's discovered endpoints; load
+  // them lazily the first time the Scans screen draws under such a scope.
+  if (SC.focus && SC.focus.mode !== 'host' && (!SC.eps || SC.epsHost !== SC.host)) ensureScanEndpoints();
   const sel = h(
     'select',
     {
@@ -9201,22 +9216,143 @@ function drawScans() {
     { class: 'card' },
     h('div', { class: 'sechead' }, h('h3', { text: 'Target' }), h('span', { class: 'shacts' }, askButton({ kind: 'host', host: SC.host }, 'Ask Claude Code to plan a scan for this host'))),
     h('div', { class: 'scanrow' }, h('label', { class: 'muted', text: 'Host' }), sel),
-    h('p', { class: 'muted', text: 'Only accepted, in-scope hosts appear here.' }),
+    scanScopeRow(),
+    scanScopeNote(),
   );
-  clear(box, scanFocusBanner(), targetCard, scanSuggestSection(), scanCrawlSection());
+  clear(box, targetCard, scanSuggestSection(), scanCrawlSection());
 }
 
-/** When a focus is set, a banner naming the one endpoint the scan is scoped to. */
-function scanFocusBanner() {
-  const f = SC.focus;
-  if (!f) return null;
-  return h(
+/** The current scan scope: 'host', 'path' or 'group'. */
+function scanScopeMode() {
+  return SC.focus ? SC.focus.mode : 'host';
+}
+
+/** Make sure the host's discovered endpoints are loaded for the path pickers. */
+async function ensureScanEndpoints() {
+  if (SC.epsHost === SC.host && SC.eps) return;
+  SC.epsHost = SC.host;
+  SC.eps = null;
+  try {
+    SC.eps = await api('/api/hosts/' + encodeURIComponent(SC.host) + '/endpoints');
+  } catch (_) {
+    SC.eps = [];
+  }
+  if (S.view === 'scans') drawScans();
+}
+
+/** Path prefixes offered for a path-group scan: the distinct first path
+ *  segment of the discovered endpoints (e.g. `/api/`, `/admin/`). */
+function scanGroupPrefixes() {
+  const seen = new Map();
+  for (const e of SC.eps || []) {
+    const m = (e.path || '').match(/^\/[^/]+\//);
+    const pre = m ? m[0] : '/';
+    seen.set(pre, (seen.get(pre) || 0) + 1);
+  }
+  return [...seen.entries()].sort((a, b) => b[1] - a[1]).map(([prefix, count]) => ({ prefix, count }));
+}
+
+/** Endpoints under the current path-group prefix. */
+function scanGroupEndpoints() {
+  const pre = SC.focus && SC.focus.prefix;
+  if (!pre) return [];
+  return (SC.eps || []).filter((e) => (e.path || '').startsWith(pre));
+}
+
+/** Switch the scan scope. Loads endpoints lazily for the path pickers. */
+function setScanScope(mode) {
+  if (mode === 'host') {
+    SC.focus = null;
+    if (SC.suggest) {
+      SC.picks = new Set(SC.suggest.recommended.map((t) => t.id));
+      SC.intrusive = false;
+    }
+    drawScans();
+    return;
+  }
+  const needEps = !SC.eps || SC.epsHost !== SC.host;
+  const go = () => {
+    const eps = SC.eps || [];
+    if (mode === 'path') {
+      const e = eps[0];
+      SC.focus = { mode: 'path', method: e ? e.method : 'GET', path: e ? e.path : '/', label: '', categories: null, title: '', note: '' };
+    } else {
+      const pres = scanGroupPrefixes();
+      SC.focus = { mode: 'group', prefix: pres.length ? pres[0].prefix : '/', title: '' };
+    }
+    drawScans();
+  };
+  if (needEps) ensureScanEndpoints().then(go);
+  else go();
+}
+
+/** The scope selector row: whole host, a single path, or a path group. */
+function scanScopeRow() {
+  const mode = scanScopeMode();
+  const seg = (m, label) => h('button', { class: 'segbtn' + (mode === m ? ' on' : ''), text: label, onclick: () => setScanScope(m) });
+  const row = h(
     'div',
-    { class: 'card scanfocus' },
-    h('div', { class: 'sechead' }, h('h3', { text: 'Focused on one endpoint' }), h('span', { class: 'shacts' }, h('button', { class: 'btn sm', text: 'Scan the whole host', onclick: clearScanFocus }))),
-    h('div', { class: 'focusrow' }, h('span', { class: 'focustag', text: f.method }), h('code', { class: 'focuspath', text: f.path }), f.label ? h('span', { class: 'focuscat', text: f.label }) : null),
-    h('p', { class: 'muted focusnote', text: f.note || 'The scan is aimed at this endpoint. The checks below are pre-picked for it — review and run.' }),
+    { class: 'scanrow' },
+    h('label', { class: 'muted', text: 'Scope' }),
+    h('div', { class: 'seg scanscope' }, seg('host', 'Whole host'), seg('path', 'A path'), seg('group', 'A path group')),
   );
+  if (mode === 'path') row.append(scanPathPicker());
+  if (mode === 'group') row.append(scanGroupPicker());
+  return row;
+}
+
+/** A select of the host's discovered endpoints, for a single-path scan.
+ *  The currently focused endpoint is always an option, even if it came from a
+ *  lead and is not in the discovered list yet. */
+function scanPathPicker() {
+  if (!SC.eps) return h('span', { class: 'muted', text: 'Loading paths…' });
+  const key = (e) => e.method + ' ' + e.path;
+  const cur = SC.focus ? key(SC.focus) : '';
+  const opts = (SC.eps || []).slice();
+  if (SC.focus && !opts.some((e) => key(e) === cur)) opts.unshift({ method: SC.focus.method, path: SC.focus.path });
+  if (!opts.length) return h('span', { class: 'muted', text: 'No endpoints discovered yet — browse or crawl the host first.' });
+  const sel = h(
+    'select',
+    {
+      onchange: () => {
+        const e = opts.find((x) => key(x) === sel.value);
+        if (e) SC.focus = { mode: 'path', method: e.method, path: e.path, label: '', categories: null, title: '', note: '' };
+        drawScans();
+      },
+    },
+    opts.map((e) => h('option', { value: key(e), text: key(e), selected: key(e) === cur })),
+  );
+  return sel;
+}
+
+/** A select of path prefixes, for scanning a group of related endpoints. */
+function scanGroupPicker() {
+  if (!SC.eps) return h('span', { class: 'muted', text: 'Loading paths…' });
+  const pres = scanGroupPrefixes();
+  if (!pres.length) return h('span', { class: 'muted', text: 'No endpoints discovered yet — browse or crawl the host first.' });
+  const cur = SC.focus ? SC.focus.prefix : '';
+  const sel = h(
+    'select',
+    {
+      onchange: () => {
+        SC.focus = { mode: 'group', prefix: sel.value, title: '' };
+        drawScans();
+      },
+    },
+    pres.map((p) => h('option', { value: p.prefix, text: `${p.prefix}  (${p.count})`, selected: p.prefix === cur })),
+  );
+  const n = scanGroupEndpoints().length;
+  return h('span', { class: 'scangrp' }, sel, h('span', { class: 'muted', text: `${n} endpoint${n === 1 ? '' : 's'}` }));
+}
+
+/** One line describing what the current scope and any lead mean. */
+function scanScopeNote() {
+  const f = SC.focus;
+  if (!f) return h('p', { class: 'muted', text: 'The scan covers the whole host. Pick a path or a path group to narrow it. Only accepted, in-scope hosts appear here.' });
+  if (f.mode === 'group') {
+    return h('p', { class: 'muted', text: `Scanning every discovered endpoint under ${f.prefix}. Injecting checks are aimed only there; host-level file probes still cover the host.` });
+  }
+  return h('p', { class: 'muted focusnote', text: f.note || `The scan is aimed at ${f.method} ${f.path}. Injecting checks hit only this endpoint; host-level file probes still cover the host.` });
 }
 
 function scanSuggestSection() {
@@ -9345,7 +9481,12 @@ async function runScan() {
   drawScans();
   const body = { host: SC.host, tactics, include_intrusive: SC.intrusive };
   if (toolOn('saved-users') && actingUser()) body.as_user = S.acting;
-  if (SC.focus) body.endpoints = [{ method: SC.focus.method, path: SC.focus.path }];
+  if (SC.focus && SC.focus.mode === 'path') {
+    body.endpoints = [{ method: SC.focus.method, path: SC.focus.path }];
+  } else if (SC.focus && SC.focus.mode === 'group') {
+    const eps = scanGroupEndpoints().map((e) => ({ method: e.method, path: e.path }));
+    if (eps.length) body.endpoints = eps;
+  }
   try {
     SC.report = await api('/api/scan', { method: 'POST', body });
   } catch (e) {
@@ -9430,10 +9571,18 @@ function crawlReportCard() {
   if (r.clicks) counts.push(n(r.clicks, 'click'));
   if (r.browser) counts.push('rendered in ' + r.browser);
   const blocked = r.blocked_hosts || [];
+  const host = r.host || SC.host;
+  // A form action may be a path on the crawled host or an absolute URL to
+  // another host; show the host so the row is never ambiguous.
+  const actionCell = (action) => {
+    const a = action || '/';
+    if (/^https?:\/\//i.test(a)) return h('td', null, h('code', { text: a }));
+    return h('td', null, h('span', { class: 'formhost', text: host }), h('code', { text: a }));
+  };
   return h(
     'div',
     { class: 'crawlreport' },
-    h('div', { class: 'sechead' }, h('h4', { text: 'Crawl result' }), h('span', { class: 'muted', text: counts.join(' · ') }), h('span', { class: 'shacts' }, h('button', { class: 'btn sm', text: 'View on Map', onclick: () => go('map') }))),
+    h('div', { class: 'sechead' }, h('h4', null, 'Crawl result · ', h('code', { text: host })), h('span', { class: 'muted', text: counts.join(' · ') }), h('span', { class: 'shacts' }, h('button', { class: 'btn sm', text: 'View on Map', onclick: () => go('map') }))),
     blocked.length
       ? h('p', { class: 'muted crawlblocked' }, 'Blocked, not in scope: ', blocked.map((b) => h('code', { text: b })))
       : null,
@@ -9442,7 +9591,7 @@ function crawlReportCard() {
           'table',
           { class: 'grid scanforms' },
           h('thead', null, h('tr', null, h('th', { text: 'Method' }), h('th', { text: 'Action' }), h('th', { text: 'Fields' }))),
-          h('tbody', null, r.forms.slice(0, 50).map((f) => h('tr', null, h('td', { text: f.method }), h('td', { text: f.action || '/' }), h('td', { text: f.fields.join(', ') || '—' })))),
+          h('tbody', null, r.forms.slice(0, 50).map((f) => h('tr', null, h('td', { text: f.method }), actionCell(f.action), h('td', { text: f.fields.join(', ') || '—' })))),
         )
       : null,
     r.notes && r.notes.length ? h('div', { class: 'scannotes' }, r.notes.map((n) => h('p', { class: 'muted', text: n }))) : null,

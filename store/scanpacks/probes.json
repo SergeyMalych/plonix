@@ -117,6 +117,227 @@
       "wstg": [
         "WSTG-INPV-01"
       ]
+    },
+    {
+      "id": "graphql-introspection",
+      "title": "GraphQL schema is enumerable",
+      "description": "The GraphQL endpoint answers an introspection query, so its full schema — every type, field and argument — can be enumerated. That is useful to an attacker mapping the API. The probe sends a standard, read-only introspection query and only flags the endpoint when a schema comes back.",
+      "requires": [
+        "graphql-endpoint"
+      ],
+      "severity": "medium",
+      "intrusiveness": "safe",
+      "remediation": "Disable introspection in production, or allow it only for authorized roles.",
+      "check": {
+        "method": "POST",
+        "path": "/graphql",
+        "body": "{\"query\":\"query PlonixIntrospect { __schema { queryType { name } types { name } } }\"}",
+        "expect": {
+          "status": [
+            200
+          ],
+          "body": "\"__schema\"|\"queryType\"|\"types\""
+        }
+      },
+      "owasp": [
+        "API9",
+        "A05"
+      ],
+      "wstg": [
+        "WSTG-CONF-05"
+      ]
+    },
+    {
+      "id": "exposed-git-head",
+      "title": "Exposed .git/HEAD",
+      "description": "The Git HEAD file is reachable over HTTP, a strong sign the whole .git directory is served and source history can be reconstructed.",
+      "requires": [
+        "web"
+      ],
+      "severity": "high",
+      "intrusiveness": "safe",
+      "remediation": "Deny access to the .git directory at the web server, or move the working tree out of the web root.",
+      "check": {
+        "method": "GET",
+        "path": "/.git/HEAD",
+        "expect": {
+          "status": [
+            200
+          ],
+          "body": "ref:\\s*refs/"
+        }
+      },
+      "owasp": [
+        "A05"
+      ],
+      "wstg": [
+        "WSTG-CONF-04"
+      ]
+    },
+    {
+      "id": "exposed-openapi",
+      "title": "OpenAPI description exposed",
+      "description": "A machine-readable OpenAPI (Swagger) description is served, listing every route, parameter and schema. It is often meant for internal use and hands an attacker a full API map.",
+      "requires": [
+        "web"
+      ],
+      "severity": "low",
+      "intrusiveness": "safe",
+      "remediation": "Serve the API description only to authenticated internal users, or not in production.",
+      "check": {
+        "method": "GET",
+        "path": "/openapi.json",
+        "expect": {
+          "status": [
+            200
+          ],
+          "body": "\"openapi\"\\s*:|\"swagger\"\\s*:"
+        }
+      },
+      "owasp": [
+        "API9",
+        "A05"
+      ],
+      "wstg": [
+        "WSTG-CONF-05"
+      ]
+    },
+    {
+      "id": "exposed-swagger",
+      "title": "Swagger description exposed",
+      "description": "A Swagger API description is served at a common path, listing routes and schemas that are often meant to stay internal.",
+      "requires": [
+        "web"
+      ],
+      "severity": "low",
+      "intrusiveness": "safe",
+      "remediation": "Serve the API description only to authenticated internal users, or not in production.",
+      "check": {
+        "method": "GET",
+        "path": "/swagger.json",
+        "expect": {
+          "status": [
+            200
+          ],
+          "body": "\"swagger\"\\s*:|\"openapi\"\\s*:"
+        }
+      },
+      "owasp": [
+        "API9",
+        "A05"
+      ],
+      "wstg": [
+        "WSTG-CONF-05"
+      ]
+    },
+    {
+      "id": "directory-listing",
+      "title": "Directory listing enabled",
+      "description": "The web root returns an automatic directory index, which can expose files that were never meant to be linked.",
+      "requires": [
+        "web"
+      ],
+      "severity": "low",
+      "intrusiveness": "safe",
+      "remediation": "Turn off automatic directory indexing at the web server.",
+      "check": {
+        "method": "GET",
+        "path": "/",
+        "expect": {
+          "status": [
+            200
+          ],
+          "body": "Index of /|<title>Directory listing for"
+        }
+      },
+      "owasp": [
+        "A05"
+      ],
+      "wstg": [
+        "WSTG-CONF-04"
+      ]
+    },
+    {
+      "id": "php-info",
+      "title": "phpinfo() page exposed",
+      "description": "A phpinfo() page is reachable and discloses the PHP version, loaded modules, environment variables and server paths.",
+      "requires": [
+        "php"
+      ],
+      "severity": "medium",
+      "intrusiveness": "safe",
+      "remediation": "Remove phpinfo() pages from anything reachable in production.",
+      "check": {
+        "method": "GET",
+        "path": "/phpinfo.php",
+        "expect": {
+          "status": [
+            200
+          ],
+          "body": "<title>PHP [0-9]|phpinfo\\(\\)"
+        }
+      },
+      "owasp": [
+        "A05"
+      ],
+      "wstg": [
+        "WSTG-CONF-05"
+      ]
+    },
+    {
+      "id": "wordpress-user-enum",
+      "title": "WordPress users enumerable",
+      "description": "The WordPress REST API lists user accounts, including their login slugs, which is useful for targeting password attacks.",
+      "requires": [
+        "wordpress"
+      ],
+      "severity": "medium",
+      "intrusiveness": "safe",
+      "remediation": "Restrict or disable the users REST endpoint, or require authentication for it.",
+      "check": {
+        "method": "GET",
+        "path": "/wp-json/wp/v2/users",
+        "expect": {
+          "status": [
+            200
+          ],
+          "body": "\"slug\"\\s*:"
+        }
+      },
+      "owasp": [
+        "A01"
+      ],
+      "wstg": [
+        "WSTG-IDNT-04"
+      ]
+    },
+    {
+      "id": "wordpress-xmlrpc",
+      "title": "WordPress XML-RPC enabled",
+      "description": "The XML-RPC interface is enabled. It accepts POST requests and has historically been abused for brute-force amplification and server-side request relaying.",
+      "requires": [
+        "wordpress"
+      ],
+      "severity": "low",
+      "intrusiveness": "safe",
+      "remediation": "Disable XML-RPC if it is not needed, or block access to xmlrpc.php.",
+      "check": {
+        "method": "GET",
+        "path": "/xmlrpc.php",
+        "expect": {
+          "status": [
+            200,
+            405
+          ],
+          "body": "XML-RPC server accepts POST requests"
+        }
+      },
+      "owasp": [
+        "A05"
+      ],
+      "wstg": [
+        "WSTG-CONF-05"
+      ]
     }
   ]
 }

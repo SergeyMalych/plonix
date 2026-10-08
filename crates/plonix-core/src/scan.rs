@@ -38,6 +38,9 @@ pub const MAX_REQUIRES: usize = 8;
 pub const MAX_TECH: usize = 16;
 pub const MAX_PAYLOADS: usize = 64;
 pub const MAX_PAYLOAD_LEN: usize = 512;
+/// A fixed-path probe's request body (e.g. a GraphQL introspection query) is
+/// bounded so a pack can never ship a large payload.
+pub const MAX_BODY_LEN: usize = 4096;
 const MAX_PATTERN: usize = 1000;
 const REGEX_SIZE_LIMIT: usize = 256 * 1024;
 
@@ -170,6 +173,11 @@ pub struct CheckDef {
     /// A small, fixed set of payload tokens from the pack.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub payloads: Vec<String>,
+    /// A fixed request body for a path probe, e.g. a GraphQL introspection
+    /// query. Only valid alongside `path` (a fixed probe), never with `inject`.
+    /// Sent as `application/json` with the method the check declares.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
     pub expect: ExpectDef,
 }
 
@@ -800,6 +808,14 @@ pub fn compile_tactic(def: TacticDef, pack: &str) -> Result<Tactic, String> {
             return Err("check.path: an absolute path (starting with `/`), up to 1024 bytes, no whitespace".into());
         }
     }
+    if let Some(b) = &def.check.body {
+        if def.check.path.is_none() {
+            return Err("check.body: only a fixed-path probe (with `path`) may carry a body".into());
+        }
+        if b.len() > MAX_BODY_LEN {
+            return Err(format!("check.body: longer than {MAX_BODY_LEN} bytes"));
+        }
+    }
     match def.check.inject.location {
         InjectLocation::Query | InjectLocation::Header => {
             let name = def
@@ -903,6 +919,9 @@ pub struct PlannedRequest {
     pub headers: Vec<(String, String)>,
     /// The payload this request carries, for the reflection check and evidence.
     pub payload: Option<String>,
+    /// A request body, for a fixed-path probe that sends one (e.g. GraphQL
+    /// introspection). `None` for every injecting check.
+    pub body: Option<String>,
 }
 
 /// A finding a tactic produced, ready to record once a person's scan recorded it.
@@ -936,20 +955,26 @@ impl Tactic {
         let base = format!("{scheme}://{host}");
         let method = self.def.check.method.to_ascii_uppercase();
         if let Some(path) = &self.def.check.path {
-            return vec![PlannedRequest { method, url: format!("{base}{path}"), headers: vec![], payload: None }];
+            // A fixed-path probe may carry a body (e.g. a GraphQL introspection
+            // query); when it does, it is sent as JSON.
+            let (headers, body) = match &self.def.check.body {
+                Some(b) => (vec![("content-type".to_string(), "application/json".to_string())], Some(b.clone())),
+                None => (vec![], None),
+            };
+            return vec![PlannedRequest { method, url: format!("{base}{path}"), headers, payload: None, body }];
         }
         let Some(t) = target else { return vec![] };
         let path = if t.path.starts_with('/') { t.path.clone() } else { format!("/{}", t.path) };
         match self.def.check.inject.location {
             InjectLocation::None => {
-                vec![PlannedRequest { method, url: format!("{base}{path}"), headers: vec![], payload: None }]
+                vec![PlannedRequest { method, url: format!("{base}{path}"), headers: vec![], payload: None, body: None }]
             }
             InjectLocation::PathSuffix => self
                 .def
                 .check
                 .payloads
                 .iter()
-                .map(|p| PlannedRequest { method: method.clone(), url: format!("{base}{path}{}", encode_component(p)), headers: vec![], payload: Some(p.clone()) })
+                .map(|p| PlannedRequest { method: method.clone(), url: format!("{base}{path}{}", encode_component(p)), headers: vec![], payload: Some(p.clone()), body: None })
                 .collect(),
             InjectLocation::Query => {
                 let name = self.def.check.inject.name.as_deref().unwrap_or("q");
@@ -962,6 +987,7 @@ impl Tactic {
                         url: format!("{base}{path}?{}={}", encode_component(name), encode_component(p)),
                         headers: vec![],
                         payload: Some(p.clone()),
+                        body: None,
                     })
                     .collect()
             }
@@ -971,7 +997,7 @@ impl Tactic {
                     .check
                     .payloads
                     .iter()
-                    .map(|p| PlannedRequest { method: method.clone(), url: format!("{base}{path}"), headers: vec![(name.clone(), p.clone())], payload: Some(p.clone()) })
+                    .map(|p| PlannedRequest { method: method.clone(), url: format!("{base}{path}"), headers: vec![(name.clone(), p.clone())], payload: Some(p.clone()), body: None })
                     .collect()
             }
         }
@@ -1097,7 +1123,7 @@ mod tests {
                 severity: Severity::Medium,
                 intrusiveness: intr,
                 variant: String::new(),
-                check: CheckDef { method: "GET".into(), path: None, inject: InjectDef::default(), payloads: vec![], expect: ExpectDef { status: vec![200], ..Default::default() } },
+                check: CheckDef { method: "GET".into(), path: None, inject: InjectDef::default(), payloads: vec![], body: None, expect: ExpectDef { status: vec![200], ..Default::default() } },
                 remediation: String::new(),
                 owasp: vec![],
                 wstg: vec![],
@@ -1193,7 +1219,7 @@ mod tests {
                 path: None,
                 inject: InjectDef { location: InjectLocation::Query, name: None },
                 payloads: vec![],
-                expect: ExpectDef { reflects_payload: true, ..Default::default() },
+                body: None, expect: ExpectDef { reflects_payload: true, ..Default::default() },
             },
             remediation: String::new(),
             owasp: vec![],
@@ -1216,7 +1242,7 @@ mod tests {
             severity: Severity::Low,
             intrusiveness: Intrusiveness::Safe,
             variant: String::new(),
-            check: CheckDef { method: "GET".into(), path: None, inject: InjectDef::default(), payloads: vec![], expect: ExpectDef::default() },
+            check: CheckDef { method: "GET".into(), path: None, inject: InjectDef::default(), payloads: vec![], body: None, expect: ExpectDef::default() },
             remediation: String::new(),
             owasp: vec![],
             wstg: vec![],
@@ -1278,7 +1304,7 @@ mod tests {
     #[test]
     fn fixed_path_plans_one_request_per_host() {
         let t = tactic_with_check(
-            CheckDef { method: "GET".into(), path: Some("/.well-known/security.txt".into()), inject: InjectDef::default(), payloads: vec![], expect: ExpectDef { status: vec![200], ..Default::default() } },
+            CheckDef { method: "GET".into(), path: Some("/.well-known/security.txt".into()), inject: InjectDef::default(), payloads: vec![], body: None, expect: ExpectDef { status: vec![200], ..Default::default() } },
             Intrusiveness::Safe,
         );
         let reqs = t.plan("https", "example.com", None);
@@ -1295,7 +1321,7 @@ mod tests {
                 path: None,
                 inject: InjectDef { location: InjectLocation::Query, name: Some("q".into()) },
                 payloads: vec!["a b".into(), "x&y".into()],
-                expect: ExpectDef { reflects_payload: true, ..Default::default() },
+                body: None, expect: ExpectDef { reflects_payload: true, ..Default::default() },
             },
             Intrusiveness::Active,
         );
@@ -1309,7 +1335,7 @@ mod tests {
     #[test]
     fn injecting_tactic_plans_nothing_without_a_target() {
         let t = tactic_with_check(
-            CheckDef { method: "GET".into(), path: None, inject: InjectDef { location: InjectLocation::PathSuffix, name: None }, payloads: vec!["~".into()], expect: ExpectDef { status: vec![200], ..Default::default() } },
+            CheckDef { method: "GET".into(), path: None, inject: InjectDef { location: InjectLocation::PathSuffix, name: None }, payloads: vec!["~".into()], body: None, expect: ExpectDef { status: vec![200], ..Default::default() } },
             Intrusiveness::Active,
         );
         assert!(t.plan("https", "h", None).is_empty());
@@ -1330,7 +1356,7 @@ mod tests {
                 path: Some("/x".into()),
                 inject: InjectDef { location: InjectLocation::Query, name: Some("q".into()) },
                 payloads: vec!["p".into()],
-                expect: ExpectDef { status: vec![200], ..Default::default() },
+                body: None, expect: ExpectDef { status: vec![200], ..Default::default() },
             },
             remediation: String::new(),
             owasp: vec![],
@@ -1347,11 +1373,11 @@ mod tests {
                 path: None,
                 inject: InjectDef { location: InjectLocation::Query, name: Some("q".into()) },
                 payloads: vec!["<xyz>".into()],
-                expect: ExpectDef { status: vec![200], body: Some("error".into()), reflects_payload: true },
+                body: None, expect: ExpectDef { status: vec![200], body: Some("error".into()), reflects_payload: true },
             },
             Intrusiveness::Active,
         );
-        let req = PlannedRequest { method: "GET".into(), url: "https://h/s?q=%3Cxyz%3E".into(), headers: vec![], payload: Some("<xyz>".into()) };
+        let req = PlannedRequest { method: "GET".into(), url: "https://h/s?q=%3Cxyz%3E".into(), headers: vec![], payload: Some("<xyz>".into()), body: None };
         let hdr = vec![("content-type".to_string(), "text/html".to_string())];
         // All three hold: status 200, body has "error", payload reflected.
         assert!(t.evaluate(&req, Some(200), &hdr, b"<h1>error</h1> echo <xyz>").is_some());
@@ -1366,10 +1392,10 @@ mod tests {
     #[test]
     fn evaluate_status_only_fires_on_match() {
         let t = tactic_with_check(
-            CheckDef { method: "GET".into(), path: Some("/.well-known/security.txt".into()), inject: InjectDef::default(), payloads: vec![], expect: ExpectDef { status: vec![200], ..Default::default() } },
+            CheckDef { method: "GET".into(), path: Some("/.well-known/security.txt".into()), inject: InjectDef::default(), payloads: vec![], body: None, expect: ExpectDef { status: vec![200], ..Default::default() } },
             Intrusiveness::Safe,
         );
-        let req = PlannedRequest { method: "GET".into(), url: "https://h/.well-known/security.txt".into(), headers: vec![], payload: None };
+        let req = PlannedRequest { method: "GET".into(), url: "https://h/.well-known/security.txt".into(), headers: vec![], payload: None, body: None };
         assert!(t.evaluate(&req, Some(200), &[], b"Contact: mailto:x").is_some());
         assert!(t.evaluate(&req, Some(404), &[], b"not found").is_none());
     }
@@ -1404,7 +1430,7 @@ mod tests {
     }
 
     fn fixed_path_check(path: &str) -> CheckDef {
-        CheckDef { method: "GET".into(), path: Some(path.into()), inject: InjectDef::default(), payloads: vec![], expect: ExpectDef { status: vec![200], ..Default::default() } }
+        CheckDef { method: "GET".into(), path: Some(path.into()), inject: InjectDef::default(), payloads: vec![], body: None, expect: ExpectDef { status: vec![200], ..Default::default() } }
     }
 
     fn query_check(name: Option<&str>) -> CheckDef {
@@ -1413,7 +1439,7 @@ mod tests {
             path: None,
             inject: InjectDef { location: InjectLocation::Query, name: name.map(|s| s.to_string()) },
             payloads: vec!["m".into()],
-            expect: ExpectDef { reflects_payload: true, ..Default::default() },
+            body: None, expect: ExpectDef { reflects_payload: true, ..Default::default() },
         }
     }
 
@@ -1437,6 +1463,60 @@ mod tests {
         assert_eq!(p.insertion.path, "/.git/config");
         assert_eq!(p.insertion.location, InjectLocation::None);
         assert!(p.recommended);
+    }
+
+    #[test]
+    fn fixed_path_probe_can_carry_a_json_body() {
+        // A GraphQL introspection check is a fixed-path POST with a body; the
+        // planned request carries that body and a JSON content-type.
+        let mut check = fixed_path_check("/graphql");
+        check.method = "POST".into();
+        let query = "{\"query\":\"{ __schema { queryType { name } } }\"}";
+        check.body = Some(query.into());
+        let t = tagged_tactic("graphql-introspection", &["graphql-endpoint"], Intrusiveness::Safe, check, &["API9"]);
+        let reqs = t.plan("https", "h", None);
+        assert_eq!(reqs.len(), 1);
+        let r = &reqs[0];
+        assert_eq!(r.method, "POST");
+        assert_eq!(r.url, "https://h/graphql");
+        assert_eq!(r.body.as_deref(), Some(query));
+        assert!(r.headers.iter().any(|(k, v)| k == "content-type" && v == "application/json"));
+    }
+
+    #[test]
+    fn a_request_body_without_a_fixed_path_is_rejected() {
+        let mut check = query_check(Some("q"));
+        check.body = Some("x".into());
+        let def = TacticDef {
+            id: "bad".into(),
+            title: "bad".into(),
+            description: String::new(),
+            requires: vec!["web".into()],
+            severity: Severity::Low,
+            intrusiveness: Intrusiveness::Safe,
+            variant: String::new(),
+            check,
+            remediation: String::new(),
+            owasp: vec![],
+            wstg: vec![],
+        };
+        assert!(compile_tactic(def, "p").is_err());
+    }
+
+    #[test]
+    fn graphql_introspection_is_gated_on_a_graphql_endpoint() {
+        // The built-in GraphQL introspection check is recommended once a
+        // GraphQL endpoint is detected, and skipped otherwise.
+        let cat = builtin_catalog();
+        let mut gql = ex("h", &[]);
+        gql.method = "POST".into();
+        gql.path = "/graphql".into();
+        let with = cat.suggest(&[], std::slice::from_ref(&gql));
+        assert!(with.recommended.iter().any(|t| t.id == "graphql-introspection"), "introspection should be recommended on a GraphQL host");
+        let plain = ex("h", &[]);
+        let without = cat.suggest(&[], std::slice::from_ref(&plain));
+        assert!(!without.recommended.iter().any(|t| t.id == "graphql-introspection"));
+        assert!(!without.optional.iter().any(|t| t.id == "graphql-introspection"));
     }
 
     #[test]
