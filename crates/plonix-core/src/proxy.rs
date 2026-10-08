@@ -152,7 +152,9 @@ async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<ProxyResponse, Infal
             ..Default::default()
         },
         taken: false,
+        as_user: None,
     };
+    act_as_user(&ctx.engine, &mut outbound, &mut pending);
 
     if req.version() <= http::Version::HTTP_11 && crate::websocket::is_handshake(req.headers()) {
         return Ok(websocket(req, ctx, outbound, pending).await);
@@ -209,6 +211,28 @@ fn size(n: usize) -> String {
         n if n >= 1024 => format!("{:.1} KB", n as f64 / 1024.0),
         n => format!("{n} bytes"),
     }
+}
+
+/// When the person is acting as a saved user, sends browser traffic to
+/// in-scope hosts as that user: the browser's own cookies and auth headers
+/// are set aside for the user's. Hosts outside scope are left alone.
+fn act_as_user(engine: &Arc<Engine>, outbound: &mut OutboundRequest, pending: &mut Pending) {
+    if !engine.rules().in_scope(&pending.ex.host) {
+        return;
+    }
+    let user = match engine.store.acting_user() {
+        Ok(Some(u)) => u,
+        Ok(None) => return,
+        Err(e) => {
+            tracing::warn!("could not read the acting user: {e:#}");
+            return;
+        }
+    };
+    outbound.headers.retain(|(k, _)| !crate::users::is_auth_header(k));
+    outbound.headers.extend(user.request_headers(&pending.ex.host, crate::users::now_secs()));
+    pending.ex.req_headers = outbound.headers.clone();
+    pending.ex.replaced.push(format!("{}{}", crate::users::SENT_AS, user.name));
+    pending.as_user = Some(user.id);
 }
 
 /// Applies the match-and-replace rules to a request on its way out. The
@@ -318,6 +342,12 @@ async fn hold_request(engine: &Arc<Engine>, outbound: &mut OutboundRequest, pend
 /// Answers the client with the server's response: streaming it, or holding
 /// it in Intercept first when the user holds responses.
 async fn respond(engine: &Arc<Engine>, status: u16, headers: Headers, body: Incoming, mut pending: Pending) -> ProxyResponse {
+    // Cookies the server sets for a saved user go to that user, not the browser.
+    if let Some(id) = &pending.as_user
+        && let Err(e) = engine.store.absorb_cookies(id, &pending.ex.host, &headers)
+    {
+        tracing::warn!("saved user {id}: could not keep its cookies: {e:#}");
+    }
     let (headers, body) = match replace_response(engine, status, headers, body, &mut pending).await {
         Ok(r) => r,
         Err(e) => {
@@ -534,8 +564,12 @@ fn from_http2(headers: &mut Headers, authority: Option<&str>) {
 fn deliver(status: u16, headers: Headers, body: RespBody, mut pending: Pending) -> ProxyResponse {
     pending.ex.status = Some(status);
     let mut builder = Response::builder().status(status);
+    // Acting as a saved user, the browser's own cookies are kept out of it:
+    // the user's cookies were updated from these instead (see `respond`).
+    let keep_cookies = pending.as_user.is_none();
     for (k, v) in &headers {
-        if !HOP_BY_HOP.contains(&k.to_ascii_lowercase().as_str()) {
+        let k_low = k.to_ascii_lowercase();
+        if !HOP_BY_HOP.contains(&k_low.as_str()) && (keep_cookies || k_low != "set-cookie") {
             builder = builder.header(k.as_str(), v.as_str());
         }
     }
@@ -645,6 +679,8 @@ struct Pending {
     resp: Arc<Mutex<Captured>>,
     ex: Exchange,
     taken: bool,
+    /// The saved user this request was sent as, if any.
+    as_user: Option<String>,
 }
 
 impl Pending {

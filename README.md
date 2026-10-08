@@ -50,6 +50,7 @@ Most of a web assessment is the same loop: capture traffic, figure out what the 
 | Several targets at once | Each project opens in its own window with its own proxy, database and scope. |
 | A toolbox that grows without bloat | A signed community Market of skills, rule packs, filter packs, payload lists, extensions and tools, with a starter set picked for your kind of work. |
 | Scope you can keep up with | Follow a bug bounty or disclosure program and its scope and rules apply to everything Plonix sends. |
+| To see exactly what changed | Compare any two sends side by side: the lines that differ in the response or the request are marked, and everything else folds away. |
 | A next step without the setup | The Lens reads the request on screen and offers the one move that fits (save a login as a user, check an id across users, replay signed out, scan just this endpoint), one click away. You still decide and send. |
 
 ## Principles
@@ -81,7 +82,7 @@ Plonix has a handful of tools, each with its own name. They are the same in the 
 | **Skills** | Playbooks AI agents follow for a job in Plonix, offered over MCP | `plonix skills` |
 | **Rules** | Change traffic as it passes: add, change or remove a header, or replace text, for browser traffic, the Bench and Scans, optionally only when a Traffic search matches | `plonix replace` |
 | **Rule packs** | Community packs that teach Plonix to recognise technologies | `plonix rules` |
-| **Saved users** | The cookies and tokens for each user of an application; the Bench sends as whichever one you pick (a Market tool) | Bench › As … |
+| **Saved users** | The cookies and tokens for each user of an application. Act as one from the title bar and your browser, the Bench and Scans send as them; see, edit and expire each cookie on the Users screen (a Market tool) | Title bar › Act as, Users |
 | **Access check** | Replays chosen requests as each saved user and signed out, side by side, so differences in what each one may see stand out (a Market tool) | Traffic or Map selection |
 | **Callbacks** | Hands out a unique host for each test and lists every DNS lookup, HTTP request or mail that reaches one (a Market tool) | Callbacks tab, Bench › Insert callback host |
 
@@ -120,6 +121,15 @@ These are from the demo project that ships with Plonix (Start screen › Try the
   <img src="docs/images/ask-light.webp" alt="Ask Claude: the question, and each part of the request that will be shared, with its size, to tick or untick">
 </picture>
 <b>Ask Claude.</b> See and pick exactly what Claude gets before you ask. The answer arrives in the app.
+</td>
+</tr>
+<tr>
+<td colspan="2">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/compare-dark.webp">
+  <img src="docs/images/compare-light.webp" alt="Comparing two sends on the Bench: the responses for two order ids side by side, with the lines that differ marked">
+</picture>
+<b>Compare requests.</b> Tick two sends and see them side by side, with only the lines that differ marked. Switch between the responses and the requests.
 </td>
 </tr>
 </table>
@@ -201,6 +211,11 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - Replay any captured exchange with a different method, path, headers or body.
 - Send new requests from scratch. Results are stored alongside captured traffic and tagged with who sent them.
 
+### Compare requests
+- Tick two sends in a Bench tab's history and press **Compare**: the two show side by side, with the lines that differ marked and unchanged stretches folded into "… N unchanged lines". Switch between **Response** and **Request**.
+- Compare two users reading the same record, an id one apart, a header added or removed, or a send before and after a change. Headers, JSON bodies and decoded values line up line by line, so a changed email, total or card number stands out.
+- **Branch** turns any earlier send into a new tab to try a different idea from there, and **Restore** puts it back in the editor, so a comparison is always one click from the next experiment.
+
 ### Bench runs
 - Mark one or more positions in a request with `•…•` and feed lists of values through them: one position at a time, in lockstep, or every combination. Lists come built in, from the Market, from a number range, from values you type or from a file.
 - Results line up in one table (status, size, time, and what changed against the baseline), and every row opens its full response. Every request goes through the scope choke point, is capped by a request budget, and is recorded like any other send. A run only starts when you start it; agents cannot start one.
@@ -225,7 +240,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - **Starter profiles:** pick bug hunter, red teamer or security researcher on the Start screen, at the top of the Market, in Settings or per project. The Market then shows **Recommended for you**, each item with one line on why, and `plonix market install --starter` installs the set. Pick none and everything stays neutral. See [docs/market.md](docs/market.md).
 
 ### Saved users and the Access check
-- **Saved users** keep each user's cookies and tokens per project. Pick **As …** on the Bench to send a request as one of them; switching never widens scope.
+- **Saved users** keep each user's cookies and tokens per project. **Act as** one from the title bar: browser traffic to in-scope hosts, the Bench and Scans are then sent with that user's cookies, and cookies the server sets for them are kept with the user instead of in your browser. A Bench tab can pick its own user with **As …**. The **Users** screen lists every cookie to edit, expire or remove. Switching sends nothing by itself and never widens scope.
 - The **Access check** replays the requests you select in Traffic or on the Map as each saved user and once signed out, then lines up status, size and content for each. It points out where a signed-out request still succeeds and where different users get the same response; it draws no conclusions, and you decide what they mean.
 
 ### Callbacks
@@ -495,7 +510,8 @@ The API listens on port 8090 when it is free; `plonix status` shows the actual a
 | GET | `/api/scan/catalog` · `/api/scan/suggest/{host}` | Scan detectors and checks, and the suggested profile for a host |
 | GET | `/api/scan/plan/{host}` | A reviewable scan plan for a host: proposed tests with reasons, grouped by OWASP category (sends nothing) |
 | POST | `/api/run` · GET `/api/run/lists` | Start a Bench run (user only), and the payload lists available to it |
-| GET / PUT | `/api/users` | Saved users for the project (user only) |
+| GET / PUT | `/api/users` | Saved users for the project, and the one being acted as (user only) |
+| PUT | `/api/users/acting` | Act as a saved user, or `null` for the browser's own session (user only) |
 | POST | `/api/access-check` | Replay requests as each saved user and signed out, and compare (user only) |
 | GET | `/api/hosts/{host}/spec` · `/api/traffic/{id}/spec` | API descriptions found in traffic, and the endpoints not visited yet |
 | GET | `/api/program` · POST `/api/program/preview` · `apply` · `clear` | The program this project follows; preview, follow or stop following one |

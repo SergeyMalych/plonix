@@ -424,6 +424,19 @@ const TOUR_STEPS = [
     text: 'Mark a value with • and Run sends the request once per value, with a sensible list picked for you. Here it walks the order id through nearby numbers so you can spot orders that aren’t yours.',
   },
   {
+    view: 'users',
+    prep: () => (US.sel = 'dana'),
+    target: ['.uscookies', '#main .view'],
+    title: 'Users',
+    text: 'The people you test as, each with their cookies and headers. Edit a value, expire a cookie to stop sending it, or paste a fresh Cookie header. Cookies the server sets for a user are kept here, so the session stays current.',
+  },
+  {
+    view: 'users',
+    target: '#actas',
+    title: 'Act as a user',
+    text: 'Pick who you are from the title bar. Your browser, the Bench and Scans then send as that user to in-scope hosts, so you can click around as Dana and compare with Maya. Switching sends nothing by itself.',
+  },
+  {
     view: 'findings',
     target: ['#findbody > .finding', '#findbody'],
     title: 'Findings',
@@ -457,7 +470,7 @@ const TOUR_STEPS = [
     view: 'market',
     target: ['#mkinds', '#main .view'],
     title: 'Market',
-    text: 'Extensions, skills, filter packs and word lists, each signed and checked before it installs. Tools such as Saved users and the Access check, which replays requests as each user and signed out, are switched on from here.',
+    text: 'Extensions, skills, filter packs and word lists, each signed and checked before it installs. Tools such as Saved users and the Access check, which replays requests as each user and signed out, are switched on from here in your own projects.',
   },
   {
     view: 'market',
@@ -640,6 +653,7 @@ const VIEWS = {
   bench: { label: 'Bench', ico: '⎇', render: renderBench },
   scope: { label: 'Scope', ico: '◉', render: renderScope },
   map: { label: 'Map', ico: '⊞', render: renderMap },
+  users: { label: 'Users', ico: '☺\uFE0E', render: renderUsers, tool: 'saved-users' },
   access: { label: 'Access', ico: '⚿', render: renderAccess, tool: 'access-check' },
   callbacks: { label: 'Callbacks', ico: '↩', render: renderCallbacks, tool: 'callbacks' },
   findings: { label: 'Findings', ico: '⚑', render: renderFindings },
@@ -654,7 +668,9 @@ const VIEWS = {
 const IN_APP = !!window.__PLONIX_APP__;
 
 /** Whether a built-in tool has been switched on from the Market. */
-const toolOn = (id) => !!(S.status && S.status.tools && S.status.tools.includes(id));
+const toolOn = (id) => !!(S.status && ((S.status.tools && S.status.tools.includes(id)) || (S.status.demo && DEMO_TOOLS.includes(id))));
+/** Tools the demo project shows without installing them, so its walkthrough can stop on them. */
+const DEMO_TOOLS = ['saved-users'];
 
 function renderShell() {
   const nav = h('div', { class: 'nav' });
@@ -680,6 +696,7 @@ function renderShell() {
       h(
         'div',
         { class: 'right' },
+        toolOn('saved-users') ? h('button', { class: 'actas', id: 'actas', onclick: (e) => actingMenu(e.currentTarget) }) : null,
         h('div', { class: 'engine', id: 'engine' }, h('span', { class: 'dot' }), h('span', { id: 'enginetxt' })),
         h('button', { class: 'iconbtn', title: 'Theme (auto / light / dark)', onclick: cycleTheme, text: '◐' }),
       ),
@@ -734,6 +751,7 @@ function renderShell() {
   loadFacets();
   loadAgentSettings();
   go(S.view, true);
+  if (toolOn('saved-users')) loadUsers().then(drawActing);
 }
 
 function toggleSidebar() {
@@ -2467,7 +2485,7 @@ function drawRows(freshAbove) {
     if (ex.source === 'replay') tags.push(h('span', { class: 'tag replay', text: 'sent' }));
     if (ex.source === 'import') tags.push(h('span', { class: 'tag imported', text: 'har', title: 'Imported from a HAR file' }));
     if (ex.edited) tags.push(h('span', { class: 'tag edited', text: 'edited', title: 'Changed in Intercept before it went on' }));
-  if (ex.replaced) tags.push(h('span', { class: 'tag edited', text: 'changed', title: 'Changed by rules on the way' }));
+  if (ex.replaced) tags.push(h('span', { class: 'tag edited', text: 'changed', title: 'Changed on the way, by rules or by sending as a saved user' }));
     const tr = h(
       'tr',
       {
@@ -2723,7 +2741,8 @@ async function openInspector(id) {
         h('span', { text: fmtSize(ex.resp_size != null ? ex.resp_size : b64len(ex.resp_body)) }),
         ex.http_version ? h('span', { text: ex.http_version, title: 'The protocol spoken with the server' }) : null,
         ex.edited ? h('button', { class: 'tag edited', text: 'edited', title: 'Changed in Intercept before it went on. Show the original', onclick: () => showOriginal(ex) }) : null,
-        ex.replaced && ex.replaced.length ? h('button', { class: 'tag edited', text: 'changed', title: 'Changed by rules:\n' + ex.replaced.join('\n') + '\n\nClick to open Rules', onclick: () => leaveTo('rules') }) : null,
+        sentAs(ex) ? h('button', { class: 'tag sentas', text: 'as ' + sentAs(ex), title: `Sent as the saved user ${sentAs(ex)}: their cookies and headers replaced the auth headers. Click to open Users`, onclick: () => leaveTo('users') }) : null,
+        ruleNotes(ex).length ? h('button', { class: 'tag edited', text: 'changed', title: 'Changed by rules:\n' + ruleNotes(ex).join('\n') + '\n\nClick to open Rules', onclick: () => leaveTo('rules') }) : null,
         clientCertTag(ex),
         ex.source === 'import' ? h('span', { class: 'tag imported', text: 'har', title: 'Imported from a HAR file' }) : null,
         h('span', { class: 'tag ' + scopeTag(decide(ex.host)), text: scopeLabel(decide(ex.host)) }),
@@ -3055,6 +3074,11 @@ function sessionGrant(ex) {
   return { cookie: pairs.join('; '), count: pairs.length };
 }
 
+/** The saved user an exchange was sent as, from its notes, or null. */
+const SENT_AS = 'sent as saved user: ';
+const sentAs = (ex) => ((ex.replaced || []).find((r) => r.startsWith(SENT_AS)) || '').slice(SENT_AS.length) || null;
+const ruleNotes = (ex) => (ex.replaced || []).filter((r) => !r.startsWith(SENT_AS));
+
 /** A friendly default name for a user captured from a request. */
 function suggestUserName(ex) {
   for (const [k, v] of queryPairsOf(ex)) if (/^(user|username|login|email|account|name)$/i.test(k) && v) return v.split('@')[0].slice(0, 40);
@@ -3068,7 +3092,7 @@ function suggestUserName(ex) {
 function saveUserFrom(ex) {
   const g = sessionGrant(ex);
   if (!g) return toast('No session cookie found on this response.', 'err');
-  manageUsers(() => toast('Saved — pick this user in the Bench “As…” menu.', 'ok'), { name: suggestUserName(ex), note: `Captured from ${ex.method} ${ex.path}`, headers: [['Cookie', g.cookie]] });
+  manageUsers(() => toast('Saved. Act as this user from the title bar, or pick it in the Bench “As…” menu.', 'ok'), { name: suggestUserName(ex), note: `Captured from ${ex.method} ${ex.path}`, headers: [['Cookie', g.cookie]] });
 }
 
 const IDEAS_QUESTION =
@@ -3428,7 +3452,7 @@ async function drawLensSuggestions(slot, ex, list) {
   if (cors) {
     chips.push(h('button', { class: 'chip k-warn', title: cors.note + ' Record it as a finding.', onclick: () => findingForm(null, [ex.id], `Permissive cross-origin policy on ${ex.method} ${ex.path}`, { severity: cors.severity, note: cors.note }) }, h('span', { text: '+ Finding: open CORS policy' })));
   }
-  // A login handed back a session — offer to save it as a user for the cookie jar.
+  // A login handed back a session — offer to keep it as a saved user.
   if (toolOn('saved-users') && sessionGrant(ex)) {
     chips.push(h('button', { class: 'chip k-user', title: 'Save the session this response just set as a reusable user, ready in the Bench “As…” picker and the Access check.', onclick: () => saveUserFrom(ex) }, h('span', { text: 'Save login as a user' })));
   }
@@ -4086,7 +4110,7 @@ function renderBench(main) {
     const { headers, body, bad } = parseRaw(tab.raw);
     if (bad.length) return toast('Not a header line: ' + bad[0] + ' (use "Name: value", then a blank line before the body)', 'err');
     const req = { method: tab.method, url: tab.url, headers };
-    if (tab.asUser && toolOn('saved-users')) req.as_user = tab.asUser;
+    if (toolOn('saved-users') && tabUser(tab)) req.as_user = tabUser(tab);
     if (tab.bodyB64 && !body) req.body_base64 = tab.bodyB64;
     else if (body) req.body = body;
     sendBtn.disabled = true;
@@ -4211,7 +4235,7 @@ function renderBench(main) {
       'div',
       { class: 'rbody' },
       h('datalist', { id: 'methods' }, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map((m) => h('option', { value: m }))),
-      h('div', { class: 'reqbar' }, panelToggle, method, h('div', { class: 'urlwrap' }, url), urlMarkBtn, !runMode && toolOn('saved-users') ? userSwitcher(tab, main) : null, runMode ? null : sendBtn),
+      h('div', { class: 'reqbar' }, panelToggle, method, h('div', { class: 'urlwrap' }, url), urlMarkBtn, toolOn('saved-users') ? userSwitcher(tab, main) : null, runMode ? null : sendBtn),
       h('div', { id: 'scopehint' }),
       runMode ? null : h('div', { id: 'propslot' }),
       runMode
@@ -5467,6 +5491,7 @@ async function startRun(tab, main) {
     include_base: !!cfg.base,
     max_requests: cfg.max ? Number(cfg.max) : null,
     delay_ms: cfg.delay === '' ? null : Number(cfg.delay),
+    as_user: toolOn('saved-users') && tabUser(tab) ? tabUser(tab) : null,
   };
   tab.runState = { busy: true, report: null, error: null, sort: tab.runState?.sort, sel: null };
   drawRunResults(tab, main);
@@ -6653,20 +6678,24 @@ function specToBench(spec, e) {
 }
 
 /* ======================================================================
-   Saved users (the cookie jar) and the Access check
-   Two Market tools. Saved users keep each person's cookies and tokens so the
-   Bench can send a request as any of them; the Access check replays chosen
-   requests as every user, and once signed out, and lines the responses up.
+   Saved users and the Access check
+   Saved users keep each person's cookies and headers. The person acts as one
+   of them at a time (the switcher in the title bar): browser traffic to
+   in-scope hosts, Bench tabs and Scans are then sent as that user. The Users
+   screen shows every cookie, to edit, expire or remove. The Access check
+   replays chosen requests as every user, and once signed out.
    ====================================================================== */
 
-/** Loads the saved users for this project, cached on S. */
+/** Loads the saved users for this project and who the person acts as, cached on S. */
 async function loadUsers(force) {
   if (S.users && !force) return S.users;
   try {
     const r = await api('/api/users');
     S.users = r.users || [];
+    S.acting = r.acting || null;
   } catch (_) {
     S.users = [];
+    S.acting = null;
   }
   return S.users;
 }
@@ -6682,74 +6711,132 @@ function parseHeaderLines(text) {
   return headers;
 }
 
-const headerLines = (headers) => (headers || []).map(([k, v]) => `${k}: ${v}`).join('\n');
-
-/** The manage-users sheet: add, edit and remove the saved users. */
-async function manageUsers(afterSave, prefill) {
-  const users = (await loadUsers(true)).map((u) => ({ ...u, headers: (u.headers || []).map((h) => [...h]) }));
-  if (prefill) users.push({ id: '', name: prefill.name || '', note: prefill.note || '', headers: prefill.headers || [] });
-  const list = h('div', { class: 'userlist' });
-  const draw = () => {
-    clear(
-      list,
-      users.length ? null : h('div', { class: 'muted', text: 'No users yet. Add one and paste its Cookie or Authorization header below.' }),
-      users.map((u, i) =>
-        h(
-          'div',
-          { class: 'usercard' },
-          h(
-            'div',
-            { class: 'urow' },
-            h('input', { class: 'uname', placeholder: 'Name, e.g. Alice (admin)', value: u.name || '', oninput: (e) => (u.name = e.target.value) }),
-            h('button', { class: 'btn sm danger', text: 'Remove', onclick: () => (users.splice(i, 1), draw()) }),
-          ),
-          h('input', { class: 'unote', placeholder: 'Optional note', value: u.note || '', oninput: (e) => (u.note = e.target.value) }),
-          h('label', { class: 'ulbl', text: 'Headers sent as this user (one per line)' }),
-          h('textarea', {
-            class: 'uhead',
-            spellcheck: 'false',
-            rows: '3',
-            placeholder: 'Cookie: session=…\nAuthorization: Bearer …',
-            value: headerLines(u.headers),
-            oninput: (e) => (u._raw = e.target.value),
-          }),
-        ),
-      ),
-      h('button', { class: 'btn sm', text: '+ Add user', onclick: () => (users.push({ id: '', name: '', note: '', headers: [] }), draw()) }),
-    );
-  };
-  draw();
-  const save = async () => {
-    const payload = users
-      .map((u) => ({ id: u.id || '', name: (u.name || '').trim(), note: (u.note || '').trim(), headers: u._raw != null ? parseHeaderLines(u._raw) : u.headers }))
-      .filter((u) => u.name);
-    try {
-      const r = await api('/api/users', { method: 'PUT', body: { users: payload } });
-      S.users = r.users || [];
-      closeModal();
-      toast('Saved users updated', 'ok');
-      if (afterSave) afterSave();
-    } catch (e) {
-      toast(e.message, 'err');
-    }
-  };
-  modal('Saved users', h('div', { class: 'usersheet' }, h('p', { class: 'hint', text: 'Each user is a set of headers — usually a Cookie or a token — applied to a request before it is sent. Values stay in this project.' }), list), [
-    h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }),
-    h('button', { class: 'btn primary', text: 'Save', onclick: save }),
-  ]);
+const userById = (id) => (S.users || []).find((u) => u.id === id) || null;
+const actingUser = () => (S.acting ? userById(S.acting) : null);
+const nowSecs = () => Math.floor(Date.now() / 1000);
+const cookieLive = (c) => c.expires == null || c.expires > nowSecs();
+/** The first letter of a user's name, for its round badge. */
+const userInitial = (u) => ((u && u.name.trim()[0]) || '?').toUpperCase();
+/** A steady hue per user, so each badge keeps its colour. */
+const USER_HUES = [232, 162, 282, 18, 196, 328, 96];
+const userHue = (u) => USER_HUES[[...((u && u.id) || '')].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 9973, 7) % USER_HUES.length];
+function userBadge(u, cls = '') {
+  const b = h('span', { class: 'ubadge ' + cls, text: u ? userInitial(u) : '' });
+  if (u) b.style.setProperty('--uh', userHue(u));
+  return b;
 }
 
-/** The Bench control that picks which saved user a request is sent as. */
+/** Saves every user as they stand on S.users. `keep` leaves the objects the
+ * Users screen is editing in place (taking only the ids the engine gave),
+ * so typing carries on into the next save. */
+async function saveUsers(keep) {
+  const r = await api('/api/users', { method: 'PUT', body: { users: S.users } });
+  if (keep && (r.users || []).length === S.users.length) r.users.forEach((u, i) => (S.users[i].id = u.id));
+  else S.users = r.users || [];
+  drawActing();
+  return S.users;
+}
+
+/** Picks the user to act as, or none (null): the browser's own session. Sends nothing. */
+async function setActing(id) {
+  try {
+    const r = await api('/api/users/acting', { method: 'PUT', body: { id } });
+    S.acting = r.acting || null;
+  } catch (e) {
+    return toast(e.message, 'err');
+  }
+  drawActing();
+  const u = actingUser();
+  toast(u ? `Acting as ${u.name}: your browser, the Bench and Scans now send as them.` : 'Back to your browser’s own session.', 'ok');
+  if (S.view === 'users' || S.view === 'bench' || S.view === 'scans') go(S.view, true);
+}
+
+/** The title bar pill: who the person is acting as. */
+function drawActing() {
+  const b = $('#actas');
+  if (!b) return;
+  const u = actingUser();
+  b.classList.toggle('on', !!u);
+  b.title = u ? `Acting as ${u.name}. Browser traffic to in-scope hosts, the Bench and Scans are sent with their cookies.` : 'Act as a saved user: send as someone else from your browser, the Bench and Scans';
+  clear(b, u ? userBadge(u) : h('span', { class: 'ubadge none' }), h('span', { class: 'aslbl', text: u ? u.name : 'Your browser' }), h('span', { class: 'caret', text: '▾' }));
+}
+
+/** The menu under the title bar pill. */
+function actingMenu(anchor) {
+  closePopover();
+  const item = (u) =>
+    h(
+      'button',
+      { role: 'menuitemradio', class: 'actitem' + ((u ? u.id : null) === (S.acting || null) ? ' on' : ''), onclick: () => (closePopover(), setActing(u ? u.id : null)) },
+      u ? userBadge(u) : h('span', { class: 'ubadge none' }),
+      h('span', { class: 'actname' }, h('b', { text: u ? u.name : 'Your browser' }), h('span', { class: 'muted', text: u ? userSummary(u) : 'The cookies your browser has' })),
+      h('span', { class: 'actcheck', text: (u ? u.id : null) === (S.acting || null) ? '✓' : '' }),
+    );
+  const menu = h(
+    'div',
+    { class: 'ctxmenu actmenu', role: 'menu' },
+    h('div', { class: 'mhead', text: 'Act as' }),
+    item(null),
+    (S.users || []).map(item),
+    (S.users || []).length ? null : h('div', { class: 'mnote', text: 'No saved users yet. Add one, or save a login from the Lens.' }),
+    h('div', { class: 'msep' }),
+    h('button', { role: 'menuitem', text: 'Manage users and cookies…', onclick: () => (closePopover(), leaveTo('users')) }),
+  );
+  const r = anchor.getBoundingClientRect();
+  showPopover(menu, { left: Math.max(8, r.right - 300), bottom: r.bottom });
+}
+
+/** "3 cookies · 1 expired", for menus and the user list. */
+function userSummary(u) {
+  const live = (u.cookies || []).filter(cookieLive).length;
+  const dead = (u.cookies || []).length - live;
+  const bits = [live === 1 ? '1 cookie' : live + ' cookies'];
+  if (dead) bits.push(dead + ' expired');
+  if ((u.headers || []).length) bits.push((u.headers || []).map((x) => x[0]).join(', '));
+  return bits.join(' · ');
+}
+
+/** "in 3 h", "expired 2 d ago", or "no expiry". */
+function expiryText(t) {
+  if (t == null) return 'no expiry';
+  const d = t - nowSecs();
+  const span = (n) => (n < 3600 ? Math.max(1, Math.round(n / 60)) + ' min' : n < 172800 ? Math.round(n / 3600) + ' h' : Math.round(n / 86400) + ' d');
+  return d > 0 ? 'in ' + span(d) : 'expired ' + span(-d) + ' ago';
+}
+
+/** Adds a user (from the Lens, or a blank one) and opens it on the Users screen. */
+async function manageUsers(afterSave, prefill) {
+  if (!prefill) return leaveTo('users');
+  await loadUsers(true);
+  S.users.push({ id: '', name: prefill.name || 'New user', note: prefill.note || '', headers: prefill.headers || [], cookies: [], keep_fresh: true });
+  try {
+    await saveUsers();
+  } catch (e) {
+    S.users.pop();
+    return toast(e.message, 'err');
+  }
+  US.sel = S.users[S.users.length - 1].id;
+  if (afterSave) afterSave();
+  leaveTo('users');
+}
+
+/** The Bench control that picks which saved user a request is sent as. A tab
+ * follows the user the person acts as until one is picked for it. */
+function tabUser(tab) {
+  const id = tab.asUser != null ? tab.asUser : S.acting || '';
+  return id && userById(id) ? id : '';
+}
+
 function userSwitcher(tab, main) {
   const sel = h('select', {
     class: 'assel',
-    title: 'Send this request as a saved user',
+    title: 'Send this request as a saved user. Tabs follow the user you act as (title bar) until you pick one here.',
     onchange: () => {
       if (sel.value === '__manage') {
-        sel.value = tab.asUser || '';
-        return manageUsers(() => renderBench(main));
+        sel.value = tabUser(tab);
+        return leaveTo('users');
       }
-      tab.asUser = sel.value || null;
+      tab.asUser = sel.value;
       saveBench();
       renderBench(main);
     },
@@ -6758,11 +6845,231 @@ function userSwitcher(tab, main) {
   for (const u of S.users || []) opts.push(h('option', { value: u.id, text: 'As ' + u.name }));
   opts.push(h('option', { value: '__manage', text: 'Manage users…' }));
   append(sel, opts);
-  sel.value = (S.users || []).some((u) => u.id === tab.asUser) ? tab.asUser : '';
-  if (sel.value !== (tab.asUser || '')) {
-    tab.asUser = sel.value || null; // the saved user is gone; fall back
-  }
+  sel.value = tabUser(tab);
   return h('span', { class: 'asbox' }, h('span', { class: 'aslbl', text: '⚿' }), sel);
+}
+
+/* ---- the Users screen ---- */
+
+const US = { sel: null, timer: null, saving: false };
+
+async function renderUsers(main) {
+  clear(
+    main,
+    h(
+      'div',
+      { class: 'view usersview' },
+      h(
+        'div',
+        { class: 'toolbar' },
+        backButton(),
+        h('h2', { text: 'Users' }),
+        h('span', { class: 'muted', text: 'The people you test as: their cookies and headers. Act as one and your browser, the Bench and Scans send as them.' }),
+        h('span', { class: 'spacer' }),
+        h('span', { class: 'muted ussaved', id: 'ussaved' }),
+        h('button', { class: 'btn sm primary', text: '+ Add user', onclick: addBlankUser }),
+      ),
+      h('div', { class: 'usbody', id: 'usbody' }, h('div', { class: 'empty', text: 'Loading users…' })),
+    ),
+  );
+  await loadUsers(true);
+  drawActing();
+  drawUsers();
+}
+
+async function addBlankUser() {
+  S.users.push({ id: '', name: 'User ' + (S.users.length + 1), note: '', headers: [], cookies: [], keep_fresh: true });
+  try {
+    await saveUsers();
+  } catch (e) {
+    S.users.pop();
+    return toast(e.message, 'err');
+  }
+  US.sel = S.users[S.users.length - 1].id;
+  drawUsers();
+  const name = $('.usname');
+  if (name) (name.focus(), name.select());
+}
+
+/** Saves a moment after the last change, so typing doesn't save each key. */
+function usersChanged(redraw) {
+  clearTimeout(US.timer);
+  const note = $('#ussaved');
+  if (note) note.textContent = 'Saving…';
+  US.timer = setTimeout(async () => {
+    try {
+      await saveUsers(!redraw);
+      if (note) note.textContent = 'Saved';
+    } catch (e) {
+      if (note) note.textContent = '';
+      toast(e.message, 'err');
+    }
+    if (redraw) drawUsers();
+  }, redraw ? 0 : 500);
+}
+
+function drawUsers() {
+  const body = $('#usbody');
+  if (!body) return;
+  const users = S.users || [];
+  if (!users.length) {
+    return clear(
+      body,
+      h(
+        'div',
+        { class: 'rlempty' },
+        h('h3', { text: 'No saved users yet' }),
+        h('p', { class: 'muted', text: 'A saved user is a set of cookies and headers, such as a session cookie or a bearer token. Sign in as someone in your browser and press “Save login as a user” in the Lens, or add one and paste its Cookie header.' }),
+        h('button', { class: 'btn primary', text: '+ Add user', onclick: addBlankUser }),
+      ),
+    );
+  }
+  if (!userById(US.sel)) US.sel = (actingUser() || users[0]).id;
+  const list = h(
+    'div',
+    { class: 'uslist' },
+    users.map((u) =>
+      h(
+        'button',
+        { class: 'usitem' + (u.id === US.sel ? ' on' : ''), onclick: () => ((US.sel = u.id), drawUsers()) },
+        userBadge(u),
+        h('span', { class: 'usitemtext' }, h('b', { text: u.name }), h('span', { class: 'muted', text: userSummary(u) })),
+        u.id === S.acting ? h('span', { class: 'ustag', text: 'acting' }) : null,
+      ),
+    ),
+    h(
+      'button',
+      { class: 'usitem browser' + (S.acting ? '' : ' acting'), title: 'Stop acting as a saved user', onclick: () => S.acting && setActing(null) },
+      h('span', { class: 'ubadge none' }),
+      h('span', { class: 'usitemtext' }, h('b', { text: 'Your browser' }), h('span', { class: 'muted', text: S.acting ? 'Click to use its own cookies again' : 'Its own cookies' })),
+      S.acting ? null : h('span', { class: 'ustag', text: 'acting' }),
+    ),
+  );
+  clear(body, list, userDetail(userById(US.sel)));
+}
+
+function userDetail(u) {
+  const acting = u.id === S.acting;
+  const now = nowSecs();
+  const cookies = u.cookies || (u.cookies = []);
+  const headers = u.headers || (u.headers = []);
+  const field = (cls, value, placeholder, set, extra = {}) =>
+    h('input', { class: cls, value, placeholder, spellcheck: 'false', oninput: (e) => (set(e.target.value), usersChanged()), ...extra });
+
+  const cookieRow = (c, i) => {
+    const live = cookieLive(c);
+    return h(
+      'div',
+      { class: 'usrow' + (live ? '' : ' dead') },
+      field('mono', c.name, 'name', (v) => (c.name = v)),
+      field('mono', c.value, 'value', (v) => (c.value = v)),
+      field('mono', c.domain || '', 'any in-scope host', (v) => (c.domain = v)),
+      h('span', { class: 'usexp' + (live ? '' : ' dead'), title: c.expires != null ? new Date(c.expires * 1000).toLocaleString() : 'Sent until you expire or remove it', text: expiryText(c.expires) }),
+      live
+        ? h('button', { class: 'btn xs', text: 'Expire', title: 'Stop sending this cookie, but keep it here', onclick: () => ((c.expires = now), usersChanged(true)) })
+        : h('button', { class: 'btn xs', text: 'Restore', title: 'Send this cookie again, with no expiry', onclick: () => ((c.expires = null), usersChanged(true)) }),
+      h('button', { class: 'iconbtn', text: '✕', title: 'Remove this cookie', onclick: () => (cookies.splice(i, 1), usersChanged(true)) }),
+    );
+  };
+  const headerRow = (hd, i) =>
+    h(
+      'div',
+      { class: 'usrow hdr' },
+      field('mono', hd[0], 'Authorization', (v) => (hd[0] = v)),
+      field('mono', hd[1], 'Bearer …', (v) => (hd[1] = v)),
+      h('button', { class: 'iconbtn', text: '✕', title: 'Remove this header', onclick: () => (headers.splice(i, 1), usersChanged(true)) }),
+    );
+  const pasteCookies = () => {
+    const box = h('textarea', { class: 'mono uspaste', rows: '4', spellcheck: 'false', placeholder: 'session=abc123; theme=dark' });
+    modal('Paste cookies', h('div', { class: 'usersheet' }, h('p', { class: 'hint', text: 'Paste a Cookie header, or the name=value pairs from it. Cookies with the same name are replaced.' }), box), [
+      h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }),
+      h('button', {
+        class: 'btn primary',
+        text: 'Add cookies',
+        onclick: () => {
+          const text = box.value.replace(/^\s*cookie\s*:/i, '');
+          for (const pair of text.split(/[;\n]/)) {
+            const at = pair.indexOf('=');
+            const name = at > 0 ? pair.slice(0, at).trim() : '';
+            if (!name) continue;
+            const value = pair.slice(at + 1).trim();
+            const same = cookies.find((c) => c.name === name);
+            if (same) Object.assign(same, { value, expires: null });
+            else cookies.push({ name, value, domain: '', expires: null });
+          }
+          closeModal();
+          usersChanged(true);
+        },
+      }),
+    ]);
+    box.focus();
+  };
+  const live = cookies.filter(cookieLive).length;
+
+  return h(
+    'div',
+    { class: 'usdetail' },
+    h(
+      'div',
+      { class: 'ushead' },
+      userBadge(u, 'lg'),
+      h('div', { class: 'usnames' }, field('usname', u.name, 'Name, e.g. Alice (admin)', (v) => (u.name = v)), field('usnote', u.note || '', 'Note (optional)', (v) => (u.note = v))),
+      acting
+        ? h('button', { class: 'btn sm', text: 'Stop acting as this user', onclick: () => setActing(null) })
+        : h('button', { class: 'btn sm primary', text: 'Act as this user', title: 'Your browser, the Bench and Scans send as this user until you switch back', onclick: () => setActing(u.id) }),
+    ),
+    acting ? h('div', { class: 'usnote-on' }, userBadge(u), `You are acting as ${u.name}. In-scope browser traffic, the Bench and Scans send with these cookies, and cookies the server sets land here instead of in your browser.`) : null,
+    h(
+      'section',
+      { class: 'ussec uscookies' },
+      h(
+        'div',
+        { class: 'ussech' },
+        h('h3', { text: 'Cookies' }),
+        h('span', { class: 'muted', text: cookies.length ? `${live} sent${cookies.length - live ? ', ' + (cookies.length - live) + ' expired' : ''}` : 'none yet' }),
+        h('span', { class: 'spacer' }),
+        h('button', { class: 'btn xs', text: 'Paste cookies', onclick: pasteCookies }),
+        live ? h('button', { class: 'btn xs', text: 'Expire all', title: 'Sign this user out: stop sending every cookie, but keep them here', onclick: () => (cookies.forEach((c) => cookieLive(c) && (c.expires = now)), usersChanged(true)) }) : null,
+        h('button', { class: 'btn xs', text: '+ Add cookie', onclick: () => (cookies.push({ name: '', value: '', domain: '', expires: null }), drawUsers(), $('.uscookies .usrow:last-of-type input').focus()) }),
+      ),
+      cookies.length ? h('div', { class: 'usgrid' }, h('div', { class: 'usrow head' }, ['Name', 'Value', 'Domain', 'Expires', '', ''].map((t) => h('span', { text: t }))), cookies.map(cookieRow)) : h('div', { class: 'muted usempty', text: 'No cookies. Paste a Cookie header, or act as this user and sign in: the cookies the site sets are kept here.' }),
+      h(
+        'label',
+        { class: 'uscheck' },
+        h('input', { type: 'checkbox', checked: u.keep_fresh !== false, onchange: (e) => ((u.keep_fresh = e.target.checked), usersChanged()) }),
+        h('span', null, h('b', { text: 'Keep cookies fresh.' }), h('span', { class: 'muted', text: ' When the server sets or clears a cookie in answer to a request sent as this user, it is updated here.' })),
+      ),
+    ),
+    h(
+      'section',
+      { class: 'ussec' },
+      h(
+        'div',
+        { class: 'ussech' },
+        h('h3', { text: 'Headers' }),
+        h('span', { class: 'muted', text: 'sent with every request as this user, such as a bearer token' }),
+        h('span', { class: 'spacer' }),
+        h('button', { class: 'btn xs', text: '+ Add header', onclick: () => (headers.push(['', '']), drawUsers()) }),
+      ),
+      headers.length ? h('div', { class: 'usgrid' }, headers.map(headerRow)) : null,
+    ),
+    h(
+      'div',
+      { class: 'usfoot' },
+      h('span', { class: 'muted', text: 'Values stay in this project. Nothing is sent until you browse, press Send or run a scan.' }),
+      h('span', { class: 'spacer' }),
+      h('button', {
+        class: 'btn xs danger',
+        text: 'Delete user',
+        onclick: async () => {
+          if (!confirm(`Delete ${u.name} and their cookies?`)) return;
+          S.users = S.users.filter((x) => x !== u);
+          US.sel = null;
+          usersChanged(true);
+        },
+      }),
+    ),
+  );
 }
 
 /* ---- the Access check screen ---- */
@@ -6826,11 +7133,11 @@ function drawAccess(body, main) {
   // Identities to replay as.
   const idCard = h('div', { class: 'accard' });
   const userRows = (S.users || []).map((u) =>
-    h('label', { class: 'acid' }, h('input', { type: 'checkbox', checked: AC.picks.has(u.id), onchange: (e) => (e.target.checked ? AC.picks.add(u.id) : AC.picks.delete(u.id)) }), h('span', { class: 'acname', text: u.name }), u.headers && u.headers.length ? h('span', { class: 'achdr', text: u.headers.map((h) => h[0]).join(', ') }) : null),
+    h('label', { class: 'acid' }, h('input', { type: 'checkbox', checked: AC.picks.has(u.id), onchange: (e) => (e.target.checked ? AC.picks.add(u.id) : AC.picks.delete(u.id)) }), h('span', { class: 'acname', text: u.name }), h('span', { class: 'achdr', text: userSummary(u) })),
   );
   clear(
     idCard,
-    h('div', { class: 'aclbl' }, 'Replay as', h('button', { class: 'link', style: { marginLeft: 'auto' }, text: (S.users || []).length ? 'Manage users' : 'Add users', onclick: () => manageUsers(() => renderAccess($('#main'))) })),
+    h('div', { class: 'aclbl' }, 'Replay as', h('button', { class: 'link', style: { marginLeft: 'auto' }, text: (S.users || []).length ? 'Manage users' : 'Add users', onclick: () => leaveTo('users') })),
     (S.users || []).length ? h('div', { class: 'acids' }, userRows) : h('div', { class: 'muted', text: 'No saved users yet. Add some, or run the signed-out check on its own.' }),
     h('label', { class: 'acid anon' }, h('input', { type: 'checkbox', checked: AC.anon, onchange: (e) => (AC.anon = e.target.checked) }), h('span', { class: 'acname', text: 'Signed out' }), h('span', { class: 'achdr', text: 'auth headers removed' })),
   );
@@ -8421,7 +8728,7 @@ function scanSuggestSection() {
   );
 
   const picks = SC.picks || new Set();
-  const runBtn = h('button', { class: 'btn primary', disabled: SC.running || !picks.size, onclick: runScan }, SC.running ? 'Scanning…' : 'Run scan');
+  const runBtn = h('button', { class: 'btn primary', disabled: SC.running || !picks.size, onclick: runScan, title: actingUser() ? `Sent as ${actingUser().name}, the user you act as` : null }, SC.running ? 'Scanning…' : actingUser() ? `Run scan as ${actingUser().name}` : 'Run scan');
   const groups = [];
   if (sug.recommended.length) {
     groups.push(
@@ -8528,6 +8835,7 @@ async function runScan() {
   SC.report = null;
   drawScans();
   const body = { host: SC.host, tactics, include_intrusive: SC.intrusive };
+  if (toolOn('saved-users') && actingUser()) body.as_user = S.acting;
   if (SC.focus) body.endpoints = [{ method: SC.focus.method, path: SC.focus.path }];
   try {
     SC.report = await api('/api/scan', { method: 'POST', body });
@@ -9657,15 +9965,37 @@ async function marketAction(p, action, consent) {
   loadFacets();
 }
 
-/** Capabilities an extension asks for, with a checkbox for each sensitive one. Returns the boxes. */
+/** A small line icon for a permission row: ok (it gets this), warn (needs care) or off (not granted). */
+function capIcon(kind) {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const d of { ok: ['M4 8.5l2.5 2.5L12 5.5'], warn: ['M8 4.5v4.5', 'M8 11.6v.1'], off: ['M5 5l6 6', 'M11 5l-6 6'] }[kind]) {
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  }
+  return h('span', { class: 'mi ' + kind }, svg);
+}
+
+/** What an extension asks for: what it gets on install, then a checkbox for each sensitive one. Returns the boxes. */
 function capabilityList(caps) {
   const boxes = [];
-  const rows = caps.map((c) => {
-    if (!c.sensitive) return h('div', { class: 'mcap' }, h('span', { text: '✓' }), c.what);
-    const box = h('input', { type: 'checkbox', value: c.id });
-    boxes.push(box);
-    return h('div', { class: 'mcap warn' }, h('label', null, box, h('span', { text: '!' }), c.what + ' (only if you tick it)'));
-  });
+  const given = caps.filter((c) => !c.sensitive).map((c) => h('div', { class: 'mcap' }, capIcon('ok'), h('span', { text: c.what })));
+  const asks = caps
+    .filter((c) => c.sensitive)
+    .map((c) => {
+      const box = h('input', { type: 'checkbox', value: c.id });
+      boxes.push(box);
+      return h('label', { class: 'mcap ask' }, box, h('span', { text: c.what }));
+    });
+  const rows = h(
+    'div',
+    { class: 'mcaps' },
+    given.length ? [h('div', { class: 'mcaph', text: 'It will be allowed to' }), given] : null,
+    asks.length ? [h('div', { class: 'mcaph', text: 'Only if you tick it' }), asks, h('p', { class: 'muted fine', text: 'It installs either way. Whatever stays unticked does not run.' })] : null,
+  );
   return { rows, boxes };
 }
 
@@ -9683,7 +10013,7 @@ async function extensionConsent(p, action) {
   const go = h('button', { class: 'btn primary', text: action === 'update' ? 'Update' : 'Install' });
   modal(
     `${action === 'update' ? 'Update' : 'Install'} ${p.name}?`,
-    [h('p', { class: 'muted mnote', text: 'It will be allowed to:' }), rows, notReviewed(p.verification), h('p', { class: 'muted fine', text: x.sandbox })],
+    [p.description ? h('p', { class: 'mnote', text: p.description }) : null, rows, notReviewed(p.verification), h('div', { class: 'mhow' }, h('div', { class: 'mcaph', text: 'How it runs' }), h('p', { text: x.sandbox }))],
     [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), go],
   );
   go.onclick = () => {
@@ -9694,9 +10024,9 @@ async function extensionConsent(p, action) {
 
 /** The program an extension runs: installed on this Mac, or how to install it. */
 function programNeeds(pr) {
-  if (pr.found) return h('div', { class: 'mcap' }, h('span', { text: '✓' }), `${pr.id} is installed on this Mac.`);
+  if (pr.found) return h('div', { class: 'mcap' }, capIcon('ok'), h('span', { text: `${pr.id} is installed on this Mac.` }));
   return [
-    h('div', { class: 'mcap warn' }, h('span', { text: '!' }), `${pr.id} is not installed on this Mac yet. Install it in Terminal, then come back:`),
+    h('div', { class: 'mcap' }, capIcon('warn'), h('span', { text: `${pr.id} is not installed on this Mac yet. Install it in Terminal, then come back:` })),
     h('div', { class: 'mneeds' }, h('code', { text: pr.install }), h('button', { class: 'btn sm', text: 'Copy', onclick: () => copyText(pr.install) })),
   ];
 }
@@ -9820,7 +10150,7 @@ function addExternal(prefill) {
         h('div', { class: 'xhead' }, h('b', { class: 'mono', text: f.name }), h('span', { class: 'muted', text: ` ${KIND_INFO[f.kind].one} · ${f.version} · ${f.author}` })),
         h('p', { text: f.description }),
         h('p', { class: 'muted fine', text: 'From ' + f.source }),
-        f.kind === 'extension' ? [h('p', { class: 'muted', text: 'It will be allowed to:' }), caps.rows, h('p', { class: 'muted fine', text: f.effects[f.effects.length - 1] })] : f.effects.map((e) => h('div', { class: 'mcap' }, h('span', { text: '•' }), e)),
+        f.kind === 'extension' ? [caps.rows, h('div', { class: 'mhow' }, h('div', { class: 'mcaph', text: 'How it runs' }), h('p', { text: f.effects[f.effects.length - 1] }))] : f.effects.map((e) => h('div', { class: 'mcap' }, h('span', { class: 'mdot', text: '•' }), h('span', { text: e }))),
         f.replaces ? h('p', { class: 'muted', text: `This replaces ${f.name} ${f.replaces}, which is installed.` }) : null,
         h(
           'div',
@@ -9932,7 +10262,7 @@ async function showPackage(name) {
         granted ? 'Allowed to' : 'Would be allowed to',
         x.capabilities.map((c) => {
           const off = granted && !granted.includes(c.id);
-          return h('div', { class: 'mcap' + (off ? ' off' : c.sensitive ? ' warn' : '') }, h('span', { text: off ? '✗' : c.sensitive ? '!' : '✓' }), c.what + (off ? ' (not granted)' : c.sensitive && !granted ? ' (only if you say yes)' : ''));
+          return h('div', { class: 'mcap' + (off ? ' off' : '') }, capIcon(off ? 'off' : c.sensitive ? 'warn' : 'ok'), h('span', { text: c.what + (off ? ' (not granted)' : c.sensitive && !granted ? ' (asks for your OK when you install)' : '') }));
         }),
         h('p', { class: 'muted fine', text: x.installable ? x.sandbox : x.why_not ? 'Not installable in this version: ' + x.why_not : 'Listed so you can see what is coming; its code is not published yet.' }),
       ),

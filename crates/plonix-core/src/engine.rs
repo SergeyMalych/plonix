@@ -23,7 +23,7 @@ use crate::extension::{self, Capability, ExtensionLibrary, Loaded, LoadedSet, Ru
 use crate::insight::{Category as InsightCategory, Insight, Side as InsightSide};
 use crate::sandbox;
 use crate::model::{Exchange, Headers, Source, WsMessage, now_ms};
-use crate::paths::{EngineInfo, Home};
+use crate::paths::EngineInfo;
 use crate::detectorpack::{DetectorLibrary, DetectorSet};
 use crate::filterpack::{FilterLibrary, FilterSet};
 use crate::listpack::{ListLibrary, ListSet};
@@ -453,8 +453,27 @@ impl Engine {
         self.reload_replace_rules()
     }
 
+    /// Adds a match-and-replace rule and applies it at once.
+    pub fn add_replace_rule(&self, rule: &crate::replace::Rule) -> Result<crate::replace::Rule> {
+        let stored = self.store.add_replace_rule(rule)?;
+        self.reload_replace_rules()?;
+        Ok(stored)
+    }
+
+    pub fn update_replace_rule(&self, rule: &crate::replace::Rule) -> Result<bool> {
+        let changed = self.store.update_replace_rule(rule)?;
+        self.reload_replace_rules()?;
+        Ok(changed)
+    }
+
+    pub fn delete_replace_rule(&self, id: i64) -> Result<bool> {
+        let removed = self.store.delete_replace_rule(id)?;
+        self.reload_replace_rules()?;
+        Ok(removed)
+    }
+
     /// Reads the rules again after they changed.
-    pub fn reload_replace_rules(&self) -> Result<()> {
+    fn reload_replace_rules(&self) -> Result<()> {
         let set = if self.replace_on.load(Ordering::Relaxed) { RuleSet::new(&self.store.replace_rules()?) } else { Arc::default() };
         *self.replace.write().unwrap() = set;
         Ok(())
@@ -1005,17 +1024,6 @@ impl Engine {
     }
 
     async fn send_from(&self, mut req: SendRequest, initiator: &str, reach: Reach) -> Result<Exchange, SendError> {
-        // Sending as a saved user: its headers replace the auth headers the
-        // draft carried. The values come from the project database, so they
-        // are never round-tripped through the client.
-        if let Some(uid) = req.as_user.take().filter(|u| !u.is_empty()) {
-            let users = self.store.saved_users().map_err(SendError::Other)?;
-            let Some(user) = users.into_iter().find(|u| u.id == uid) else {
-                return Err(SendError::BadRequest(format!("there is no saved user '{uid}'")));
-            };
-            req.headers.retain(|(k, _)| !crate::users::is_auth_header(k));
-            req.headers.extend(user.headers);
-        }
         let url = req.url.trim();
         let (scheme, rest) = url
             .split_once("://")
@@ -1035,6 +1043,22 @@ impl Engine {
             .filter(|(h, _)| !h.contains(':') || h.ends_with(']'))
             .and_then(|(_, p)| p.parse().ok())
             .unwrap_or(if scheme == "https" { 443 } else { 80 });
+
+        // Sending as a saved user: its cookies and headers replace the auth
+        // headers the draft carried. The values come from the project
+        // database, so they are never round-tripped through the client.
+        let as_user = match req.as_user.take().filter(|u| !u.is_empty()) {
+            Some(uid) => {
+                let users = self.store.saved_users().map_err(SendError::Other)?;
+                let Some(user) = users.into_iter().find(|u| u.id == uid) else {
+                    return Err(SendError::BadRequest(format!("there is no saved user '{uid}'")));
+                };
+                req.headers.retain(|(k, _)| !crate::users::is_auth_header(k));
+                req.headers.extend(user.request_headers(&host, crate::users::now_secs()));
+                Some(user)
+            }
+            None => None,
+        };
 
         // The single choke point for active traffic: scope is enforced here.
         let decision = self.rules().decide(&host);
@@ -1124,6 +1148,12 @@ impl Engine {
             Err(e) => ex.error = Some(format!("{e:#}")),
         }
         ex.replaced = replaced;
+        if let Some(user) = &as_user {
+            ex.replaced.insert(0, format!("{}{}", crate::users::SENT_AS, user.name));
+            if let Err(e) = self.store.absorb_cookies(&user.id, &ex.host, &ex.resp_headers) {
+                tracing::warn!("saved user {}: could not keep its cookies: {e:#}", user.id);
+            }
+        }
         let id = self.record(ex.clone())?;
         ex.id = id;
         Ok(ex)
@@ -1309,7 +1339,7 @@ impl Engine {
                     report.requests_sent += 1;
                     let sent = self
                         .send_scan(
-                            SendRequest { method: planned.method.clone(), url: planned.url.clone(), headers: planned.headers.clone(), body: None, body_base64: None, as_user: None },
+                            SendRequest { method: planned.method.clone(), url: planned.url.clone(), headers: planned.headers.clone(), body: None, body_base64: None, as_user: req.as_user.clone() },
                             initiator,
                         )
                         .await;
@@ -1504,7 +1534,7 @@ impl Engine {
                 headers,
                 body: if body.is_empty() { None } else { Some(body) },
                 body_base64: None,
-                as_user: None,
+                as_user: req.as_user.clone(),
             };
             let n = report.rows.len() + 1;
             match self.send(send, initiator).await {
@@ -1561,6 +1591,7 @@ impl Engine {
         if targets.is_empty() {
             return Err(SendError::BadRequest("no requests were selected to check".into()));
         }
+        self.check_automation("Access check")?;
 
         let delay = std::time::Duration::from_millis(req.delay_ms.unwrap_or(authcheck::DEFAULT_DELAY_MS).min(authcheck::MAX_DELAY_MS));
         let mut report = authcheck::AuthCheckReport { identities: identities.clone(), planned: targets.len() * identities.len(), ..Default::default() };
@@ -1590,11 +1621,8 @@ impl Engine {
                 // As a saved user: drop the known auth headers the capture
                 // carried, then set this user's own. Signed out: drop them and
                 // set nothing.
-                let set_headers = if ident.anon {
-                    Vec::new()
-                } else {
-                    req.users.iter().find(|u| u.id == ident.id).map(|u| u.headers.clone()).unwrap_or_default()
-                };
+                let user = if ident.anon { None } else { req.users.iter().find(|u| u.id == ident.id) };
+                let set_headers = user.map(|u| u.request_headers(&orig.host, crate::users::now_secs())).unwrap_or_default();
                 let replay = ReplayRequest {
                     id: tid,
                     method: None,
@@ -1606,6 +1634,11 @@ impl Engine {
                 let cell = match self.replay(replay, initiator).await {
                     Ok(ex) => {
                         report.sent += 1;
+                        if let Some(u) = user
+                            && let Err(e) = self.store.absorb_cookies(&u.id, &ex.host, &ex.resp_headers)
+                        {
+                            tracing::warn!("saved user {}: could not keep its cookies: {e:#}", u.id);
+                        }
                         authcheck::Cell {
                             identity: ident.id.clone(),
                             status: ex.status,
@@ -1807,17 +1840,12 @@ impl Engine {
         if proposals.is_empty() {
             return Ok(0);
         }
-        let by = extension_author(&ext.name);
-        let existing: BTreeSet<String> = self.store.findings()?.into_iter().filter(|f| f.created_by == by).map(|f| f.title).collect();
-        let mut added = 0;
-        for p in proposals.iter().filter(|p| !existing.contains(&p.title)) {
-            let note = format!("Proposed by the extension {} {}. Not confirmed: check it before you rely on it.", ext.name, ext.version);
-            let description = if p.description.is_empty() { note } else { format!("{}\n\n{note}", p.description) };
-            let f = crate::model::NewFinding { title: p.title.clone(), severity: p.severity.clone(), description, exchange_ids: p.exchange_ids.clone() };
-            self.store.add_finding(&f, &by)?;
-            added += 1;
-        }
-        Ok(added)
+        let note = format!("Proposed by the extension {} {}. Not confirmed: check it before you rely on it.", ext.name, ext.version);
+        let findings = proposals.iter().map(|p| {
+            let description = if p.description.is_empty() { note.clone() } else { format!("{}\n\n{note}", p.description) };
+            crate::model::NewFinding { title: p.title.clone(), severity: p.severity.clone(), description, exchange_ids: p.exchange_ids.clone() }
+        });
+        self.add_extension_findings(&ext.name, findings)
     }
 
     /// Hands newly recorded exchanges to every enabled extension.
@@ -2048,6 +2076,7 @@ impl Engine {
         if !ext.granted.contains(&Capability::ScopedRequests) || !ext.granted.contains(&Capability::RunProgram) {
             return Err(SendError::BadRequest(format!("{name} needs permission to send scoped requests and run its probe")));
         }
+        self.check_automation("parameter probes")?;
         let initiator = extension_author(name);
         const MARKER: &str = "plnxprobe7q";
 
@@ -2095,15 +2124,26 @@ impl Engine {
                  Proposed by the extension {} {}. Not confirmed: check it before you rely on it.",
                 baseline.id, ext.name, ext.version
             );
-            let by = extension_author(&ext.name);
-            let existing: BTreeSet<String> = self.store.findings()?.into_iter().filter(|f| f.created_by == by).map(|f| f.title).collect();
-            if !existing.contains(&title) {
-                let f = crate::model::NewFinding { title, severity: "info".into(), description, exchange_ids: ids };
-                self.store.add_finding(&f, &by)?;
-                report.proposed = true;
-            }
+            let f = crate::model::NewFinding { title, severity: "info".into(), description, exchange_ids: ids };
+            report.proposed = self.add_extension_findings(&ext.name, [f])? > 0;
         }
         Ok(report)
+    }
+
+    /// Adds findings an extension proposed, attributed to it, skipping
+    /// titles it already proposed and ones that do not check out. Returns
+    /// how many are new.
+    fn add_extension_findings(&self, name: &str, findings: impl IntoIterator<Item = crate::model::NewFinding>) -> Result<usize> {
+        let by = extension_author(name);
+        let mut existing: BTreeSet<String> = self.store.findings()?.into_iter().filter(|f| f.created_by == by).map(|f| f.title).collect();
+        let mut added = 0;
+        for f in findings.into_iter().filter_map(|f| f.checked().ok()) {
+            if existing.insert(f.title.clone()) {
+                self.store.add_finding(&f, &by)?;
+                added += 1;
+            }
+        }
+        Ok(added)
     }
 
     /// Logs why a program extension could not run, once until it changes.
@@ -2147,27 +2187,6 @@ fn program_insights(ext: &Loaded, json: &str) -> Vec<Insight> {
 /// How findings an extension proposed are attributed.
 pub fn extension_author(name: &str) -> String {
     format!("extension:{name}")
-}
-
-/// Configuration for running an engine process.
-#[derive(Debug, Clone)]
-pub struct EngineConfig {
-    pub home: Home,
-    pub project: String,
-    pub proxy_addr: SocketAddr,
-    /// When true and `proxy_addr`'s port is taken, use the next free port.
-    pub proxy_port_fallback: bool,
-    pub api_addr: SocketAddr,
-    pub insecure_upstream: bool,
-}
-
-/// A started engine: listeners are bound, servers are running.
-pub struct Running {
-    pub engine: Arc<Engine>,
-    pub proxy_addr: SocketAddr,
-    pub api_addr: SocketAddr,
-    pub token: String,
-    pub agent_token: String,
 }
 
 /// Runs scope analysis over exchanges in order and stores what it learned
@@ -2215,47 +2234,6 @@ pub fn reanalyze(store: &Store, rules: &ScopeRules) -> Result<()> {
         analyze_into(store, batch.iter().map(|ex| (ex, ex.id)), rules)?;
     }
     Ok(())
-}
-
-/// Starts an engine for a project by name, the way earlier versions did.
-/// Opening a [`crate::session`] is the full version: a project folder,
-/// its settings and a lock.
-pub async fn start(config: &EngineConfig) -> Result<Running> {
-    config.home.ensure()?;
-    let ca = Arc::new(CertAuthority::load_or_create(&config.home)?);
-    let project = crate::project::resolve(&config.home, &config.project)?;
-    let store = Store::open(&project.db_path())?;
-    let upstream = Upstream::new(config.insecure_upstream, vec![])?;
-    let engine = Engine::new(project.name(), store, ca, upstream)?;
-    engine.set_rule_library(Library::new(&config.home));
-    engine.set_filter_library(FilterLibrary::new(&config.home));
-    engine.set_detector_library(DetectorLibrary::new(&config.home));
-    engine.set_list_library(ListLibrary::new(&config.home));
-    engine.set_extension_library(ExtensionLibrary::new(&config.home));
-    if project.file.demo {
-        engine.set_responder(crate::demo::responder());
-    }
-    start_with(engine, config).await
-}
-
-pub async fn start_with(engine: Arc<Engine>, config: &EngineConfig) -> Result<Running> {
-    let token = config.home.load_or_create_token()?;
-    let agent_token = config.home.load_or_create_agent_token()?;
-    engine.start_recorder();
-    let api = TcpListener::bind(config.api_addr).await.with_context(|| format!("binding API to {}", config.api_addr))?;
-    let proxy_addr = engine.bind_proxy(config.proxy_addr, config.proxy_port_fallback).await?;
-    let api_addr = api.local_addr()?;
-    let router = crate::api::router(
-        engine.clone(),
-        crate::api::Tokens { user: token.clone(), agent: agent_token.clone() },
-        api_addr,
-        config.home.clone(),
-    );
-    let shutdown_engine = engine.clone();
-    tokio::spawn(async move {
-        let _ = axum::serve(api, router).with_graceful_shutdown(async move { shutdown_engine.stopped().await }).await;
-    });
-    Ok(Running { engine, proxy_addr, api_addr, token, agent_token })
 }
 
 /// Binds `addr`. With `fallback`, a taken port moves to the next free one

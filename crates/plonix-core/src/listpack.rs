@@ -241,7 +241,7 @@ impl ListLibrary {
     }
 
     pub fn at(dir: &Path) -> Self {
-        Self { shelf: Shelf::new(dir, "list pack", "lists", MAX_INSTALLED_PACKS) }
+        Self { shelf: Shelf::new(dir, "list pack", "market", MAX_INSTALLED_PACKS) }
     }
 
     pub fn stamp(&self) -> Option<std::time::SystemTime> {

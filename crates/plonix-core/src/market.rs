@@ -976,20 +976,38 @@ pub struct CapabilityInfo {
     pub sensitive: bool,
 }
 
-pub fn capability_infos(caps: &[Capability]) -> Vec<CapabilityInfo> {
-    caps.iter().map(|c| CapabilityInfo { id: *c, what: c.describe(), sensitive: c.sensitive() }).collect()
+/// `program` is the program a program extension runs, which decides how
+/// `run-program` is described.
+pub fn capability_infos(caps: &[Capability], program: Option<&str>) -> Vec<CapabilityInfo> {
+    caps.iter().map(|c| CapabilityInfo { id: *c, what: c.describe_for(program), sensitive: c.sensitive() }).collect()
 }
 
 /// What an extension's code can and cannot do, for the consent screen.
 pub const SANDBOX_NOTE: &str = "Its code runs in the Plonix sandbox: no network, files, processes or clock, limited CPU time and memory. \
      It is stopped and switched off if it misbehaves.";
 
-pub const PROGRAM_NOTE: &str = "It runs a program you install yourself, on this Mac only, over copies of captured requests and responses that are \
-     deleted when it finishes. Plonix runs it so it checks nothing with outside services and does not update itself.";
+/// How a program extension runs, by the kind of program it drives: each kind
+/// reaches different things, so each gets its own plain account.
+pub fn program_note(program: Option<&str>) -> &'static str {
+    match program.and_then(crate::program::get).map(|p| p.kind) {
+        Some(crate::program::Kind::Enumerate) => {
+            "The program runs on this Mac and gets only the domains you accepted in Scope, never your captured traffic. \
+             It asks public sources on the internet which subdomains they know of. Nothing joins your scope until you accept it."
+        }
+        Some(crate::program::Kind::Probe) => {
+            "Plonix runs this itself, with no outside program. It sends a small, fixed set of requests to the in-scope address \
+             you pick, and each one shows in Traffic. Findings it proposes stay unconfirmed until you confirm them."
+        }
+        _ => {
+            "The program runs on this Mac only, over copies of captured requests and responses that are deleted when it \
+             finishes. It works offline: Plonix tells it not to check what it finds with outside services and not to update itself."
+        }
+    }
+}
 
 /// What to tell someone about how an extension runs.
 pub fn runtime_note(m: &extension::Manifest) -> &'static str {
-    if m.runtime == extension::Runtime::Program { PROGRAM_NOTE } else { SANDBOX_NOTE }
+    if m.runtime == extension::Runtime::Program { program_note(m.program.as_deref()) } else { SANDBOX_NOTE }
 }
 
 /// Which kind of package a file is, from its contents.
@@ -1094,7 +1112,7 @@ impl Market {
             }
             Kind::Extension => {
                 let p = extension::parse_package(&bytes)?;
-                capabilities = capability_infos(&p.manifest.capabilities);
+                capabilities = capability_infos(&p.manifest.capabilities, p.manifest.program.as_deref());
                 let mut effects: Vec<String> = p.manifest.capabilities.iter().map(|c| format!("Can {}.", c.describe())).collect();
                 effects.push(runtime_note(&p.manifest).into());
                 (p.manifest.description, p.manifest.author, effects)

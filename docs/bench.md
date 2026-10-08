@@ -11,6 +11,19 @@ only ever reach a host that is **accepted into scope**, exactly like a manual
 send. When the host has a [client certificate](projects.md#client-certificates),
 the Bench presents it and marks the response **cert · CN=…**.
 
+## Comparing sends
+
+Every send in a tab is kept in its **History**. Tick two sends and press
+**Compare** (with nothing ticked, it compares the latest two). The two show side
+by side, older on the left, with each one's status, time and size. Lines that
+differ are marked, and unchanged stretches fold into "… N unchanged lines", so a
+changed email, total or token stands out even in a long JSON body. **Response**
+and **Request** switch what is compared, and **Close** hides it.
+
+Typical uses: the same record read by two users, ids one apart, a header added
+or removed, or a send before and after a change. **Branch** opens any earlier
+send in a new tab, and **Restore** puts it back in the editor.
+
 ## Claude's suggested edits
 
 Under the request on the Send panel, **Ask about this request** (or **✦ Ask
