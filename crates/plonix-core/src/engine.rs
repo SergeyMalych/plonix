@@ -53,6 +53,8 @@ pub struct Engine {
     pub shutdown: Notify,
     stopping: AtomicBool,
     proxy: Mutex<ProxyListener>,
+    /// Proxy ports of saved users' own browser windows, by user id.
+    user_proxies: tokio::sync::Mutex<HashMap<String, SocketAddr>>,
     interception: RwLock<Interception>,
     /// The project folder this engine records into, when it has one.
     pub project_ref: OnceLock<ProjectRef>,
@@ -288,6 +290,7 @@ impl Engine {
             shutdown: Notify::new(),
             stopping: AtomicBool::new(false),
             proxy: Mutex::default(),
+            user_proxies: tokio::sync::Mutex::default(),
             interception: RwLock::new(Interception { decrypt: true, passthrough: vec![] }),
             project_ref: OnceLock::new(),
             detection: Mutex::new(DetectionState::default()),
@@ -417,6 +420,20 @@ impl Engine {
             let _ = old.await;
         }
         Ok(bound)
+    }
+
+    /// The proxy port for a saved user's own browser window, on loopback.
+    /// Started the first time the user's window opens, then kept.
+    pub async fn user_proxy(self: &Arc<Self>, id: &str) -> Result<SocketAddr> {
+        let mut ports = self.user_proxies.lock().await;
+        if let Some(addr) = ports.get(id) {
+            return Ok(*addr);
+        }
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await.context("binding a proxy port for a saved user")?;
+        let addr = listener.local_addr()?;
+        tokio::spawn(crate::proxy::serve_as(listener, self.clone(), Some(id.to_string())));
+        ports.insert(id.to_string(), addr);
+        Ok(addr)
     }
 
     /// Applies proxy settings: the upstream client, HTTPS interception and,

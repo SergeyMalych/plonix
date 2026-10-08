@@ -460,7 +460,7 @@ const TOUR_STEPS = [
     target: ['.uscookies', '#main .view'],
     title: 'Users',
     test: 'sameuser',
-    text: 'The people you test as, each with their cookies and headers. Edit a value, expire a cookie to stop sending it, or paste a fresh Cookie header. Cookies the server sets for a user are kept here, so the session stays current.',
+    text: 'The people you test as, each with their cookies and headers. Edit a value, expire a cookie to stop sending it, or paste a fresh Cookie header. Cookies the server sets for a user are kept here, so the session stays current. Open a browser as Dana to get a window of her own, where you can sign in as her without signing out anywhere else.',
   },
   {
     view: 'users',
@@ -1348,15 +1348,22 @@ function renderRail() {
   clear(box, secs);
 }
 
-/** Opens a target in the capture browser: an isolated browser that routes through Plonix. */
-function openTarget() {
-  const input = h('input', { placeholder: 'example.com', spellcheck: 'false', autocomplete: 'off', value: pstore('plonix.lastTarget') || '' });
+/** Opens a target in the capture browser: an isolated browser that routes
+ * through Plonix. With a saved user, it is that user's own browser window. */
+function openTarget(user) {
+  user = user && user.id ? user : null;
+  const who = user ? userShortName(user) : '';
+  const lastHost = () => {
+    const r = ((S.scope && S.scope.rules) || []).find((x) => x.decision === 'accepted');
+    return r ? r.pattern : '';
+  };
+  const input = h('input', { placeholder: 'example.com', spellcheck: 'false', autocomplete: 'off', value: pstore('plonix.lastTarget') || (user ? lastHost() : '') });
   const go = async () => {
     const target = input.value.trim();
     if (!target) return input.focus();
     btn.disabled = true;
     m.err.textContent = '';
-    const r = await launchTarget(target);
+    const r = await launchTarget(target, user);
     btn.disabled = false;
     // launchTarget may have replaced this dialog with one of its own.
     if (!m.el.isConnected) return;
@@ -1366,28 +1373,38 @@ function openTarget() {
   input.addEventListener('keydown', (e) => e.key === 'Enter' && go());
   const btn = h('button', { class: 'btn primary', text: 'Open', onclick: go });
   const m = modal(
-    'Open a target',
+    user ? `Open a browser as ${who}` : 'Open a target',
     [
       h('label', null, 'Site or URL', input),
-      h('p', { class: 'muted mnote', text: 'Opens a separate browser that captures through Plonix and trusts its certificate. The domain and its subdomains go into scope.' }),
+      h('p', {
+        class: 'muted mnote',
+        text: user
+          ? `Opens a browser window of ${who}’s own, with its own cookies, so you can sign in as ${who} there and stay signed in as yourself here. ${(user.cookies || []).some(cookieLive) ? 'It starts with the cookies saved here' : 'Sign in once in that window'}; cookies the site sets there are kept for ${who} too.`
+          : 'Opens a separate browser that captures through Plonix and trusts its certificate. The domain and its subdomains go into scope.',
+      }),
     ],
     [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), btn],
   );
   input.select();
 }
 
-async function launchTarget(target) {
+async function launchTarget(target, user) {
   try {
-    const r = await api('/api/browser/open', { method: 'POST', body: { target } });
+    const r = await api('/api/browser/open', { method: 'POST', body: { target, as_user: user ? user.id : null } });
     pstore('plonix.lastTarget', target);
-    toast(`Opened ${r.url} in ${r.browser}. Browse the site; requests appear in Traffic.`, 'ok');
     await loadScope();
-    if (S.view !== 'traffic') go('traffic');
+    if (r.as_user) {
+      const who = userShortName(r.as_user);
+      toast(`Opened ${r.url} in a ${r.browser} window of ${who}’s own. What you do there is sent as ${who}, and their cookies are kept here.`, 'ok');
+    } else {
+      toast(`Opened ${r.url} in ${r.browser}. Browse the site; requests appear in Traffic.`, 'ok');
+      if (S.view !== 'traffic') go('traffic');
+    }
     if (r.needs_trust) trustCertificate(r.browser, r.can_trust);
     return { ok: true };
   } catch (e) {
     if (e.code === 'no_browser' && e.data && e.data.can_install) {
-      getPlonixBrowser(target);
+      getPlonixBrowser(target, user);
       return { ok: false, message: '' };
     }
     return { ok: false, message: e.message };
@@ -1397,7 +1414,7 @@ async function launchTarget(target) {
 const megabytes = (n) => (n / 1048576).toFixed(0);
 
 /** No browser to launch: offers the Plonix browser (Chromium, downloaded once), then opens the target in it. */
-function getPlonixBrowser(target) {
+function getPlonixBrowser(target, user) {
   const fill = h('div', { class: 'pbar-fill' });
   const bar = h('div', { class: 'pbar', hidden: true }, fill);
   const line = h('div', { class: 'muted fine' });
@@ -1448,7 +1465,7 @@ function getPlonixBrowser(target) {
       if (p.stage === 'done') {
         show(p);
         line.textContent = 'Ready. Opening ' + target + '…';
-        const r = await launchTarget(target);
+        const r = await launchTarget(target, user);
         if (!m.el.isConnected) return;
         if (r.ok) closeModal();
         else m.err.textContent = r.message;
@@ -7250,6 +7267,8 @@ const userById = (id) => (S.users || []).find((u) => u.id === id) || null;
 const actingUser = () => (S.acting ? userById(S.acting) : null);
 const nowSecs = () => Math.floor(Date.now() / 1000);
 const cookieLive = (c) => c.expires == null || c.expires > nowSecs();
+/** "Dana" for "Dana (another customer)". */
+const userShortName = (u) => u.name.replace(/\s*\(.*\)$/, '').trim() || u.name;
 /** The first letter of a user's name, for its round badge. */
 const userInitial = (u) => ((u && u.name.trim()[0]) || '?').toUpperCase();
 /** A steady hue per user, so each badge keeps its colour. */
@@ -7552,6 +7571,12 @@ function userDetail(u) {
       acting
         ? h('button', { class: 'btn sm', text: 'Stop acting as this user', onclick: () => setActing(null) })
         : h('button', { class: 'btn sm primary', text: 'Act as this user', title: 'Your browser, the Bench and Scans send as this user until you switch back', onclick: () => setActing(u.id) }),
+      h('button', {
+        class: 'btn sm',
+        text: 'Open a browser as ' + userShortName(u),
+        title: 'A browser window of this user’s own, with its own cookies: sign in there without signing out here',
+        onclick: () => openTarget(u),
+      }),
     ),
     acting ? h('div', { class: 'usnote-on' }, userBadge(u), `You are acting as ${u.name}. In-scope browser traffic, the Bench and Scans send with these cookies, and cookies the server sets land here instead of in your browser.`) : null,
     h(

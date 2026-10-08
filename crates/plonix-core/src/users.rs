@@ -121,6 +121,35 @@ impl SavedUser {
         out
     }
 
+    /// The headers a request from this user's own browser window carries to
+    /// `host`. The window keeps its own session: its headers go out as they
+    /// are, and the user's headers and live cookies fill in only what it did
+    /// not send. So a window opened for a user with saved cookies starts
+    /// signed in, and signing in there replaces them.
+    pub fn window_headers(&self, host: &str, sent: &Headers, now: i64) -> Headers {
+        let mut out = sent.clone();
+        for (k, v) in &self.headers {
+            if !out.iter().any(|(o, _)| o.eq_ignore_ascii_case(k)) {
+                out.push((k.clone(), v.clone()));
+            }
+        }
+        let has: Vec<String> = out
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("cookie"))
+            .flat_map(|(_, v)| v.split(';').filter_map(|p| p.split_once('=').map(|(n, _)| n.trim().to_string())))
+            .collect();
+        let missing: Vec<String> =
+            self.cookies.iter().filter(|c| c.live(now) && c.sent_to(host) && !has.contains(&c.name)).map(|c| format!("{}={}", c.name, c.value)).collect();
+        if !missing.is_empty() {
+            match out.iter_mut().find(|(k, _)| k.eq_ignore_ascii_case("cookie")) {
+                Some((_, v)) if !v.trim().is_empty() => *v = format!("{v}; {}", missing.join("; ")),
+                Some((_, v)) => *v = missing.join("; "),
+                None => out.push(("Cookie".into(), missing.join("; "))),
+            }
+        }
+        out
+    }
+
     /// Moves any `Cookie` header into [`Self::cookies`], one entry per
     /// cookie, so cookies can be seen and changed one by one. Users saved
     /// before cookies were kept separately carry them as a header.
@@ -382,6 +411,21 @@ mod tests {
         let h = user.request_headers("api.shop.test", 100);
         assert_eq!(h, vec![("Authorization".to_string(), "Bearer t".to_string()), ("Cookie".to_string(), "s=1; cart=9".to_string())]);
         assert_eq!(user.request_headers("x.test", 10)[1].1, "s=1; old=x");
+    }
+
+    #[test]
+    fn a_users_window_keeps_its_own_session_and_fills_the_gaps() {
+        let user = SavedUser {
+            cookies: vec![c("s", "saved"), c("theme", "dark"), Cookie { expires: Some(50), ..c("old", "x") }],
+            ..u("A", &[("Authorization", "Bearer saved"), ("X-Team", "red")])
+        };
+        let hv = |pairs: &[(&str, &str)]| -> Headers { pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect() };
+        // Nothing of its own yet: the window goes out with the user's session.
+        let fresh = user.window_headers("shop.test", &hv(&[("Accept", "*/*")]), 100);
+        assert_eq!(fresh, hv(&[("Accept", "*/*"), ("Authorization", "Bearer saved"), ("X-Team", "red"), ("Cookie", "s=saved; theme=dark")]));
+        // Signed in there: its own session wins, the user only fills the gaps.
+        let own = user.window_headers("shop.test", &hv(&[("cookie", "s=window"), ("authorization", "Bearer window")]), 100);
+        assert_eq!(own, hv(&[("cookie", "s=window; theme=dark"), ("authorization", "Bearer window"), ("X-Team", "red")]));
     }
 
     #[test]
