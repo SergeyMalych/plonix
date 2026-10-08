@@ -42,6 +42,20 @@ plonix market install --starter       # install the starter set (extensions are 
 
 Profiles never name items. Each one weighs a fixed list of tags, and each item carries a few tags and a noise level (`passive`, `light` or `active`) in [`store/profiles.json`](../store/profiles.json). An item's score is the sum of the profile's weights for its tags; items scoring 4 or more are suggested, best first. A bundle replaces the items inside it unless one of them scores higher on its own, and items noisier than the profile allows are listed under *Also for you* without being picked. To make a new Market item show up for the right people, add its tags there; `cargo test` fails if a Market item has no entry.
 
+## Three shelves
+
+Every package in the Market carries a badge that says who stands behind it:
+
+| Badge | Where it comes from | Who looked at it |
+| --- | --- | --- |
+| **Official** (or **Built in**) | The Plonix Market, signed with the Plonix key | The Plonix maintainers reviewed it before signing |
+| **Community** | The [community Market](#the-community-market), signed with the community key | Checked automatically, and a reviewer read what it asks for. Its author wrote and maintains it; the maintainers have not reviewed its code |
+| **Your own** | Added by you from a GitHub repository, a folder, a file or a link ([below](#adding-your-own)) | Nobody |
+
+A Market you host yourself and trust by its key shows **Verified by** its publisher. Something whose file changed on disk after it was installed shows **Changed** and does not load.
+
+Every shelf can do the same things. An extension from any of them can ask for any capability, and every sensitive one needs its own yes when it installs. On Community and Your own extensions that yes sits next to a red line saying Plonix has not reviewed the code. What no extension can do, from any shelf, is listed in [Invariants](extensions.md#invariants): no network, files or processes outside the sandbox, and no change of scope you did not click.
+
 ## Validated packages
 
 Nothing is installed unless it can be traced to a signature you trust:
@@ -118,21 +132,67 @@ Build a short briefing on {{host}} for the user...
 
 To publish one in the Plonix Market, add it to `store/skills/` and its entry to `store/index.json` (see [store/README.md](../store/README.md)).
 
-## Adding things from outside the Market
+## Adding your own
 
-You can add a skill, rule pack or filter pack from a file or a link that is not in a signed Market:
+You can add a skill, a pack or an extension that is in no Market: from a GitHub repository, an extension's folder, a file or a link.
 
 ```
-plonix market add ./my-skill.md            # shows what it is and what it does
-plonix market add ./my-skill.md --yes      # adds it
-plonix market add https://example.com/pack.json --yes
+plonix market add github:jsmith/graphql-notes          # the package attached to the latest release
+plonix market add github:jsmith/graphql-notes@v1.2.0   # one release
+plonix market add github:jsmith/kit#notes.plonixext    # one file, when a release has several
+plonix market add ./my-extension                       # an extension's folder, while you write it
+plonix market add https://example.com/skill.md --yes
+plonix extensions add github:jsmith/graphql-notes --grant scoped-requests   # an extension, with a sensitive capability
 ```
 
-In the app, use **Add from a file or link** on the Market screen. Plonix reads the file in full, shows its name, author, what it does and its checksum, and adds it only after you confirm.
+In the app, use **Add your own** on the Market screen. Paste a repository, a path or an address, or choose a file or a folder. Plonix reads the file in full, shows its name, author, where it came from, what it may do and its checksum, and adds it only after you confirm.
 
-Anything added this way is marked **Not verified**: nobody has signed or reviewed it. It is still checked and cannot run code, and agents cannot add anything themselves. A skill that is not verified carries a note saying so when an agent uses it.
+- **From GitHub**, Plonix reads the repository's latest release (or the one you name with `@tag`) through GitHub's public API and downloads the package file attached to it: a `.plonixext` extension, a skill (`.md`) or a pack (`.json`). It never builds or runs the repository's code. `github.com/owner/repo` and the repository's https address work too.
+- **From a folder**, Plonix packs the extension in it (its `plonix-extension.json` and the module it names). The item shows **From a folder** with a **Read again** button for after you rebuild it.
+- **New releases.** For something added from GitHub, the Market checks the repository for a newer release and shows **Release v1.3.0 is out** on its row. It never updates it on its own: **Look at v1.3.0** opens the same sheet, so you see what the new release asks for, and anything new needs your yes again. `plonix market update` lists them too.
+- **Removing** works like any other package: **Remove** on its page, or `plonix market remove <name>`.
 
-To use a Market list that is not signed, turn on **Allow unsigned Market lists** in Settings › Market. Everything from it is then marked Not verified.
+Anything added this way is marked **Your own**. It is still checked in full, and a skill that is your own carries a note saying so when an agent uses it. Agents cannot add anything themselves, and a name that belongs to something built in cannot be taken.
+
+To use a Market list that is not signed, turn on **Allow Markets that are not signed** in Settings › Market. Everything from it is then marked Not verified.
+
+## The community Market
+
+The community Market is a second list, next to the Plonix Market, for packages their authors write and maintain. The Market screen shows them with a **Community** badge and a **Community** filter; switch them off in **Settings › Market › Show the community Market**.
+
+- The list is `community/index.json` in the Plonix repository, signed with its own key. That key is trusted for the community list only, never for the Plonix Market.
+- A package's file stays where its author published it: the list pins a GitHub release file by its SHA-256, so a replaced file is refused.
+- The Plonix Market wins a name both use. Community bundles, tools and packages that require others are left out, so a community package never pulls in anything else by name.
+
+### Publishing to the community Market
+
+1. Publish your package in your own GitHub repository, as a file attached to a release. Check it first with `plonix extensions check ./my-extension` (or `plonix skills check`, `plonix rules check`…). People can already add it as their own with `plonix market add github:you/your-repo`.
+2. Open a pull request to the Plonix repository that adds one entry to `community/index.json`: the package's `name`, `kind`, `version`, `description`, `author` (your GitHub name), `homepage` (your repository), `url` (the release file's download address) and its `sha256`. The repository must have an open-source license.
+3. The **Market lists** workflow downloads the file, matches the checksum and validates it in full. A reviewer reads what it asks for and checks that the release was built from the repository's source.
+4. When the pull request merges, the community list is signed and the package shows up in everyone's Market. A new version is a new entry with the new release's file and checksum.
+
+See [community/README.md](../community/README.md) for an example entry.
+
+### From Community to Official
+
+A community package that many people use and that has stayed stable can be proposed for the Plonix Market. A maintainer reviews its source, it moves into `store/`, and it is signed with the Plonix key. Only then does it carry the Official badge.
+
+## The block list
+
+When something on the Market turns out to be harmful, the maintainers add it to `store/blocked.json`, signed with the Plonix Market key. Plonix reads it every time it opens the Market and keeps the last verified copy, so it also applies offline and when Plonix starts.
+
+- A blocked package cannot be installed or added, from any shelf: a Market, a repository, a folder, a file or a link.
+- One that is already installed is switched off with the reason (an extension) or removed (anything else). An extension that is blocked cannot be switched back on.
+- An entry names a package, one file of it (by SHA-256), or both:
+
+```json
+{ "plonix_blocked": 1,
+  "entries": [ { "name": "bad-ext", "kind": "extension", "reason": "Sends tokens to its author." } ] }
+```
+
+## How the Markets are signed
+
+The **Market lists** workflow (`.github/workflows/market.yml`) runs on every pull request that changes `store/` or `community/`. It checks every package, then signs `store/index.json`, `store/blocked.json` and `community/index.json` with keys kept as repository secrets (`PLONIX_MARKET_KEY` and `PLONIX_COMMUNITY_KEY`), commits the signatures to the pull request and runs CI again. The keys only ever reach a signer built from `main`. Merging the pull request is the review. Pull requests from forks get the checks but not the keys; a maintainer brings the change into a branch of the repository to have it signed.
 
 ## Item pages
 

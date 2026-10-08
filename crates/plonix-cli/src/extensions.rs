@@ -9,7 +9,7 @@ use anyhow::{Result, anyhow, bail};
 use clap::Subcommand;
 use plonix_core::extension::{self, Capability, Consent, ExtensionLibrary};
 use plonix_core::market::{self, Market};
-use plonix_core::registry::{self, Kind};
+use plonix_core::registry::Kind;
 use serde_json::json;
 
 use crate::Ctx;
@@ -22,9 +22,9 @@ pub enum ExtensionsCmd {
     List,
     /// What an installed extension is and what it is allowed to do
     Show { name: String },
-    /// Install from a package file, an extension's folder, or an https:// address (marked Not verified)
+    /// Install from a package file, an extension's folder, or an https:// address (marked Your own)
     Add {
-        /// A .plonixext package, a folder with plonix-extension.json, or an https:// address
+        /// A .plonixext package, a folder with plonix-extension.json, github:owner/repo[@tag], or an https:// address
         source: String,
         /// Install without asking again, approving what it asks for
         #[arg(long)]
@@ -67,16 +67,6 @@ pub enum ExtensionsCmd {
 
 fn caps_line(caps: &[Capability]) -> String {
     caps.iter().map(|c| c.id()).collect::<Vec<_>>().join(", ")
-}
-
-fn read(source: &str) -> Result<(Vec<u8>, String)> {
-    let loc = registry::location(source).map_err(|e| anyhow!(e))?;
-    match &loc {
-        registry::Location::File(p) => {
-            Ok((extension::read_source(p)?, std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()).display().to_string()))
-        }
-        registry::Location::Url(u) => Ok((registry::fetch(&loc, extension::MAX_PACKAGE_BYTES)?, u.clone())),
-    }
 }
 
 fn parse_grants(grant: &[String]) -> Result<Vec<Capability>> {
@@ -147,7 +137,7 @@ pub fn extensions_cmd(ctx: &Ctx, cmd: ExtensionsCmd) -> Result<()> {
             println!("Source: {}\nsha256 {}", i.source, i.sha256);
         }
         ExtensionsCmd::Add { source, yes, grant } => {
-            let (bytes, label) = read(&source)?;
+            let (bytes, label) = market::read_external(&source)?;
             let m = Market::new(&ctx.home);
             let ext = m.inspect_external(bytes, &label).map_err(|e| anyhow!(e))?;
             if ext.kind != Kind::Extension {
@@ -170,7 +160,7 @@ pub fn extensions_cmd(ctx: &Ctx, cmd: ExtensionsCmd) -> Result<()> {
                 }
                 println!("{}", ext.effects.last().map(String::as_str).unwrap_or(market::SANDBOX_NOTE));
                 println!("sha256 {}", ext.sha256);
-                println!("! NOT VERIFIED: it did not come from a signed Market, so nobody has vouched for it.");
+                println!("! YOUR OWN: it comes from {}, not a signed Market, so nobody has reviewed its code.", market::describe_source(&ext.source));
             }
             if !yes {
                 if ctx.json {
@@ -249,7 +239,7 @@ pub fn extensions_cmd(ctx: &Ctx, cmd: ExtensionsCmd) -> Result<()> {
             }
         }
         ExtensionsCmd::Check { source } => {
-            let (bytes, _) = read(&source)?;
+            let (bytes, _) = market::read_external(&source)?;
             let p = extension::parse_package(&bytes).map_err(|e| anyhow!(e))?;
             if ctx.json {
                 return ctx.print_json(&json!({ "valid": true, "manifest": p.manifest, "sha256": p.sha256, "module_bytes": p.module.len() }));

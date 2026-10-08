@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The Market lists workflow runs CI again after it signs a branch, since a
+  # commit pushed by a workflow starts no runs of its own.
+  workflow_dispatch:
 
 jobs:
   test:

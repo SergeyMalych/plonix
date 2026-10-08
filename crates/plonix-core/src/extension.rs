@@ -557,6 +557,9 @@ impl ExtensionLibrary {
         if self.shelf.installed_version(name).is_none() {
             bail!("no extension named `{}` is installed (see `plonix extensions`)", clean(name, 64));
         }
+        if on && let Some(why) = self.blocked(name) {
+            bail!("{why}");
+        }
         let mut state = self.read_state();
         let s = state.extensions.entry(name.to_string()).or_default();
         s.enabled = on;
@@ -581,6 +584,13 @@ impl ExtensionLibrary {
 
     pub fn installed_version(&self, name: &str) -> Option<String> {
         self.shelf.installed_version(name)
+    }
+
+    /// Why the Plonix maintainers blocked an installed extension, if they did.
+    fn blocked(&self, name: &str) -> Option<String> {
+        let list = crate::blocklist::load(self.dir.parent()?);
+        let sha = self.shelf.installed().into_iter().find(|i| i.name == name).map(|i| i.entry.sha256).unwrap_or_default();
+        list.blocked(crate::registry::Kind::Extension, name, &sha).map(|why| crate::blocklist::Blocklist::message(name, why))
     }
 
     pub fn installed(&self) -> Vec<crate::shelf::Installed> {
@@ -622,9 +632,14 @@ impl ExtensionLibrary {
     pub fn load(&self) -> LoadedSet {
         let state = self.read_state();
         let (verified, mut problems) = self.shelf.verified();
+        let blocked = self.dir.parent().map(crate::blocklist::load).unwrap_or_default();
         let mut out = vec![];
         for v in verified {
             let Some(st) = state.extensions.get(&v.name).filter(|s| s.enabled) else { continue };
+            if let Some(why) = blocked.blocked(crate::registry::Kind::Extension, &v.name, &v.entry.sha256) {
+                problems.push(format!("extension {}: {}", v.name, crate::blocklist::Blocklist::message(&v.name, why)));
+                continue;
+            }
             let loaded = parse_package(&v.bytes).and_then(|p| {
                 let granted: Vec<Capability> = p.manifest.capabilities.iter().copied().filter(|c| st.granted.contains(c)).collect();
                 let runner = match p.manifest.program {

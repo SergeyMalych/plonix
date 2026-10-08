@@ -220,7 +220,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - In the Market today: **secret-sweep** (API keys, tokens and passwords for hundreds of services, using `trufflehog` you install yourself), **js-endpoints** (API paths and URLs referenced in captured JavaScript), **subdomain-discovery** (subdomains of an accepted domain from public sources, using `subfinder` you install), **parameter-probe** (undocumented query parameters on one in-scope endpoint), **graphql-explorer** and **security-headers**.
 
 ### The Market and starter profiles
-- **One signed catalog** (`store/index.json`) of skills, rule packs, filter packs, payload lists, bug bounty platforms, tools, bundles and extensions. Everything is verified against the signature before it installs, and items added from a file or link are marked **Not verified**.
+- **One signed catalog** (`store/index.json`) of skills, rule packs, filter packs, payload lists, bug bounty platforms, tools, bundles and extensions. Everything is verified against the signature before it installs. A signed **community Market** sits next to it, and you can add your own from a GitHub repository, a folder, a file or a link; badges say which is **Official**, **Community** or **Your own**.
 - **Tools** switch on a capability built into Plonix that ships off until you want it, such as Saved users, the Access check and Callbacks.
 - **Starter profiles:** pick bug hunter, red teamer or security researcher on the Start screen, at the top of the Market, in Settings or per project. The Market then shows **Recommended for you**, each item with one line on why, and `plonix market install --starter` installs the set. Pick none and everything stays neutral. See [docs/market.md](docs/market.md).
 
