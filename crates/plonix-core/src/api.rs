@@ -1402,9 +1402,10 @@ async fn market_detail(State(s): State<AppState>, Path(name): Path<String>) -> R
         let mut detail = json!({});
         if l.package.kind == registry::Kind::Extension && l.local {
             let info = m.extensions.info(&name);
-            let caps = info.as_ref().map(|i| market::capability_infos(&i.requested)).unwrap_or_default();
             let program = info.as_ref().and_then(|i| i.program.clone());
-            let note = if program.is_some() { market::PROGRAM_NOTE } else { market::SANDBOX_NOTE };
+            let program_id = program.as_ref().map(|p| p.id.as_str());
+            let caps = info.as_ref().map(|i| market::capability_infos(&i.requested, program_id)).unwrap_or_default();
+            let note = if program.is_some() { market::program_note(program_id) } else { market::SANDBOX_NOTE };
             let runtime = if program.is_some() { "program" } else { "wasm" };
             detail = json!({ "extension": { "runtime": runtime, "capabilities": caps, "installable": true, "sandbox": note, "program": program, "installed": info } });
         }
@@ -1420,7 +1421,7 @@ async fn market_detail(State(s): State<AppState>, Path(name): Path<String>) -> R
                     let runnable = market::extension_runnable(&bytes);
                     json!({ "extension": {
                         "runtime": mf.runtime,
-                        "capabilities": market::capability_infos(&mf.capabilities),
+                        "capabilities": market::capability_infos(&mf.capabilities, mf.program.as_deref()),
                         "installable": runnable.is_ok(),
                         "why_not": runnable.err(),
                         "sandbox": market::runtime_note(&mf),

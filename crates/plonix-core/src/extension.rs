@@ -111,9 +111,23 @@ impl Capability {
             Capability::UiTab => "add a sidebar tab, with Plonix's own components",
             Capability::PassiveAnalysis => "annotate traffic it was given",
             Capability::ProposeFindings => "propose findings (unconfirmed until you confirm)",
-            Capability::ScopedRequests => "send requests to accepted hosts only (scope-enforced, recorded)",
-            Capability::RunProgram => "run a program you installed on this Mac over copies of captured requests and responses",
-            Capability::SuggestScope => "suggest domains for scope, with evidence (you accept or reject each; it never changes scope)",
+            Capability::ScopedRequests => "send requests to accepted hosts only; each one is checked against scope and recorded",
+            Capability::RunProgram => "run a program on this Mac",
+            Capability::SuggestScope => "suggest domains for scope with evidence; you accept or reject each one",
+        }
+    }
+
+    /// [`Capability::describe`], with `run-program` saying what the named
+    /// program actually does, since that differs by program.
+    pub fn describe_for(self, program: Option<&str>) -> &'static str {
+        if self != Capability::RunProgram {
+            return self.describe();
+        }
+        match program.and_then(crate::program::get).map(|p| p.kind) {
+            Some(crate::program::Kind::Scan) => "run a program you install on this Mac over copies of captured requests and responses",
+            Some(crate::program::Kind::Enumerate) => "run a program you install on this Mac that looks up subdomains of your in-scope domains online",
+            Some(crate::program::Kind::Probe) => "run Plonix's built-in parameter probe against an in-scope address you pick",
+            None => self.describe(),
         }
     }
 
