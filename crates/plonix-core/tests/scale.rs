@@ -16,16 +16,14 @@
 //!
 //! Budgets are for release builds; debug builds get several times more.
 
-use std::sync::Arc;
+mod common;
+use common::Running;
+
 use std::time::{Duration, Instant};
 
-use plonix_core::ca::CertAuthority;
-use plonix_core::engine::{self, EngineConfig, Running};
 use plonix_core::model::{Exchange, Source};
 use plonix_core::paths::Home;
 use plonix_core::scope::Decision;
-use plonix_core::store::Store;
-use plonix_core::upstream::Upstream;
 use plonix_core::Engine;
 
 /// Debug builds run SQLite and the analyzers unoptimized.
@@ -136,20 +134,7 @@ fn exchange(i: u64, rng: &mut Rng) -> Exchange {
 }
 
 async fn start(home: &Home) -> Running {
-    home.ensure().unwrap();
-    let ca = Arc::new(CertAuthority::load_or_create(home).unwrap());
-    std::fs::create_dir_all(home.root.join("projects")).unwrap();
-    let store = Store::open(&home.project_db("scale")).unwrap();
-    let engine = Engine::new("scale", store, ca, Upstream::new(false, vec![]).unwrap()).unwrap();
-    let config = EngineConfig {
-        home: home.clone(),
-        project: "scale".into(),
-        proxy_addr: "127.0.0.1:0".parse().unwrap(),
-        proxy_port_fallback: false,
-        api_addr: "127.0.0.1:0".parse().unwrap(),
-        insecure_upstream: false,
-    };
-    engine::start_with(engine, &config).await.unwrap()
+    common::open(home, "scale", None).await
 }
 
 fn search(engine: &Engine, q: &str, sort: Option<&str>, limit: usize, offset: usize) -> (usize, i64) {

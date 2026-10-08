@@ -1005,13 +1005,25 @@ button.agfhit:hover { background: var(--surface-2); color: var(--accent); }
 .marg { display: flex; gap: 8px; align-items: baseline; font-size: 12px; padding: 2px 0; }
 .marg code { font-size: 11.5px; white-space: nowrap; }
 .mpre { white-space: pre-wrap; font-family: var(--mono); font-size: 11.5px; line-height: 1.5; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 8px; padding: 10px; margin: 0; max-height: 360px; overflow: auto; }
-.mcap { display: flex; gap: 8px; font-size: 12px; padding: 2px 0; }
-.mcap span { color: var(--ok); font-weight: 700; }
-.mcap.warn span { color: var(--warn); }
-.mcap.off span { color: var(--fg-3); }
+.mcap { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; line-height: 1.45; padding: 2px 0; color: var(--fg); }
+.mcap.off { color: var(--fg-3); }
+.mcap .mdot { flex: none; width: 16px; text-align: center; color: var(--fg-3); }
+.mi { flex: none; width: 16px; height: 16px; margin-top: 1px; border-radius: 50%; display: inline-grid; place-items: center; }
+.mi svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.mi.ok { color: var(--ok); background: var(--ok-soft); }
+.mi.warn { color: var(--warn); background: var(--warn-soft); }
+.mi.off { color: var(--fg-3); background: var(--surface-2); }
+.mcaps { display: flex; flex-direction: column; gap: 2px; }
+.mcaph { font-size: 11px; font-weight: 600; color: var(--fg-3); margin: 6px 0 2px; }
+.mcaps .mcaph:first-child { margin-top: 0; }
+.mcaps .fine { margin-top: 2px; }
+.mcard label.mcap.ask { flex-direction: row; align-items: flex-start; gap: 8px; font-size: 12px; font-weight: 400; color: var(--fg); cursor: pointer; padding: 2px 0; }
+.mcap.ask input { flex: none; width: 16px; height: 16px; margin: 1px 0 0; padding: 0; accent-color: var(--accent); cursor: pointer; }
+.mhow { background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 9px; padding: 8px 12px 10px; }
+.mhow .mcaph { margin: 0 0 3px; }
+.mhow p { margin: 0; font-size: 12px; line-height: 1.5; color: var(--fg-2); }
 .mneeds { display: flex; gap: 8px; align-items: center; margin: 6px 0 2px 20px; }
 .mneeds code { font-size: 12px; padding: 3px 8px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--line-2); user-select: all; }
-.mcap label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
 .extstate { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line-2); border-radius: 9px; padding: 10px 12px; }
 .extstate.stopped { background: var(--crit-soft); border-color: transparent; }
 .extstate p { margin: 0; font-size: 12px; line-height: 1.5; color: var(--fg-2); }

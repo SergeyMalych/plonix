@@ -290,10 +290,10 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
             if let Some(mf) = manifest {
                 println!("Would be allowed to:");
                 for c in &mf.capabilities {
-                    println!("  - {}{}", c.describe(), if c.sensitive() { " (sensitive: only with --grant)" } else { "" });
+                    println!("  - {}{}", c.describe_for(mf.program.as_deref()), if c.sensitive() { " (sensitive: only with --grant)" } else { "" });
                 }
                 match runnable {
-                    Some(Ok(())) => println!("{}", market::SANDBOX_NOTE),
+                    Some(Ok(())) => println!("{}", market::runtime_note(&mf)),
                     Some(Err(e)) => println!("Not installable in this version: {e}"),
                     None => {}
                 }

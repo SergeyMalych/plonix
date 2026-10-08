@@ -33,7 +33,7 @@ use crate::dialogs;
 use crate::engine::{Engine, ReplayRequest, SendError, SendRequest};
 use crate::intercept;
 use crate::replace;
-use crate::model::{Exchange, FindingEdit, NewFinding, check_severity, now_ms};
+use crate::model::{Exchange, FindingEdit, NewFinding, now_ms};
 use crate::report;
 use crate::paths::Home;
 use crate::{chats, market, profile, registry, skill};
@@ -555,14 +555,6 @@ fn bad_rule(msg: &str) -> Response {
     err(StatusCode::BAD_REQUEST, "bad_rule", msg)
 }
 
-/// The rules changed: apply them to the proxy at once.
-fn rules_changed(s: &AppState, rule: Value) -> Response {
-    match s.engine.reload_replace_rules() {
-        Ok(()) => Json(rule).into_response(),
-        Err(e) => internal(e),
-    }
-}
-
 /// Adds a rule: `{"target": "request_header", "match": "...", "replace": "...", "regex": false, "in_scope_only": false, "note": ""}`.
 async fn add_replace_rule(State(s): State<AppState>, caller: MaybeCaller, Json(b): Json<replace::RuleInput>) -> Response {
     if let Some(r) = user_only(&caller) {
@@ -572,8 +564,8 @@ async fn add_replace_rule(State(s): State<AppState>, caller: MaybeCaller, Json(b
         Ok(r) => r,
         Err(e) => return bad_rule(&e),
     };
-    match s.engine.store.add_replace_rule(&rule) {
-        Ok(rule) => rules_changed(&s, json!(rule)),
+    match s.engine.add_replace_rule(&rule) {
+        Ok(rule) => Json(rule).into_response(),
         Err(e) => internal(e),
     }
 }
@@ -592,8 +584,8 @@ async fn edit_replace_rule(State(s): State<AppState>, caller: MaybeCaller, Path(
         Ok(r) => r,
         Err(e) => return bad_rule(&e),
     };
-    match s.engine.store.update_replace_rule(&rule) {
-        Ok(_) => rules_changed(&s, json!(rule)),
+    match s.engine.update_replace_rule(&rule) {
+        Ok(_) => Json(rule).into_response(),
         Err(e) => internal(e),
     }
 }
@@ -602,8 +594,8 @@ async fn delete_replace_rule(State(s): State<AppState>, caller: MaybeCaller, Pat
     if let Some(r) = user_only(&caller) {
         return r;
     }
-    match s.engine.store.delete_replace_rule(id) {
-        Ok(true) => rules_changed(&s, json!({ "deleted": id })),
+    match s.engine.delete_replace_rule(id) {
+        Ok(true) => Json(json!({ "deleted": id })).into_response(),
         Ok(false) => err(StatusCode::NOT_FOUND, "not_found", &format!("no match-and-replace rule {id}")),
         Err(e) => internal(e),
     }
@@ -1187,10 +1179,7 @@ async fn scan_run(State(s): State<AppState>, headers: HeaderMap, Json(req): Json
     crate::usage::record("scan_run");
     match s.engine.scan(req, &initiator(&headers)).await {
         Ok(report) => Json(report).into_response(),
-        Err(e @ SendError::OutOfScope { .. }) => err(StatusCode::FORBIDDEN, "out_of_scope", &e.to_string()),
-        Err(e @ SendError::NotAllowed(_)) => err(StatusCode::FORBIDDEN, "program_rules", &e.to_string()),
-        Err(SendError::Other(e)) => internal(e),
-        Err(e) => err(StatusCode::BAD_REQUEST, "bad_request", &e.to_string()),
+        Err(e) => send_error(e),
     }
 }
 
@@ -1198,10 +1187,7 @@ async fn crawl_run(State(s): State<AppState>, headers: HeaderMap, Json(req): Jso
     crate::usage::record("crawl_run");
     match s.engine.crawl(req, &initiator(&headers)).await {
         Ok(report) => Json(report).into_response(),
-        Err(e @ SendError::OutOfScope { .. }) => err(StatusCode::FORBIDDEN, "out_of_scope", &e.to_string()),
-        Err(e @ SendError::NotAllowed(_)) => err(StatusCode::FORBIDDEN, "program_rules", &e.to_string()),
-        Err(SendError::Other(e)) => internal(e),
-        Err(e) => err(StatusCode::BAD_REQUEST, "bad_request", &e.to_string()),
+        Err(e) => send_error(e),
     }
 }
 
@@ -1403,9 +1389,10 @@ async fn market_detail(State(s): State<AppState>, Path(name): Path<String>) -> R
         let mut detail = json!({});
         if l.package.kind == registry::Kind::Extension && l.local {
             let info = m.extensions.info(&name);
-            let caps = info.as_ref().map(|i| market::capability_infos(&i.requested)).unwrap_or_default();
             let program = info.as_ref().and_then(|i| i.program.clone());
-            let note = if program.is_some() { market::PROGRAM_NOTE } else { market::SANDBOX_NOTE };
+            let program_id = program.as_ref().map(|p| p.id.as_str());
+            let caps = info.as_ref().map(|i| market::capability_infos(&i.requested, program_id)).unwrap_or_default();
+            let note = if program.is_some() { market::program_note(program_id) } else { market::SANDBOX_NOTE };
             let runtime = if program.is_some() { "program" } else { "wasm" };
             detail = json!({ "extension": { "runtime": runtime, "capabilities": caps, "installable": true, "sandbox": note, "program": program, "installed": info } });
         }
@@ -1421,7 +1408,7 @@ async fn market_detail(State(s): State<AppState>, Path(name): Path<String>) -> R
                     let runnable = market::extension_runnable(&bytes);
                     json!({ "extension": {
                         "runtime": mf.runtime,
-                        "capabilities": market::capability_infos(&mf.capabilities),
+                        "capabilities": market::capability_infos(&mf.capabilities, mf.program.as_deref()),
                         "installable": runnable.is_ok(),
                         "why_not": runnable.err(),
                         "sandbox": market::runtime_note(&mf),
@@ -1639,11 +1626,7 @@ struct ProbeBody {
 async fn extension_probe(State(s): State<AppState>, Path(name): Path<String>, Json(b): Json<ProbeBody>) -> Response {
     match s.engine.run_param_probe(&name, &b.url).await {
         Ok(report) => Json(report).into_response(),
-        Err(crate::engine::SendError::OutOfScope { host, decision }) => {
-            err(StatusCode::FORBIDDEN, "out_of_scope", &format!("{host} is not in scope ({decision}); accept it first"))
-        }
-        Err(crate::engine::SendError::BadRequest(m)) => err(StatusCode::BAD_REQUEST, "cannot_probe", &m),
-        Err(e) => internal(anyhow::anyhow!("{e}")),
+        Err(e) => send_error(e),
     }
 }
 
@@ -1869,11 +1852,7 @@ fn send_result(s: &AppState, r: Result<Exchange, SendError>) -> Response {
             let in_scope = s.engine.rules().in_scope(&ex.host);
             Json(view(ex, in_scope)).into_response()
         }
-        Err(e @ SendError::OutOfScope { .. }) => err(StatusCode::FORBIDDEN, "out_of_scope", &e.to_string()),
-        Err(e @ SendError::NotAllowed(_)) => err(StatusCode::FORBIDDEN, "program_rules", &e.to_string()),
-        Err(e @ SendError::BadRequest(_)) => err(StatusCode::BAD_REQUEST, "bad_request", &e.to_string()),
-        Err(e @ SendError::NotFound(_)) => err(StatusCode::NOT_FOUND, "not_found", &e.to_string()),
-        Err(SendError::Other(e)) => internal(e),
+        Err(e) => send_error(e),
     }
 }
 
@@ -1895,10 +1874,7 @@ async fn run(State(s): State<AppState>, headers: HeaderMap, Json(req): Json<crat
     crate::usage::record("bench_run");
     match s.engine.run(req, &initiator(&headers)).await {
         Ok(report) => Json(report).into_response(),
-        Err(e @ SendError::OutOfScope { .. }) => err(StatusCode::FORBIDDEN, "out_of_scope", &e.to_string()),
-        Err(e @ SendError::NotAllowed(_)) => err(StatusCode::FORBIDDEN, "program_rules", &e.to_string()),
-        Err(SendError::Other(e)) => internal(e),
-        Err(e) => err(StatusCode::BAD_REQUEST, "bad_request", &e.to_string()),
+        Err(e) => send_error(e),
     }
 }
 
@@ -2032,10 +2008,22 @@ async fn access_check(State(s): State<AppState>, caller: MaybeCaller, headers: H
     let req = crate::authcheck::AuthCheckRequest { targets, users, include_anon: body.include_anon, delay_ms: body.delay_ms };
     match s.engine.access_check(req, &initiator(&headers)).await {
         Ok(report) => Json(report).into_response(),
-        Err(e @ SendError::OutOfScope { .. }) => err(StatusCode::FORBIDDEN, "out_of_scope", &e.to_string()),
-        Err(e @ SendError::BadRequest(_)) => err(StatusCode::BAD_REQUEST, "bad_request", &e.to_string()),
-        Err(SendError::Other(e)) => internal(e),
-        Err(e) => err(StatusCode::BAD_REQUEST, "bad_request", &e.to_string()),
+        Err(e) => send_error(e),
+    }
+}
+
+/// How a refused or failed send reads over the API.
+fn send_error(e: SendError) -> Response {
+    let (status, code) = match &e {
+        SendError::OutOfScope { .. } => (StatusCode::FORBIDDEN, "out_of_scope"),
+        SendError::NotAllowed(_) => (StatusCode::FORBIDDEN, "program_rules"),
+        SendError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
+        SendError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
+        SendError::Other(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
+    };
+    match e {
+        SendError::Other(e) => internal(e),
+        e => err(status, code, &e.to_string()),
     }
 }
 
@@ -2189,19 +2177,31 @@ async fn callbacks_remove_payload(State(s): State<AppState>, caller: MaybeCaller
     Json(callbacks_view(&s, u64::MAX)).into_response()
 }
 
-async fn findings(State(s): State<AppState>) -> Response {
-    match s.engine.store.findings() {
+async fn findings(State(s): State<AppState>, caller: MaybeCaller) -> Response {
+    let in_scope_only = agent_in_scope_only(&s, &caller);
+    let list = s.engine.store.findings().and_then(|all| {
+        if !in_scope_only {
+            return Ok(all);
+        }
+        let rules = s.engine.rules();
+        let visible = |ex: &Exchange| rules.in_scope(&ex.host);
+        let mut out = Vec::with_capacity(all.len());
+        for f in all {
+            if report::shown(&s.engine.store, &f, &visible)? {
+                out.push(f);
+            }
+        }
+        Ok(out)
+    });
+    match list {
         Ok(f) => Json(f).into_response(),
         Err(e) => internal(e),
     }
 }
 
-async fn add_finding(State(s): State<AppState>, headers: HeaderMap, Json(mut f): Json<NewFinding>) -> Response {
-    if f.title.trim().is_empty() {
-        return err(StatusCode::BAD_REQUEST, "bad_request", "title is required");
-    }
-    f.severity = match check_severity(&f.severity) {
-        Ok(sev) => sev,
+async fn add_finding(State(s): State<AppState>, headers: HeaderMap, Json(f): Json<NewFinding>) -> Response {
+    let f = match f.checked() {
+        Ok(f) => f,
         Err(e) => return err(StatusCode::BAD_REQUEST, "bad_request", &e),
     };
     match s.engine.store.add_finding(&f, &initiator(&headers)) {
@@ -2217,8 +2217,16 @@ fn finding_not_found(id: i64) -> Response {
     err(StatusCode::NOT_FOUND, "not_found", &format!("finding {id} not found"))
 }
 
-async fn finding(State(s): State<AppState>, Path(id): Path<i64>) -> Response {
+async fn finding(State(s): State<AppState>, caller: MaybeCaller, Path(id): Path<i64>) -> Response {
     match s.engine.store.finding(id) {
+        Ok(Some(f)) if agent_in_scope_only(&s, &caller) => {
+            let rules = s.engine.rules();
+            match report::shown(&s.engine.store, &f, &|ex: &Exchange| rules.in_scope(&ex.host)) {
+                Ok(true) => Json(f).into_response(),
+                Ok(false) => outside_agent_data(),
+                Err(e) => internal(e),
+            }
+        }
         Ok(Some(f)) => Json(f).into_response(),
         Ok(None) => finding_not_found(id),
         Err(e) => internal(e),
