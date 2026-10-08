@@ -35,7 +35,7 @@ use crate::ca::LeafResolver;
 use crate::codec;
 use crate::engine::Engine;
 use crate::intercept::{self, Edit, HeldItem, HeldKind, Verdict};
-use crate::replace::Target;
+use crate::replace::{Passing, Reach, Target};
 use crate::model::{Exchange, Headers, Source, now_ms};
 use crate::upstream::{BoxError, HOP_BY_HOP, OutboundRequest, StreamBody, Upgrade, full_body};
 
@@ -215,11 +215,13 @@ fn size(n: usize) -> String {
 /// body is only changed when it was read in full (`buffered`).
 fn replace_request(engine: &Arc<Engine>, outbound: &mut OutboundRequest, pending: &mut Pending, buffered: bool, limit: usize) {
     let rules = engine.replace_rules();
-    if rules.is_empty() {
+    if !rules.reaches(Reach::Browser) {
         return;
     }
     let in_scope = engine.rules().in_scope(&pending.ex.host);
-    let mut applied = rules.request_line(in_scope, &mut outbound.method, &mut outbound.target);
+    let before = Exchange { req_headers: outbound.headers.clone(), req_body: if buffered { outbound.body.to_vec() } else { vec![] }, ..pending.ex.clone() };
+    let ctx = Passing { reach: Reach::Browser, in_scope, ex: &before };
+    let mut applied = rules.request_line(ctx, &mut outbound.method, &mut outbound.target);
     if !applied.is_empty() {
         pending.ex.method = outbound.method.clone();
         (pending.ex.path, pending.ex.query) = match outbound.target.split_once('?') {
@@ -227,14 +229,14 @@ fn replace_request(engine: &Arc<Engine>, outbound: &mut OutboundRequest, pending
             None => (outbound.target.clone(), String::new()),
         };
     }
-    let changed = rules.headers(Target::RequestHeader, in_scope, &mut outbound.headers);
+    let changed = rules.headers(Target::RequestHeader, ctx, &mut outbound.headers);
     if !changed.is_empty() {
         pending.ex.req_headers = outbound.headers.clone();
         applied.extend(changed);
     }
-    if buffered && rules.has(Target::RequestBody, in_scope) {
+    if buffered && rules.has(Target::RequestBody, ctx) {
         let mut body = outbound.body.to_vec();
-        let changed = rules.body(Target::RequestBody, in_scope, &mut body);
+        let changed = rules.body(Target::RequestBody, ctx, &mut body);
         if !changed.is_empty() {
             let mut cap = pending.req.lock().unwrap();
             *cap = Captured::new(limit);
@@ -243,6 +245,9 @@ fn replace_request(engine: &Arc<Engine>, outbound: &mut OutboundRequest, pending
             outbound.body = Bytes::from(body);
             applied.extend(changed);
         }
+    }
+    if !applied.is_empty() && pending.ex.original_request.is_none() {
+        pending.ex.original_request = Some(crate::ask::request_text(&before, limit).0);
     }
     pending.ex.replaced.extend(applied);
 }
@@ -313,7 +318,7 @@ async fn hold_request(engine: &Arc<Engine>, outbound: &mut OutboundRequest, pend
 /// Answers the client with the server's response: streaming it, or holding
 /// it in Intercept first when the user holds responses.
 async fn respond(engine: &Arc<Engine>, status: u16, headers: Headers, body: Incoming, mut pending: Pending) -> ProxyResponse {
-    let (headers, body) = match replace_response(engine, headers, body, &mut pending).await {
+    let (headers, body) = match replace_response(engine, status, headers, body, &mut pending).await {
         Ok(r) => r,
         Err(e) => {
             pending.ex.status = Some(status);
@@ -339,22 +344,24 @@ fn is_event_stream(headers: &Headers) -> bool {
 /// Intercept) sees it. Body rules read the body first; one that is longer
 /// than the body limit, slow to arrive or an event stream passes unchanged.
 /// A compressed body is matched decoded, and sent uncompressed when changed.
-async fn replace_response(engine: &Arc<Engine>, mut headers: Headers, body: Incoming, pending: &mut Pending) -> Result<(Headers, RespBody), hyper::Error> {
+async fn replace_response(engine: &Arc<Engine>, status: u16, mut headers: Headers, body: Incoming, pending: &mut Pending) -> Result<(Headers, RespBody), hyper::Error> {
     let rules = engine.replace_rules();
-    if rules.is_empty() {
+    if !rules.reaches(Reach::Browser) {
         return Ok((headers, RespBody::Stream(body)));
     }
     let in_scope = engine.rules().in_scope(&pending.ex.host);
-    let mut applied = rules.headers(Target::ResponseHeader, in_scope, &mut headers);
+    let seen = Exchange { status: Some(status), resp_headers: headers.clone(), ..pending.ex.clone() };
+    let ctx = Passing { reach: Reach::Browser, in_scope, ex: &seen };
+    let mut applied = rules.headers(Target::ResponseHeader, ctx, &mut headers);
     let mut body = RespBody::Stream(body);
-    if rules.has(Target::ResponseBody, in_scope) && !is_event_stream(&headers) {
+    if rules.has(Target::ResponseBody, ctx) && !is_event_stream(&headers) {
         let RespBody::Stream(b) = body else { unreachable!() };
         body = read_body(b, engine.body_limit()).await?;
         if let RespBody::Whole(b) = &body {
             let encoded = crate::model::header(&headers, "content-encoding").is_some();
             let decoded = if encoded { codec::decode_whole(&headers, b, engine.body_limit()) } else { Some(b.to_vec()) };
             if let Some(mut text) = decoded {
-                let changed = rules.body(Target::ResponseBody, in_scope, &mut text);
+                let changed = rules.body(Target::ResponseBody, ctx, &mut text);
                 if !changed.is_empty() {
                     headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-encoding"));
                     set_length(&mut headers, text.len());

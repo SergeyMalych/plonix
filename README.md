@@ -79,7 +79,8 @@ Plonix has a handful of tools, each with its own name. They are the same in the 
 | **Market** | One signed catalog of skills, rule packs, filter packs, payload lists, platforms, tools, bundles and extensions, with picks for your kind of work | `plonix market`, ⌘7 |
 | **Extensions** | Sandboxed analyzers that add notes to the Lens and propose findings for you to confirm | `plonix extensions` |
 | **Skills** | Playbooks AI agents follow for a job in Plonix, offered over MCP | `plonix skills` |
-| **Rules** | Community rule packs that teach Plonix to recognise technologies | `plonix rules` |
+| **Rules** | Change traffic as it passes: add, change or remove a header, or replace text, for browser traffic, the Bench and Scans, optionally only when a Traffic search matches | `plonix replace` |
+| **Rule packs** | Community packs that teach Plonix to recognise technologies | `plonix rules` |
 | **Saved users** | The cookies and tokens for each user of an application; the Bench sends as whichever one you pick (a Market tool) | Bench › As … |
 | **Access check** | Replays chosen requests as each saved user and signed out, side by side, so differences in what each one may see stand out (a Market tool) | Traffic or Map selection |
 | **Callbacks** | Hands out a unique host for each test and lists every DNS lookup, HTTP request or mail that reaches one (a Market tool) | Callbacks tab, Bench › Insert callback host |
@@ -141,11 +142,12 @@ These are from the demo project that ships with Plonix (Start screen › Try the
 - The record shows what was actually sent, marked **edited**, with the original kept: the Lens shows it on click, and `GET /api/traffic/{id}` returns it as `original_request` / `original_response`.
 - Intercept is yours alone: agents cannot see the queue or hold, edit, forward or drop anything.
 
-### Match and replace
-- Rules that change traffic as it passes through the proxy, applied to every request before Intercept sees it and to every response before the browser gets it: the request line, request headers, request body, response headers or response body. Use them to swap a token, force a header, strip `Content-Security-Policy`, or flip a feature flag in a JSON response.
-- A rule matches literal text or a regular expression (`$1` inserts a capture). Header rules see one `Name: value` line per header, so a rule can change a value, rename a header, add one or remove one. A rule can be limited to in-scope hosts.
-- Body rules apply to bodies within the body limit; longer, streaming and event-stream bodies pass unchanged. Compressed response bodies are matched decoded and sent uncompressed when changed. WebSocket handshakes and messages are not changed.
-- Manage rules in Settings › Match and replace (one switch turns them all off), with `plonix replace` or `/api/replace`. Each exchange records which rules changed it; the Lens marks it **replaced**. Agents cannot read or change rules.
+### Rules
+- Rules change traffic as it passes, in plain steps: **Add header** (send a header on every request, such as your bug bounty handle), **Change header**, **Remove header**, or **Replace text** in the request line, headers or body, or in the response headers or body. Use them to send an identity header, swap a token, strip `Content-Security-Policy`, or flip a feature flag in a JSON response.
+- Each rule says where it applies: traffic from your browser, requests you send from the Bench (and Run and Access check), and requests Scans send. A rule can be limited to in-scope hosts and can have a condition, written as a Traffic search (`host:api.example.com method:POST`): it only changes what matches.
+- The **Rules** screen lists every rule in plain words, with a switch per rule and one switch that pauses them all; **+ Add rule** opens a short form with a preview of what every request will carry. Right-click any header in the Lens to start a rule from it, filled in. A pill in Traffic shows how many rules are on and pauses them in one click.
+- Text rules match literal text or a regular expression (`$1` puts back what a group matched). Body rules apply to bodies within the body limit; longer, streaming and event-stream bodies pass unchanged. Compressed response bodies are matched decoded and sent uncompressed when changed. WebSocket handshakes and messages are not changed.
+- Each exchange records which rules changed it and the request as it was: Traffic and the Lens mark it **changed**, and the Lens shows it as sent, as it was, or side by side. Also with `plonix replace` (`plonix replace header add X-Bug-Bounty me --bench --scans`) or `/api/replace`. Agents cannot read or change rules.
 
 ### Full traffic capture
 - Every request and response is recorded into a per-project SQLite database, in scope or not, so nothing you browsed is lost.
@@ -245,7 +247,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 ### Settings
 - **Proxy** (per project, applies right away): listen address and port (use 0.0.0.0 to capture from phones and other devices), next-free-port fallback, HTTPS decryption on or off, hosts that are never decrypted (for apps that pin certificates), server certificate checks, an upstream HTTP or SOCKS5 proxy with login and a list of hosts to reach directly, timeouts, and how much of each body to keep.
 - **Intercept** (per project): hold in-scope hosts only or everything, an optional Traffic search to narrow what is held, whether responses are held too, and how long an unanswered item waits before it goes on unchanged.
-- **Match and replace** (per project): the rules, and one switch that turns them all off.
+- **Match and replace** (per project): one switch that pauses every rule; the rules themselves are on the Rules screen.
 - **Client certificates** (per project): certificates presented to servers that ask for one, and one switch that turns them all off.
 - **Storage** (per project): keep only in-scope traffic, with a count of what it would delete and a button to delete it now.
 - **Interface** (all projects): open projects in a Plonix window or in your web browser.
@@ -557,7 +559,7 @@ site/             the plonix.io website; site/docs is generated from docs/ by sc
 - [x] Adaptive scope v1: suggestions with evidence, accept/reject, enforcement
 - [x] Replay and send
 - [x] Intercept: hold requests and responses in flight to edit, forward or drop them
-- [x] Match and replace: rules that change requests and responses in flight
+- [x] Rules: plain header and text rules that change requests and responses in flight, for browser traffic, the Bench and Scans, with conditions, on their own screen
 - [x] Token-authenticated, loopback-only local API
 - [x] `plonix` CLI: search, inspect, watch, replay and manage scope from the terminal
 - [x] `plonix open <target>`: one command from nothing to captured traffic, in a pre-configured browser
