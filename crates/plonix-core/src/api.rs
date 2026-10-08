@@ -110,6 +110,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/tech/{host}", get(tech_host))
         .route("/api/rules", get(rule_packs))
         .route("/api/filters", get(named_filters))
+        .route("/api/detectors", get(detectors))
         .route("/api/skills", get(skills))
         .route("/api/skills/{name}", get(skill_detail))
         .route("/api/market", get(market_list))
@@ -1174,6 +1175,16 @@ async fn named_filters(State(s): State<AppState>) -> Response {
     }
 }
 
+/// The detectors in effect: the app matches them against traffic to draw the
+/// Mind Reader suggestion chips. Matching stays client-side, next to the chips.
+async fn detectors(State(s): State<AppState>) -> Response {
+    let engine = s.engine.clone();
+    match tokio::task::spawn_blocking(move || engine.detectors()).await {
+        Ok(d) => Json(json!({ "detectors": d.detectors, "packs": d.packs, "problems": d.problems })).into_response(),
+        Err(e) => internal(e.into()),
+    }
+}
+
 // ---- skills and the Market ---------------------------------------------------
 
 fn is_agent(caller: &MaybeCaller) -> bool {
@@ -1380,6 +1391,12 @@ async fn market_detail(State(s): State<AppState>, Path(name): Path<String>) -> R
                     let pack = crate::filterpack::parse(&bytes).map_err(|e| anyhow::anyhow!(e))?;
                     let filters: Vec<_> = pack.doc.filters.iter().map(|f| json!({ "id": f.id, "label": f.label, "query": f.query })).collect();
                     json!({ "filters": filters })
+                }
+                registry::Kind::Detectors => {
+                    let pack = crate::detectorpack::parse(&bytes).map_err(|e| anyhow::anyhow!(e))?;
+                    let detectors: Vec<_> =
+                        pack.doc.detectors.iter().map(|d| json!({ "id": d.id, "chip": d.suggest.chip, "handler": d.suggest.handler })).collect();
+                    json!({ "detectors": detectors })
                 }
                 registry::Kind::List => {
                     let pack = crate::listpack::parse(&bytes).map_err(|e| anyhow::anyhow!(e))?;

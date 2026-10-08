@@ -114,10 +114,11 @@ code, .mono { font-family: var(--mono); }
 .chip.k-bad span:first-child::before, .chip.k-warn span:first-child::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--crit); }
 .chip.k-warn span:first-child::before { background: var(--orange); }
 .chip.k-neg { color: var(--fg-3); }
-.chip.k-access span:first-child::before, .chip.k-bench span:first-child::before, .chip.k-user span:first-child::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+.chip.k-access span:first-child::before, .chip.k-bench span:first-child::before, .chip.k-user span:first-child::before, .chip.k-scan span:first-child::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
 .chip.k-access span:first-child::before { background: var(--info); }
 .chip.k-bench span:first-child::before { background: var(--accent); }
 .chip.k-user span:first-child::before { background: var(--ok); }
+.chip.k-scan span:first-child::before { background: var(--violet); }
 .chip:hover { color: var(--fg); border-color: var(--line); }
 .chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .chip.on .n { color: var(--accent); }
@@ -1015,6 +1016,12 @@ input.num { width: 72px; }
 .scanrow select, .scanrow input[type='text'], .scanrow input:not([type]) { min-width: 220px; }
 .linklike { font-family: var(--mono); font-size: 11px; color: var(--accent); border: 1px solid var(--line-2); border-radius: 6px; padding: 2px 8px; background: var(--surface-2); }
 .linklike:hover { border-color: var(--accent); }
+.scanfocus { border-left: 3px solid var(--violet); }
+.scanfocus .focusrow { display: flex; align-items: center; gap: 8px; margin: 2px 0 6px; flex-wrap: wrap; }
+.scanfocus .focustag { font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--violet); background: var(--violet-soft); border-radius: 4px; padding: 1px 6px; }
+.scanfocus .focuspath { font-family: var(--mono); font-size: 12px; color: var(--fg); overflow-wrap: anywhere; }
+.scanfocus .focuscat { font-size: 11px; color: var(--fg-3); }
+.scanfocus .focusnote { font-size: 12px; margin: 0; }
 .scansug { display: flex; flex-direction: column; gap: 12px; }
 .scansigs { gap: 6px; }
 .scansig { display: flex; align-items: center; gap: 10px; font-size: 12px; }

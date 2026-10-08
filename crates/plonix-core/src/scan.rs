@@ -420,6 +420,22 @@ pub struct ScanRequest {
     /// A ceiling on how many requests the scan may send.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_requests: Option<usize>,
+    /// When non-empty, the scan is focused on just these endpoints: injecting
+    /// tactics are aimed only at the matching discovered endpoints rather than
+    /// every endpoint on the host. This only ever narrows a scan, never widens
+    /// it — scope is still enforced on every send. Paths are matched after the
+    /// same folding the store applies to discovered endpoints, so a selector
+    /// like `/orders/123` lines up with the folded `/orders/{id}`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub endpoints: Vec<EndpointSel>,
+}
+
+/// An endpoint a focused scan is aimed at: a method and a path. Used only to
+/// narrow which discovered endpoints injecting tactics act on.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EndpointSel {
+    pub method: String,
+    pub path: String,
 }
 
 /// A finding a scan recorded.

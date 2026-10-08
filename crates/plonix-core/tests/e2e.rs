@@ -347,6 +347,57 @@ async fn active_scan_finds_a_real_exposure_and_stays_in_scope() {
 }
 
 #[tokio::test]
+async fn a_focused_scan_only_aims_at_the_chosen_endpoint() {
+    use plonix_core::scan::{EndpointSel, ScanRequest};
+
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let up = serve_http().await;
+    let r = start(&home, None).await;
+
+    // Two discovered endpoints: /echo reflects its input, /site/b does not.
+    via_proxy(r.proxy_addr, &format!("http://localhost:{}/echo?q=1", up.port()), &[]).await;
+    via_proxy(r.proxy_addr, &format!("http://localhost:{}/site/b?id=1", up.port()), &[]).await;
+    wait_for_count(&r.engine, 2).await;
+    r.engine.decide("localhost", Decision::Accepted, false, "").unwrap();
+
+    let reflected = |rep: plonix_core::scan::ScanReport| rep.findings.into_iter().filter(|f| f.title.contains("reflected")).count();
+
+    // Focused on the reflecting endpoint: the reflected-parameter check fires.
+    let on_echo = r
+        .engine
+        .scan(
+            ScanRequest {
+                host: "localhost".into(),
+                tactics: vec!["reflected-parameter".into()],
+                endpoints: vec![EndpointSel { method: "GET".into(), path: "/echo".into() }],
+                ..Default::default()
+            },
+            "scan",
+        )
+        .await
+        .unwrap();
+    assert!(reflected(on_echo) >= 1, "focusing on /echo should surface the reflected-parameter finding");
+
+    // Focused on the other endpoint only: the check never touches /echo, so
+    // nothing reflects — proof the scan was narrowed to the chosen endpoint.
+    let on_other = r
+        .engine
+        .scan(
+            ScanRequest {
+                host: "localhost".into(),
+                tactics: vec!["reflected-parameter".into()],
+                endpoints: vec![EndpointSel { method: "GET".into(), path: "/site/b".into() }],
+                ..Default::default()
+            },
+            "scan",
+        )
+        .await
+        .unwrap();
+    assert_eq!(reflected(on_other), 0, "focusing on /site/b must not probe /echo");
+}
+
+#[tokio::test]
 async fn payload_run_feeds_positions_and_stays_in_scope() {
     use plonix_core::runs::{Payloads, RunMode, RunRequest};
 

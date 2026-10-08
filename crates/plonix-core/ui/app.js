@@ -1713,6 +1713,13 @@ function rowMenu(e, ex) {
     if (idT) actions.push({ label: 'Check this id across users', run: () => startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}` }) });
     actions.push({ label: 'Replay signed out', run: () => startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}`, onlyAnon: true }) });
   }
+  if (decide(ex.host) === 'accepted') {
+    const leads = scanLeadsFor(ex);
+    actions.push({ label: leads.length ? leads[0].chip : 'Scan this endpoint', run: () => scanEndpoint(ex, leads[0] || null) });
+    for (const { d, cap } of detectorLeadsSync(ex)) {
+      actions.push({ label: fillTemplate(d.suggest.chip, cap), run: () => runDetectorLead(ex, d, cap) });
+    }
+  }
   const groups = [
     actions,
     both('host:' + ex.host, ex.host),
@@ -2448,6 +2455,334 @@ function looksLikeApiSpec(ex) {
   return !!t && t.length < 8_000_000 && /"(openapi|swagger)"\s*:/.test(t.slice(0, 4000)) && /"paths"\s*:/.test(t);
 }
 
+/* ---------- Leads into the Scans tab ----------
+   Some endpoint shapes have a natural follow-up that lives in Scans: a file
+   upload, an endpoint that takes inputs. Rather than "scan the whole host",
+   these leads hand exactly the one endpoint to Scans with the fitting checks
+   pre-picked, so the researcher reviews and runs — the human decides, nothing
+   fires on its own. Each lead is a label plus the OWASP categories to focus;
+   coverage stays at the category level, concrete checks come from the Market. */
+
+const UPLOAD_PATH = /\/(upload|uploads|file|files|attachment|attachments|media|document|documents|import|avatar|avatars|photo|photos|image|images)(?:\/|$|\?)/i;
+
+/** An endpoint that takes a file — the "what does it accept, and what happens then?" smell. */
+function uploadTarget(ex) {
+  if (!/^(POST|PUT|PATCH)$/i.test(ex.method || '')) return null;
+  const ct = (header(ex.req_headers, 'content-type') || '').toLowerCase();
+  if (ct.includes('multipart/form-data')) return { how: 'sends a multipart form, the usual shape of a file upload' };
+  if (/\bfilename\s*=/.test(ex.req_text || '')) return { how: 'carries a filename in the body' };
+  if (ct.includes('application/octet-stream')) return { how: 'posts a raw file body' };
+  if (UPLOAD_PATH.test(ex.path || '')) return { how: 'is a write to an upload-shaped path' };
+  return null;
+}
+
+/** Whether a request carries inputs worth checking how the server handles. */
+function hasInputs(ex) {
+  if (queryPairsOf(ex).length) return true;
+  const rb = ex.req_text || '';
+  return rb.length < 200_000 && /[^&=]=[^&=]/.test(rb) && !/^[[{]/.test(rb.trim());
+}
+
+/** Does a value look like a hostname, URL or IP the server might fetch? */
+function looksLikeHostOrUrl(v) {
+  const s = (v || '').trim();
+  if (s.length < 4 || s.length > 2048 || /\s|@/.test(s)) return null;
+  if (/^(https?:)?\/\/[^/\s]/i.test(s)) return 'a URL';
+  if (/^\d{1,3}(\.\d{1,3}){3}(:\d+)?(\/|$)/.test(s)) return 'an IP address';
+  // A bare hostname: dotted, ending in an alphabetic label, not a file name.
+  if (/^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(:\d+)?(\/|$)/i.test(s) && !/\.(js|css|png|jpe?g|gif|svg|webp|woff2?|map|json|xml|txt|ico)$/i.test(s)) return 'a hostname';
+  return null;
+}
+
+/** An input whose value points at another server — the "does it fetch this?" smell. */
+function ssrfTarget(ex) {
+  for (const [k, v] of queryPairsOf(ex)) {
+    const what = looksLikeHostOrUrl(v);
+    if (what) return { name: k, where: `the "${k}" parameter`, what, value: v };
+  }
+  const rb = ex.req_text || '';
+  if (rb.length < 100_000 && /[=&]/.test(rb) && !/^[[{]/.test(rb.trim())) {
+    for (const part of rb.split('&')) {
+      const i = part.indexOf('=');
+      if (i <= 0) continue;
+      const dec = (s) => { try { return decodeURIComponent(s.replace(/\+/g, ' ')); } catch (_) { return s; } };
+      const k = dec(part.slice(0, i));
+      const what = looksLikeHostOrUrl(dec(part.slice(i + 1)));
+      if (what) return { name: k, where: `the "${k}" field`, what, value: dec(part.slice(i + 1)) };
+    }
+  }
+  return null;
+}
+
+/**
+ * The single most specific follow-up for this endpoint that belongs in Scans,
+ * as a one-item list (or none). Self-describing so the chip and the Scans focus
+ * banner can explain exactly what will run. `categories` are OWASP ids to
+ * pre-pick; an empty array pre-picks none. Order: the most specific wins.
+ */
+function scanLeadsFor(ex) {
+  if (!ex || decide(ex.host) !== 'accepted') return [];
+  const where = `${ex.method} ${ex.path}`;
+  const up = uploadTarget(ex);
+  if (up) {
+    return [{
+      kind: 'upload',
+      chip: 'Check this upload in Scans',
+      focus: 'file handling',
+      categories: [],
+      title: `an upload endpoint (${where})`,
+      why: `This ${up.how}. Open it in Scans to check how the upload is handled — allowed types, where files land, what the server does with them.`,
+      note: 'Plonix has no built-in file-handling check yet, so nothing is pre-picked here. Add a file-handling check from the Market, or experiment with the upload field on the Bench.',
+    }];
+  }
+  const ssrf = ssrfTarget(ex);
+  if (ssrf) {
+    return [{
+      kind: 'ssrf',
+      chip: 'Scan this input for SSRF',
+      focus: 'server-side requests (SSRF)',
+      categories: ['A10'],
+      title: `server-side requests on ${where}`,
+      why: `${ssrf.where} carries ${ssrf.what} ("${ssrf.value.slice(0, 40)}") that the server may fetch. Open it in Scans to check whether it can be pointed at somewhere it shouldn't reach.`,
+      note: 'Plonix has no built-in SSRF check yet, so nothing is pre-picked here. Add one from the Market, or change the value on the Bench and watch where the request goes.',
+    }];
+  }
+  if (hasInputs(ex)) {
+    return [{
+      kind: 'inputs',
+      chip: "Scan this endpoint's inputs",
+      focus: 'input handling',
+      categories: ['A03'],
+      title: `input handling on ${where}`,
+      why: 'This endpoint takes inputs. Open it in Scans to run the input-handling checks that fit, scoped to just this endpoint.',
+      note: '',
+    }];
+  }
+  return [];
+}
+
+/* ---------- Detector packs (Mind Reader suggestions as data) ----------
+   A detector is declarative: it recognizes a shape in the exchange and offers
+   a chip that hands off to another tab — an upload to check in Scans, a token
+   to tweak on the Bench, a cookie to write up as a finding. The engine only
+   serves the definitions; the matching runs here, next to the chips. A
+   detector can't run code or send anything: a match produces one suggestion
+   chip, and only for a host already in scope. Community packs plug in the same
+   way, so these grow without an app release. */
+
+let DETECTORS = null;
+let DETECTORS_PENDING = null;
+/** Loads the detectors in effect once, then serves them from memory. */
+async function loadDetectors() {
+  if (DETECTORS) return DETECTORS;
+  if (!DETECTORS_PENDING) {
+    DETECTORS_PENDING = api('/api/detectors')
+      .then((d) => ((DETECTORS = (d && d.detectors) || []), DETECTORS))
+      .catch(() => ((DETECTORS = []), DETECTORS));
+  }
+  return DETECTORS_PENDING;
+}
+
+const DET_RE_CACHE = new Map();
+/** A case-insensitive RegExp for a pattern, compiled once; null if invalid. */
+function detRe(p) {
+  if (DET_RE_CACHE.has(p)) return DET_RE_CACHE.get(p);
+  let re = null;
+  try {
+    re = new RegExp(p, 'i');
+  } catch (_) {
+    re = null;
+  }
+  DET_RE_CACHE.set(p, re);
+  return re;
+}
+
+/** Does a value look like a file path or name (and not a host or URL)? */
+function looksLikePathOrFile(v) {
+  const s = (v || '').trim();
+  if (s.length < 2 || s.length > 2048 || /\s/.test(s)) return null;
+  if (looksLikeHostOrUrl(s)) return null;
+  if (/(^|[/\\])\.\.([/\\]|$)/.test(s)) return 'a path that climbs directories';
+  if (/[/\\]/.test(s)) return 'a file path';
+  if (/^[\w.-]+\.[a-z0-9]{1,8}$/i.test(s)) return 'a file name';
+  return null;
+}
+
+/** Does a value look like a JWT (three base64url segments, the middle a claims set)? */
+function looksLikeJwt(v) {
+  return /eyj[a-z0-9_-]+\.eyj[a-z0-9_-]+\.[a-z0-9_-]+/i.test((v || '').trim()) ? 'a token' : null;
+}
+
+const DET_VALUE_CLASS = { host_or_url: looksLikeHostOrUrl, path_or_file: looksLikePathOrFile, jwt: looksLikeJwt };
+
+/** The request body as key/value pairs, when it is a urlencoded form. */
+function formPairsOf(ex) {
+  const rb = ex.req_text || '';
+  if (rb.length > 200_000 || !/[=&]/.test(rb) || /^[[{]/.test(rb.trim())) return [];
+  const dec = (s) => {
+    try {
+      return decodeURIComponent(s.replace(/\+/g, ' '));
+    } catch (_) {
+      return s;
+    }
+  };
+  const out = [];
+  for (const part of rb.split('&')) {
+    const i = part.indexOf('=');
+    if (i <= 0) continue;
+    out.push([dec(part.slice(0, i)), dec(part.slice(i + 1))]);
+  }
+  return out;
+}
+
+/** Whether a header condition holds. The header must exist; then any sub-test given must pass. */
+function headerCondMatch(headers, c) {
+  const vals = (headers || []).filter(([k]) => (k || '').toLowerCase() === c.name.toLowerCase()).map(([, v]) => v || '');
+  if (!vals.length) return false;
+  if (c.contains && !vals.some((v) => v.toLowerCase().includes(c.contains.toLowerCase()))) return false;
+  if (c.regex) {
+    const re = detRe(c.regex);
+    if (!re || !vals.some((v) => re.test(v))) return false;
+  }
+  if (c.absent_regex) {
+    const re = detRe(c.absent_regex);
+    // The header is present, but at least one value lacks the pattern
+    // (e.g. one Set-Cookie has HttpOnly and another does not).
+    if (!re || !vals.some((v) => !re.test(v))) return false;
+  }
+  return true;
+}
+
+/** Runs a detector's `when` over an exchange. Returns a capture (to fill the
+ *  chip text) when every condition holds, or null. */
+function detectorMatch(ex, when) {
+  const cap = { method: ex.method || '', path: ex.path || '' };
+  if (when.method && when.method.length && !when.method.some((m) => m.toUpperCase() === (ex.method || '').toUpperCase())) return null;
+  if (when.req_content_type) {
+    const ct = (header(ex.req_headers, 'content-type') || '').toLowerCase();
+    if (!ct.includes(when.req_content_type.toLowerCase())) return null;
+    cap.ct = ct;
+  }
+  if (when.resp_content_type) {
+    const ct = (header(ex.resp_headers, 'content-type') || '').toLowerCase();
+    if (!ct.includes(when.resp_content_type.toLowerCase())) return null;
+    cap.ct = ct;
+  }
+  if (when.path_regex) {
+    const re = detRe(when.path_regex);
+    if (!re || !re.test(ex.path || '')) return null;
+  }
+  if (when.req_body_regex) {
+    const re = detRe(when.req_body_regex);
+    if (!re || !re.test((ex.req_text || '').slice(0, 200_000))) return null;
+  }
+  if (when.resp_body_regex) {
+    const re = detRe(when.resp_body_regex);
+    if (!re || !re.test((ex.resp_text || '').slice(0, 200_000))) return null;
+  }
+  if (when.req_header && !headerCondMatch(ex.req_headers, when.req_header)) return null;
+  if (when.resp_header && !headerCondMatch(ex.resp_headers, when.resp_header)) return null;
+  if (when.status) {
+    const s = ex.status || 0;
+    if (when.status.min != null && s < when.status.min) return null;
+    if (when.status.max != null && s > when.status.max) return null;
+  }
+  if (when.param) {
+    const test = DET_VALUE_CLASS[when.param.value_class];
+    if (!test) return null;
+    const places = when.param.in && when.param.in.length ? when.param.in : ['query', 'body'];
+    const pairs = [];
+    if (places.includes('query')) pairs.push(...queryPairsOf(ex));
+    if (places.includes('body')) pairs.push(...formPairsOf(ex));
+    let hit = null;
+    for (const [k, v] of pairs) {
+      const what = test(v);
+      if (what) {
+        hit = { param: k, value: v, what };
+        break;
+      }
+    }
+    if (!hit) return null;
+    cap.param = hit.param;
+    cap.value = hit.value;
+    cap.what = hit.what;
+  }
+  return cap;
+}
+
+/** Fills `{method}`, `{path}`, `{param}`, `{value}`, `{ct}`, `{what}` in a string. */
+function fillTemplate(s, cap) {
+  if (!s) return s;
+  return s.replace(/\{(method|path|param|value|ct|what)\}/g, (_, k) => {
+    const v = cap[k] != null ? String(cap[k]) : '';
+    return k === 'value' ? v.slice(0, 60) : v;
+  });
+}
+
+/** Detector suggestions for this exchange, already in priority order. Each is
+ *  the served detector plus the capture used to fill its text. In-scope only. */
+async function detectorLeads(ex) {
+  if (!ex || decide(ex.host) !== 'accepted') return [];
+  const defs = await loadDetectors();
+  const out = [];
+  for (const d of defs) {
+    // An access hand-off only makes sense when the Access check is switched on.
+    if (d.suggest.handler === 'access' && !toolOn('access-check')) continue;
+    const cap = detectorMatch(ex, d.when || {});
+    if (cap) out.push({ d, cap });
+  }
+  return out;
+}
+
+/** Detector suggestions without awaiting: used where a menu is built on the
+ *  spot. Returns nothing until the detectors have loaded (kicking that off),
+ *  which they have after the first Lens draw. */
+function detectorLeadsSync(ex) {
+  if (!ex || decide(ex.host) !== 'accepted') return [];
+  if (!DETECTORS) {
+    loadDetectors();
+    return [];
+  }
+  const out = [];
+  for (const d of DETECTORS) {
+    if (d.suggest.handler === 'access' && !toolOn('access-check')) continue;
+    const cap = detectorMatch(ex, d.when || {});
+    if (cap) out.push({ d, cap });
+  }
+  return out;
+}
+
+const DET_CHIP_CLASS = { scan: 'k-scan', bench: 'k-bench', finding: 'k-warn', access: 'k-access' };
+
+/** Acts on a detector suggestion: pre-fills the handler's tab, nothing is sent. */
+function runDetectorLead(ex, d, cap) {
+  const s = d.suggest;
+  const title = fillTemplate(s.title, cap);
+  const note = fillTemplate(s.note, cap);
+  switch (s.handler) {
+    case 'scan':
+      scanEndpoint(ex, {
+        kind: d.id,
+        chip: fillTemplate(s.chip, cap),
+        focus: s.focus,
+        categories: Array.isArray(s.categories) ? s.categories : [],
+        title,
+        why: fillTemplate(s.why, cap),
+        note,
+      });
+      break;
+    case 'bench':
+      benchWithNote(ex.id, note);
+      break;
+    case 'finding':
+      findingForm(null, [ex.id], title, { severity: s.severity, note });
+      break;
+    case 'access':
+      startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}`, onlyAnon: s.mode === 'anon' });
+      break;
+  }
+}
+
 /** The "Suggested" row under the Lens header. Every chip is one click to act on, and nothing is sent until clicked. */
 async function drawLensSuggestions(slot, ex, list) {
   const chips = [];
@@ -2496,6 +2831,17 @@ async function drawLensSuggestions(slot, ex, list) {
     // GraphQL — open it on the Bench like any other request to explore.
     if (isGraphql(ex)) {
       chips.push(h('button', { class: 'chip k-bench', title: 'Open this GraphQL request on the Bench to edit the operation and explore the schema.', onclick: () => benchWithNote(ex.id, 'GraphQL endpoint — edit the operation to explore what it exposes.') }, h('span', { text: 'GraphQL → Bench' })));
+    }
+    // Something on this endpoint is worth taking into Scans, scoped to it.
+    for (const lead of scanLeadsFor(ex)) {
+      chips.push(h('button', { class: 'chip k-scan', title: lead.why, onclick: () => scanEndpoint(ex, lead) }, h('span', { text: lead.chip })));
+    }
+    // Detector packs: the same idea as data, so the community can add more.
+    for (const { d, cap } of await detectorLeads(ex)) {
+      const title = fillTemplate(d.suggest.why || d.suggest.note || d.suggest.title || d.suggest.chip, cap);
+      chips.push(
+        h('button', { class: `chip ${DET_CHIP_CLASS[d.suggest.handler] || ''}`, title, onclick: () => runDetectorLead(ex, d, cap) }, h('span', { text: fillTemplate(d.suggest.chip, cap) })),
+      );
     }
   }
   if (looksLikeApiSpec(ex)) {
@@ -6056,7 +6402,42 @@ function findingForm(f, ids = [], title = '', hint = null) {
  * of Plonix, so nothing ever leaves the hosts you accepted. Any issue a scan
  * records is a normal finding, editable on the Findings screen.
  */
-const SC = { host: null, hosts: [], suggest: null, suggestErr: null, picks: null, intrusive: false, running: false, report: null, crawl: null, crawling: false, crawlStart: '/', crawlBrowser: false, crawlClick: false };
+const SC = { host: null, hosts: [], suggest: null, suggestErr: null, picks: null, intrusive: false, running: false, report: null, focus: null, crawl: null, crawling: false, crawlStart: '/', crawlBrowser: false, crawlClick: false };
+
+/**
+ * Hands one endpoint to Scans, focused: the scan is narrowed to this endpoint
+ * (the engine aims injecting checks only here) and the checks that fit the
+ * lead are pre-picked. Nothing runs until the researcher presses Run scan.
+ */
+function scanEndpoint(ex, lead) {
+  SC.host = ex.host;
+  SC.focus = {
+    method: ex.method,
+    path: ex.path,
+    label: lead ? lead.focus : '',
+    // An array of OWASP ids pre-picks the checks that match (an empty array
+    // pre-picks none); null, for a plain "scan this endpoint", pre-picks every
+    // recommended check, aimed at this endpoint.
+    categories: lead ? lead.categories || [] : null,
+    title: lead ? lead.title : `${ex.method} ${ex.path}`,
+    note: lead ? lead.note : '',
+  };
+  SC.suggest = null;
+  SC.report = null;
+  SC.crawl = null;
+  SC.running = false;
+  leaveTo('scans');
+}
+
+/** Drops the endpoint focus and goes back to scanning the whole host. */
+function clearScanFocus() {
+  SC.focus = null;
+  if (SC.suggest) {
+    SC.picks = new Set(SC.suggest.recommended.map((t) => t.id));
+    SC.intrusive = false;
+  }
+  drawScans();
+}
 
 const INTRU_LABEL = { passive: 'Passive', safe: 'Safe', active: 'Active', intrusive: 'Intrusive' };
 const INTRU_TAG = { passive: 'in', safe: 'in', active: 'upd', intrusive: 'rej' };
@@ -6782,7 +7163,13 @@ async function loadSuggest() {
   if (SC.host !== host || S.view !== 'scans') return;
   SC.suggest = sug;
   // Recommended checks start selected; intrusive ones stay off until opted in.
-  SC.picks = new Set(sug.recommended.map((t) => t.id));
+  // Under a focus, `categories` is an array of OWASP ids to pre-pick (empty
+  // picks none — e.g. a shape Plonix has no built-in check for yet), or null
+  // for "every recommended check, aimed at this endpoint".
+  const cats = SC.focus ? SC.focus.categories : null;
+  const fits = (t) => (t.owasp || []).some((o) => (cats || []).some((c) => o === c || o.startsWith(c)));
+  const chosen = !SC.focus || cats === null ? sug.recommended : sug.recommended.filter(fits);
+  SC.picks = new Set(chosen.map((t) => t.id));
   SC.intrusive = false;
   drawScans();
 }
@@ -6815,6 +7202,7 @@ function drawScans() {
         SC.suggest = null;
         SC.report = null;
         SC.crawl = null;
+        SC.focus = null;
         loadSuggest();
       },
     },
@@ -6827,7 +7215,20 @@ function drawScans() {
     h('div', { class: 'scanrow' }, h('label', { class: 'muted', text: 'Host' }), sel),
     h('p', { class: 'muted', text: 'Only accepted, in-scope hosts appear here.' }),
   );
-  clear(box, targetCard, scanSuggestSection(), scanCrawlSection());
+  clear(box, scanFocusBanner(), targetCard, scanSuggestSection(), scanCrawlSection());
+}
+
+/** When a focus is set, a banner naming the one endpoint the scan is scoped to. */
+function scanFocusBanner() {
+  const f = SC.focus;
+  if (!f) return null;
+  return h(
+    'div',
+    { class: 'card scanfocus' },
+    h('div', { class: 'sechead' }, h('h3', { text: 'Focused on one endpoint' }), h('span', { class: 'shacts' }, h('button', { class: 'btn sm', text: 'Scan the whole host', onclick: clearScanFocus }))),
+    h('div', { class: 'focusrow' }, h('span', { class: 'focustag', text: f.method }), h('code', { class: 'focuspath', text: f.path }), f.label ? h('span', { class: 'focuscat', text: f.label }) : null),
+    h('p', { class: 'muted focusnote', text: f.note || 'The scan is aimed at this endpoint. The checks below are pre-picked for it — review and run.' }),
+  );
 }
 
 function scanSuggestSection() {
@@ -6954,8 +7355,10 @@ async function runScan() {
   SC.running = true;
   SC.report = null;
   drawScans();
+  const body = { host: SC.host, tactics, include_intrusive: SC.intrusive };
+  if (SC.focus) body.endpoints = [{ method: SC.focus.method, path: SC.focus.path }];
   try {
-    SC.report = await api('/api/scan', { method: 'POST', body: { host: SC.host, tactics, include_intrusive: SC.intrusive } });
+    SC.report = await api('/api/scan', { method: 'POST', body });
   } catch (e) {
     SC.running = false;
     drawScans();

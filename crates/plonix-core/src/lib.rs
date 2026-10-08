@@ -34,6 +34,7 @@ pub mod intercept;
 pub mod market;
 pub mod mcp;
 pub mod extension;
+pub mod detectorpack;
 pub mod filterpack;
 pub mod har;
 pub mod hub;

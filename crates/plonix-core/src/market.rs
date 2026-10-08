@@ -29,6 +29,7 @@ use serde_json::Value;
 
 use crate::detect::clean;
 use crate::extension::{self, Capability, Consent, ExtensionLibrary};
+use crate::detectorpack::{self, DetectorLibrary};
 use crate::filterpack::{self, FilterLibrary};
 use crate::listpack::{self, ListLibrary};
 use crate::paths::{Home, write_private};
@@ -52,6 +53,7 @@ pub const SNAPSHOT: &[(&str, &str)] = &[
     ("packs/admin-panels.json", include_str!("../../../store/packs/admin-panels.json")),
     ("filterpacks/common.json", include_str!("../../../store/filterpacks/common.json")),
     ("filterpacks/leaks.json", include_str!("../../../store/filterpacks/leaks.json")),
+    ("detectorpacks/mind-reader.json", include_str!("../../../store/detectorpacks/mind-reader.json")),
     ("lists/starter-lists.json", include_str!("../../../store/lists/starter-lists.json")),
     ("lists/extra-wordlists.json", include_str!("../../../store/lists/extra-wordlists.json")),
     ("platforms/hackerone.json", include_str!("../../../store/platforms/hackerone.json")),
@@ -278,6 +280,7 @@ pub fn describe(kind: Kind, bytes: &[u8]) -> Result<(String, String), String> {
     match kind {
         Kind::Rules => rulepack::parse(bytes).map(|x| (x.doc.name, x.doc.version)).map_err(|e| e.to_string()),
         Kind::Filters => filterpack::parse(bytes).map(|x| (x.doc.name, x.doc.version)),
+        Kind::Detectors => detectorpack::parse(bytes).map(|x| (x.doc.name, x.doc.version)),
         Kind::List => listpack::parse(bytes).map(|x| (x.doc.name, x.doc.version)),
         Kind::Tool => tool::parse(bytes).map(|x| (x.doc.name, x.doc.version)),
         Kind::Skill => skill::parse(bytes).map(|x| (x.name, x.version)),
@@ -370,6 +373,7 @@ fn open_at(loc: &Location, trusted: &[TrustedKey], allow_unsigned: bool) -> Resu
     };
     inject_builtin_tools(&mut index, &trust);
     inject_builtin_platforms(&mut index, &trust);
+    inject_builtin_detectors(&mut index, &trust);
     Ok(Catalog { origin: Origin::Remote(loc.clone()), index, trust, offline_reason: None })
 }
 
@@ -401,6 +405,34 @@ fn inject_builtin_platforms(index: &mut Index, trust: &Trust) {
     }
 }
 
+/// Lists the detector packs built into Plonix in the official Market. Like the
+/// built-in platforms, they ship inside Plonix, are not in the signed index,
+/// and adding one needs no new signature. Other catalogs never get them.
+fn inject_builtin_detectors(index: &mut Index, trust: &Trust) {
+    if !matches!(trust, Trust::Verified { key, .. } if key == registry::OFFICIAL_KEY) {
+        return;
+    }
+    for (name, text) in detectorpack::BUILTIN {
+        if index.get(name).is_some() {
+            continue;
+        }
+        let Ok(pack) = detectorpack::parse(text.as_bytes()) else { continue };
+        let d = pack.doc;
+        index.packages.push(Package {
+            name: d.name,
+            kind: Kind::Detectors,
+            version: d.version,
+            description: d.description,
+            author: d.author,
+            url: format!("detectorpacks/{name}.json"),
+            sha256: pack.sha256,
+            homepage: d.homepage,
+            about: vec![],
+            requires: vec![],
+        });
+    }
+}
+
 /// The copy of the Plonix Market built into this Plonix.
 pub fn bundled(trusted: &[TrustedKey]) -> Result<Catalog> {
     let file = |name: &str| SNAPSHOT.iter().find(|(p, _)| *p == name).map(|(_, t)| t.as_bytes()).unwrap_or_default();
@@ -410,6 +442,7 @@ pub fn bundled(trusted: &[TrustedKey]) -> Result<Catalog> {
     let trust = Trust::Verified { key: key.key, publisher: key.publisher };
     inject_builtin_tools(&mut index, &trust);
     inject_builtin_platforms(&mut index, &trust);
+    inject_builtin_detectors(&mut index, &trust);
     Ok(Catalog { origin: Origin::Bundled, index, trust, offline_reason: None })
 }
 
@@ -594,6 +627,7 @@ pub struct Market {
     home: Home,
     pub rules: Library,
     pub filters: FilterLibrary,
+    pub detectors: DetectorLibrary,
     pub lists: ListLibrary,
     pub tools: ToolLibrary,
     pub skills: SkillLibrary,
@@ -607,6 +641,7 @@ impl Market {
             home: home.clone(),
             rules: Library::new(home),
             filters: FilterLibrary::new(home),
+            detectors: DetectorLibrary::new(home),
             lists: ListLibrary::new(home),
             tools: ToolLibrary::new(home),
             skills: SkillLibrary::new(home),
@@ -667,6 +702,7 @@ impl Market {
         let mut v = vec![];
         v.extend(self.rules.installed().into_iter().map(|i| (Kind::Rules, i)));
         v.extend(self.filters.installed().into_iter().map(|i| (Kind::Filters, i)));
+        v.extend(self.detectors.installed().into_iter().map(|i| (Kind::Detectors, i)));
         v.extend(self.lists.installed().into_iter().map(|i| (Kind::List, i)));
         v.extend(self.tools.installed().into_iter().map(|i| (Kind::Tool, i)));
         v.extend(self.skills.installed().into_iter().map(|i| (Kind::Skill, i)));
@@ -767,6 +803,8 @@ pub fn detect_kind(bytes: &[u8]) -> Result<Kind, String> {
         Ok(Kind::Rules)
     } else if v.get("plonix_filters").is_some() {
         Ok(Kind::Filters)
+    } else if v.get("plonix_detectors").is_some() {
+        Ok(Kind::Detectors)
     } else if v.get("plonix_lists").is_some() {
         Ok(Kind::List)
     } else if v.get("plonix_platform").is_some() {
@@ -821,6 +859,14 @@ impl Market {
                     vec![format!("Adds {} named Traffic filters. They can only narrow what you see.", p.doc.filters.len())],
                 )
             }
+            Kind::Detectors => {
+                let p = detectorpack::parse(&bytes)?;
+                (
+                    p.doc.description.clone(),
+                    p.doc.author.clone(),
+                    vec![format!("Adds {} Mind Reader suggestions. Data only: each can only offer a chip that pre-fills another tab, never act on its own.", p.doc.detectors.len())],
+                )
+            }
             Kind::List => {
                 let p = listpack::parse(&bytes)?;
                 (
@@ -869,6 +915,7 @@ impl Market {
         let previous = match ext.kind {
             Kind::Rules => self.rules.install(&ext.bytes, src, Some(&ext.sha256))?.1,
             Kind::Filters => self.filters.install(&ext.bytes, src, Some(&ext.sha256))?.1,
+            Kind::Detectors => self.detectors.install(&ext.bytes, src, Some(&ext.sha256))?.1,
             Kind::List => self.lists.install(&ext.bytes, src, Some(&ext.sha256))?.1,
             Kind::Tool => self.tools.install(&ext.bytes, src, Some(&ext.sha256))?.1,
             Kind::Skill => self.skills.install(&ext.bytes, src, Some(&ext.sha256))?.1,
@@ -893,6 +940,7 @@ impl Market {
     fn local_listing(&self, cat: &Catalog) -> Vec<Listing> {
         let rules = self.rules.load();
         let filters = self.filters.load();
+        let detectors = self.detectors.load();
         let lists = self.lists.load();
         let skills = self.skills.load();
         let extensions = self.extensions.list();
@@ -905,6 +953,7 @@ impl Market {
             let (description, author) = match kind {
                 Kind::Rules => rules.packs.iter().find(|(_, i)| i.name == item.name).map(|(_, i)| (i.description.clone(), i.author.clone())),
                 Kind::Filters => filters.packs.iter().find(|i| i.name == item.name).map(|i| (i.description.clone(), i.author.clone())),
+                Kind::Detectors => detectors.packs.iter().find(|i| i.name == item.name).map(|i| (i.description.clone(), i.author.clone())),
                 Kind::List => lists.packs.iter().find(|i| i.name == item.name).map(|i| (i.description.clone(), i.author.clone())),
                 Kind::Skill => skills.get(&item.name).map(|(s, ..)| (s.description.clone(), s.author.clone())),
                 Kind::Extension => extensions.iter().find(|e| e.name == item.name && e.intact).map(|e| (e.description.clone(), e.author.clone())),
@@ -939,6 +988,7 @@ impl Market {
         let list = match kind {
             Kind::Rules => rulepack::BUILTIN,
             Kind::Filters => filterpack::BUILTIN,
+            Kind::Detectors => detectorpack::BUILTIN,
             Kind::List => listpack::BUILTIN,
             Kind::Skill => skill::BUILTIN,
             Kind::Platform => platform::BUILTIN,
@@ -951,6 +1001,7 @@ impl Market {
         match kind {
             Kind::Rules => self.rules.installed_version(name),
             Kind::Filters => self.filters.installed_version(name),
+            Kind::Detectors => self.detectors.installed_version(name),
             Kind::List => self.lists.installed_version(name),
             Kind::Tool => self.tools.installed_version(name),
             Kind::Skill => self.skills.installed_version(name),
@@ -1049,6 +1100,7 @@ impl Market {
             match (p.kind, bytes) {
                 (Kind::Rules, Some(b)) => drop(self.rules.install(&b, &source(p), Some(&p.sha256))?),
                 (Kind::Filters, Some(b)) => drop(self.filters.install(&b, &source(p), Some(&p.sha256))?),
+                (Kind::Detectors, Some(b)) => drop(self.detectors.install(&b, &source(p), Some(&p.sha256))?),
                 (Kind::List, Some(b)) => drop(self.lists.install(&b, &source(p), Some(&p.sha256))?),
                 (Kind::Tool, Some(b)) => drop(self.tools.install(&b, &source(p), Some(&p.sha256))?),
                 (Kind::Skill, Some(b)) => drop(self.skills.install(&b, &source(p), Some(&p.sha256))?),
@@ -1109,7 +1161,7 @@ impl Market {
         }
         let changes = self.remove_one(name)?;
         if changes.is_empty() {
-            for kind in [Kind::Rules, Kind::Filters, Kind::List, Kind::Tool, Kind::Skill, Kind::Extension, Kind::Platform] {
+            for kind in [Kind::Rules, Kind::Filters, Kind::Detectors, Kind::List, Kind::Tool, Kind::Skill, Kind::Extension, Kind::Platform] {
                 if Self::builtin(kind, name) {
                     bail!("`{name}` is a built-in {} and cannot be removed", kind.noun());
                 }
@@ -1127,11 +1179,12 @@ impl Market {
 
     fn remove_one(&self, name: &str) -> Result<Vec<Change>> {
         let mut changes = vec![];
-        for kind in [Kind::Rules, Kind::Filters, Kind::List, Kind::Tool, Kind::Skill, Kind::Extension, Kind::Platform] {
+        for kind in [Kind::Rules, Kind::Filters, Kind::Detectors, Kind::List, Kind::Tool, Kind::Skill, Kind::Extension, Kind::Platform] {
             let Some(version) = self.installed_version(kind, name) else { continue };
             match kind {
                 Kind::Rules => self.rules.remove(name)?,
                 Kind::Filters => self.filters.remove(name)?,
+                Kind::Detectors => self.detectors.remove(name)?,
                 Kind::List => self.lists.remove(name)?,
                 Kind::Extension => self.extensions.remove(name)?,
                 Kind::Platform => self.platforms.remove(name)?,

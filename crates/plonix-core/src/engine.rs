@@ -24,6 +24,7 @@ use crate::insight::{Category as InsightCategory, Insight, Side as InsightSide};
 use crate::sandbox;
 use crate::model::{Exchange, Headers, Source, WsMessage, now_ms};
 use crate::paths::{EngineInfo, Home};
+use crate::detectorpack::{DetectorLibrary, DetectorSet};
 use crate::filterpack::{FilterLibrary, FilterSet};
 use crate::listpack::{ListLibrary, ListSet};
 use crate::intercept::{InterceptOptions, Interceptor};
@@ -61,6 +62,7 @@ pub struct Engine {
     recorder_rx: Mutex<Option<mpsc::UnboundedReceiver<Queued>>>,
     detection: Mutex<DetectionState>,
     filters: Mutex<FilterState>,
+    detectors: Mutex<DetectorState>,
     lists: Mutex<ListState>,
     /// The listen address last asked for in the settings.
     applied_listen: Mutex<Option<SocketAddr>>,
@@ -163,6 +165,14 @@ struct FilterState {
     library: Option<FilterLibrary>,
     loaded_stamp: Option<Option<std::time::SystemTime>>,
     set: Arc<FilterSet>,
+}
+
+/// Detector packs in effect (Mind Reader suggestions), reloaded when packs change.
+#[derive(Default)]
+struct DetectorState {
+    library: Option<DetectorLibrary>,
+    loaded_stamp: Option<Option<std::time::SystemTime>>,
+    set: Arc<DetectorSet>,
 }
 
 /// Payload lists in effect for the Bench, reloaded when list packs change.
@@ -278,6 +288,7 @@ impl Engine {
             project_ref: OnceLock::new(),
             detection: Mutex::new(DetectionState::default()),
             filters: Mutex::new(FilterState::default()),
+            detectors: Mutex::new(DetectorState::default()),
             lists: Mutex::new(ListState::default()),
             applied_listen: Mutex::new(None),
             overrides: Mutex::default(),
@@ -622,6 +633,32 @@ impl Engine {
             f.loaded_stamp = Some(stamp);
         }
         f.set.clone()
+    }
+
+    /// Loads installed detector packs from this library (the built-in pack is
+    /// always loaded).
+    pub fn set_detector_library(&self, library: DetectorLibrary) {
+        let mut d = self.detectors.lock().unwrap();
+        d.library = Some(library);
+        d.loaded_stamp = None;
+    }
+
+    /// Detectors in effect (Mind Reader suggestions), reloading if packs changed.
+    pub fn detectors(&self) -> Arc<DetectorSet> {
+        let mut d = self.detectors.lock().unwrap();
+        let stamp = d.library.as_ref().and_then(DetectorLibrary::stamp);
+        if d.loaded_stamp != Some(stamp) {
+            let set = match &d.library {
+                Some(lib) => lib.load(),
+                None => DetectorLibrary::at(std::path::Path::new("/nonexistent")).load(),
+            };
+            for p in &set.problems {
+                tracing::warn!("detectors: {p}");
+            }
+            d.set = Arc::new(set);
+            d.loaded_stamp = Some(stamp);
+        }
+        d.set.clone()
     }
 
     pub fn set_list_library(&self, library: ListLibrary) {
@@ -1149,7 +1186,16 @@ impl Engine {
             })
             .collect();
 
-        let endpoints = self.store.endpoints(&host).map_err(SendError::Other)?;
+        let mut endpoints = self.store.endpoints(&host).map_err(SendError::Other)?;
+        // A focused scan aims injecting tactics at only the chosen endpoints.
+        // Selector paths are folded the same way the store folds discovered
+        // ones, so `/orders/123` matches the folded `/orders/{id}`. This only
+        // narrows the target set; scope is still checked on every send.
+        if !req.endpoints.is_empty() {
+            let want: std::collections::BTreeSet<(String, String)> =
+                req.endpoints.iter().map(|e| (e.method.to_ascii_uppercase(), crate::store::fold_path(&e.path))).collect();
+            endpoints.retain(|e| want.contains(&(e.method.to_ascii_uppercase(), e.path.clone())));
+        }
         // Build the authority from captured traffic so a non-default port is
         // kept; fall back to https:443 for a host with nothing captured yet.
         let (scheme, port) = exchanges.first().map(|e| (e.scheme.clone(), e.port)).unwrap_or_else(|| ("https".into(), 443));
@@ -2096,6 +2142,7 @@ pub async fn start(config: &EngineConfig) -> Result<Running> {
     let engine = Engine::new(project.name(), store, ca, upstream)?;
     engine.set_rule_library(Library::new(&config.home));
     engine.set_filter_library(FilterLibrary::new(&config.home));
+    engine.set_detector_library(DetectorLibrary::new(&config.home));
     engine.set_list_library(ListLibrary::new(&config.home));
     engine.set_extension_library(ExtensionLibrary::new(&config.home));
     if project.file.demo {
