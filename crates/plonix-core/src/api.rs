@@ -1806,6 +1806,10 @@ struct OpenBody {
     /// Accept the target's domain (and subdomains) into scope first.
     #[serde(default = "yes")]
     scope: bool,
+    /// Open the saved user's own browser window instead: a profile of its
+    /// own whose traffic is sent and recorded as that user.
+    #[serde(default)]
+    as_user: Option<String>,
 }
 
 fn yes() -> bool {
@@ -1838,8 +1842,24 @@ async fn open_browser(State(s): State<AppState>, Json(b): Json<OpenBody>) -> Res
         );
         return (StatusCode::NOT_FOUND, Json(json!({ "error": msg, "code": "no_browser", "can_install": can_install }))).into_response();
     };
-    let profile = browser::profile_dir(&s.home, s.engine.project_ref.get().map(|p| p.dir.as_path()));
-    let launched = browser::launch(&profile, &found, &s.proxy_addr(), &s.engine.ca.spki_sha256(), &target.url);
+    let mut profile = browser::profile_dir(&s.home, s.engine.project_ref.get().map(|p| p.dir.as_path()));
+    let mut proxy = s.proxy_addr();
+    let mut as_user = Value::Null;
+    if let Some(id) = b.as_user.as_deref().filter(|id| !id.is_empty()) {
+        let user = match s.engine.store.saved_users() {
+            Ok(users) => users.into_iter().find(|u| u.id == id),
+            Err(e) => return internal(e),
+        };
+        let Some(user) = user else { return err(StatusCode::NOT_FOUND, "no_user", &format!("no saved user '{id}'")) };
+        proxy = match s.engine.user_proxy(&user.id).await {
+            Ok(a) => a.to_string(),
+            Err(e) => return internal(e),
+        };
+        // Ids are [a-z0-9-], so they make a safe folder name.
+        profile = std::path::PathBuf::from(format!("{}-{}", profile.display(), user.id));
+        as_user = json!({ "id": user.id, "name": user.name });
+    }
+    let launched = browser::launch(&profile, &found, &proxy, &s.engine.ca.spki_sha256(), &target.url);
     if let Err(e) = launched {
         return internal(e);
     }
@@ -1856,6 +1876,7 @@ async fn open_browser(State(s): State<AppState>, Json(b): Json<OpenBody>) -> Res
         "needs_trust": needs_trust,
         "can_trust": trust::supported(),
         "scope": rule,
+        "as_user": as_user,
     }))
     .into_response()
 }

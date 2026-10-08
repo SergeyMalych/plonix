@@ -50,9 +50,18 @@ struct Ctx {
     local: SocketAddr,
     /// Set inside a CONNECT tunnel: the scheme spoken inside it, the target host and port.
     tunnel: Option<(&'static str, String, u16)>,
+    /// The saved user whose own browser window this listener serves.
+    user: Option<String>,
 }
 
 pub async fn serve(listener: TcpListener, engine: Arc<Engine>) {
+    serve_as(listener, engine, None).await
+}
+
+/// Serves the proxy on `listener`. With `user`, it is that saved user's own
+/// browser window: its in-scope traffic is sent and recorded as the user, and
+/// the cookies servers set there are kept for the user too.
+pub async fn serve_as(listener: TcpListener, engine: Arc<Engine>, user: Option<String>) {
     let local = listener.local_addr().expect("bound listener");
     loop {
         let (stream, _) = match listener.accept().await {
@@ -65,7 +74,7 @@ pub async fn serve(listener: TcpListener, engine: Arc<Engine>) {
             }
         };
         stream.set_nodelay(true).ok();
-        let ctx = Ctx { engine: engine.clone(), local, tunnel: None };
+        let ctx = Ctx { engine: engine.clone(), local, tunnel: None, user: user.clone() };
         tokio::spawn(serve_conn(TokioIo::new(stream), ctx));
     }
 }
@@ -153,8 +162,12 @@ async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<ProxyResponse, Infal
         },
         taken: false,
         as_user: None,
+        pass_cookies: false,
     };
-    act_as_user(&ctx.engine, &mut outbound, &mut pending);
+    match &ctx.user {
+        Some(id) => window_user(&ctx.engine, id, &mut outbound, &mut pending),
+        None => act_as_user(&ctx.engine, &mut outbound, &mut pending),
+    }
 
     if req.version() <= http::Version::HTTP_11 && crate::websocket::is_handshake(req.headers()) {
         return Ok(websocket(req, ctx, outbound, pending).await);
@@ -233,6 +246,39 @@ fn act_as_user(engine: &Arc<Engine>, outbound: &mut OutboundRequest, pending: &m
     pending.ex.req_headers = outbound.headers.clone();
     pending.ex.replaced.push(format!("{}{}", crate::users::SENT_AS, user.name));
     pending.as_user = Some(user.id);
+}
+
+/// Traffic from a saved user's own browser window, to in-scope hosts: the
+/// window's session goes out as it is, filled in from the user's saved
+/// headers and cookies, and is recorded as sent by the user. The user keeps
+/// what the window sends, and the cookies servers set there (see `respond`).
+fn window_user(engine: &Arc<Engine>, id: &str, outbound: &mut OutboundRequest, pending: &mut Pending) {
+    if !engine.rules().in_scope(&pending.ex.host) {
+        return;
+    }
+    let user = match engine.store.saved_users() {
+        Ok(users) => match users.into_iter().find(|u| u.id == id) {
+            Some(u) => u,
+            None => return,
+        },
+        Err(e) => {
+            tracing::warn!("could not read saved user {id}: {e:#}");
+            return;
+        }
+    };
+    // What the window sends is the user's session now: a cookie set from
+    // JavaScript, a bearer token the page keeps in local storage.
+    if user.keep_fresh
+        && user.clone().learn_sent(&pending.ex.host, &outbound.headers, crate::users::now_secs())
+        && let Err(e) = engine.store.learn_sent(&user.id, &pending.ex.host, &outbound.headers)
+    {
+        tracing::warn!("saved user {id}: could not keep its session: {e:#}");
+    }
+    outbound.headers = user.window_headers(&pending.ex.host, &outbound.headers, crate::users::now_secs());
+    pending.ex.req_headers = outbound.headers.clone();
+    pending.ex.replaced.push(format!("{}{}", crate::users::SENT_AS, user.name));
+    pending.as_user = Some(user.id);
+    pending.pass_cookies = true;
 }
 
 /// Applies the match-and-replace rules to a request on its way out. The
@@ -566,7 +612,7 @@ fn deliver(status: u16, headers: Headers, body: RespBody, mut pending: Pending) 
     let mut builder = Response::builder().status(status);
     // Acting as a saved user, the browser's own cookies are kept out of it:
     // the user's cookies were updated from these instead (see `respond`).
-    let keep_cookies = pending.as_user.is_none();
+    let keep_cookies = pending.as_user.is_none() || pending.pass_cookies;
     for (k, v) in &headers {
         let k_low = k.to_ascii_lowercase();
         if !HOP_BY_HOP.contains(&k_low.as_str()) && (keep_cookies || k_low != "set-cookie") {
@@ -681,6 +727,9 @@ struct Pending {
     taken: bool,
     /// The saved user this request was sent as, if any.
     as_user: Option<String>,
+    /// The browser keeps the cookies servers set even though the request was
+    /// sent as a saved user: it is that user's own window.
+    pass_cookies: bool,
 }
 
 impl Pending {

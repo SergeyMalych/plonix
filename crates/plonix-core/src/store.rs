@@ -661,6 +661,19 @@ impl Store {
         Ok(())
     }
 
+    /// Takes the session a saved user's own browser window sent to `host`
+    /// into that user (see [`crate::users::SavedUser::learn_sent`]). Does
+    /// nothing for a user that is gone or does not keep its cookies fresh.
+    pub fn learn_sent(&self, id: &str, host: &str, sent: &[(String, String)]) -> Result<()> {
+        let _jar = USERS.lock().unwrap();
+        let mut users = self.saved_users()?;
+        let Some(u) = users.iter_mut().find(|u| u.id == id && u.keep_fresh) else { return Ok(()) };
+        if u.learn_sent(host, sent, crate::users::now_secs()) {
+            self.set_view_state("users", &serde_json::json!({ "users": users }))?;
+        }
+        Ok(())
+    }
+
     // ---- saved view state -------------------------------------------------
 
     /// Saved UI state of a view (e.g. its active filters), as JSON.
