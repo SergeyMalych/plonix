@@ -267,7 +267,7 @@ fn run(ctx: &Ctx, a: RunArgs) -> Result<()> {
         for f in &findings {
             println!("  #{:<5} {:<8} {}", f["id"].as_i64().unwrap_or(0), f["severity"].as_str().unwrap_or(""), f["title"].as_str().unwrap_or(""));
         }
-        println!("\nSee them with `plonix show <id>` or on the Findings screen.");
+        println!("\nSee them with `plonix findings show <id>` or on the Findings screen.");
     }
     for note in v["notes"].as_array().cloned().unwrap_or_default() {
         if let Some(n) = note.as_str() {

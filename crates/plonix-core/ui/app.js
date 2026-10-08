@@ -3220,7 +3220,7 @@ function curlFor(method, url, headers, body, binary) {
   const host = hostOf(url);
   const parts = ['curl'];
   const m = (method || 'GET').toUpperCase();
-  if (m !== 'GET' || (body && m !== 'POST')) parts.push('-X ' + m);
+  if (m !== 'GET' || (body && m !== 'POST')) parts.push('-X ' + shq(m));
   parts.push(shq(url));
   let compressed = false;
   for (const [k, v] of headers || []) {

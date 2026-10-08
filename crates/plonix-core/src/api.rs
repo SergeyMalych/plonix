@@ -216,6 +216,8 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/usage", post(usage_screen))
         .route("/api/shutdown", post(shutdown))
         .layer(middleware::from_fn_with_state(state.clone(), guard))
+        // `guard` already caps bodies at MAX_BODY; the extractors' own 2 MB default would refuse bigger HAR uploads.
+        .layer(axum::extract::DefaultBodyLimit::disable())
         .with_state(state)
 }
 
@@ -866,11 +868,14 @@ fn default_limit() -> usize {
 }
 
 async fn traffic(State(s): State<AppState>, caller: MaybeCaller, Query(p): Query<TrafficParams>) -> Response {
-    let q = if agent_in_scope_only(&s, &caller) { format!("{} scope:in", p.q) } else { p.q };
-    let q = match s.engine.filters().parse(&q) {
+    let mut q = match s.engine.filters().parse(&p.q) {
         Ok(q) => q,
         Err(e) => return err(StatusCode::BAD_REQUEST, "bad_query", &e.to_string()),
     };
+    // Added as a term, not as text, so nothing in the agent's query can swallow it.
+    if agent_in_scope_only(&s, &caller) {
+        q.terms.push(crate::query::Term { negate: false, field: crate::query::Field::Scope(true) });
+    }
     match s.engine.store.search_sorted(&q, &s.engine.rules(), p.sort.as_deref(), p.limit.min(5000), p.offset) {
         Ok((items, total)) => Json(json!({ "total": total, "items": items })).into_response(),
         Err(e) => internal(e),
@@ -1011,7 +1016,9 @@ async fn set_view_state(State(s): State<AppState>, Path(view): Path<String>, Jso
 }
 
 fn valid_view(view: &str) -> bool {
-    !view.is_empty() && view.len() <= 40 && view.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    // These names hold engine state (saved users, the program's guard, the exclusions prompt), not UI state.
+    !matches!(view, "users" | "program" | "exclusions")
+        && !view.is_empty() && view.len() <= 40 && view.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 async fn hosts(State(s): State<AppState>, caller: MaybeCaller) -> Response {
@@ -1142,7 +1149,10 @@ async fn scan_catalog(State(s): State<AppState>) -> Response {
     }
 }
 
-async fn scan_suggest(State(s): State<AppState>, Path(host): Path<String>) -> Response {
+async fn scan_suggest(State(s): State<AppState>, caller: MaybeCaller, Path(host): Path<String>) -> Response {
+    if agent_in_scope_only(&s, &caller) && !s.engine.rules().in_scope(&host) {
+        return outside_agent_data();
+    }
     let engine = s.engine.clone();
     match tokio::task::spawn_blocking(move || engine.scan_suggest(&host)).await {
         Ok(Ok(suggestion)) => Json(suggestion).into_response(),
@@ -1151,7 +1161,10 @@ async fn scan_suggest(State(s): State<AppState>, Path(host): Path<String>) -> Re
     }
 }
 
-async fn scan_plan(State(s): State<AppState>, Path(host): Path<String>) -> Response {
+async fn scan_plan(State(s): State<AppState>, caller: MaybeCaller, Path(host): Path<String>) -> Response {
+    if agent_in_scope_only(&s, &caller) && !s.engine.rules().in_scope(&host) {
+        return outside_agent_data();
+    }
     let engine = s.engine.clone();
     match tokio::task::spawn_blocking(move || engine.scan_plan(&host)).await {
         Ok(Ok(plan)) => Json(plan).into_response(),

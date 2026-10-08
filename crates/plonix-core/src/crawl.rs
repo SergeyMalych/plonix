@@ -110,7 +110,7 @@ impl CrawlReport {
 
 /// Extracts candidate link targets from `href`/`src` attributes.
 pub fn extract_links(html: &str) -> Vec<String> {
-    let body = &html[..html.len().min(MAX_BODY_SCAN)];
+    let body = &html[..html.floor_char_boundary(MAX_BODY_SCAN)];
     let re = link_re();
     let mut out = Vec::new();
     let mut seen = BTreeSet::new();
@@ -127,7 +127,7 @@ pub fn extract_links(html: &str) -> Vec<String> {
 
 /// Extracts forms: method, action and input/select/textarea names.
 pub fn extract_forms(html: &str) -> Vec<Form> {
-    let body = &html[..html.len().min(MAX_BODY_SCAN)];
+    let body = &html[..html.floor_char_boundary(MAX_BODY_SCAN)];
     let mut forms = Vec::new();
     for fc in form_re().captures_iter(body) {
         let tag = fc.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -429,6 +429,13 @@ fn field_re() -> Regex {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_pages_cut_on_a_character_boundary() {
+        let html = format!("{}<a href=\"/x\">", "€".repeat(MAX_BODY_SCAN));
+        assert!(extract_links(&html).is_empty());
+        assert!(extract_forms(&html).is_empty());
+    }
 
     #[test]
     fn extracts_links_from_href_and_src() {

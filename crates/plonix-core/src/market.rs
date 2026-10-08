@@ -452,7 +452,8 @@ const CACHE_TTL: Duration = Duration::from_secs(300);
 
 /// [`open`], reusing a catalog fetched in the last few minutes.
 pub fn open_cached(home: &Home, refresh: bool) -> Result<Arc<Catalog>> {
-    let key = format!("{}|{:?}", index_address(home, &OpenOptions::default()), MarketSettings::load(home).trusted_keys);
+    let settings = MarketSettings::load(home);
+    let key = format!("{}|{:?}|{}", index_address(home, &OpenOptions::default()), settings.trusted_keys, settings.allow_unsigned);
     if !refresh
         && let Some((at, k, c)) = CACHE.lock().unwrap().as_ref()
         && *k == key
