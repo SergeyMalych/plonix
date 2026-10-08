@@ -1294,7 +1294,7 @@ pub fn mime_kind(mime: &str) -> Option<String> {
 fn first_segment(path: &str) -> Option<String> {
     let seg = path.trim_start_matches('/').split(['/', '?']).next()?;
     let folded = fold_path(seg);
-    if seg.is_empty() || seg.contains('.') || folded == "{id}" || seg.len() > 40 {
+    if seg.is_empty() || seg.contains('.') || folded.starts_with('{') || seg.len() > 40 {
         return None;
     }
     Some(format!("/{seg}"))
@@ -1305,10 +1305,33 @@ pub fn fold_path(path: &str) -> String {
         .map(|seg| {
             let numeric = !seg.is_empty() && seg.chars().all(|c| c.is_ascii_digit());
             let hexish = seg.len() >= 16 && seg.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
-            if numeric || hexish { "{id}" } else { seg }
+            if numeric || hexish {
+                "{id}"
+            } else if is_token(seg) {
+                "{token}"
+            } else {
+                seg
+            }
         })
         .collect::<Vec<_>>()
         .join("/")
+}
+
+/// A long opaque segment such as a signed link, a session token or a JWT, as
+/// opposed to a readable name like `latest-delivery-notifications`.
+fn is_token(seg: &str) -> bool {
+    if seg.len() < 20 {
+        return false;
+    }
+    let jwt = seg.starts_with("eyJ") && seg.matches('.').count() == 2;
+    let charset = seg.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '='));
+    if !(jwt || charset) {
+        return false;
+    }
+    let upper = seg.chars().any(|c| c.is_ascii_uppercase());
+    let lower = seg.chars().any(|c| c.is_ascii_lowercase());
+    let digit = seg.chars().any(|c| c.is_ascii_digit());
+    jwt || (upper && lower && digit) || (digit && (upper || lower) && !seg.contains('-'))
 }
 
 fn param_names(query: &str, headers: &Headers, body: &[u8]) -> Vec<String> {
@@ -1338,6 +1361,18 @@ fn param_names(query: &str, headers: &Headers, body: &[u8]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opaque_segments_fold_into_tokens() {
+        let f = |p: &str| fold_path(p);
+        assert_eq!(f("/v1/orders/1042/invoice.pdf"), "/v1/orders/{id}/invoice.pdf");
+        assert_eq!(f("/dl/aW52b2ljZXMtMjAyNS0wOS1icmlnaHRjYXJ0/orders.csv"), "/dl/{token}/orders.csv");
+        assert_eq!(f("/s/k3j2h5g6l1m0n9b8v7c6x5z4"), "/s/{token}");
+        assert_eq!(f("/a/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl"), "/a/{token}");
+        for readable in ["/v1/carrier-updates/latest-delivery-attempt-notifications", "/p/trail-running-shoes-2025-edition", "/v1/openapi.json", "/brightcart-orders-export-2025-09.csv"] {
+            assert_eq!(f(readable), readable);
+        }
+    }
 
     fn sample(host: &str, method: &str, path: &str, status: u16, body: &str) -> Exchange {
         Exchange {
