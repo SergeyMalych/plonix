@@ -12,23 +12,6 @@
 'use strict';
 
 (function () {
-  function h(tag, props, ...kids) {
-    const el = document.createElement(tag);
-    for (const [k, v] of Object.entries(props || {})) {
-      if (v == null || v === false) continue;
-      if (k === 'class') el.className = v;
-      else if (k === 'text') el.textContent = v;
-      else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
-      else if (k in el && typeof v !== 'string') el[k] = v;
-      else el.setAttribute(k, v === true ? '' : v);
-    }
-    for (const kid of kids.flat(Infinity)) {
-      if (kid == null || kid === false) continue;
-      el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
-    }
-    return el;
-  }
-
   const LEVEL = { project: 'This project', global: 'All projects' };
   const APPLIES = { now: 'Saved. Changes apply right away.', next_open: 'Saved. Changes apply the next time the project opens.' };
 
@@ -199,5 +182,5 @@
     return { show };
   }
 
-  window.PlonixSettings = { render, h };
+  window.PlonixSettings = { render };
 })();

@@ -43,16 +43,19 @@ async fn serve_http() -> SocketAddr {
 /// A browser request through the proxy carrying its own cookie. Returns the
 /// body and whether the browser was handed a Set-Cookie.
 async fn browse(proxy: SocketAddr, url: &str) -> (String, bool) {
+    browse_with(proxy, url, Some("s=browser")).await
+}
+
+async fn browse_with(proxy: SocketAddr, url: &str, cookie: Option<&str>) -> (String, bool) {
     let tcp = TcpStream::connect(proxy).await.unwrap();
     let (mut sender, conn) = hyper::client::conn::http1::handshake::<_, Full<Bytes>>(TokioIo::new(tcp)).await.unwrap();
     tokio::spawn(conn);
     let uri: hyper::Uri = url.parse().unwrap();
-    let req = Request::builder()
-        .uri(url)
-        .header("host", uri.authority().unwrap().as_str())
-        .header("cookie", "s=browser")
-        .body(Full::new(Bytes::new()))
-        .unwrap();
+    let mut req = Request::builder().uri(url).header("host", uri.authority().unwrap().as_str());
+    if let Some(c) = cookie {
+        req = req.header("cookie", c);
+    }
+    let req = req.body(Full::new(Bytes::new())).unwrap();
     let resp = sender.send_request(req).await.unwrap();
     let set = resp.headers().contains_key("set-cookie");
     let body = resp.into_body().collect().await.unwrap().to_bytes();
@@ -144,4 +147,80 @@ async fn acting_as_a_saved_user_swaps_the_browser_session() {
     let s2 = s.clone();
     blocking(move || api(&s2, "PUT", "/api/users/acting", Some(json!({ "id": null })))).await.unwrap();
     assert_eq!(browse(s.proxy_addr(), &url("/")).await.0, "s=browser");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_saved_user_gets_a_browser_window_of_their_own() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().join("home") };
+    let p = Project::create(&home.root.join("work").join(project::slug("Windows")), "Windows").unwrap();
+    project::remember(&home, &p, false).unwrap();
+    let s = std::sync::Arc::new(session::open(&home, p, OpenOptions { api_port: Some(0), ..Default::default() }).await.unwrap());
+    let up = serve_http().await;
+    let url = |path: &str| format!("http://localhost:{}{path}", up.port());
+    let s2 = s.clone();
+    blocking(move || api(&s2, "PUT", "/api/users", Some(json!({ "users": [{ "name": "Maya", "headers": [["Cookie", "s=maya; theme=dark"]] }] }))))
+        .await
+        .unwrap();
+    s.engine.decide("localhost", Decision::Accepted, false, "").unwrap();
+
+    // Maya's window starts with her saved session.
+    let window = s.engine.user_proxy("maya").await.unwrap();
+    assert_ne!(window, s.proxy_addr());
+    assert_eq!(s.engine.user_proxy("maya").await.unwrap(), window, "one port per user, kept");
+    assert_eq!(browse_with(window, &url("/"), None).await.0, "s=maya; theme=dark");
+
+    // Signing in there keeps the window's own session, and Maya keeps the
+    // cookie the server set too, while the main browser stays as it was.
+    let (_, handed_to_browser) = browse_with(window, &url("/rotate"), Some("s=window")).await;
+    assert!(handed_to_browser, "the window keeps the cookies servers set");
+    assert_eq!(cookie(&s, "maya", "s").as_deref(), Some("rotated"));
+    assert_eq!(browse_with(window, &url("/"), Some("s=window")).await.0, "s=window; theme=dark");
+    assert_eq!(browse(s.proxy_addr(), &url("/")).await.0, "s=browser");
+    // What the window sends is kept too: a cookie set from JavaScript.
+    browse_with(window, &url("/"), Some("s=window; js=1")).await;
+    assert_eq!(cookie(&s, "maya", "js").as_deref(), Some("1"));
+    assert_eq!(cookie(&s, "maya", "s").as_deref(), Some("window"));
+    let mut rotate = None;
+    for _ in 0..200 {
+        rotate = s.engine.store.exchanges_after(0, 100).unwrap().into_iter().find(|e| e.path == "/rotate");
+        if rotate.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(rotate.expect("recorded").replaced.iter().any(|r| r.ends_with("Maya")), "recorded as sent by Maya");
+
+    // Opening it launches a browser of its own on that port and profile.
+    let args_file = dir.path().join("args.txt");
+    let fake = dir.path().join("fake-chrome");
+    std::fs::write(&fake, format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n", args_file.display())).unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    // SAFETY: no other test in this binary reads or writes the environment.
+    unsafe { std::env::set_var("PLONIX_BROWSER", &fake) };
+    let target = url("/login");
+    let s2 = s.clone();
+    let (opened, missing) = blocking(move || {
+        (
+            api(&s2, "POST", "/api/browser/open", Some(json!({ "target": target, "as_user": "maya" }))),
+            api(&s2, "POST", "/api/browser/open", Some(json!({ "target": "localhost", "as_user": "nobody" }))),
+        )
+    })
+    .await;
+    let opened = opened.unwrap();
+    assert_eq!(opened["as_user"]["name"], "Maya");
+    assert_eq!(missing.unwrap_err().0, 404);
+    let mut args = String::new();
+    for _ in 0..200 {
+        args = std::fs::read_to_string(&args_file).unwrap_or_default();
+        if args.contains("/login") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(args.contains(&format!("--proxy-server=http://{window}")), "{args}");
+    assert!(args.lines().any(|l| l.starts_with("--user-data-dir=") && l.ends_with("browser-maya")), "{args}");
 }

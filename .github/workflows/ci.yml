@@ -9,7 +9,49 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Website (site/), documentation (docs/) and Markdown changes don't need the
+  # Rust builds. The jobs below still report success when they skip, so
+  # required checks pass. Markdown that is compiled into Plonix (TERMS.md and
+  # anything under store/, community/ or crates/) counts as code. The docs job
+  # always runs: it checks site/docs against docs/.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.files.outputs.code }}
+    steps:
+      - id: files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -o pipefail
+          if [ "$EVENT" = pull_request ]; then
+            files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[].filename')
+          elif [ "$EVENT" = push ] && [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
+            files=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BEFORE...$AFTER" --jq 'if (.files | length) >= 300 then "too-many" else .files[].filename end')
+          else
+            files=everything
+          fi
+          code=false
+          while IFS= read -r f; do
+            case "$f" in
+              site/*|docs/*) ;;
+              TERMS.md|store/*|community/*|crates/*) code=true ;;
+              *.md) ;;
+              *) code=true ;;
+            esac
+          done <<< "$files"
+          printf 'Changed files:\n%s\n' "$files"
+          echo "code=$code" | tee -a "$GITHUB_OUTPUT"
+
+  # Skipped step by step rather than as a whole, so each matrix check still
+  # reports under its own name.
   test:
+    needs: changes
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -17,19 +59,25 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        if: needs.changes.outputs.code != 'false'
       - uses: dtolnay/rust-toolchain@stable
+        if: needs.changes.outputs.code != 'false'
       - uses: Swatinem/rust-cache@v2
+        if: needs.changes.outputs.code != 'false'
       - name: Install app libraries (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && needs.changes.outputs.code != 'false'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev librsvg2-dev
       - name: Test
+        if: needs.changes.outputs.code != 'false'
         run: cargo test --workspace --locked
 
   # The 100,000-exchange scale tests (crates/plonix-core/tests/scale.rs), in
   # release mode. A 10,000-exchange version runs with the tests above.
   scale:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,6 +87,8 @@ jobs:
         run: cargo test --release --locked -p plonix-core --test scale -- --ignored --nocapture
 
   lint:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -72,6 +122,8 @@ jobs:
         run: for f in crates/plonix-core/ui/*.js; do node --check "$f"; done
 
   deny:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -81,6 +133,8 @@ jobs:
           command: check
 
   macos-app:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: macos-latest
     env:
       # Pushes to main produce a signed and notarized app when the signing

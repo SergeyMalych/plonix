@@ -1,54 +1,12 @@
 // Plonix web UI. Plain JavaScript, no build step: every screen reads and
-// writes through the engine's local API, exactly like the CLI.
-//
-// Captured traffic is attacker-controlled, so nothing from the API is ever
-// parsed as HTML: the DOM is built with h() and text nodes only.
+// writes through the engine's local API, exactly like the CLI. Shared
+// helpers (h, store, toast, modal, ApiError) are in common.js.
 'use strict';
-
-/* ---------- DOM helpers ---------- */
-
-function h(tag, props, ...kids) {
-  const el = document.createElement(tag);
-  if (props) {
-    for (const [k, v] of Object.entries(props)) {
-      if (v == null || v === false) continue;
-      if (k === 'class') el.className = v;
-      else if (k === 'text') el.textContent = v;
-      else if (k === 'value' || k === 'checked' || k === 'disabled' || k === 'selected') el[k] = v;
-      else if (k === 'style') Object.assign(el.style, v);
-      else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
-      else el.setAttribute(k, v === true ? '' : String(v));
-    }
-  }
-  append(el, kids);
-  return el;
-}
-
-function append(el, kids) {
-  for (const c of kids.flat(Infinity)) {
-    if (c == null || c === false) continue;
-    el.append(c instanceof Node ? c : String(c));
-  }
-  return el;
-}
-
-function clear(el, ...kids) {
-  el.replaceChildren();
-  return append(el, kids);
-}
-
-const $ = (sel, root = document) => root.querySelector(sel);
 
 /* ---------- formatting ---------- */
 
 const fmtTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 const fmtDate = (ms) => new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-function fmtSize(n) {
-  if (n == null || n < 0) return '';
-  if (n < 1024) return n + ' B';
-  if (n < 1024 * 1024) return (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB';
-  return (n / 1048576).toFixed(1) + ' MB';
-}
 const b64len = (s) => (s ? Math.floor((s.length * 3) / 4) - (s.endsWith('==') ? 2 : s.endsWith('=') ? 1 : 0) : 0);
 const statusClass = (s) => (s == null ? 'sc sc-x' : 'sc sc-' + String(s)[0]);
 const target = (ex) => ex.path + (ex.query ? '?' + ex.query : '');
@@ -65,27 +23,7 @@ const PROJECT_ID = (document.querySelector('meta[name="plonix-project"]') || {})
 const pkey = (key) => (PROJECT_ID && !PROJECT_ID.includes('{') ? `${key}@${PROJECT_ID}` : key);
 const pstore = (key, value) => store(pkey(key), value);
 
-function store(key, value) {
-  try {
-    if (value === undefined) return JSON.parse(localStorage.getItem(key));
-    if (value === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, JSON.stringify(value));
-  } catch (_) {
-    return null;
-  }
-}
-
 /* ---------- API ---------- */
-
-class ApiError extends Error {
-  constructor(status, code, message, data) {
-    super(message);
-    this.status = status;
-    this.code = code;
-    this.problems = data && data.problems;
-    this.data = data;
-  }
-}
 
 const S = {
   token: null,
@@ -125,35 +63,6 @@ async function api(path, { method = 'GET', body } = {}) {
   }
   if (!resp.ok) throw new ApiError(resp.status, (data && data.code) || 'error', (data && data.error) || resp.statusText, data);
   return data;
-}
-
-/* ---------- toasts & modal ---------- */
-
-function toast(msg, kind = '') {
-  let box = $('.toasts');
-  if (!box) document.body.append((box = h('div', { class: 'toasts' })));
-  const t = h('div', { class: 'toast ' + kind, text: msg });
-  box.append(t);
-  setTimeout(() => t.remove(), kind === 'err' ? 6000 : 3200);
-}
-
-function closeModal() {
-  const m = $('.modal');
-  if (m) m.remove();
-}
-
-function modal(title, body, actions) {
-  closeModal();
-  const err = h('span', { class: 'err' });
-  const m = h(
-    'div',
-    { class: 'modal', onmousedown: (e) => e.target === m && closeModal() },
-    h('div', { class: 'mcard', role: 'dialog' }, h('h3', { text: title }), h('div', { class: 'mb' }, body), h('div', { class: 'mf' }, err, actions)),
-  );
-  document.body.append(m);
-  const first = m.querySelector('input, textarea, select');
-  if (first) first.focus();
-  return { el: m, err };
 }
 
 /* ---------- session ---------- */
@@ -361,19 +270,21 @@ async function filterTour() {
 const TOUR_STEPS = [
   {
     title: 'Welcome to the Plonix demo',
-    text: 'Brightcart is a made-up shop whose traffic was captured ahead of time. This walk takes about two minutes and stops on each part of Plonix. Use the arrow keys or the buttons, and leave whenever you like.',
+    text: 'Brightcart is a made-up shop whose traffic was captured ahead of time. This walk takes about two minutes and stops on each part of Plonix. Where you see Test now!, press it to watch that part work for real on the demo. Use the arrow keys or the buttons, and leave whenever you like.',
     view: 'traffic',
   },
   {
     view: 'traffic',
     target: '#searchbox',
     title: 'Traffic',
+    test: 'traffic',
     text: 'Every request your browser makes through Plonix lands here, live. Search any text, or type a filter such as host:, status:, path: or method: and press Enter.',
   },
   {
     view: 'traffic',
     target: '#chips',
     title: 'Filters',
+    test: 'filters',
     text: 'Filters are chips: + shows only what matches, − hides it. The Suggested chips come from this traffic, so the useful ones are a click away. Filters are saved with the project.',
     action: { label: 'See ready-made filters', run: () => filterTour() },
   },
@@ -381,7 +292,15 @@ const TOUR_STEPS = [
     view: 'traffic',
     target: '#groupseg',
     title: 'Grouping',
-    text: 'The same request sent several times in a row folds into one ×N row with its time span. Click the row to expand it, or switch to Every request.',
+    test: 'grouping',
+    text: 'The same request sent several times in a row folds into one ×N row with its time span. Switch between Grouped and Every request here, or click a folded row to unfold it in place.',
+  },
+  {
+    view: 'traffic',
+    target: '#pathseg',
+    title: 'Short paths',
+    text: 'Long paths full of ids and tokens are hard to scan. Short path folds them into {id} and {token}, as the Map does, and keeps the last part of each path in view. Hover a row for the full path.',
+    action: { label: 'Try short paths', run: () => setShortPath(!T.shortPath) },
   },
   {
     view: 'traffic',
@@ -391,36 +310,64 @@ const TOUR_STEPS = [
     },
     target: '#inspector',
     title: 'Lens',
+    test: 'lens',
     text: 'Lens shows the request and response, and points out what matters in them: tokens, emails and card numbers in this order. Select any text in it to decode it, find it in other traffic or ask Claude about it.',
   },
   {
     view: 'traffic',
     target: ['.lenssugg:not([hidden])', '#inspector'],
     title: 'Suggestions',
+    test: 'suggestions',
     text: 'Plonix reads the request and suggests next steps that fit it, one click each, such as drafting a finding or getting ideas for this endpoint. Nothing is sent until you click.',
+  },
+  {
+    view: 'traffic',
+    target: ['#inspector .lenshead', '#inspector'],
+    title: 'Ask Claude',
+    test: 'ask',
+    text: 'Ask Claude Code about any request, finding or host. You see exactly what it gets before anything is sent, and the answer comes back here with what it was based on.',
   },
   {
     view: 'scope',
     target: ['#scopebody .card.sugg', '#scopebody'],
     title: 'Scope',
+    test: 'scope',
     text: 'As you browse, Plonix spots domains that belong to your target and shows why. You accept or reject each one, and anything that sends requests stays inside what you accepted.',
   },
   {
     view: 'map',
     target: ['#hostlist', '#main .view'],
     title: 'Map',
+    test: 'map',
     text: 'Hosts, endpoints and parameters learned from the traffic, with the technologies Plonix detected. Click any endpoint to see its requests in place.',
   },
   {
     view: 'bench',
     target: ['.reqbar', '#main .view'],
     title: 'Bench',
+    test: 'bench',
     text: 'Each tab is an experiment: edit a request, send it, branch it and compare the responses. The demo comes with three ready-made experiments.',
   },
   {
     view: 'bench',
+    prep: () => {
+      const i = R.tabs.findIndex((x) => x.name === 'Order lookup');
+      if (i >= 0) R.active = i;
+    },
+    target: ['.hist', '#main .view'],
+    title: 'Compare',
+    test: 'compare',
+    text: 'Every send is kept in the tab’s history. Tick any two and Compare puts them side by side, with the lines that differ marked, for the response or the request.',
+  },
+  {
+    view: 'bench',
+    prep: () => {
+      const i = R.tabs.findIndex((x) => (x.url || '').includes(MARK));
+      if (i >= 0) R.active = i;
+    },
     target: ['.runconf', '#main .view'],
     title: 'Run',
+    test: 'run',
     text: 'Mark a value with • and Run sends the request once per value, with a sensible list picked for you. Here it walks the order id through nearby numbers so you can spot orders that aren’t yours.',
   },
   {
@@ -428,12 +375,14 @@ const TOUR_STEPS = [
     prep: () => (US.sel = 'dana'),
     target: ['.uscookies', '#main .view'],
     title: 'Users',
-    text: 'The people you test as, each with their cookies and headers. Edit a value, expire a cookie to stop sending it, or paste a fresh Cookie header. Cookies the server sets for a user are kept here, so the session stays current.',
+    test: 'sameuser',
+    text: 'The people you test as, each with their cookies and headers. Edit a value, expire a cookie to stop sending it, or paste a fresh Cookie header. Cookies the server sets for a user are kept here, so the session stays current. Open a browser as Dana to get a window of her own, where you can sign in as her without signing out anywhere else.',
   },
   {
     view: 'users',
     target: '#actas',
     title: 'Act as a user',
+    test: 'actas',
     text: 'Pick who you are from the title bar. Your browser, the Bench and Scans then send as that user to in-scope hosts, so you can click around as Dana and compare with Maya. Switching sends nothing by itself.',
   },
   {
@@ -452,6 +401,7 @@ const TOUR_STEPS = [
     view: 'rules',
     target: ['.rllist', '#main .view'],
     title: 'Rules',
+    test: 'rules',
     text: 'Rules change traffic as it passes: send a header on every request, change or remove one, or replace any text. Each rule says where it applies (your browser, the Bench, Scans) and can have a condition, written like a Traffic search.',
   },
   {
@@ -470,6 +420,7 @@ const TOUR_STEPS = [
     view: 'market',
     target: ['#mkinds', '#main .view'],
     title: 'Market',
+    test: 'market',
     text: 'Extensions, skills, filter packs and word lists, each signed and checked before it installs. Tools such as Saved users and the Access check, which replays requests as each user and signed out, are switched on from here in your own projects.',
   },
   {
@@ -498,7 +449,437 @@ const TOUR_STEPS = [
   },
 ];
 
-const TOUR = { i: -1, el: null, spot: null, timer: null, keys: null };
+/* ---- Test now: a live example for each stop ---- */
+
+/** What a Test now example can do: wait, type like a person, press a
+ * button where it can be seen, and move the ring to what it shows. Every
+ * example runs on the demo's own data; its made-up hosts are answered by the
+ * demo's stand-in API, so nothing reaches the internet. */
+function tourKit(i) {
+  const alive = () => TOUR.i === i && !!TOUR.el;
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const kit = {
+    alive,
+    wait,
+    async until(fn, ms = 6000) {
+      for (let t = 0; t < ms && alive(); t += 100) {
+        const v = fn();
+        if (v) return v;
+        await wait(100);
+      }
+      return fn();
+    },
+    ring(target) {
+      TOUR.focus = target;
+      placeTour();
+    },
+    async type(el, text, { clear: wipe = true, ms = 40 } = {}) {
+      if (!el) return;
+      if (wipe) el.value = '';
+      for (const ch of text) {
+        if (!alive()) return;
+        el.value += ch;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        await wait(ms);
+      }
+      el.blur();
+    },
+    /** Glides the pointer to the middle of `el`. */
+    async point(el) {
+      if (!el || !alive()) return;
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      const m = tourMouse();
+      const r = el.getBoundingClientRect();
+      m.hidden = false;
+      m.classList.remove('gone');
+      m.style.transform = `translate(${Math.round(r.left + Math.min(r.width / 2, 40))}px, ${Math.round(r.top + r.height / 2)}px)`;
+      await wait(620);
+    },
+    /** Points at `el` and clicks it, so the user sees where the click lands. */
+    async press(el) {
+      if (!el || !alive()) return;
+      await kit.point(el);
+      if (!alive()) return;
+      const m = tourMouse();
+      m.classList.add('click');
+      el.classList.add('tourpress');
+      await wait(260);
+      m.classList.remove('click');
+      el.classList.remove('tourpress');
+      el.click();
+      await wait(120);
+    },
+  };
+  // Typing starts with a click into the field.
+  const type = kit.type;
+  kit.type = async (el, text, opts) => {
+    await kit.press(el);
+    await type(el, text, opts);
+  };
+  return kit;
+}
+
+/** The pointer a Test now example moves and clicks with, starting from the Test now button. */
+function tourMouse() {
+  let m = $('.tourmouse');
+  if (!m) {
+    m = h('div', { class: 'tourmouse', hidden: true, 'aria-hidden': 'true' });
+    m.innerHTML = '<svg width="22" height="26" viewBox="0 0 22 26"><path d="M2 2 L2 21 L7 16.5 L10.5 24 L14 22.5 L10.6 15.2 L17.5 15 Z" fill="#fff" stroke="#14161c" stroke-width="1.6" stroke-linejoin="round"/></svg><span class="tmring"></span>';
+    document.body.append(m);
+    const b = $('.tourcard .ttest');
+    const r = b ? b.getBoundingClientRect() : { left: innerWidth / 2, top: innerHeight / 2, width: 0, height: 0 };
+    m.style.transform = `translate(${Math.round(r.left + r.width / 2)}px, ${Math.round(r.top + r.height / 2)}px)`;
+  }
+  return m;
+}
+
+function hideTourMouse(now) {
+  const m = $('.tourmouse');
+  if (!m) return;
+  if (now) return m.remove();
+  m.classList.add('gone');
+  setTimeout(() => m.classList.contains('gone') && m.remove(), 900);
+}
+
+const andList = (xs) => (xs.length < 2 ? xs.join('') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1]);
+
+const TOUR_TESTS = {
+  traffic: {
+    run: async (t) => {
+      await t.type($('#q'), 'usr_8f2c41');
+      await t.wait(700);
+      t.ring('#tablewrap');
+      const n = (($('#tcount') || {}).textContent || '').trim();
+      return `${n || 'These requests'} carry Maya’s user id, usr_8f2c41, somewhere in a URL, header or body. One search, across every host, as fast as you type.`;
+    },
+    undo: () => {
+      const q = $('#q');
+      if (q) q.value = '';
+      T.text = '';
+      saveTrafficView();
+      if (S.view === 'traffic' && T.refresh) T.refresh(true);
+    },
+  },
+  filters: {
+    run: async (t) => {
+      TOUR.saved = { filters: T.filters.map((f) => ({ ...f })), text: T.text };
+      const filters = [{ term: 'is:auth', mode: 'include' }];
+      T.filters = filters;
+      T.text = '';
+      const q = $('#q');
+      if (q) q.value = '';
+      filtersChanged();
+      await t.wait(700);
+      t.ring('#tablewrap');
+      const r = await api('/api/traffic?limit=200&q=' + encodeURIComponent(queryFor(filters, ''))).catch(() => ({ items: [], total: 0 }));
+      const hosts = new Set(r.items.map((x) => x.host));
+      return `One chip, is:auth, pulls out the whole sign-in flow: ${plural(r.total, 'request')} across ${plural(hosts.size, 'host')}, from the login page to the token exchange.`;
+    },
+    undo: () => {
+      if (!TOUR.saved) return;
+      T.filters = TOUR.saved.filters;
+      T.text = TOUR.saved.text;
+      TOUR.saved = null;
+      if (S.view === 'traffic') filtersChanged();
+      else saveTrafficView();
+    },
+  },
+  grouping: {
+    run: async (t) => {
+      const rowsNow = () => document.querySelectorAll('#rows tr').length;
+      const seg = await t.until(() => $('#groupseg'));
+      if (!seg) return 'Grouping lives in Traffic.';
+      t.ring('#groupseg');
+      const grouped = rowsNow();
+      await t.press([...seg.querySelectorAll('button')].find((b) => /every/i.test(b.textContent)));
+      await t.until(() => rowsNow() !== grouped, 2500);
+      const every = rowsNow();
+      t.ring('#tablewrap');
+      await t.wait(900);
+      await t.press([...$('#groupseg').querySelectorAll('button')].find((b) => /grouped/i.test(b.textContent)));
+      await t.until(() => rowsNow() === grouped, 2500);
+      const tag = await t.until(() => $('#rows .tag.alike:not(.on)'));
+      if (!tag) return `Every request shows ${every} rows; Grouped folds them into ${grouped}.`;
+      const id = Number(tag.closest('tr').dataset.id);
+      const n = (tag.textContent.match(/\d+/) || ['2'])[0];
+      await t.press(tag);
+      await t.wait(250);
+      const tr = $(`#rows tr[data-id="${id}"]`);
+      if (tr) t.ring(tr);
+      const ex = await getExchange(id).catch(() => null);
+      return `Every request: ${every} rows. Grouped: ${grouped}, with repeats folded into one row. ${ex ? ex.method + ' ' + ex.path : 'This one'} was sent ${n} times in a row; one click unfolds them right underneath.`;
+    },
+    undo: () => {
+      if (!T.group) setGrouping(true);
+    },
+  },
+  lens: {
+    run: async (t) => {
+      const ex = T.sel ? await getExchange(T.sel).catch(() => null) : null;
+      const auth = ex && (ex.req_headers || []).find(([k]) => /^authorization$/i.test(k));
+      const tok = auth && auth[1].replace(/^Bearer\s+/i, '');
+      const slot = $('#inspector .selslot');
+      if (!tok || !slot) return 'Select any text in the Lens to decode it.';
+      t.ring(slot.parentElement);
+      decodeSelection(slot.parentElement, tok);
+      await t.wait(200);
+      t.ring($('#inspector .spotdetail') || slot.parentElement);
+      const it = genericDecode(tok);
+      const p = (it.jwt && it.jwt.payload) || {};
+      const who = [p.sub && 'user ' + p.sub, p.role && 'role ' + p.role, p.exp && 'expires ' + new Date(p.exp * 1000).toLocaleDateString()].filter(Boolean).join(', ');
+      return `The bearer token, decoded in place: ${who || 'its claims and header'}. Select any value in a request or response to do the same.`;
+    },
+    undo: () => document.querySelectorAll('#inspector .selslot').forEach((s) => clear(s)),
+  },
+  suggestions: {
+    run: async (t) => {
+      const chip = await t.until(() => $('.lenssugg .chip.k-warn') || $('.lenssugg .chip'));
+      if (!chip) return 'No suggestions for this request.';
+      const label = chip.textContent.trim();
+      await t.press(chip);
+      const m = await t.until(() => $('.modal'));
+      if (!m) return label;
+      m.classList.add('tourmodal');
+      t.ring(m.querySelector('.mcard'));
+      return `“${label}” turned into a ready finding: title, severity and this request as evidence, filled in for you. Save it as is, or let Claude write it up.`;
+    },
+  },
+  scope: {
+    run: async (t) => {
+      const card = $('#scopebody .card.sugg');
+      const btn = card && card.querySelector('button.primary');
+      if (!btn) return 'Nothing waiting for a decision.';
+      const host = (card.querySelector('.dom') || {}).textContent || 'This host';
+      const why = card.querySelectorAll('.ev').length;
+      await t.press(btn);
+      await t.wait(600);
+      t.ring(['#railsecs', '#scopebody']);
+      return `${host.trim()} is now in scope, accepted on ${why ? plural(why, 'piece', 'pieces') + ' of' : 'the'} evidence Plonix found while you browsed. The Bench, Scans and every check can reach it; anything you didn’t accept stays out.`;
+    },
+  },
+  map: {
+    run: async (t) => {
+      const host = 'api.brightcart.example';
+      M.sel = host;
+      M.specOpen = host;
+      if (typeof drawHostList === 'function') drawHostList();
+      drawHostDetail();
+      const sec = await t.until(() => $('#hostdetail .specsec'));
+      if (!sec) return 'This host has no API description.';
+      sec.scrollIntoView({ block: 'center' });
+      await t.wait(250);
+      t.ring(sec);
+      const spec = await api('/api/hosts/' + encodeURIComponent(host) + '/spec').catch(() => null);
+      const todo = spec ? spec.endpoints.filter((e) => !e.visited) : [];
+      const pick = todo.find((e) => /admin|role/.test(e.path)) || todo[0];
+      return `Plonix found the API’s own description in the traffic: ${plural(spec ? spec.endpoints.length : 0, 'endpoint')}, ${todo.length} never visited${pick ? `, such as ${pick.method} ${pick.path}` : ''}. Each one is a click from the Bench.`;
+    },
+  },
+  sameuser: {
+    run: async (t) => {
+      if (!userById('maya') || !userById('dana')) return 'Maya and Dana are gone; start the demo over to get them back.';
+      go('bench', true);
+      const tab = { name: 'Who am I', method: 'GET', url: 'https://api.brightcart.example/v1/me', raw: 'Accept: application/json\nUser-Agent: Plonix\n\n', bodyB64: null, history: [], cur: null, picks: [], asUser: 'maya' };
+      const was = R.active;
+      R.tabs.push(tab);
+      R.active = R.tabs.length - 1;
+      TOUR.undo = () => {
+        const i = R.tabs.indexOf(tab);
+        if (i < 0) return;
+        R.tabs.splice(i, 1);
+        R.active = Math.min(was, R.tabs.length - 1);
+        saveBench();
+      };
+      saveBench();
+      renderBench($('#main'));
+      const who = async () => {
+        const send = await t.until(() => $('.reqbar .btn.primary:not([disabled])'));
+        const before = tab.cur;
+        await t.press(send);
+        await t.until(() => tab.cur && tab.cur !== before && !$('.reqbar .btn.primary[disabled]'));
+        await t.wait(250);
+        t.ring(['.rsplit > .rcol:last-child', '#main .view']);
+        try {
+          return JSON.parse((await getExchange(tab.cur)).resp_text).name || null;
+        } catch (_) {
+          return null;
+        }
+      };
+      t.ring('.reqbar');
+      const first = await who();
+      await t.wait(900);
+      const sel = await t.until(() => $('.reqbar .assel'));
+      t.ring('.reqbar');
+      await t.press(sel);
+      sel.value = 'dana';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await t.wait(500);
+      const second = await who();
+      if (!first || !second) return 'The shop did not recognise the session; start the demo over to refresh the users’ cookies.';
+      return `Sent one request as Maya, then picked Dana in the box next to Send and sent it again. The shop answered ${first}, then ${second}: each user’s cookies went with the same request, and nothing else changed.`;
+    },
+  },
+  actas: {
+    run: async (t) => {
+      const pill = await t.until(() => $('#actas'));
+      if (!pill) return 'Saved users is not switched on in this project.';
+      await t.press(pill);
+      const dana = await t.until(() => [...document.querySelectorAll('.actmenu .actitem')].find((b) => /dana/i.test(b.textContent)));
+      if (!dana) return 'Dana is gone; start the demo over to get her back.';
+      await t.wait(350);
+      await t.press(dana);
+      await t.until(() => S.acting);
+      await t.wait(300);
+      t.ring('#actas');
+      const send = (as_user) => api('/api/send', { method: 'POST', body: { method: 'GET', url: 'https://api.brightcart.example/v1/me', headers: [['Accept', 'application/json']], as_user } });
+      const who = async (as_user) => {
+        try {
+          return JSON.parse((await send(as_user)).resp_text).name || null;
+        } catch (_) {
+          return null;
+        }
+      };
+      const [asDana, asMaya] = [await who(S.acting), await who('maya')];
+      if (!asDana) return 'The shop did not recognise Dana; her session may have run out. Start the demo over to refresh it.';
+      return `You are now ${asDana}. The shop’s “who am I” endpoint answers ${asDana}, where the same request as Maya answers ${asMaya || 'Maya'}. Browse, use the Bench or run a scan and it all goes out as ${asDana.split(' ')[0]}, with no logging out and back in.`;
+    },
+    undo: () => S.acting && api('/api/users/acting', { method: 'PUT', body: { id: null } }).then(() => ((S.acting = null), drawActing())).catch(() => {}),
+  },
+  rules: {
+    run: async (t) => {
+      const ex = await api('/api/send', { method: 'POST', body: { method: 'GET', url: 'https://api.brightcart.example/v1/orders/1042', headers: [['Accept', 'application/json']] } });
+      t.ring(['.rllist', '#main .view']);
+      // Only Accept was sent, so any other header was added by a rule on the way.
+      const changes = (ex.req_headers || []).filter(([k]) => !/^(accept|host|content-length)$/i.test(k)).map(([k, v]) => `${k}: ${v}`);
+      return `Sent a bare request from the Bench. On the way, the rules ${changes.length ? 'added ' + changes.join(', ') : 'checked it and changed nothing'}, and the request is tagged “changed” in Traffic so you always know.`;
+    },
+  },
+  ask: {
+    run: async (t) => {
+      const btn = await t.until(() => [...document.querySelectorAll('#inspector button')].find((b) => /ask claude/i.test(b.textContent)));
+      if (!btn) return 'Open a request in the Lens to ask about it.';
+      await t.press(btn);
+      const m = await t.until(() => $('.modal textarea.askq'));
+      if (!m) return 'Ask Claude needs Claude Code on this Mac.';
+      $('.modal').classList.add('tourmodal');
+      t.ring($('.modal .mcard'));
+      await t.type(m, 'Can this token read other customers’ orders? What should I try next?', { ms: 22 });
+      m.dispatchEvent(new Event('input', { bubbles: true }));
+      await t.wait(500);
+      const parts = document.querySelectorAll('.modal .askparts input[type=checkbox]:checked').length;
+      return `Ask Claude opened on this request with your question, and shows exactly what Claude Code gets${parts ? ` (${plural(parts, 'part')}, each one you can untick)` : ''}. Press Ask Claude and the answer is written here, then kept in Agents.`;
+    },
+  },
+  compare: {
+    run: async (t) => {
+      const i = R.tabs.findIndex((x) => x.name === 'Order lookup');
+      if (i < 0 || R.tabs[i].history.length < 2) return 'The order lookup experiment is gone; start the demo over to get it back.';
+      R.active = i;
+      R.tabs[i].picks = [];
+      saveBench();
+      renderBench($('#main'));
+      await t.until(() => $('.hist .histrows'));
+      t.ring('.hist');
+      const boxes = [...document.querySelectorAll('.hist .histrows input[type=checkbox]')].slice(0, 2);
+      for (const b of boxes) await t.press(b);
+      const cmp = await t.until(() => [...document.querySelectorAll('.hist .histhead button')].find((b) => /compare/i.test(b.textContent)));
+      await t.press(cmp);
+      const view = await t.until(() => $('#cmpslot .cmpview'));
+      if (!view) return 'Tick two sends to compare them.';
+      view.scrollIntoView({ block: 'start' });
+      await t.wait(300);
+      t.ring('#cmpslot .cmpview');
+      const [a, b] = await Promise.all(R.tabs[i].picks.map(getExchange));
+      const who = (ex) => {
+        try {
+          return JSON.parse(ex.resp_text).customer.name;
+        } catch (_) {
+          return null;
+        }
+      };
+      const sum = ($('#cmpslot .cmpsum') || {}).textContent || '';
+      return `${sum} Same request, one digit apart in the URL, and two different people’s orders: ${andList([who(a), who(b)].filter(Boolean)) || 'two customers'}, with their emails and cards.`;
+    },
+    undo: () => {
+      const tab = R.tabs.find((x) => x.name === 'Order lookup');
+      if (tab) tab.picks = [];
+      saveBench();
+    },
+  },
+  bench: {
+    run: async (t) => {
+      const i = R.tabs.findIndex((x) => x.name === 'Order lookup');
+      if (i < 0) return 'The order lookup experiment is gone; start the demo over to get it back.';
+      R.active = i;
+      saveBench();
+      renderBench($('#main'));
+      const url = await t.until(() => $('#benchurl'));
+      t.ring('.reqbar');
+      url.value = url.value.replace(/\d+$/, '');
+      await t.type(url, '1043', { clear: false, ms: 140 });
+      await t.press($('.reqbar .btn.primary'));
+      await t.until(() => R.tabs[i].cur && !$('.reqbar .btn.primary[disabled]'));
+      await t.wait(300);
+      t.ring(['.rsplit > .rcol:last-child', '#main .view']);
+      const ex = R.tabs[i].cur ? await getExchange(R.tabs[i].cur).catch(() => null) : null;
+      let who = '';
+      try {
+        const o = JSON.parse(ex.resp_text);
+        who = `${o.customer.name}’s order: their name, email and card number`;
+      } catch (_) {}
+      return `Order 1043 came back with ${who || 'someone else’s order'}, while signed in as Maya. The API never checks whose order it is.`;
+    },
+  },
+  run: {
+    run: async (t) => {
+      const i = R.tabs.findIndex((x) => /run/i.test(x.name || '') && (x.url || '').includes(MARK));
+      if (i < 0) return 'The ready-made run is gone; start the demo over to get it back.';
+      R.active = i;
+      saveBench();
+      renderBench($('#main'));
+      const start = await t.until(() => $('.runstart:not([disabled])'));
+      if (!start) return 'Pick a value to run first.';
+      await t.press(start);
+      t.ring('#runresults');
+      const tab = R.tabs[i];
+      await t.until(() => tab.runState && !tab.runState.busy, 20000);
+      const rep = tab.runState && tab.runState.report;
+      if (!rep) return (tab.runState && tab.runState.error) || 'The run did not finish.';
+      const ok = rep.rows.filter((r) => r.status === 200 && r.exchange_id);
+      const names = new Set();
+      for (const r of ok.slice(0, 10)) {
+        try {
+          names.add(JSON.parse((await getExchange(r.exchange_id)).resp_text).customer.name);
+        } catch (_) {}
+      }
+      t.ring('#runresults');
+      return `Sent ${plural(rep.rows.length, 'request')} in a moment and got ${ok.length} orders back, belonging to ${plural(names.size, 'different customer')}, including ${andList([...names].slice(0, 3))}. That’s the flaw, found with one click.`;
+    },
+  },
+  market: {
+    run: async (t) => {
+      for (const name of ['saved-users', 'access-check']) {
+        if (!toolOn(name)) await api('/api/market/install', { method: 'POST', body: { name } });
+      }
+      S.status = await api('/api/status');
+      renderShell();
+      const r = await api('/api/traffic?limit=1&q=' + encodeURIComponent('path:/v1/orders/1042 mime:json'));
+      if (!r.items.length) return 'The order to check is gone; start the demo over to get it back.';
+      startAccessCheck({ targets: [r.items[0].id], sourceLabel: 'GET /v1/orders/1042, Maya’s order' });
+      const btn = await t.until(() => $('#main .acpane .btn.primary:not([disabled])'));
+      t.ring('#main .view');
+      await t.press(btn);
+      await t.until(() => AC.report || AC.err, 15000);
+      await t.wait(200);
+      t.ring(['#main .actable', '#main .view']);
+      if (!AC.report) return AC.err || 'The check did not finish.';
+      const ok = AC.report.identities.filter((id) => AC.report.rows[0].cells.some((c) => c.identity === id.id && okStatus(c.status)));
+      return `Switched on the Access check, then replayed Maya’s order ${andList(AC.report.identities.map((x) => (x.anon ? 'signed out' : 'as ' + x.label.replace(/\s*\(.*\)$/, ''))))}. ${ok.length === AC.report.identities.length ? 'Every one of them got it, even signed out.' : `${plural(ok.length, 'identity', 'identities')} got it.`}`;
+    },
+  },
+};
+
+const TOUR = { i: -1, el: null, spot: null, timer: null, keys: null, focus: null, undo: null, saved: null };
 
 /** Starts the walk at the first step, or at `at`. */
 function startTour(at = 0) {
@@ -530,18 +911,21 @@ function endTour() {
   window.removeEventListener('resize', placeTour);
   if (TOUR.el) TOUR.el.remove();
   if (TOUR.spot) TOUR.spot.remove();
-  Object.assign(TOUR, { i: -1, el: null, spot: null, timer: null, keys: null });
+  tourUndo();
+  Object.assign(TOUR, { i: -1, el: null, spot: null, timer: null, keys: null, focus: null, saved: null });
 }
 
 async function tourStep(i) {
   if (!TOUR.el || i < 0) return;
   if (i >= TOUR_STEPS.length) return endTour();
+  tourUndo();
   TOUR.i = i;
+  TOUR.focus = null;
   const s = TOUR_STEPS[i];
   const last = i === TOUR_STEPS.length - 1;
   closeModal();
   if (s.prep && s.view !== 'traffic') s.prep();
-  if (s.view && (S.view !== s.view || s.view === 'settings')) go(s.view, true);
+  if (s.view && (S.view !== s.view || s.view === 'settings' || (s.prep && s.view !== 'traffic'))) go(s.view, true);
   if (s.prep && s.view === 'traffic') await Promise.resolve(s.prep()).catch(() => {});
   if (TOUR.i !== i || !TOUR.el) return;
   const dots = TOUR_STEPS.map((_, n) => h('span', { class: 'tdot' + (n === i ? ' on' : n < i ? ' done' : '') }));
@@ -551,6 +935,7 @@ async function tourStep(i) {
     h('h4', { text: s.title }),
     h('p', { text: s.text }),
     s.action ? h('button', { class: 'linkbtn taction', text: s.action.label + ' →', onclick: s.action.run }) : null,
+    s.test ? tourTestBox(i, TOUR_TESTS[s.test]) : null,
     h(
       'div',
       { class: 'tourfoot' },
@@ -569,9 +954,59 @@ async function tourStep(i) {
   placeTour();
 }
 
-/** The first of a step's targets that is on screen. */
+/** Undoes what the last Test now changed on screen, so the next stop starts clean. */
+function tourUndo() {
+  hideTourMouse(true);
+  const undo = TOUR.undo;
+  TOUR.undo = null;
+  if (undo) {
+    try {
+      undo();
+    } catch (_) {}
+  }
+}
+
+/** The Test now button, and where the example says what it found. */
+function tourTestBox(i, test) {
+  if (!test) return null;
+  const result = h('div', { class: 'tresult', hidden: true });
+  const btn = h('button', { class: 'btn sm ttest', onclick: () => go() }, h('span', { class: 'tico', text: '▶' }), h('span', { text: 'Test now!' }));
+  const go = async () => {
+    if (btn.disabled) return;
+    tourUndo();
+    btn.disabled = true;
+    btn.classList.add('busy');
+    btn.lastChild.textContent = 'Running…';
+    result.hidden = true;
+    TOUR.undo = test.undo || null;
+    let said;
+    try {
+      said = await test.run(tourKit(i));
+    } catch (e) {
+      said = e.message;
+    }
+    if (TOUR.i !== i || !TOUR.el) return;
+    setTimeout(() => TOUR.i === i && hideTourMouse(), 1400);
+    btn.disabled = false;
+    btn.classList.remove('busy');
+    btn.lastChild.textContent = 'Test again';
+    if (said) {
+      clear(result, h('span', { class: 'tok', text: '✓' }), h('span', { text: said }));
+      result.hidden = false;
+    }
+    placeTour();
+  };
+  return h('div', { class: 'ttestbox' }, btn, result);
+}
+
+/** The first of a step's targets that is on screen; a running Test now
+ * points the ring at what it is showing instead. */
 function tourTarget(s) {
-  for (const sel of [].concat(s.target || [])) {
+  for (const sel of [].concat(TOUR.focus || s.target || [])) {
+    if (sel instanceof Element) {
+      if (sel.isConnected && sel.getClientRects().length) return sel;
+      continue;
+    }
     const el = $(sel);
     if (el && el.getClientRects().length) return el;
   }
@@ -615,8 +1050,8 @@ function placeTour() {
     TOUR.spot.hidden = false;
     const clampY = (v) => Math.min(Math.max(v, 12), vh - ch - 12);
     const clampX = (v) => Math.min(Math.max(v, 12), vw - cw - 12);
-    if (vw - r.right - pad >= cw + gap * 2) [x, y] = [r.right + pad + gap, clampY(r.top)];
-    else if (r.left - pad >= cw + gap * 2) [x, y] = [r.left - pad - gap - cw, clampY(r.top)];
+    if (vw - r.right - pad >= cw + gap + 12) [x, y] = [r.right + pad + gap, clampY(r.top)];
+    else if (r.left - pad >= cw + gap + 12) [x, y] = [r.left - pad - gap - cw, clampY(r.top)];
     else if (vh - r.bottom - pad >= ch + gap * 2) [x, y] = [clampX(r.left), r.bottom + pad + gap];
     else if (r.top - pad >= ch + gap * 2) [x, y] = [clampX(r.left), r.top - pad - gap - ch];
     else [x, y] = [clampX(r.right - cw - 20), clampY(r.bottom - ch - 20)];
@@ -674,16 +1109,21 @@ const toolOn = (id) => !!(S.status && ((S.status.tools && S.status.tools.include
 /** Tools the demo project shows without installing them, so its walkthrough can stop on them. */
 const DEMO_TOOLS = ['saved-users', 'programs'];
 
+/** Screens with a number key (⌘1-⌘9 in the app), in the order of the app's
+ * View menu (plonix-app/src/main.rs), so a hint always names the right key. */
+const SHORTCUTS = ['traffic', 'bench', 'scope', 'map', 'findings', 'agents', 'market', 'scans', 'programs'];
+const shownView = (key) => !!VIEWS[key] && !VIEWS[key].footer && (!VIEWS[key].tool || toolOn(VIEWS[key].tool));
+
 /** The sidebar's screen buttons, without the tools that are not switched on. */
 function navList() {
   const nav = h('div', { class: 'nav' });
-  Object.entries(VIEWS).forEach(([key, v], i) => {
-    if (v.footer) return;
-    if (v.tool && !toolOn(v.tool)) return;
+  Object.entries(VIEWS).forEach(([key, v]) => {
+    if (!shownView(key)) return;
+    const n = SHORTCUTS.indexOf(key);
     nav.append(
       h(
         'button',
-        { 'data-v': key, title: `${v.label}  (${IN_APP ? '⌘' : ''}${i + 1})`, onclick: () => go(key) },
+        { 'data-v': key, title: n < 0 ? v.label : `${v.label}  (${IN_APP ? '⌘' : ''}${n + 1})`, onclick: () => go(key) },
         h('span', { class: 'ico', text: v.ico }),
         h('span', { class: 'nl', text: v.label }),
         h('span', { class: 'ct', id: 'ct-' + key }),
@@ -831,15 +1271,22 @@ function renderRail() {
   clear(box, secs);
 }
 
-/** Opens a target in the capture browser: an isolated browser that routes through Plonix. */
-function openTarget() {
-  const input = h('input', { placeholder: 'example.com', spellcheck: 'false', autocomplete: 'off', value: pstore('plonix.lastTarget') || '' });
+/** Opens a target in the capture browser: an isolated browser that routes
+ * through Plonix. With a saved user, it is that user's own browser window. */
+function openTarget(user) {
+  user = user && user.id ? user : null;
+  const who = user ? userShortName(user) : '';
+  const lastHost = () => {
+    const r = ((S.scope && S.scope.rules) || []).find((x) => x.decision === 'accepted');
+    return r ? r.pattern : '';
+  };
+  const input = h('input', { placeholder: 'example.com', spellcheck: 'false', autocomplete: 'off', value: pstore('plonix.lastTarget') || (user ? lastHost() : '') });
   const go = async () => {
     const target = input.value.trim();
     if (!target) return input.focus();
     btn.disabled = true;
     m.err.textContent = '';
-    const r = await launchTarget(target);
+    const r = await launchTarget(target, user);
     btn.disabled = false;
     // launchTarget may have replaced this dialog with one of its own.
     if (!m.el.isConnected) return;
@@ -849,28 +1296,38 @@ function openTarget() {
   input.addEventListener('keydown', (e) => e.key === 'Enter' && go());
   const btn = h('button', { class: 'btn primary', text: 'Open', onclick: go });
   const m = modal(
-    'Open a target',
+    user ? `Open a browser as ${who}` : 'Open a target',
     [
       h('label', null, 'Site or URL', input),
-      h('p', { class: 'muted mnote', text: 'Opens a separate browser that captures through Plonix and trusts its certificate. The domain and its subdomains go into scope.' }),
+      h('p', {
+        class: 'muted mnote',
+        text: user
+          ? `Opens a browser window of ${who}’s own, with its own cookies, so you can sign in as ${who} there and stay signed in as yourself here. ${(user.cookies || []).some(cookieLive) ? 'It starts with the cookies saved here' : 'Sign in once in that window'}. The cookies and tokens it uses are saved for ${who} as you go, so the Bench, the Access check and Scans send the same.`
+          : 'Opens a separate browser that captures through Plonix and trusts its certificate. The domain and its subdomains go into scope.',
+      }),
     ],
     [h('button', { class: 'btn', text: 'Cancel', onclick: closeModal }), btn],
   );
   input.select();
 }
 
-async function launchTarget(target) {
+async function launchTarget(target, user) {
   try {
-    const r = await api('/api/browser/open', { method: 'POST', body: { target } });
+    const r = await api('/api/browser/open', { method: 'POST', body: { target, as_user: user ? user.id : null } });
     pstore('plonix.lastTarget', target);
-    toast(`Opened ${r.url} in ${r.browser}. Browse the site; requests appear in Traffic.`, 'ok');
     await loadScope();
-    if (S.view !== 'traffic') go('traffic');
+    if (r.as_user) {
+      const who = userShortName(r.as_user);
+      toast(`Opened ${r.url} in a ${r.browser} window of ${who}’s own. What you do there is sent as ${who}, and their session is saved here as you go.`, 'ok');
+    } else {
+      toast(`Opened ${r.url} in ${r.browser}. Browse the site; requests appear in Traffic.`, 'ok');
+      if (S.view !== 'traffic') go('traffic');
+    }
     if (r.needs_trust) trustCertificate(r.browser, r.can_trust);
     return { ok: true };
   } catch (e) {
     if (e.code === 'no_browser' && e.data && e.data.can_install) {
-      getPlonixBrowser(target);
+      getPlonixBrowser(target, user);
       return { ok: false, message: '' };
     }
     return { ok: false, message: e.message };
@@ -880,7 +1337,7 @@ async function launchTarget(target) {
 const megabytes = (n) => (n / 1048576).toFixed(0);
 
 /** No browser to launch: offers the Plonix browser (Chromium, downloaded once), then opens the target in it. */
-function getPlonixBrowser(target) {
+function getPlonixBrowser(target, user) {
   const fill = h('div', { class: 'pbar-fill' });
   const bar = h('div', { class: 'pbar', hidden: true }, fill);
   const line = h('div', { class: 'muted fine' });
@@ -931,7 +1388,7 @@ function getPlonixBrowser(target) {
       if (p.stage === 'done') {
         show(p);
         line.textContent = 'Ready. Opening ' + target + '…';
-        const r = await launchTarget(target);
+        const r = await launchTarget(target, user);
         if (!m.el.isConnected) return;
         if (r.ok) closeModal();
         else m.err.textContent = r.message;
@@ -1250,7 +1707,7 @@ function rawPre({ lines, body }) {
    Traffic
    ====================================================================== */
 
-const T = { text: '', filters: [], items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: store('plonix.inspH'), picked: new Set(), pickAnchor: null, group: store('plonix.groupAlike') !== false, open: new Set(), visible: null };
+const T = { text: '', filters: [], items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: store('plonix.inspH'), picked: new Set(), pickAnchor: null, group: store('plonix.groupAlike') !== false, shortPath: store('plonix.shortPath') === true, open: new Set(), visible: null };
 
 const sameKey = (ex) => `${ex.method} ${ex.host}:${ex.port} ${target(ex)}`;
 
@@ -1275,6 +1732,25 @@ function setGrouping(on) {
   store('plonix.groupAlike', on ? null : false);
   drawGroupToggle();
   drawRows(Infinity);
+}
+
+function setShortPath(on) {
+  T.shortPath = on;
+  // Full paths are the default, so only turning short paths on is remembered.
+  store('plonix.shortPath', on ? true : null);
+  drawPathToggle();
+  drawRows(Infinity);
+}
+
+/** Full paths, or the Map's short form: ids and tokens folded, the query left out, the folder giving way to the name. */
+function drawPathToggle() {
+  const box = $('#pathseg');
+  if (!box) return;
+  clear(
+    box,
+    h('button', { class: T.shortPath ? '' : 'on', text: 'Full path', title: 'Show each path and query in full', onclick: () => setShortPath(false) }),
+    h('button', { class: T.shortPath ? 'on' : '', text: 'Short path', title: 'Fold ids and tokens into {id} and {token}, leave out the query, and keep the last part of the path in view. Hover a row for the full path.', onclick: () => setShortPath(true) }),
+  );
 }
 
 /** "21:35:58–36:13" for a run (newest first in the list), or one time if they match. */
@@ -1630,6 +2106,7 @@ function renderTraffic(main) {
         h('div', { class: 'search', id: 'searchbox' }, h('span', { class: 'mg', text: '⌕' }), input, h('kbd', { text: '/' })),
         h('span', { class: 'count', id: 'tcount' }),
         h('span', { class: 'seg groupseg', id: 'groupseg' }),
+        h('span', { class: 'seg groupseg', id: 'pathseg' }),
         h('span', { id: 'rulespill' }),
         liveBtn,
         interceptButton(),
@@ -1644,6 +2121,7 @@ function renderTraffic(main) {
   ]);
   renderChips();
   drawGroupToggle();
+  drawPathToggle();
   loadRules();
   renderBanner();
   IC.drawn = null;
@@ -2526,7 +3004,9 @@ function drawRows(freshAbove) {
       h('td', { class: 'num', text: ex.id }),
       h('td', null, h('span', { class: 'meth m-' + ex.method, text: ex.method })),
       h('td', { class: 'host c-host', text: ex.host + (ex.port !== 443 && ex.port !== 80 ? ':' + ex.port : ''), title: ex.host }),
-      h('td', { class: 'url', title: target(ex) }, tags, tags.length ? ' ' : '', target(ex)),
+      T.shortPath
+        ? h('td', { class: 'url short', title: target(ex) }, h('span', { class: 'urlrow' }, tags, append(pathParts(ex.short_path || ex.path), [ex.query ? h('span', { class: 'pq', text: '?…' }) : null])))
+        : h('td', { class: 'url', title: target(ex) }, tags, tags.length ? ' ' : '', target(ex)),
       h('td', null, h('span', { class: statusClass(ex.status), text: ex.status == null ? 'ERR' : ex.status })),
       h('td', null, ex.in_scope ? null : h('span', { class: 'tag out', text: 'out' }), ' ', h('span', { class: 'mime', text: shortMime(ex.mime) })),
       h('td', { class: 'num c-size', text: fmtSize(ex.resp_len) }),
@@ -6647,10 +7127,15 @@ function endpointsSection(eps) {
 
 /** A path cell that never widens the table: the folder part gives way first, so the resource name stays readable. Folded ids and tokens are tinted. Hover shows the whole path. */
 function pathCell(path) {
+  return h('td', { class: 'pathcell', title: path }, pathParts(path));
+}
+
+/** The folder and the resource name of a path as separate spans, so the folder can give way first. */
+function pathParts(path) {
   const cut = path.lastIndexOf('/', path.length - 2);
   const dir = cut > 0 ? path.slice(0, cut + 1) : '';
   const part = (cls, text) => h('span', { class: cls }, text.split(/(\{\w+\})/).map((t, i) => (i % 2 ? h('span', { class: 'ph', text: t }) : t)));
-  return h('td', { class: 'pathcell', title: path }, h('span', { class: 'pc' }, dir ? part('pd', dir) : null, part('pn', path.slice(dir.length))));
+  return h('span', { class: 'pc' }, dir ? part('pd', dir) : null, part('pn', path.slice(dir.length)));
 }
 
 /** Endpoints an API description lists that captured traffic has not visited yet, each one click from the Bench. */
@@ -6761,6 +7246,8 @@ const userById = (id) => (S.users || []).find((u) => u.id === id) || null;
 const actingUser = () => (S.acting ? userById(S.acting) : null);
 const nowSecs = () => Math.floor(Date.now() / 1000);
 const cookieLive = (c) => c.expires == null || c.expires > nowSecs();
+/** "Dana" for "Dana (another customer)". */
+const userShortName = (u) => u.name.replace(/\s*\(.*\)$/, '').trim() || u.name;
 /** The first letter of a user's name, for its round badge. */
 const userInitial = (u) => ((u && u.name.trim()[0]) || '?').toUpperCase();
 /** A steady hue per user, so each badge keeps its colour. */
@@ -7063,6 +7550,12 @@ function userDetail(u) {
       acting
         ? h('button', { class: 'btn sm', text: 'Stop acting as this user', onclick: () => setActing(null) })
         : h('button', { class: 'btn sm primary', text: 'Act as this user', title: 'Your browser, the Bench and Scans send as this user until you switch back', onclick: () => setActing(u.id) }),
+      h('button', {
+        class: 'btn sm',
+        text: 'Open a browser as ' + userShortName(u),
+        title: 'A browser window of this user’s own, with its own cookies: sign in there without signing out here',
+        onclick: () => openTarget(u),
+      }),
     ),
     acting ? h('div', { class: 'usnote-on' }, userBadge(u), `You are acting as ${u.name}. In-scope browser traffic, the Bench and Scans send with these cookies, and cookies the server sets land here instead of in your browser.`) : null,
     h(
@@ -11135,8 +11628,8 @@ document.addEventListener('keydown', (e) => {
     }
     return;
   }
-  const keys = Object.keys(VIEWS).filter((k) => !VIEWS[k].footer);
-  if (/^[1-9]$/.test(e.key) && keys[Number(e.key) - 1]) return go(keys[Number(e.key) - 1]);
+  const key = /^[1-9]$/.test(e.key) && SHORTCUTS[Number(e.key) - 1];
+  if (key && shownView(key)) return go(key);
   if (e.key === '\\') return toggleSidebar();
   if (S.view !== 'traffic') return;
   if (e.key === '/') {

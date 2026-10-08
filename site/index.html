@@ -133,6 +133,16 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
 .btn.primary:hover { background: #5862e6; }
 .btn.small { height: 36px; padding-inline: 14px; font-size: 0.9rem; border-radius: 10px; }
 .btn svg { width: 18px; height: 18px; flex: none; }
+.tour-btn { background: transparent; border-color: transparent; padding-inline: 0 10px; color: var(--muted); }
+.tour-btn:hover { border-color: transparent; color: var(--fg); }
+.tour-btn .play { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 999px; background: color-mix(in srgb, var(--indigo) 14%, transparent); color: var(--indigo); transition: background .15s ease; }
+.tour-btn:hover .play { background: color-mix(in srgb, var(--indigo) 24%, transparent); }
+.tour-btn .play svg { width: 14px; height: 14px; margin-left: 2px; }
+.tour { width: min(1100px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 16px; background: #0d0e13; color: var(--fg); overflow: hidden; box-shadow: 0 40px 120px -20px rgba(0,0,0,.6); }
+.tour::backdrop { background: rgba(9, 10, 16, .72); backdrop-filter: blur(6px); }
+.tour video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; background: #0d0e13; }
+.tour-close { position: absolute; top: 12px; right: 12px; z-index: 1; width: 36px; height: 36px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); background: rgba(13,14,19,.7); color: #ecedf4; font: 500 20px/1 var(--body); cursor: pointer; }
+.tour-close:hover { border-color: #8b93ff; }
 @media (max-width: 760px) { .nav-links { display: none; } .nav .theme-btn { margin-left: auto; } }
 
 /* ---------- hero ---------- */
@@ -450,6 +460,10 @@ footer a:hover { color: var(--fg); }
           Download for Mac
         </a>
         <a class="btn" href="https://github.com/SergeyMalych/plonix">Star on GitHub</a>
+        <button type="button" class="btn tour-btn" id="tourbtn" aria-haspopup="dialog">
+          <span class="play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/></svg></span>
+          Watch the 1-minute tour
+        </button>
       </div>
     </div>
 
@@ -779,6 +793,11 @@ footer a:hover { color: var(--fg); }
   </div>
 </footer>
 
+<dialog class="tour" id="tour" aria-label="Plonix in one minute">
+  <button type="button" class="tour-close" id="tourclose" aria-label="Close">×</button>
+  <video id="tourvid" controls playsinline preload="none" width="1920" height="1080"></video>
+</dialog>
+
 <script>
 (() => {
   /* ---- theme switch ---- */
@@ -994,6 +1013,20 @@ footer a:hover { color: var(--fg); }
     const fallback = () => { const s = getSelection(), r = document.createRange(); r.selectNodeContents(p); s.removeAllRanges(); s.addRange(r); copy.textContent = 'Press ⌘C'; };
     try { navigator.clipboard.writeText(text).then(done, fallback); } catch (e) { fallback(); }
   });
+})();
+
+// One-minute tour: nothing loads until the button is pressed.
+(() => {
+  const dlg = document.getElementById('tour'), vid = document.getElementById('tourvid');
+  if (!dlg || typeof dlg.showModal !== 'function') return;
+  document.getElementById('tourbtn').addEventListener('click', () => {
+    if (!vid.src) { vid.poster = 'assets/tour-poster.webp'; vid.src = 'assets/tour.mp4'; }
+    dlg.showModal();
+    vid.play().catch(() => {});
+  });
+  document.getElementById('tourclose').addEventListener('click', () => dlg.close());
+  dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
+  dlg.addEventListener('close', () => vid.pause());
 })();
 </script>
 </body>

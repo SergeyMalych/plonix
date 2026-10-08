@@ -227,6 +227,13 @@ code, .mono { font-family: var(--mono); }
 .ttable td.host { color: var(--fg-2); }
 .ttable .num { text-align: right; color: var(--fg-2); font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 11px; }
 .ttable tr.out td.url, .ttable tr.out td.host { color: var(--fg-3); }
+.ttable td.url .urlrow { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.ttable td.url .urlrow > .tag { flex: 0 0 auto; }
+.ttable td.url .pc { display: flex; min-width: 0; white-space: nowrap; }
+.ttable td.url .pd { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--fg-3); }
+.ttable td.url .pn { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ttable td.url .ph { color: var(--accent); }
+.ttable td.url .pq { flex: 0 0 auto; color: var(--fg-3); }
 .empty { padding: 48px 20px; text-align: center; color: var(--fg-2); line-height: 1.6; }
 .empty h3 { color: var(--fg); margin: 0 0 6px; font-size: 15px; }
 .empty code { background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 5px; padding: 1px 6px; }
@@ -1624,6 +1631,25 @@ body:has(.modal.tourmodal) .tourcard { z-index: 55; }
 .rlcmpgrid .rlhint { display: block; padding: 4px 12px 0; }
 .reqbody { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
 .lbl .seg button { white-space: nowrap; }
+
+/* Test now: a live example on a tour stop */
+.tourcard .ttestbox { display: flex; flex-direction: column; gap: 8px; }
+.tourcard .ttest { align-self: flex-start; display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px 5px 10px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); background: linear-gradient(135deg, var(--accent-soft), color-mix(in srgb, var(--accent-soft) 40%, var(--surface))); color: var(--accent); font-weight: 600; }
+.tourcard .ttest:hover:not([disabled]) { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
+.tourcard .ttest .tico { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); color: var(--accent-fg); font-size: 8px; padding-left: 1px; }
+.tourcard .ttest.busy .tico { background: transparent; border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color: var(--accent); width: 12px; height: 12px; padding: 0; animation: tspin 0.7s linear infinite; font-size: 0; }
+@keyframes tspin { to { transform: rotate(360deg); } }
+.tourcard .tresult { display: flex; gap: 8px; align-items: flex-start; padding: 9px 11px; border-radius: 9px; background: color-mix(in srgb, var(--accent-soft) 70%, var(--surface)); font-size: 12.5px; line-height: 1.5; color: var(--fg); animation: tourin 0.2s ease; }
+.tourcard .tresult .tok { flex: 0 0 auto; display: inline-grid; place-items: center; width: 16px; height: 16px; margin-top: 2px; border-radius: 50%; background: var(--accent); color: var(--accent-fg); font-size: 9px; font-weight: 700; }
+.tourpress { animation: tourpress 0.38s ease; }
+@keyframes tourpress { 40% { transform: scale(0.94); box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 30%, transparent); } }
+.tourmouse { position: fixed; left: 0; top: 0; z-index: 60; pointer-events: none; transition: transform 0.6s cubic-bezier(0.3, 0.7, 0.2, 1), opacity 0.4s ease; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35)); }
+.tourmouse svg { display: block; margin: -2px 0 0 -2px; }
+.tourmouse .tmring { position: absolute; left: -14px; top: -14px; width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--accent); opacity: 0; transform: scale(0.4); }
+.tourmouse.click svg { transform: scale(0.88); transform-origin: 2px 2px; }
+.tourmouse.click .tmring { animation: tmclick 0.5s ease-out; }
+.tourmouse.gone { opacity: 0; }
+@keyframes tmclick { 0% { opacity: 0.9; transform: scale(0.4); } 100% { opacity: 0; transform: scale(1.5); } }
 
 /* ---- saved users: the title bar switcher and the Users screen ---- */
 .ubadge { --uh: 230; width: 18px; height: 18px; flex: 0 0 auto; border-radius: 50%; display: inline-grid; place-items: center; font-size: 10px; font-weight: 700; color: #fff; background: hsl(var(--uh) 55% 52%); line-height: 1; }
