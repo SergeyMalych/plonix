@@ -170,12 +170,14 @@ fn field_matches(field: &Field, ex: &Exchange, in_scope: bool, text: &mut Option
         Field::Text(t) => {
             let hay = text.get_or_insert_with(|| {
                 format!(
-                    "{}\n{} {}\n{}\n{}\n{}\n{}",
+                    "{}\n{} {}\n{}\n{}\n{}\n{}\n{}",
                     ex.url(),
                     ex.method,
                     ex.path,
                     codec::headers_text(&ex.req_headers),
                     codec::body_text(&ex.req_headers, &ex.req_body).unwrap_or_default(),
+                    // The search index's response text starts with the status too.
+                    ex.status.map(|s| s.to_string()).unwrap_or_default(),
                     codec::headers_text(&ex.resp_headers),
                     codec::body_text(&ex.resp_headers, &ex.resp_body).unwrap_or_default()
                 )

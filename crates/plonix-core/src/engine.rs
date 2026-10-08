@@ -518,8 +518,8 @@ impl Engine {
         let removed = self.store.delete_for_hosts(&out_hosts, &keep)?;
         if removed > 0 {
             self.rescan()?;
+            self.store.compact()?;
         }
-        self.store.compact()?;
         Ok(PruneReport { at, removed, kept: self.store.count()?, skipped: String::new() })
     }
 
@@ -836,6 +836,8 @@ impl Engine {
     pub fn decide(&self, domain: &str, decision: Decision, include_subdomains: bool, note: &str) -> Result<Rule> {
         let (pattern, subs) = match domain.trim().strip_prefix("*.") {
             Some(base) => (scope::normalize_host(base), true),
+            // normalize_host cuts at '/', which would turn a range into one address.
+            None if crate::bounty::is_cidr(domain.trim()) => (domain.trim().to_ascii_lowercase(), false),
             None => (scope::normalize_host(domain), include_subdomains),
         };
         anyhow::ensure!(!pattern.is_empty(), "empty domain");
@@ -940,7 +942,7 @@ impl Engine {
     }
 
     pub fn remove_rule(&self, domain: &str) -> Result<bool> {
-        let pattern = scope::normalize_host(domain.trim().trim_start_matches("*."));
+        let pattern = if crate::bounty::is_cidr(domain.trim()) { domain.trim().to_ascii_lowercase() } else { scope::normalize_host(domain.trim().trim_start_matches("*.")) };
         let removed = self.store.delete_rule(&pattern)?;
         *self.rules.write().unwrap() = self.store.rules()?;
         self.rescan()?;

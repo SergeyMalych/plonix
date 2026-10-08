@@ -270,6 +270,13 @@ async fn adaptive_scope_suggests_with_evidence() {
     assert!(!r.engine.store.suggestions(&r.engine.rules()).unwrap().iter().any(|s| s.domain == "127.0.0.1"));
     r.engine.remove_rule("127.0.0.1").unwrap();
     assert!(r.engine.store.suggestions(&r.engine.rules()).unwrap().iter().any(|s| s.domain == "127.0.0.1"));
+
+    // A typed IP range stays a range, and removing it removes that rule.
+    let rule = r.engine.decide("127.0.0.0/8", Decision::Rejected, false, "").unwrap();
+    assert_eq!(rule.pattern, "127.0.0.0/8");
+    assert_eq!(r.engine.rules().decide("127.0.0.1"), Decision::Rejected);
+    assert!(r.engine.remove_rule("127.0.0.0/8").unwrap());
+    assert_eq!(r.engine.rules().decide("127.0.0.1"), Decision::Unknown);
 }
 
 #[tokio::test]
@@ -755,6 +762,18 @@ async fn agent_settings_and_ask_context() {
         assert_eq!(get("/api/traffic/1", &agent).0, 403);
         assert_eq!(get("/api/traffic/1", &agent).1["code"], "outside_agent_data");
         assert!(get("/api/hosts", &agent).1.as_array().unwrap().is_empty());
+        // An unclosed quote in the agent's own query cannot swallow the scope filter.
+        let (code, b) = get("/api/traffic?q=-%22", &agent);
+        assert_eq!(code, 200);
+        assert_eq!(b["total"], 0);
+        assert_eq!(get("/api/scan/plan/localhost", &agent).1["code"], "outside_agent_data");
+        assert_eq!(get("/api/scan/suggest/localhost", &agent).1["code"], "outside_agent_data");
+
+        // Bodies over the extractors' old 2 MB default reach the handler, and
+        // engine state kept beside UI state is not writable as a view.
+        let big = serde_json::json!({ "x": "a".repeat(3 * 1024 * 1024) });
+        assert_eq!(put("/api/views/bench", &user, big).1["code"], "bad_request");
+        assert_eq!(put("/api/views/users", &user, serde_json::json!({ "x": 1 })).1["code"], "bad_request");
 
         // AgentSettings uses serde defaults, so a partial body sets the rest.
         put("/api/agents/settings", &user, serde_json::json!({ "data": "all" }));
