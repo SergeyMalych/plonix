@@ -50,6 +50,7 @@ Most of a web assessment is the same loop: capture traffic, figure out what the 
 | Several targets at once | Each project opens in its own window with its own proxy, database and scope. |
 | A toolbox that grows without bloat | A signed community Market of skills, rule packs, filter packs, payload lists, extensions and tools, with a starter set picked for your kind of work. |
 | Scope you can keep up with | Follow a bug bounty or disclosure program and its scope and rules apply to everything Plonix sends. |
+| To see exactly what changed | Compare any two sends side by side: the lines that differ in the response or the request are marked, and everything else folds away. |
 | A next step without the setup | The Lens reads the request on screen and offers the one move that fits (save a login as a user, check an id across users, replay signed out, scan just this endpoint), one click away. You still decide and send. |
 
 ## Principles
@@ -120,6 +121,15 @@ These are from the demo project that ships with Plonix (Start screen › Try the
   <img src="docs/images/ask-light.webp" alt="Ask Claude: the question, and each part of the request that will be shared, with its size, to tick or untick">
 </picture>
 <b>Ask Claude.</b> See and pick exactly what Claude gets before you ask. The answer arrives in the app.
+</td>
+</tr>
+<tr>
+<td colspan="2">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/compare-dark.webp">
+  <img src="docs/images/compare-light.webp" alt="Comparing two sends on the Bench: the responses for two order ids side by side, with the lines that differ marked">
+</picture>
+<b>Compare requests.</b> Tick two sends and see them side by side, with only the lines that differ marked. Switch between the responses and the requests.
 </td>
 </tr>
 </table>
@@ -200,6 +210,11 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 ### Replay and send
 - Replay any captured exchange with a different method, path, headers or body.
 - Send new requests from scratch. Results are stored alongside captured traffic and tagged with who sent them.
+
+### Compare requests
+- Tick two sends in a Bench tab's history and press **Compare**: the two show side by side, with the lines that differ marked and unchanged stretches folded into "… N unchanged lines". Switch between **Response** and **Request**.
+- Compare two users reading the same record, an id one apart, a header added or removed, or a send before and after a change. Headers, JSON bodies and decoded values line up line by line, so a changed email, total or card number stands out.
+- **Branch** turns any earlier send into a new tab to try a different idea from there, and **Restore** puts it back in the editor, so a comparison is always one click from the next experiment.
 
 ### Bench runs
 - Mark one or more positions in a request with `•…•` and feed lists of values through them: one position at a time, in lockstep, or every combination. Lists come built in, from the Market, from a number range, from values you type or from a file.
