@@ -141,6 +141,23 @@ code, .mono { font-family: var(--mono); }
 .fsep { width: 1px; height: 16px; background: var(--line); margin: 0 4px; }
 
 /* popover and context menu */
+/* search autocomplete: fields first, then values from this project's traffic */
+.qsugg { position: fixed; z-index: 70; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; }
+.qsugg .qlist { max-height: 316px; overflow: auto; padding: 4px; }
+.qsugg .qmh { font-size: 10.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3); padding: 8px 8px 4px; }
+.qsugg .qmh:first-child { padding-top: 4px; }
+.qsugg .qrow { display: flex; align-items: center; gap: 10px; min-height: 28px; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+.qsugg .qrow.on { background: var(--accent-soft); }
+.qsugg .qterm { flex: 0 1 auto; min-width: 0; font-family: var(--mono); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qsugg .qk { color: var(--fg-3); }
+.qsugg .qv { color: var(--fg); }
+.qsugg .qv b { font-weight: 700; color: var(--accent); }
+.qsugg .qnote { flex: 1 1 auto; min-width: 0; font-size: 11.5px; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+.qsugg .qn { flex: 0 0 auto; min-width: 26px; text-align: right; font-size: 11px; color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.qsugg .qfoot { display: flex; align-items: center; gap: 12px; padding: 6px 12px; border-top: 1px solid var(--line-2); background: var(--surface-2); font-size: 11px; color: var(--fg-3); white-space: nowrap; }
+.qsugg .qhint { display: inline-flex; align-items: center; gap: 5px; }
+.qsugg .qhint kbd { min-width: 18px; text-align: center; line-height: 15px; background: var(--surface); }
+.qsugg .qtip { margin-left: auto; }
 .popover, .ctxmenu { position: fixed; z-index: 60; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); }
 .popover { width: 340px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .popover .prow { display: flex; gap: 6px; }
