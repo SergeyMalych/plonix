@@ -6357,7 +6357,7 @@ async function drawHostDetail() {
             'tr',
             { class: 'click' + (T.sel === e.sample_id ? ' sel' : ''), 'data-ex': e.sample_id, title: 'Open a sample request', onclick: () => showExchange(e.sample_id) },
             h('td', null, h('span', { class: 'meth m-' + e.method, text: e.method })),
-            h('td', { class: 'mono', text: e.path }),
+            pathCell(e.path),
             h('td', null, e.statuses.map((s) => [h('span', { class: statusClass(s), text: s }), ' '])),
             h('td', null, e.params.map((p) => h('span', { class: 'param', text: p }))),
             h('td', { class: 'num', text: e.requests }),
@@ -6366,6 +6366,13 @@ async function drawHostDetail() {
       ),
     ),
   );
+}
+
+/** A path cell that never widens the table: the folder part gives way first, so the resource name stays readable. Hover shows the whole path. */
+function pathCell(path) {
+  const cut = path.lastIndexOf('/', path.length - 2);
+  const dir = cut > 0 ? path.slice(0, cut + 1) : '';
+  return h('td', { class: 'pathcell', title: path }, h('span', { class: 'pc' }, dir ? h('span', { class: 'pd', text: dir }) : null, h('span', { class: 'pn', text: path.slice(dir.length) })));
 }
 
 /** Endpoints an API description lists that captured traffic has not visited yet, each one click from the Bench. */
@@ -6389,7 +6396,7 @@ function specSection(spec) {
                 'tr',
                 null,
                 h('td', null, h('span', { class: 'meth m-' + e.method, text: e.method })),
-                h('td', { class: 'mono', text: e.path }),
+                pathCell(e.path),
                 h('td', { class: 'muted', text: e.summary }),
                 h('td', null, e.params.map((p) => h('span', { class: 'param', text: p }))),
                 h('td', { class: 'num' }, h('button', { class: 'btn sm', text: 'Open on Bench', title: 'Start a request for this endpoint on the Bench. Nothing is sent until you press Send.', onclick: () => specToBench(spec, e) })),

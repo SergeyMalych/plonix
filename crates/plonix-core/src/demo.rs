@@ -566,6 +566,15 @@ export async function api(path, opts = {{}}) {{
             .body("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<catalog><item sku=\"TRX-01\"><name>Trail shoes</name><price>120.00</price></item></catalog>"),
         resp(202, "application/json").api().json(json!({ "accepted": 1, "job": "imp_5531" })),
     )?;
+    // Real apps have long paths: deep resources and signed download links.
+    s.add(
+        api_get("https://api.brightcart.example/v1/accounts/me/orders/48213/shipments/2/tracking-events/carrier-updates/latest-delivery-attempt-notifications?lang=en"),
+        resp(200, "application/json").api().json(json!({ "items": [ { "at": "2025-09-14T09:12:00Z", "status": "out_for_delivery" } ] })),
+    )?;
+    s.add(
+        api_get("https://api.brightcart.example/v1/exports/download/aW52b2ljZXMtMjAyNS0wOS1icmlnaHRjYXJ0LWV4cG9ydC1hbGwtb3JkZXJzLXdpdGgtbGluZS1pdGVtcw/brightcart-orders-export-2025-09-all-regions-with-line-items-and-tax.csv"),
+        resp(200, "text/csv").api().body("order,total\n48213,113.00\n").ms(140),
+    )?;
 
     // The API describes itself: the Map lists what it offers that nobody has
     // visited yet.

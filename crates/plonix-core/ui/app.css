@@ -465,7 +465,7 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .muted { color: var(--fg-3); }
 
 /* map */
-.mapwrap { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px 1fr; }
+.mapwrap { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px minmax(0, 1fr); }
 .hostlist { border-right: 1px solid var(--line); overflow: auto; background: var(--chrome-2); }
 .hostrow { display: flex; flex-direction: column; gap: 3px; padding: 8px 12px; border-bottom: 1px solid var(--line-2); cursor: pointer; }
 .hostrow:hover { background: var(--surface-2); }
@@ -475,6 +475,10 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .hostrow .hm { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--fg-3); flex-wrap: wrap; }
 .techchip { font-size: 10.5px; border: 1px solid var(--line-2); background: var(--surface); border-radius: 5px; padding: 0 5px; color: var(--fg-2); }
 .hostdetail { overflow: auto; }
+.grid td.pathcell { width: 100%; max-width: 0; min-width: 180px; font-family: var(--mono); }
+.pathcell .pc { display: flex; white-space: nowrap; }
+.pathcell .pd { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--fg-3); }
+.pathcell .pn { flex: 0 0 auto; min-width: 0; max-width: calc(100% - 2ch); overflow: hidden; text-overflow: ellipsis; }
 .techgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; padding: 12px; }
 .tech { border: 1px solid var(--line-2); border-radius: 9px; padding: 8px 10px; background: var(--surface); }
 .tech .tn { font-weight: 650; display: flex; gap: 6px; align-items: baseline; }
