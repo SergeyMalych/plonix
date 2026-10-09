@@ -262,7 +262,7 @@ async fn engine_launch_url(api: &str, token: &str) -> Result<String> {
 fn router(hub: Arc<Hub>) -> Router {
     Router::new()
         .route("/", get(ui::launcher))
-        .route("/ui/{file}", get(ui::file))
+        .route("/ui/{*file}", get(ui::file))
         .route("/ui/session", post(ui_session))
         .route("/api/ui/launch", post(ui_launch))
         .route("/api/hub", get(about))
