@@ -101,9 +101,23 @@ pub fn start(home: &Home, opts: &StartOptions) -> Result<(Connected, bool)> {
         }
         if Instant::now() > deadline {
             let _ = child.kill();
-            bail!("the engine did not start within 15 seconds.{}", log_excerpt(&log_path, log_start));
+            bail!("the engine did not start within 15 seconds ({}).{}", not_ready(home, project.id(), child.id()), log_excerpt(&log_path, log_start));
         }
         std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Why a session that was started is not answering yet, for the timeout message.
+fn not_ready(home: &Home, project_id: &str, pid: u32) -> String {
+    let Some(info) = session::find(home, project_id) else {
+        return "no session file for the project".into();
+    };
+    if info.pid != pid {
+        return format!("the session file names process {}, not {pid}", info.pid);
+    }
+    match Client::to(home, &info, "cli").and_then(|c| c.get("/api/status")) {
+        Ok(_) => "it answers now".into(),
+        Err(e) => format!("{} does not answer: {e:#}", info.api),
     }
 }
 
