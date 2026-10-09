@@ -72,16 +72,32 @@ function corsIssue(ex) {
   if (!acao) return null;
   const creds = /true/i.test(header(ex.resp_headers, 'access-control-allow-credentials') || '');
   const origin = (header(ex.req_headers, 'origin') || '').trim();
+  // The site's own front end, allowed by name, is how most APIs work — not an echo worth a finding.
+  const site = (host) => (host || '').toLowerCase().split('.').slice(-2).join('.');
+  let originHost = '';
+  try {
+    originHost = new URL(origin).hostname;
+  } catch (_) {}
   if (acao === '*' && creds) return { severity: 'medium', note: 'The response sets Access-Control-Allow-Origin to * while allowing credentials, so any site could read it on behalf of a signed-in user.' };
-  if (origin && acao === origin && creds) return { severity: 'medium', note: `The response echoes the request Origin (${origin}) into Access-Control-Allow-Origin with credentials allowed, so an attacker-chosen origin may be trusted.` };
+  if (origin && acao === origin && creds && site(originHost) !== site(ex.host)) return { severity: 'medium', note: `The response echoes the request Origin (${origin}) into Access-Control-Allow-Origin with credentials allowed, so an attacker-chosen origin may be trusted.` };
   if (acao === '*') return { severity: 'low', note: 'The response sets Access-Control-Allow-Origin to *, so any site can read it.' };
   return null;
 }
 
 /** A parameter that carries a URL or path the server might follow. */
 function redirectParam(ex) {
-  for (const [k, v] of queryPairsOf(ex)) {
-    if (REDIRECT_PARAMS.test(k) && /^(https?:\/\/|\/\/|\/)[^\s]/i.test(v)) return { name: k, value: v };
+  for (const [k, raw] of queryPairsOf(ex)) {
+    if (!REDIRECT_PARAMS.test(k)) continue;
+    // Apps often encode the target twice (next=%252Faccount), so peel off a layer or two.
+    let v = raw;
+    for (let i = 0; i < 2 && /%[0-9a-f]{2}/i.test(v); i++) {
+      try {
+        v = decodeURIComponent(v);
+      } catch (_) {
+        break;
+      }
+    }
+    if (/^(https?:\/\/|\/\/|\/)[^\s]/i.test(v)) return { name: k, value: v };
   }
   return null;
 }
@@ -115,7 +131,13 @@ function suggestUserName(ex) {
   for (const [k, v] of queryPairsOf(ex)) if (/^(user|username|login|email|account|name)$/i.test(k) && v) return v.split('@')[0].slice(0, 40);
   const rb = ex.req_text || '';
   const m = rb.match(/"?(user(name)?|email|login)"?\s*[:=]\s*"?([^"&,}\s]{2,40})/i);
-  if (m) return m[3].split('@')[0];
+  if (m) {
+    let v = m[3];
+    try {
+      v = decodeURIComponent(v.replace(/\+/g, ' '));
+    } catch (_) {}
+    return v.split('@')[0];
+  }
   return 'User from ' + (ex.host || 'capture');
 }
 
@@ -125,6 +147,11 @@ function saveUserFrom(ex) {
   if (!g) return toast('No session cookie found on this response.', 'err');
   manageUsers(() => toast('Saved. Act as this user from the title bar, or pick it in the Bench “As…” menu.', 'ok'), { name: suggestUserName(ex), note: `Captured from ${ex.method} ${ex.path}`, headers: [['Cookie', g.cookie]] });
 }
+
+/** The suggestions that need a built-in tool: each asks to switch it on first if it is off. */
+const saveLoginAsUser = (ex) => useTool('saved-users', 'Save login as a user').then((ok) => ok && saveUserFrom(ex));
+const checkIdAcrossUsers = (ex) => useTool('access-check', 'Check this id across users').then((ok) => ok && startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}` }));
+const replaySignedOut = (ex) => useTool('access-check', 'Replay signed out').then((ok) => ok && startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}`, onlyAnon: true }));
 
 const IDEAS_QUESTION =
   'Suggest up to three things worth trying next on this endpoint. For each, say in plain words what to change, what result would mean there is a problem, and give the exact request to send from the Plonix Bench. Start with the most promising one.';
@@ -458,7 +485,7 @@ function runDetectorLead(ex, d, cap) {
       findingForm(null, [ex.id], title, { severity: s.severity, note });
       break;
     case 'access':
-      startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}`, onlyAnon: s.mode === 'anon' });
+      useTool('access-check', fillTemplate(s.chip, cap)).then((ok) => ok && startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}`, onlyAnon: s.mode === 'anon' }));
       break;
   }
 }
@@ -484,29 +511,29 @@ async function drawLensSuggestions(slot, ex, list) {
     chips.push(h('button', { class: 'chip k-warn', title: cors.note + ' Record it as a finding.', onclick: () => findingForm(null, [ex.id], `Permissive cross-origin policy on ${ex.method} ${ex.path}`, { severity: cors.severity, note: cors.note }) }, h('span', { text: '+ Finding: open CORS policy' })));
   }
   // A login handed back a session — offer to keep it as a saved user.
-  if (toolOn('saved-users') && sessionGrant(ex)) {
-    chips.push(h('button', { class: 'chip k-user', title: 'Save the session this response just set as a reusable user, ready in the Bench “As…” picker and the Access check.', onclick: () => saveUserFrom(ex) }, h('span', { text: 'Save login as a user' })));
+  if (sessionGrant(ex)) {
+    chips.push(h('button', { class: 'chip k-user', title: 'Save the session this response just set as a reusable user, ready in the Bench “As…” picker and the Access check.', onclick: () => saveLoginAsUser(ex) }, h('span', { text: 'Save login as a user' })));
   }
   if (inScope) {
     // An id in the path or a param — check whether other users' records answer too.
     const id = idTargetOf(ex);
-    if (id && toolOn('access-check')) {
-      chips.push(h('button', { class: 'chip k-access', title: `Replay this request as each saved user and signed out, to see if ${id.where} (${id.value.slice(0, 24)}) lets you reach records that aren’t yours.`, onclick: () => startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}` }) }, h('span', { text: 'Check this id across users' })));
+    if (id) {
+      chips.push(h('button', { class: 'chip k-access', title: `Replay this request as each saved user and signed out, to see if ${id.where} (${id.value.slice(0, 24)}) lets you reach records that aren’t yours.`, onclick: () => checkIdAcrossUsers(ex) }, h('span', { text: 'Check this id across users' })));
     }
     // An authenticated request — does it still work with the login removed?
-    if (toolOn('access-check') && authHeadersOf(ex.req_headers || []).length && ex.status >= 200 && ex.status < 300) {
-      chips.push(h('button', { class: 'chip k-access', title: 'Replay this request with your login removed, to see whether it needs you signed in at all.', onclick: () => startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}`, onlyAnon: true }) }, h('span', { text: 'Replay signed out' })));
+    if (authHeadersOf(ex.req_headers || []).length && ex.status >= 200 && ex.status < 300) {
+      chips.push(h('button', { class: 'chip k-access', title: 'Replay this request with your login removed, to see whether it needs you signed in at all.', onclick: () => replaySignedOut(ex) }, h('span', { text: 'Replay signed out' })));
     }
     // A value that comes straight back — set it up as a Bench experiment.
     const refl = reflectedValues(ex);
     if (refl.length) {
       const r = refl[0];
-      chips.push(h('button', { class: 'chip k-bench', title: `The ${r.where} value “${r.value.slice(0, 32)}” comes back unescaped in the response. Open this request on the Bench to vary it and compare.`, onclick: () => benchWithNote(ex.id, `“${r.name}” is reflected in the response — vary it and compare.`) }, h('span', { text: 'Reflected value → Bench' })));
+      chips.push(h('button', { class: 'chip k-bench', title: `The ${r.where} value “${r.value.slice(0, 32)}” comes back unescaped in the response. Open this request on the Bench to vary it and compare.`, onclick: () => benchWithNote(ex.id, `“${r.name}” is reflected in the response — vary it and compare.`, r.where === 'query' ? r.name : null) }, h('span', { text: 'Reflected value → Bench' })));
     }
     // A redirect-shaped parameter — open it ready to follow.
     const rd = redirectParam(ex);
     if (rd) {
-      chips.push(h('button', { class: 'chip k-bench', title: `The “${rd.name}” parameter carries a URL the server may follow. Open this request on the Bench to change it and watch where it lands.`, onclick: () => benchWithNote(ex.id, `“${rd.name}” carries a redirect target — change it and follow where it goes.`) }, h('span', { text: 'Trace this redirect' })));
+      chips.push(h('button', { class: 'chip k-bench', title: `The “${rd.name}” parameter carries a URL the server may follow. Open this request on the Bench to change it and watch where it lands.`, onclick: () => benchWithNote(ex.id, `“${rd.name}” carries a redirect target — change it and follow where it goes.`, rd.name) }, h('span', { text: 'Trace this redirect' })));
     }
     // GraphQL — enumerate the schema in Scans, or open it on the Bench.
     if (isGraphql(ex)) {

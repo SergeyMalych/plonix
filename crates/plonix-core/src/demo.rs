@@ -559,6 +559,12 @@ export async function api(path, opts = {{}}) {{
         req("GET", "https://www.brightcart.example/product/1001").h("Accept", "text/html").h("Referer", referer.clone()).h("Cookie", cookies.clone()),
         html_resp("<!doctype html><title>Trail running shoes · Brightcart</title><div id=\"app\" data-product=\"1001\"></div>".into()),
     )?;
+    // The shop's search page writes the search words back into the page as typed,
+    // the "value comes straight back" moment the Lens offers to set up on the Bench.
+    s.add(
+        req("GET", "https://www.brightcart.example/search?q=trail+running").h("Accept", "text/html").h("Referer", referer.clone()).h("Cookie", cookies.clone()),
+        html_resp("<!doctype html><title>Search · Brightcart</title><h2>Results for trail running</h2><ul><li><a href=\"/product/1001\">Trail running shoes</a></li></ul>".into()),
+    )?;
     s.add(api_get("https://api.brightcart.example/v1/products/1001"), resp(200, "application/json").api().json(product(1001, "Trail running shoes", 8900)))?;
     s.add(api_get("https://api.brightcart.example/v1/products/1001/reviews?limit=5"), resp(200, "application/json").api().json(json!({ "items": [ { "rating": 5, "text": "Great grip on wet rock.", "author": "J." } ], "total": 42 })))?;
     s.add(api_get("https://api.brightcart.example/v1/products/1002"), resp(200, "application/json").api().json(product(1002, "Merino hoodie", 7400)))?;
@@ -646,6 +652,22 @@ export async function api(path, opts = {{}}) {{
             "upstream": "10.20.4.17:9200"
         })),
     )?;
+    // The same search library fails the same way behind other endpoints, the
+    // "one leaked trace is rarely alone" moment.
+    for (url, ctl) in [
+        ("https://api.brightcart.example/v1/products?category=new&sort=popular%27", "controllers/products.js:63:18"),
+        ("https://api.brightcart.example/v1/products/1001/reviews?limit=5&q=fit%22", "controllers/reviews.js:29:14"),
+    ] {
+        s.add(
+            api_get(url),
+            resp(500, "application/json").api().ms(240).json(json!({
+                "error": "internal",
+                "message": "SearchQueryError: unterminated string in query",
+                "stack": format!("SearchQueryError: unterminated string in query\n    at parseQuery (/srv/app/node_modules/@bc/search/lib/parse.js:88:11)\n    at list (/srv/app/src/{ctl})"),
+                "upstream": "10.20.4.17:9200"
+            })),
+        )?;
+    }
 
     // Signing in on the identity host, then back to the shop.
     s.add(
@@ -695,6 +717,17 @@ export async function api(path, opts = {{}}) {{
             "id": "usr_8f2c41", "email": "maya.lopez@mail.example", "name": "Maya Lopez", "role": "customer",
             "phone": "+44 7700 900123", "marketing_opt_in": true
         })),
+    )?;
+    // The wishlist service answers any origin and still allows credentials, so
+    // any site Maya visits could read her saved items.
+    s.add(
+        authed("GET", "https://api.brightcart.example/v1/wishlist"),
+        resp(200, "application/json")
+            .h("Server", "nginx/1.25.4")
+            .h("X-Powered-By", "Express")
+            .h("Access-Control-Allow-Origin", "*")
+            .h("Access-Control-Allow-Credentials", "true")
+            .json(json!({ "owner": "usr_8f2c41", "email": "maya.lopez@mail.example", "items": [ { "id": 1002, "name": "Merino hoodie" }, { "id": 1004, "name": "Rain shell" } ] })),
     )?;
     s.add(
         authed("GET", "https://api.brightcart.example/v1/users/usr_8f2c41/addresses"),
