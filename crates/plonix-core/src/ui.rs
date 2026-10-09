@@ -44,8 +44,12 @@ const FILES: &[(&str, &'static str, &str)] = &[
     ("app/shell.js", "text/javascript; charset=utf-8", include_str!("../ui/app/shell.js")),
     ("launcher.js", "text/javascript; charset=utf-8", include_str!("../ui/launcher.js")),
     ("app.css", "text/css; charset=utf-8", include_str!("../ui/app.css")),
+    ("studio.css", "text/css; charset=utf-8", include_str!("../ui/studio.css")),
     ("icon.svg", "image/svg+xml", include_str!("../ui/icon.svg")),
 ];
+
+/// Font files the stylesheets load: name, content type, bytes.
+const FONTS: &[(&str, &str, &[u8])] = &[("fonts/jost.woff2", "font/woff2", include_bytes!("../ui/fonts/jost.woff2"))];
 
 /// How long a launch code stays valid.
 pub const CODE_TTL: Duration = Duration::from_secs(120);
@@ -54,7 +58,7 @@ pub const CODE_TTL: Duration = Duration::from_secs(120);
 /// origin. Captured traffic is attacker-controlled; this keeps any markup in
 /// it inert even if a rendering bug let it through.
 const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; \
-                   connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+                   font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 /// Outstanding one-time launch codes.
 #[derive(Default)]
@@ -113,6 +117,9 @@ pub async fn launcher() -> Response {
 
 /// A script, stylesheet or icon the pages load, by name (`/ui/{*file}`).
 pub async fn file(Path(name): Path<String>) -> Response {
+    if let Some((_, content_type, bytes)) = FONTS.iter().find(|(n, ..)| *n == name) {
+        return asset_bytes(content_type, bytes.to_vec());
+    }
     match FILES.iter().find(|(n, ..)| *n == name) {
         Some((_, content_type, body)) => asset(content_type, *body),
         None => StatusCode::NOT_FOUND.into_response(),
@@ -149,6 +156,17 @@ mod tests {
             for part in page.split("\"/ui/").skip(1) {
                 let name = &part[..part.find('"').unwrap()];
                 assert!(FILES.iter().any(|(n, ..)| *n == name), "/ui/{name} is not served");
+            }
+        }
+    }
+
+    /// Every font a stylesheet points at is served.
+    #[test]
+    fn every_font_a_stylesheet_loads_is_served() {
+        for (_, _, css) in FILES.iter().filter(|(n, ..)| n.ends_with(".css")) {
+            for part in css.split("url(\"/ui/").skip(1) {
+                let name = &part[..part.find('"').unwrap()];
+                assert!(FONTS.iter().any(|(n, ..)| *n == name), "/ui/{name} is not served");
             }
         }
     }

@@ -69,6 +69,7 @@ async function api(path, { method = 'GET', body } = {}) {
 async function boot() {
   applyTheme(store('plonix.theme') || 'auto');
   applyDensity(store('plonix.density') || 'dense');
+  applyStyle(store('plonix.style') || 'classic');
   const hash = location.hash;
   const code = hash.startsWith('#code=') ? hash.slice(6) : null;
   if (code) {
@@ -1260,6 +1261,13 @@ function applyTheme(t) {
 function applyDensity(d) {
   document.documentElement.setAttribute('data-density', d === 'roomy' ? 'roomy' : 'dense');
   S.density = d === 'roomy' ? 'roomy' : 'dense';
+}
+
+/** Classic (the default) or Studio, the optional geometric style in studio.css. */
+function applyStyle(v) {
+  if (v === 'studio') document.documentElement.setAttribute('data-style', 'studio');
+  else document.documentElement.removeAttribute('data-style');
+  S.style = v === 'studio' ? 'studio' : 'classic';
 }
 
 function cycleTheme() {
