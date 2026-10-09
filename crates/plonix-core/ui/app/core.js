@@ -315,12 +315,61 @@ const TOUR_STEPS = [
   {
     view: 'traffic',
     target: ['.lenssugg:not([hidden])', '#inspector'],
-    title: 'Suggestions',
+    title: 'Mind Reader',
     test: 'suggestions',
-    text: 'Plonix reads the request and suggests next steps that fit it, one click each, such as drafting a finding or getting ideas for this endpoint. Nothing is sent until you click.',
+    text: 'Mind Reader reads the request on screen and offers the next steps that fit it, as chips under the Lens header and in the right-click menu in Traffic. Nothing is sent until you click, and anything that sends stays in scope. The next stops show each one.',
   },
   {
     view: 'traffic',
+    prep: () => tourLens('path:/v1/orders/1042 mime:json'),
+    target: [() => mindChip(/across users/), '.lenssugg:not([hidden])', '#inspector'],
+    title: 'Check this id across users',
+    test: 'mrid',
+    text: 'An order number in the path is the “could I read someone else’s?” question. One click replays this request as every saved user and once signed out, and lines up who got the record.',
+  },
+  {
+    view: 'traffic',
+    prep: () => tourLens('host:auth.brightcart-id.example method:POST path:/login'),
+    target: [() => mindChip(/save login/i), '.lenssugg:not([hidden])', '#inspector'],
+    title: 'Save login as a user',
+    test: 'mrlogin',
+    text: 'This sign-in handed back a session cookie. Save it as a user and it is ready in the Bench “As…” box, the Act as menu and the Access check, without copying a cookie by hand.',
+  },
+  {
+    view: 'traffic',
+    prep: () => tourLens('host:www.brightcart.example path:/search'),
+    target: [() => mindChip(/reflected/i), '.lenssugg:not([hidden])', '#inspector'],
+    title: 'Reflected value → Bench',
+    test: 'mrreflect',
+    text: 'The search words come straight back in the page. Mind Reader opens the request on the Bench with that value marked, ready to vary and compare how the page changes.',
+  },
+  {
+    view: 'traffic',
+    prep: () => tourLens('host:www.brightcart.example path:/login'),
+    target: [() => mindChip(/redirect/i), '.lenssugg:not([hidden])', '#inspector'],
+    title: 'Trace this redirect',
+    test: 'mrredirect',
+    text: 'A “next” parameter tells the server where to send you afterwards. Mind Reader opens it on the Bench with “next” marked, so you can point it somewhere else and see where the server really goes.',
+  },
+  {
+    view: 'traffic',
+    prep: () => tourLens('path:/v1/wishlist'),
+    target: [() => mindChip(/cors/i), '.lenssugg:not([hidden])', '#inspector'],
+    title: '+ Finding: open CORS policy',
+    test: 'mrcors',
+    text: 'This response lets any site read it while allowing the user’s cookies, a header pair that is easy to miss. Mind Reader drafts the finding with this request as evidence.',
+  },
+  {
+    view: 'traffic',
+    prep: () => tourLens('status:500'),
+    target: [() => mindChip(/find others/i), '.lenssugg:not([hidden])', '#inspector'],
+    title: 'Find others like this',
+    test: 'mrothers',
+    text: 'One error with a stack trace is rarely alone. One click shows every error like it from this host in Traffic.',
+  },
+  {
+    view: 'traffic',
+    prep: () => tourLens('path:/v1/orders/1042 mime:json'),
     target: ['#inspector .lenshead', '#inspector'],
     title: 'Ask Claude',
     test: 'ask',
@@ -394,7 +443,7 @@ const TOUR_STEPS = [
     view: 'scans',
     target: ['#scanbody .scansug', '#scanbody'],
     title: 'Scans',
-    text: 'Plonix lists what it sees in an in-scope host and recommends checks that fit it. You pick the checks and press Run; nothing scans on its own.',
+    text: 'Plonix lists what it sees in an in-scope host and recommends checks that fit it. You pick the checks and press Run; nothing scans on its own. After a run, every request the scan sent is listed here — open any one to see it, or view them all in Traffic.',
   },
   {
     view: 'rules',
@@ -542,7 +591,149 @@ function hideTourMouse(now) {
 
 const andList = (xs) => (xs.length < 2 ? xs.join('') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1]);
 
+/** Opens the first request matching a Traffic search in the Lens, for a tour stop. */
+async function tourLens(q) {
+  const r = await api('/api/traffic?limit=1&q=' + encodeURIComponent(q));
+  if (r.items.length) await openInspector(r.items[0].id);
+}
+
+/** The Mind Reader chip under the Lens header whose label matches. */
+const mindChip = (re) => [...document.querySelectorAll('.lenssugg .chip')].find((b) => re.test(b.textContent)) || null;
+
+/** A Mind Reader Test now that presses the chip; `then` shows what it did. */
+const mindTest = (re, then, undo) => ({
+  run: async (t) => {
+    const chip = await t.until(() => mindChip(re));
+    if (!chip) return 'That suggestion is not showing; start the demo over to get its request back.';
+    await t.press(chip);
+    return then(t);
+  },
+  undo,
+});
+
+/** Removes the Bench tab a Test now opened, so the demo's experiments stay as they were. */
+const dropTourTab = (n) => () => {
+  if (R.tabs.length <= n) return;
+  R.tabs.splice(n);
+  R.active = Math.min(R.active, R.tabs.length - 1);
+  saveBench();
+};
+
+/** Shows the Bench tab a Mind Reader chip just opened, with its marked value. */
+async function tourBenchTab(t, before, what) {
+  const tab = await t.until(() => R.tabs.length > before && R.tabs[R.tabs.length - 1]);
+  if (!tab) return 'The Bench did not open.';
+  TOUR.undo = dropTourTab(before);
+  await t.until(() => S.view === 'bench' && $('#benchurl'));
+  await t.wait(250);
+  t.ring(['.reqbar', '#main .view']);
+  let marked = ((tab.url || '').match(/•([^•]*)•/) || [])[1];
+  for (let n = 0; marked && n < 2 && /%[0-9a-f]{2}|\+/i.test(marked); n++) {
+    try {
+      marked = decodeURIComponent(marked.replace(/\+/g, ' '));
+    } catch (_) {
+      break;
+    }
+  }
+  return marked ? `Opened on the Bench with ${what} marked (${marked}). Change it and send, or press Run to try a list of values.` : `Opened on the Bench, ready for you to change ${what} and send.`;
+}
+
 const TOUR_TESTS = {
+  mrid: mindTest(/across users/, async (t) => {
+    const btn = await t.until(() => $('#main .acpane .btn.primary:not([disabled])'));
+    if (!btn) return 'The Access check did not open.';
+    t.ring('#main .view');
+    await t.press(btn);
+    await t.until(() => AC.report || AC.err, 15000);
+    await t.wait(200);
+    t.ring(['#main .actable', '#main .view']);
+    if (!AC.report) return AC.err || 'The check did not finish.';
+    const ok = AC.report.identities.filter((id) => AC.report.rows[0].cells.some((c) => c.identity === id.id && okStatus(c.status)));
+    return `Replayed Maya’s order ${andList(AC.report.identities.map((x) => (x.anon ? 'signed out' : 'as ' + x.label.replace(/\s*\(.*\)$/, ''))))}. ${ok.length === AC.report.identities.length ? 'Every one of them got it, even signed out, so it is flagged.' : `${plural(ok.length, 'identity', 'identities')} got it.`}`;
+  }),
+  mrlogin: (() => {
+    let had = null;
+    return {
+      run: async (t) => {
+        await loadUsers(true);
+        had = new Set(S.users.map((u) => u.id));
+        const chip = await t.until(() => mindChip(/save login/i));
+        if (!chip) return 'That suggestion is not showing; start the demo over to get its request back.';
+        await t.press(chip);
+        const fresh = await t.until(() => (S.users || []).find((u) => !had.has(u.id) && u.id));
+        if (!fresh) return 'The user was not saved.';
+        await t.until(() => S.view === 'users' && $('#main .view'));
+        await t.wait(300);
+        t.ring(['.uscookies', '#main .view']);
+        return `Saved “${fresh.name}” with the session cookie this sign-in set. Pick ${fresh.name} in the Bench “As…” box or the Act as menu, and requests go out as them.`;
+      },
+      undo: () => {
+        if (!had || !S.users) return;
+        const keep = S.users.filter((u) => had.has(u.id));
+        had = null;
+        if (keep.length === S.users.length) return;
+        S.users = keep;
+        US.sel = null;
+        saveUsers().catch(() => {});
+      },
+    };
+  })(),
+  mrreflect: (() => {
+    let before = 0;
+    return {
+      run: async (t) => {
+        before = R.tabs.length;
+        const chip = await t.until(() => mindChip(/reflected/i));
+        if (!chip) return 'That suggestion is not showing; start the demo over to get its request back.';
+        await t.press(chip);
+        return tourBenchTab(t, before, 'the search words');
+      },
+    };
+  })(),
+  mrredirect: (() => {
+    let before = 0;
+    return {
+      run: async (t) => {
+        before = R.tabs.length;
+        const chip = await t.until(() => mindChip(/redirect/i));
+        if (!chip) return 'That suggestion is not showing; start the demo over to get its request back.';
+        await t.press(chip);
+        return tourBenchTab(t, before, 'where “next” points');
+      },
+    };
+  })(),
+  mrcors: mindTest(/cors/i, async (t) => {
+    const m = await t.until(() => $('.modal'));
+    if (!m) return 'The finding did not open.';
+    m.classList.add('tourmodal');
+    t.ring(m.querySelector('.mcard'));
+    return 'A finding, drafted: title, severity, why it matters and this request as evidence. Save it as is, or let Claude write it up.';
+  }),
+  mrothers: (() => {
+    let saved = null;
+    return {
+      run: async (t) => {
+        saved = { filters: T.filters.map((f) => ({ ...f })), text: T.text };
+        const chip = await t.until(() => mindChip(/find others/i));
+        if (!chip) return 'That suggestion is not showing; start the demo over to get its request back.';
+        const host = T.sel ? ((await getExchange(T.sel).catch(() => null)) || {}).host : null;
+        await t.press(chip);
+        await t.wait(700);
+        t.ring(['#chips', '#tablewrap']);
+        const r = await api('/api/traffic?limit=200&q=' + encodeURIComponent(queryFor(T.filters, T.text))).catch(() => ({ items: [], total: 0 }));
+        const paths = new Set(r.items.map((x) => x.path));
+        return `Traffic now shows every server error from ${host || 'this host'}: ${plural(r.total, 'request')} across ${plural(paths.size, 'endpoint')}, failing with the same trace. One leaked error led to the rest.`;
+      },
+      undo: () => {
+        if (!saved) return;
+        T.filters = saved.filters;
+        T.text = saved.text;
+        saved = null;
+        if (S.view === 'traffic') filtersChanged();
+        else saveTrafficView();
+      },
+    };
+  })(),
   traffic: {
     run: async (t) => {
       await t.type($('#q'), 'usr_8f2c41');
@@ -857,23 +1048,15 @@ const TOUR_TESTS = {
   },
   market: {
     run: async (t) => {
-      for (const name of ['saved-users', 'access-check']) {
-        if (!toolOn(name)) await api('/api/market/install', { method: 'POST', body: { name } });
-      }
-      S.status = await api('/api/status');
-      renderShell();
-      const r = await api('/api/traffic?limit=1&q=' + encodeURIComponent('path:/v1/orders/1042 mime:json'));
-      if (!r.items.length) return 'The order to check is gone; start the demo over to get it back.';
-      startAccessCheck({ targets: [r.items[0].id], sourceLabel: 'GET /v1/orders/1042, Maya’s order' });
-      const btn = await t.until(() => $('#main .acpane .btn.primary:not([disabled])'));
-      t.ring('#main .view');
-      await t.press(btn);
-      await t.until(() => AC.report || AC.err, 15000);
-      await t.wait(200);
-      t.ring(['#main .actable', '#main .view']);
-      if (!AC.report) return AC.err || 'The check did not finish.';
-      const ok = AC.report.identities.filter((id) => AC.report.rows[0].cells.some((c) => c.identity === id.id && okStatus(c.status)));
-      return `Switched on the Access check, then replayed Maya’s order ${andList(AC.report.identities.map((x) => (x.anon ? 'signed out' : 'as ' + x.label.replace(/\s*\(.*\)$/, ''))))}. ${ok.length === AC.report.identities.length ? 'Every one of them got it, even signed out.' : `${plural(ok.length, 'identity', 'identities')} got it.`}`;
+      const card = await t.until(() => [...document.querySelectorAll('.mpkg')].find((c) => (c.querySelector('b') || {}).textContent === 'access-check'));
+      if (card) await t.press(card);
+      else if (MK.data) showPackage('access-check');
+      else return 'The Market list is still loading; try again in a moment.';
+      const page = await t.until(() => $('#mdetail .mpage .msec'));
+      if (!page) return 'The package did not open.';
+      await t.wait(250);
+      t.ring(['#mdetail', '#main .view']);
+      return 'Every package has a page: what it does, who made it, its checksum, and a How to use it guide. In your own projects, a Mind Reader chip that needs a tool such as the Access check offers to switch it on right there.';
     },
   },
 };
@@ -1001,7 +1184,10 @@ function tourTestBox(i, test) {
 /** The first of a step's targets that is on screen; a running Test now
  * points the ring at what it is showing instead. */
 function tourTarget(s) {
-  for (const sel of [].concat(TOUR.focus || s.target || [])) {
+  for (const t of [].concat(TOUR.focus || s.target || [])) {
+    // A function finds its part on demand, such as one chip among several.
+    const sel = typeof t === 'function' ? t() : t;
+    if (!sel) continue;
     if (sel instanceof Element) {
       if (sel.isConnected && sel.getClientRects().length) return sel;
       continue;

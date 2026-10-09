@@ -49,10 +49,41 @@ async function sendToBench(id) {
   leaveTo('bench');
 }
 
-/** Sends a request to the Bench and shows a one-line note about why — used by the Mind Reader chips. */
-async function benchWithNote(id, note) {
+/** Sends a request to the Bench and shows a one-line note about why — used by the Mind Reader chips.
+ * With `param`, that query parameter's value is marked as a position, ready to vary or Run. */
+async function benchWithNote(id, note, param) {
+  const before = R.tabs.length;
   await sendToBench(id);
+  const tab = R.tabs.length > before ? R.tabs[R.tabs.length - 1] : null;
+  if (tab && param) {
+    const marked = markQueryParam(tab.url, param);
+    if (marked !== tab.url) {
+      tab.url = marked;
+      saveBench();
+      if (S.view === 'bench') renderBench($('#main'));
+    }
+  }
   if (note) toast(note, 'ok');
+}
+
+/** The URL with one query parameter's value wrapped in position markers. */
+function markQueryParam(url, name) {
+  const q = url.indexOf('?');
+  if (q < 0) return url;
+  const parts = url.slice(q + 1).split('&');
+  const dec = (s) => {
+    try {
+      return decodeURIComponent(s.replace(/\+/g, ' '));
+    } catch (_) {
+      return s;
+    }
+  };
+  const i = parts.findIndex((p) => dec(p.split('=')[0]) === name && p.includes('='));
+  if (i < 0) return url;
+  const eq = parts[i].indexOf('=');
+  if (eq === parts[i].length - 1) return url;
+  parts[i] = parts[i].slice(0, eq + 1) + MARK + parts[i].slice(eq + 1) + MARK;
+  return url.slice(0, q + 1) + parts.join('&');
 }
 
 function newBlankTab() {

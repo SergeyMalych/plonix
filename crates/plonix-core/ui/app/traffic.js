@@ -150,6 +150,7 @@ function filterLabel(term) {
     'scope:in': 'In scope',
     'scope:out': 'Out of scope',
     'source:replay': 'Sent from Bench',
+    'source:scan': 'Sent by a scan',
     'source:proxy': 'Captured',
     'source:import': 'Imported from HAR',
     'status:none': 'No response',
@@ -628,6 +629,7 @@ function suggestedFilters(f) {
   // The busiest third-party hosts (analytics, CDNs) are the usual ones to hide.
   for (const x of (f.other_hosts || []).slice(0, 2)) if (x.count >= 3) add('host:' + x.value, 'Hide ' + x.value, x.count, 'exclude', 'host neg');
   add('source:replay', 'Sent from Bench', f.replays, 'include', 'replay');
+  add('source:scan', 'Sent by a scan', f.scans, 'include', 'replay');
   return out;
 }
 
@@ -704,7 +706,7 @@ const QA_FIELDS = [
   ['ext', 'File extension', ['extension', 'file']],
   ['kind', 'Static files', ['static', 'assets']],
   ['scope', 'In scope or out of scope', ['target']],
-  ['source', 'Captured, sent from Bench or imported', ['bench', 'replay', 'har', 'import']],
+  ['source', 'Captured, sent from Bench, sent by a scan or imported', ['bench', 'replay', 'scan', 'har', 'import']],
   ['is', 'Named filter from a filter pack', ['named', 'pack', 'filter']],
 ];
 const QA_STATUS = { '1xx': 'Informational', '2xx': 'Success', '3xx': 'Redirects', '4xx': 'Client errors', '5xx': 'Server errors', none: 'No response' };
@@ -1123,9 +1125,10 @@ function rowMenu(e, ex) {
   ];
   const idT = idTargetOf(ex);
   const actions = [{ label: 'Send to Bench', run: () => sendToBench(ex.id) }, { label: 'Copy as curl', run: () => copyCurl(ex.id) }];
-  if (decide(ex.host) === 'accepted' && toolOn('access-check')) {
-    if (idT) actions.push({ label: 'Check this id across users', run: () => startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}` }) });
-    actions.push({ label: 'Replay signed out', run: () => startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}`, onlyAnon: true }) });
+  if (sessionGrant(ex)) actions.push({ label: 'Save login as a user', run: () => saveLoginAsUser(ex) });
+  if (decide(ex.host) === 'accepted') {
+    if (idT) actions.push({ label: 'Check this id across users', run: () => checkIdAcrossUsers(ex) });
+    actions.push({ label: 'Replay signed out', run: () => replaySignedOut(ex) });
   }
   if (decide(ex.host) === 'accepted') {
     for (const name of extsThat('probe')) actions.push({ label: 'Probe for hidden parameters', run: () => probeExchange(name, ex) });

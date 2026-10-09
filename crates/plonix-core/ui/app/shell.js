@@ -23,12 +23,54 @@ const VIEWS = {
 
 const IN_APP = !!window.__PLONIX_APP__;
 
-/** Whether a built-in tool has been switched on from the Market. */
 /** Extensions switched on that run a given way (enumerate, probe, scan or sandbox), by name. */
 const extsThat = (kind) => Object.entries((S.status && S.status.extensions) || {}).filter(([, k]) => k === kind).map(([n]) => n);
+/** Whether a built-in tool has been switched on from the Market. */
 const toolOn = (id) => !!(S.status && ((S.status.tools && S.status.tools.includes(id)) || (S.status.demo && DEMO_TOOLS.includes(id))));
 /** Tools the demo project shows without installing them, so its walkthrough can stop on them. */
-const DEMO_TOOLS = ['saved-users', 'programs'];
+const DEMO_TOOLS = ['saved-users', 'access-check', 'programs'];
+
+/** What a suggestion says when the built-in tool it needs is still off. */
+const TOOL_ASK = {
+  'saved-users': { label: 'Saved users', what: 'keeps each user’s cookies and tokens, so the Bench, Scans and your browser can send as them' },
+  'access-check': { label: 'Access check', what: 'replays a request as each saved user and once signed out, and lines up who got what' },
+};
+
+/** Makes sure the built-in tool a suggestion needs is on. If it is off, asks once and
+ * switches it on from the official Market (the Access check brings Saved users with it).
+ * Resolves true when the tool is ready; nothing else is sent. */
+function useTool(id, action) {
+  if (toolOn(id)) return Promise.resolve(true);
+  const need = [id === 'access-check' && !toolOn('saved-users') ? 'saved-users' : null, id].filter(Boolean);
+  const names = need.map((n) => (TOOL_ASK[n] || { label: n }).label);
+  return new Promise((done) => {
+    const yes = h('button', {
+      class: 'btn primary',
+      text: 'Switch on',
+      onclick: async () => {
+        yes.disabled = true;
+        try {
+          for (const name of need) await api('/api/market/install', { method: 'POST', body: { name } });
+          await poll();
+          closeModal();
+          toast(`${andList(names)} switched on`, 'ok');
+          done(toolOn(id));
+        } catch (e) {
+          m.err.textContent = e.message;
+          yes.disabled = false;
+        }
+      },
+    });
+    const m = modal(
+      `Switch on ${andList(names)}?`,
+      [
+        h('div', { text: `“${action}” needs ${andList(names)}, free ${need.length > 1 ? 'tools' : 'tool'} from the official Market. ${need.map((n) => `${(TOOL_ASK[n] || { label: n }).label} ${(TOOL_ASK[n] || { what: '' }).what}.`).join(' ')}` }),
+        h('div', { class: 'muted', text: `Switching on sends nothing. You can switch ${need.length > 1 ? 'them' : 'it'} off again in the Market.` }),
+      ],
+      [h('button', { class: 'btn', text: 'Not now', onclick: () => (closeModal(), done(false)) }), yes],
+    );
+  });
+}
 
 /** Screens with a number key (⌘1-⌘9 in the app), in the order of the app's
  * View menu (plonix-app/src/main.rs), so a hint always names the right key. */

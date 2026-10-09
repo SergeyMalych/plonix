@@ -593,6 +593,9 @@ impl Store {
             if source == "replay" {
                 f.replays += 1;
             }
+            if source == "scan" {
+                f.scans += 1;
+            }
             if in_scope {
                 f.in_scope += 1;
                 if let Some(seg) = first_segment(&path) {

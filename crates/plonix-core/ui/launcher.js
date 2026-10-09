@@ -41,6 +41,12 @@ function ago(ms) {
   return new Date(ms).toLocaleDateString();
 }
 
+/** Shows a path under the home folder as ~/… */
+function tilde(p) {
+  const home = L.about.home_dir;
+  return home && p.startsWith(home + '/') ? '~' + p.slice(home.length) : p;
+}
+
 function slug(name) {
   const s = name.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/-+/g, '-').replace(/^[-.]+|[-.]+$/g, '');
   return s || 'project';
