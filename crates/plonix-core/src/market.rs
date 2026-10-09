@@ -719,8 +719,8 @@ pub struct Listing {
     pub package: Package,
     pub status: Status,
     pub verification: Verification,
-    /// Installed without the Market (`plonix rules add` and the like), so it
-    /// is not in the catalog.
+    /// Added by hand (`plonix market add`, `plonix rules add` and the like),
+    /// so it is not in the catalog.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub local: bool,
     /// Packages this one installs (bundles and requirements), by name.

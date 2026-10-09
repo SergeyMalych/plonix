@@ -63,7 +63,7 @@ The store has `leaks` too: AWS keys, private keys, JWTs, stack traces, SQL error
 
 ```sh
 plonix filters check acme-filters.json    # validate and print the sha256
-plonix filters add acme-filters.json      # or an https:// URL, optionally --sha256 <hex>
+plonix filters add acme-filters.json --yes # or an https:// URL, optionally --sha256 <hex>
 plonix filters remove acme-filters
 ```
 

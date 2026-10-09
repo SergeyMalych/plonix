@@ -106,8 +106,8 @@ error: invalid rule pack:
 <h2 id="installing-and-managing-packs">Installing and managing packs<a class="anchor" href="#installing-and-managing-packs" aria-label="Link to this section">#</a></h2>
 <pre><code class="language-sh">plonix rules                                   # packs in effect: built-in and installed
 plonix rules check ./my-pack.json              # validate without installing; prints the sha256
-plonix rules add ./my-pack.json                # install from a file
-plonix rules add https://example.com/pack.json --sha256 &lt;hex&gt;   # from a URL, pinned
+plonix rules add ./my-pack.json --yes          # install from a file
+plonix rules add https://example.com/pack.json --sha256 &lt;hex&gt; --yes # from a URL, pinned
 plonix rules remove my-pack
 plonix tech                                    # what the rules found, per host
 plonix tech shop.example.com</code></pre>
@@ -146,7 +146,7 @@ plonix store --index ./my-store/index.json                            # a local 
 <h2 id="limits">Limits<a class="anchor" href="#limits" aria-label="Link to this section">#</a></h2>
 <div class="table"><table><thead><tr><th>Limit</th><th>Value</th></tr></thead><tbody><tr><td>Pack file size</td><td>1 MiB</td></tr><tr><td>Rules per pack</td><td>2000</td></tr><tr><td>Conditions per rule</td><td>32</td></tr><tr><td><code>implies</code> per rule</td><td>16</td></tr><tr><td>Pattern length</td><td>1000 characters</td></tr><tr><td>Compiled pattern size</td><td>256 KiB</td></tr><tr><td>Body scanned per response</td><td>512 KiB of decoded text</td></tr><tr><td>Exchanges examined per host</td><td>300 most recent</td></tr><tr><td>Installed packs</td><td>200</td></tr><tr><td>Store index size</td><td>4 MiB, 5000 packages</td></tr></tbody></table></div>
 <h2 id="contributing-a-pack">Contributing a pack<a class="anchor" href="#contributing-a-pack" aria-label="Link to this section">#</a></h2>
-<ol><li>Write your pack and run <code>plonix rules check your-pack.json</code> until it's clean. Test it against real traffic with <code>plonix rules add</code> and <code>plonix tech</code>.</li><li>Prefer specific signals (a distinctive header, a framework-specific cookie) over generic ones, and lower <code>confidence</code> for anything that could be a coincidence.</li><li>Reuse existing ids for existing technologies so detections merge instead of duplicating.</li><li>Open a pull request that adds <code>store/packs/&lt;name&gt;.json</code> and an entry in <code>store/index.json</code> with the <code>sha256</code> printed by <code>plonix rules check</code>. <code>cargo test</code> (and CI) checks that every index entry matches its file.</li></ol>
+<ol><li>Write your pack and run <code>plonix rules check your-pack.json</code> until it's clean. Test it against real traffic with <code>plonix rules add --yes</code> and <code>plonix tech</code>.</li><li>Prefer specific signals (a distinctive header, a framework-specific cookie) over generic ones, and lower <code>confidence</code> for anything that could be a coincidence.</li><li>Reuse existing ids for existing technologies so detections merge instead of duplicating.</li><li>Open a pull request that adds <code>store/packs/&lt;name&gt;.json</code> and an entry in <code>store/index.json</code> with the <code>sha256</code> printed by <code>plonix rules check</code>. <code>cargo test</code> (and CI) checks that every index entry matches its file.</li></ol>
 <p>Reviewers check that patterns are specific, categories are right, and nothing in the pack is surprising. The checksum in the index is what makes that review stick: once merged, users install exactly the bytes that were reviewed.</p>
 </article>
 <p class="edit">This page is <a href="https://github.com/SergeyMalych/plonix/blob/main/docs/detection-rules.md">docs/detection-rules.md</a> in the Plonix repository. Spotted something wrong? <a href="https://github.com/SergeyMalych/plonix/edit/main/docs/detection-rules.md">Suggest a change</a>.</p>

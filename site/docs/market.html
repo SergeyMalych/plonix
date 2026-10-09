@@ -89,7 +89,7 @@ plonix market sign store/index.json --key ~/secrets/acme-market.key</code></pre>
 <p>Skills never widen what an agent can do. A skill declares which data it reads (<code>uses</code>), and when any of it is switched off in <strong>Settings › AI agents</strong>, agents are not offered the skill and the engine refuses to hand it out. Agents cannot install anything from the Market.</p>
 <pre><code class="language-sh">plonix skills                                    # skills, and which ones agents are offered
 plonix skills show explain-request --arg id=42   # exactly what the agent receives
-plonix skills add ./my-skill.md                  # your own, from a file or https URL
+plonix skills add ./my-skill.md --yes            # your own, from a file or https URL
 plonix skills check ./my-skill.md                # validate before sharing</code></pre>
 <h3 id="writing-a-skill">Writing a skill<a class="anchor" href="#writing-a-skill" aria-label="Link to this section">#</a></h3>
 <p>A skill is Markdown with a short header:</p>

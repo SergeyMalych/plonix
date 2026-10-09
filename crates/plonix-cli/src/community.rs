@@ -8,7 +8,7 @@
 use anyhow::{Result, anyhow, bail};
 use clap::Subcommand;
 use plonix_core::filterpack::{self, FilterLibrary};
-use plonix_core::registry::{self, Location};
+use plonix_core::registry::{self, Kind, Location};
 use plonix_core::rulepack::{self, Library, MAX_PACK_BYTES};
 use serde_json::{Value, json};
 
@@ -20,13 +20,16 @@ use crate::render::clip;
 pub enum RulesCmd {
     /// Rule packs in effect: built-in and installed (the default)
     List,
-    /// Install a rule pack from a file or an https:// URL
+    /// Add a rule pack of your own from a file or an https:// URL, after showing what it does
     Add {
         /// Path or URL of a pack (.json)
         source: String,
         /// Refuse the pack unless its SHA-256 is exactly this
         #[arg(long, value_name = "HEX")]
         sha256: Option<String>,
+        /// Add it without asking (it is still marked Your own)
+        #[arg(long)]
+        yes: bool,
     },
     /// Uninstall a rule pack
     #[command(visible_alias = "rm")]
@@ -45,13 +48,16 @@ pub enum RulesCmd {
 pub enum FiltersCmd {
     /// Named filters in effect, for `is:<name>` (the default)
     List,
-    /// Install a filter pack from a file or an https:// URL
+    /// Add a filter pack of your own from a file or an https:// URL, after showing what it does
     Add {
         /// Path or URL of a filter pack (.json)
         source: String,
         /// Refuse the pack unless its SHA-256 is exactly this
         #[arg(long, value_name = "HEX")]
         sha256: Option<String>,
+        /// Add it without asking (it is still marked Your own)
+        #[arg(long)]
+        yes: bool,
     },
     /// Uninstall a filter pack
     #[command(visible_alias = "rm")]
@@ -106,26 +112,7 @@ pub fn rules_cmd(ctx: &Ctx, cmd: RulesCmd) -> Result<()> {
                 eprintln!("warning: {p}");
             }
         }
-        RulesCmd::Add { source, sha256 } => {
-            let loc = location(&source)?;
-            let bytes = fetch(&loc, MAX_PACK_BYTES)?;
-            let (pack, previous) = lib.install(&bytes, &source_label(&loc), sha256.as_deref())?;
-            if ctx.json {
-                return ctx.print_json(&json!({ "installed": pack.info(&source_label(&loc), false, None), "replaced": previous }));
-            }
-            let what = match previous {
-                Some(v) if v == pack.doc.version => format!("Reinstalled {} {}", pack.doc.name, pack.doc.version),
-                Some(v) => format!("Updated {} {} → {}", pack.doc.name, v, pack.doc.version),
-                None => format!("Installed {} {}", pack.doc.name, pack.doc.version),
-            };
-            println!("{what}: {} rules by {}.", pack.rules.len(), pack.doc.author);
-            if sha256.is_some() {
-                println!("sha256 {} verified.", pack.sha256);
-            } else {
-                println!("Pinned to sha256 {} (pass --sha256 to require a specific build).", pack.sha256);
-            }
-            println!("Rules apply to traffic you already captured: see `plonix tech`.");
-        }
+        RulesCmd::Add { source, sha256, yes } => crate::market::add_own(ctx, &source, yes, Some(Kind::Rules), sha256.as_deref())?,
         RulesCmd::Remove { names } => {
             for name in names {
                 if lib.remove(&name)? {
@@ -173,27 +160,7 @@ pub fn filters_cmd(ctx: &Ctx, cmd: FiltersCmd) -> Result<()> {
                 eprintln!("warning: {p}");
             }
         }
-        FiltersCmd::Add { source, sha256 } => {
-            let loc = location(&source)?;
-            let bytes = fetch(&loc, MAX_PACK_BYTES)?;
-            let (pack, previous) = lib.install(&bytes, &source_label(&loc), sha256.as_deref())?;
-            if ctx.json {
-                return ctx.print_json(&json!({ "installed": pack.info(&source_label(&loc), false), "replaced": previous }));
-            }
-            let what = match previous {
-                Some(v) if v == pack.doc.version => format!("Reinstalled {} {}", pack.doc.name, pack.doc.version),
-                Some(v) => format!("Updated {} {} → {}", pack.doc.name, v, pack.doc.version),
-                None => format!("Installed {} {}", pack.doc.name, pack.doc.version),
-            };
-            let ids: Vec<String> = pack.doc.filters.iter().map(|f| format!("is:{}", f.id)).collect();
-            println!("{what}: {} filters by {}.", ids.len(), pack.doc.author);
-            println!("  {}", clip(&ids.join("  "), 200));
-            if sha256.is_some() {
-                println!("sha256 {} verified.", pack.sha256);
-            } else {
-                println!("Pinned to sha256 {} (pass --sha256 to require a specific build).", pack.sha256);
-            }
-        }
+        FiltersCmd::Add { source, sha256, yes } => crate::market::add_own(ctx, &source, yes, Some(Kind::Filters), sha256.as_deref())?,
         FiltersCmd::Remove { names } => {
             for name in names {
                 if lib.remove(&name)? {

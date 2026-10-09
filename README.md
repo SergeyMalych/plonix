@@ -430,7 +430,7 @@ plonix findings rm 2                       # asks first; the requests stay
 plonix findings export -o report.html      # or .md, .json; false positives left out
 
 plonix rules                               # detection rule packs in effect
-plonix rules add ./my-pack.json            # or an https:// URL, optionally --sha256
+plonix rules add ./my-pack.json --yes      # or an https:// URL, optionally --sha256
 plonix filters                             # named filters: is:auth, is:graphql, -is:trackers
 plonix market                              # skills, rules, filters, bundles, extensions
 plonix market install api-kit              # a bundle: verified against the signed index
