@@ -924,16 +924,6 @@ button.agfhit:hover { background: var(--surface-2); color: var(--accent); }
 .setrow { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line-2); }
 .setrow .mode { margin-left: auto; font-size: 11px; font-weight: 650; color: var(--ok); background: var(--ok-soft); border-radius: 6px; padding: 2px 8px; }
 .switch { display: flex; align-items: center; gap: 9px; font-weight: 600; color: var(--fg); }
-.setgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.setgrid > div { padding: 10px 14px 12px; }
-.setgrid > div + div { border-left: 1px solid var(--line-2); }
-.setgrid.disabled { opacity: .5; }
-.setgrid .caph { color: var(--fg-2); }
-.opt { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; color: var(--fg); padding: 4px 0; }
-.opt small { display: block; color: var(--fg-3); font-size: 11.5px; }
-.opt.col { flex-direction: column; gap: 4px; color: var(--fg-2); }
-.opt select { border: 1px solid var(--line-2); background: var(--surface-2); border-radius: 7px; padding: 4px 8px; font-size: 12px; }
-@media (max-width: 900px) { .setgrid { grid-template-columns: 1fr; } .setgrid > div + div { border-left: 0; border-top: 1px solid var(--line-2); } }
 
 /* ---- exclusions: grouped out-of-scope domains ---- */
 .excluded { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
@@ -1006,7 +996,6 @@ button.agfhit:hover { background: var(--surface-2); color: var(--accent); }
 .mdesc { margin: 0; line-height: 1.5; }
 .mact { display: flex; align-items: center; gap: 8px; }
 .mact .tag { margin-right: auto; }
-.mverify { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--fg-2); }
 .msec h4 { margin: 4px 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--fg-3); }
 .mchips { display: flex; flex-wrap: wrap; gap: 5px; }
 .marg { display: flex; gap: 8px; align-items: baseline; font-size: 12px; padding: 2px 0; }
@@ -1108,7 +1097,6 @@ button.agfhit:hover { background: var(--surface-2); color: var(--accent); }
 .runlead.on { font-weight: 600; color: var(--fg); background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 9px; padding: 8px 11px; }
 .plabel { font-size: 11px; font-weight: 650; color: var(--fg-3); }
 .modehelp { font-size: 11.5px; color: var(--fg-3); }
-.listrow { display: flex; align-items: flex-start; gap: 10px; }
 .listpick { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
 .pickrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .listpick select, .runconf input, .runconf textarea { border: 1px solid var(--line); background: var(--surface-2); border-radius: 6px; padding: 4px 7px; outline: 0; font: inherit; }

@@ -652,10 +652,8 @@ pub struct Client<'a> {
 impl<'a> Client<'a> {
     pub fn new(pack: &'a PlatformPack, cred: Credential) -> Result<Self> {
         let mut b = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(15)).timeout(Duration::from_secs(60)).redirects(0).user_agent(&format!("Plonix/{}", env!("CARGO_PKG_VERSION")));
-        if let Some(p) = std::env::var("HTTPS_PROXY").ok().or_else(|| std::env::var("https_proxy").ok()).filter(|p| !p.is_empty())
-            && !pack.doc.api.starts_with("http://")
-        {
-            b = b.proxy(ureq::Proxy::new(&p).context("invalid HTTPS_PROXY")?);
+        if let Some(p) = crate::registry::env_proxy(&pack.doc.api)? {
+            b = b.proxy(p);
         }
         Ok(Self { doc: &pack.doc, cred, agent: b.build(), next: std::sync::Mutex::new(std::time::Instant::now()) })
     }
