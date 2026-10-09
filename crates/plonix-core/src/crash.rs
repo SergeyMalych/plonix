@@ -293,7 +293,7 @@ mod tests {
 
     #[test]
     fn scrubs_queries_headers_tokens_and_home() {
-        let home = std::env::var("HOME").unwrap_or_default();
+        let home = crate::paths::user_home().map(|h| h.display().to_string()).unwrap_or_default();
         let text = format!(
             "request to https://user:pw@shop.example.com/api/v1/orders?id=7&token=abc123#frag failed\n\
              Authorization: Bearer abcdef0123456789abcdef0123456789\n\
@@ -314,10 +314,12 @@ mod tests {
         if home.len() > 1 {
             assert!(!s.contains(&home), "home survived:\n{s}");
         }
+        if home.len() > 1 {
+            assert!(s.contains("~/src/plonix/crates/plonix-core/src/session.rs:12:5"), "home not folded:\n{s}");
+        }
         for kept in [
             "https://shop.example.com/api/v1/orders?<redacted>",
             "(\"Host\", \"<redacted>\")",
-            "~/src/plonix/crates/plonix-core/src/session.rs:12:5",
             "~/.cargo/registry",
             "plonix_core::session::open and plonix_core::auth::check",
         ] {

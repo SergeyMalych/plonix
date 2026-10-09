@@ -90,9 +90,14 @@ pub fn start(home: &Home, opts: &StartOptions) -> Result<(Connected, bool)> {
     let mut child = cmd.spawn().context("starting the engine")?;
 
     let deadline = Instant::now() + Duration::from_secs(15);
+    // What the session file said the first time it appeared, in case it then goes away.
+    let mut first_seen: Option<String> = None;
     loop {
         if let Some(code) = child.try_wait()? {
             bail!("the engine exited during startup ({code}).{}", log_excerpt(&log_path, log_start));
+        }
+        if first_seen.is_none() && session::session_file(home, project.id()).exists() {
+            first_seen = Some(not_ready(home, project.id(), child.id()));
         }
         if session::find(home, project.id()).is_some_and(|i| i.pid == child.id())
             && let Some(c) = running(home, Some(project.id()), "cli")
@@ -100,29 +105,38 @@ pub fn start(home: &Home, opts: &StartOptions) -> Result<(Connected, bool)> {
             return Ok((c, true));
         }
         if Instant::now() > deadline {
+            let mut why = not_ready(home, project.id(), child.id());
+            if let Some(first) = first_seen {
+                why = format!("{why}; when the session file appeared: {first}");
+            }
             let _ = child.kill();
-            bail!("the engine did not start within 15 seconds ({}).{}", not_ready(home, project.id(), child.id()), log_excerpt(&log_path, log_start));
+            bail!("the engine did not start within 15 seconds ({why}).{}", log_excerpt(&log_path, log_start));
         }
         std::thread::sleep(Duration::from_millis(50));
     }
 }
 
 /// Why a session that was started is not answering yet, for the timeout message.
+/// Reads the session file directly: [`session::find`] removes one whose project looks closed.
 fn not_ready(home: &Home, project_id: &str, pid: u32) -> String {
-    let Some(info) = session::find(home, project_id) else {
-        let file = session::session_file(home, project_id);
-        let lock = project::resolve(home, project_id).map(|p| match p.lock() {
-            Ok(_) => "the project is not locked".to_string(),
-            Err(e) => e.to_string(),
-        });
-        return format!("no session file for the project; {} exists: {}; lock: {lock:?}", file.display(), file.exists());
+    let file = session::session_file(home, project_id);
+    let Some(info) = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice::<EngineInfo>(&b).ok()) else {
+        return format!("no session file at {}", file.display());
     };
     if info.pid != pid {
         return format!("the session file names process {}, not {pid}", info.pid);
     }
+    let lock = match info.project_dir.as_deref().map(project::Project::load) {
+        None => "the session file names no project folder".to_string(),
+        Some(Err(e)) => format!("its project does not load: {e:#}"),
+        Some(Ok(p)) => match p.lock() {
+            Ok(_) => "its project is not locked".to_string(),
+            Err(e) => format!("its project lock says: {e}"),
+        },
+    };
     match Client::to(home, &info, "cli").and_then(|c| c.get("/api/status")) {
-        Ok(_) => "it answers now".into(),
-        Err(e) => format!("{} does not answer: {e:#}", info.api),
+        Ok(_) => format!("it answers now; {lock}"),
+        Err(e) => format!("{} does not answer: {e:#}; {lock}", info.api),
     }
 }
 

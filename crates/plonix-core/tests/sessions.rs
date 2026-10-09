@@ -425,7 +425,7 @@ async fn the_start_screen_creates_opens_and_closes_projects() {
         (created, listed, opened)
     })
     .await;
-    assert!(created["path"].as_str().unwrap().ends_with("elsewhere/acme-staging"), "{created}");
+    assert!(std::path::Path::new(created["path"].as_str().unwrap()).ends_with("elsewhere/acme-staging"), "{created}");
     assert!(opened["url"].as_str().unwrap().contains("/#code="));
     assert_eq!(listed[0]["name"], "Acme (staging)");
     assert!(listed[0]["session"]["proxy"].is_string(), "{listed}");

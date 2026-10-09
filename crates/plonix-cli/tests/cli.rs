@@ -915,6 +915,8 @@ fn mcp_server_gives_agents_read_only_access() {
     assert!(c["requests"].as_u64().unwrap() >= 5, "{c}");
 }
 
+// The stand-in claude is a shell script.
+#[cfg(unix)]
 #[test]
 fn connect_claude_adds_the_mcp_server() {
     let mut p = Plonix::new();
