@@ -6,8 +6,18 @@ What changed in each Plonix release. The newest release is at the top.
 
 ## [0.1.3] - 2026-10-09
 
+
 ### Added
 - **Plonix for Windows**: `Plonix-Windows-setup.exe` on every release, for 64-bit Windows 10 and 11, with in-app updates like on the Mac. It is not code-signed yet, so Windows SmartScreen may ask before it runs: click **More info**, then **Run anyway**. On Windows Plonix keeps its data in `%USERPROFILE%\.plonix`, opens targets in Chrome, Edge, Brave or Firefox (or downloads the Plonix browser), adds its certificate to your own trusted root certificates when Firefox needs it, and opens Claude Code in PowerShell. Engines started with `plonix start` keep running after you close the terminal, and no console windows pop up.
+- **Studio style**: an optional geometric look for the app (Settings › Appearance › Style) and the website. Classic stays the default.
+- **Scans: passive checks** over traffic you already captured, with no new requests: insecure session cookies, permissive CORS with credentials, open-redirect reflection, verbose server errors, exposed source maps and version disclosure.
+- **Scans: Quick and Thorough** depth presets, and a count of how many requests a scan will send before you run it.
+- **Scans: every request a scan sent** is listed in its report and can be opened in the Lens or filtered in Traffic (`source:scan`).
+- **Scans: file-exposure checks** for backups, actuator endpoints, keys and dumps, with a soft-404 fingerprint so pages that answer everything do not raise false alarms.
+- **Mind Reader**: every suggestion shown on the website now shows up in the app, each with a walkthrough stop.
+
+### Fixed
+- **New Project** on the Start screen did nothing.
 
 ## [0.1.2] - 2026-10-09
 
