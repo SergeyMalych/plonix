@@ -543,7 +543,7 @@ const KEYCHAIN_ACCOUNT: &str = "plonix";
 
 impl Credentials {
     pub fn new(home: &Home) -> Self {
-        let standard = std::env::var_os("HOME").map(PathBuf::from).map(|h| h.join(".plonix")) == Some(home.root.clone());
+        let standard = crate::paths::user_home().map(|h| h.join(".plonix")) == Some(home.root.clone());
         Self { keychain: cfg!(target_os = "macos") && standard && std::env::var_os("PLONIX_NO_KEYCHAIN").is_none(), file: home.root.join("platforms").join("credentials.json") }
     }
 

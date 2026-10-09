@@ -1,9 +1,9 @@
 name: Release
 
-# Pushing a tag like v0.2.0 builds Plonix.app, packages it as a disk image
-# and a zip, signs the update package and publishes a GitHub release with the
-# notes from CHANGELOG.md. Installed copies of Plonix find the release through
-# latest.json, and only install it when their user says so.
+# Pushing a tag like v0.2.0 builds Plonix.app (a disk image and a zip) and the
+# Windows installer, signs the update packages and publishes a GitHub release
+# with the notes from CHANGELOG.md. Installed copies of Plonix find the release
+# through latest.json, and only install it when their user says so.
 on:
   push:
     tags: ["v*"]
@@ -14,6 +14,8 @@ permissions:
 jobs:
   macos:
     runs-on: macos-latest
+    outputs:
+      notarized: ${{ steps.signing.outputs.notarized }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -36,6 +38,7 @@ jobs:
       # its notes say how to open it the first time. Only secrets that have a
       # value are exported, so Tauri picks Apple ID or API key.
       - name: Prepare signing
+        id: signing
         env:
           S_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           S_APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -56,9 +59,11 @@ jobs:
           if [ -z "$S_APPLE_CERTIFICATE" ] || [ -z "$S_APPLE_SIGNING_IDENTITY" ] || [ -z "$S_APPLE_ID$S_APPLE_API_KEY" ]; then
             echo "::warning::No Developer ID secrets, so this release is signed ad hoc and not notarized. See docs/releasing.md"
             echo "NOTARIZED=false" >> "$GITHUB_ENV"
+            echo "notarized=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "NOTARIZED=true" >> "$GITHUB_ENV"
+          echo "notarized=true" >> "$GITHUB_OUTPUT"
           for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
                       APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID APPLE_API_KEY APPLE_API_ISSUER; do
             source_var="S_$name"; value="${!source_var}"
@@ -116,6 +121,84 @@ jobs:
             codesign --force --sign "$APPLE_SIGNING_IDENTITY" --timestamp Plonix-macOS.dmg
           fi
           hdiutil verify Plonix-macOS.dmg
+      - name: Keep the update package
+        if: env.UPDATER == 'true'
+        run: |
+          dir=target/universal-apple-darwin/release/bundle/macos
+          cp "$dir/Plonix.app.tar.gz" Plonix-macOS.app.tar.gz
+          cp "$dir/Plonix.app.tar.gz.sig" Plonix-macOS.app.tar.gz.sig
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: Plonix-macOS.*
+          if-no-files-found: error
+
+  # The Windows installer (NSIS). It is not code-signed yet, so Windows
+  # SmartScreen asks before it runs the first time; the notes say what to click.
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check the version
+        run: |
+          version=$(jq -r .version crates/plonix-app/tauri.conf.json)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version $version"; exit 1
+          fi
+      - name: Build the plonix command for the app
+        run: |
+          cargo build --release --locked -p plonix
+          host=$(rustc -vV | sed -n 's/^host: //p')
+          mkdir -p crates/plonix-app/binaries
+          cp target/release/plonix.exe "crates/plonix-app/binaries/plonix-cli-$host.exe"
+      - name: Build the installer
+        working-directory: crates/plonix-app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          updater=false
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then updater=true; fi
+          npx --yes @tauri-apps/cli@2 build --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":'"$updater"'}}' -- --locked
+      - name: Package
+        run: |
+          dir=target/release/bundle/nsis
+          ls -l "$dir"
+          setup=$(ls "$dir"/*-setup.exe)
+          cp "$setup" Plonix-Windows-setup.exe
+          if [ -f "$setup.sig" ]; then cp "$setup.sig" Plonix-Windows-setup.exe.sig; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: Plonix-Windows-setup.*
+          if-no-files-found: error
+
+  publish:
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    env:
+      NOTARIZED: ${{ needs.macos.outputs.notarized }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Check the files
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          ls -l Plonix-*
+          if [ -f Plonix-macOS.app.tar.gz.sig ] && [ -f Plonix-Windows-setup.exe.sig ]; then
+            echo "UPDATER=true" >> "$GITHUB_ENV"
+          fi
       - name: Write the release notes
         run: |
           # The section for this version in CHANGELOG.md, plus how to open an
@@ -142,24 +225,30 @@ jobs:
           Or, in Terminal: `xattr -dr com.apple.quarantine /Applications/Plonix.app`
           NOTES
           fi
+          cat >> notes.md <<'NOTES'
+
+          ### Installing on Windows
+
+          Run `Plonix-Windows-setup.exe`. The installer is not code-signed yet, so Windows SmartScreen may say it protected your PC: click **More info**, then **Run anyway**.
+          NOTES
           cat notes.md
       - name: Write latest.json
         if: env.UPDATER == 'true'
         run: |
-          dir=target/universal-apple-darwin/release/bundle/macos
-          cp "$dir/Plonix.app.tar.gz" Plonix-macOS.app.tar.gz
-          url="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/Plonix-macOS.app.tar.gz"
-          jq -n --arg v "$VERSION" --arg url "$url" --rawfile sig "$dir/Plonix.app.tar.gz.sig" \
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
+          jq -n --arg v "$VERSION" --arg mac "$base/Plonix-macOS.app.tar.gz" --rawfile macsig Plonix-macOS.app.tar.gz.sig \
+            --arg win "$base/Plonix-Windows-setup.exe" --rawfile winsig Plonix-Windows-setup.exe.sig \
             --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --arg notes "See https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME" \
             '{version: $v, notes: $notes, pub_date: $date, platforms: {
-               "darwin-aarch64": {url: $url, signature: $sig},
-               "darwin-x86_64": {url: $url, signature: $sig}}}' > latest.json
+               "darwin-aarch64": {url: $mac, signature: $macsig},
+               "darwin-x86_64": {url: $mac, signature: $macsig},
+               "windows-x86_64": {url: $win, signature: $winsig}}}' > latest.json
           cat latest.json
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          files="Plonix-macOS.dmg Plonix-macOS.zip"
+          files="Plonix-macOS.dmg Plonix-macOS.zip Plonix-Windows-setup.exe"
           if [ "$UPDATER" = true ]; then files="$files Plonix-macOS.app.tar.gz latest.json"; fi
           gh release create "$GITHUB_REF_NAME" --title "Plonix $VERSION" --notes-file notes.md $files

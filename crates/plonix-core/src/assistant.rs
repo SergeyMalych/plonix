@@ -569,7 +569,7 @@ fn started_tag() -> &'static str {
 /// (so it never opens a window). The server names itself after the run, so
 /// the Agents screen can show what each conversation looked at.
 fn mcp_config(home: &Home, name: &str) -> Value {
-    let exe = std::env::current_exe().ok().map(|e| e.canonicalize().unwrap_or(e));
+    let exe = std::env::current_exe().ok().map(|e| crate::paths::canonical(&e).unwrap_or(e));
     let command = exe.map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "plonix".into());
     let mut env = json!({ crate::mcp::CLIENT_ENV: name });
     if !is_default_home(home) {
@@ -581,7 +581,7 @@ fn mcp_config(home: &Home, name: &str) -> Value {
 /// Whether `home` is the standard `~/.plonix`, in which case `plonix mcp` finds
 /// it on its own and needs no `PLONIX_HOME` in the environment.
 fn is_default_home(home: &Home) -> bool {
-    std::env::var_os("PLONIX_HOME").is_none() && std::env::var_os("HOME").map(PathBuf::from).map(|h| h.join(".plonix")) == Some(home.root.clone())
+    std::env::var_os("PLONIX_HOME").is_none() && crate::paths::user_home().map(|h| h.join(".plonix")) == Some(home.root.clone())
 }
 
 /// Whether this `claude` can stream token by token. Older versions reject the
@@ -629,7 +629,10 @@ mod tests {
 
     fn fake_status() -> std::process::ExitStatus {
         // A non-success status; the value is irrelevant to these tests.
+        #[cfg(unix)]
         use std::os::unix::process::ExitStatusExt;
+        #[cfg(windows)]
+        use std::os::windows::process::ExitStatusExt;
         std::process::ExitStatus::from_raw(1)
     }
 

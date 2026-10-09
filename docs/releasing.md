@@ -29,7 +29,7 @@ Where it happens:
 | --- | --- | --- |
 | CI (`.github/workflows/ci.yml`, job `macos-app`) | Pull requests, forks, or no signing secrets | Unsigned `Plonix-macOS` artifact, as before |
 | CI, job `macos-app` | Pushes to `main` with the signing secrets set | Signed, notarized and stapled `Plonix-macOS` artifact; the job fails if any check fails |
-| Release (`.github/workflows/release.yml`) | Pushing a `v*` tag | A GitHub release with `Plonix-macOS.dmg`, `Plonix-macOS.zip` and the update package, signed and notarized when the signing secrets are set (see [Cutting a release](#cutting-a-release)) |
+| Release (`.github/workflows/release.yml`) | Pushing a `v*` tag | A GitHub release with `Plonix-macOS.dmg`, `Plonix-macOS.zip`, `Plonix-Windows-setup.exe` and the update packages. The Mac app is signed and notarized when the signing secrets are set (see [Cutting a release](#cutting-a-release)); the Windows installer is not code-signed yet |
 
 Secrets are never given to workflows triggered by pull requests from forks, and CI only signs on pushes to `main`, so code from a pull request never runs with the certificate.
 

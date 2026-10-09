@@ -226,7 +226,7 @@ Inner elements always have a smaller radius than their container.
 
 - **Buttons**: one primary (indigo fill) and one secondary (surface with hairline) per group. Hover lifts
   1px; press settles with `scale(.98)`. Labels fit on one line. One label per intent across the page:
-  downloading is always "Download for Mac".
+  downloading is always "Download for Mac" (primary) or "Download for Windows" (secondary).
 - **Tiles**: surface, hairline, `{rounded.xl}`, a sunk picture area that shows a small piece of the real UI,
   then a title, one or two sentences, and a mono link.
 - **Screenshot frame**: a real app screenshot, taken from the demo project in both themes

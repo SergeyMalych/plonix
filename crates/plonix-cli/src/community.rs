@@ -85,7 +85,7 @@ fn location(s: &str) -> Result<Location> {
 /// Records a readable source: URLs as given, files as absolute paths.
 fn source_label(loc: &Location) -> String {
     match loc {
-        Location::File(p) => std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()).display().to_string(),
+        Location::File(p) => plonix_core::paths::canonical(p).unwrap_or_else(|_| p.clone()).display().to_string(),
         Location::Url(u) => u.clone(),
     }
 }

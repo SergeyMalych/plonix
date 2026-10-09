@@ -60,7 +60,7 @@ pub fn connect_cmd(ctx: &Ctx, cmd: ConnectCmd) -> Result<()> {
 /// The MCP server entry: this `plonix` binary, run as `plonix mcp`.
 fn server_config(home: &Home) -> Result<Value> {
     let exe = std::env::current_exe().context("locating the plonix executable")?;
-    let exe = exe.canonicalize().unwrap_or(exe);
+    let exe = plonix_core::paths::canonical(&exe).unwrap_or(exe);
     let mut cfg = json!({ "type": "stdio", "command": exe, "args": ["mcp"] });
     if !is_default_home(&home.root) {
         cfg["env"] = json!({ "PLONIX_HOME": home.root });
@@ -69,7 +69,7 @@ fn server_config(home: &Home) -> Result<Value> {
 }
 
 fn is_default_home(root: &Path) -> bool {
-    std::env::var_os("HOME").is_some_and(|h| Path::new(&h).join(".plonix") == root)
+    plonix_core::paths::user_home().is_some_and(|h| h.join(".plonix") == root)
 }
 
 fn claude(ctx: &Ctx, a: ClaudeArgs) -> Result<()> {

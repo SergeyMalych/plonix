@@ -104,7 +104,21 @@ fn candidates() -> Vec<(&'static str, Option<PathBuf>, Kind)> {
         .collect()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+fn candidates() -> Vec<(&'static str, Option<PathBuf>, Kind)> {
+    let apps: [(&str, &str, Kind); 5] = [
+        ("Google Chrome", r"Google\Chrome\Application\chrome.exe", Kind::Chromium),
+        ("Microsoft Edge", r"Microsoft\Edge\Application\msedge.exe", Kind::Chromium),
+        ("Brave", r"BraveSoftware\Brave-Browser\Application\brave.exe", Kind::Chromium),
+        ("Chromium", r"Chromium\Application\chrome.exe", Kind::Chromium),
+        ("Firefox", r"Mozilla Firefox\firefox.exe", Kind::Firefox),
+    ];
+    // Installed for every user in Program Files, or for one user in their local app data.
+    let roots: Vec<PathBuf> = ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"].into_iter().filter_map(std::env::var_os).map(PathBuf::from).collect();
+    apps.into_iter().map(|(name, rel, kind)| (name, roots.iter().map(|r| r.join(rel)).find(|p| p.is_file()), kind)).collect()
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
 fn candidates() -> Vec<(&'static str, Option<PathBuf>, Kind)> {
     [
         ("Google Chrome", "google-chrome", Kind::Chromium),
@@ -120,7 +134,7 @@ fn candidates() -> Vec<(&'static str, Option<PathBuf>, Kind)> {
     .collect()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 fn which(bin: &str) -> Option<PathBuf> {
     std::env::split_paths(&std::env::var_os("PATH")?).map(|d| d.join(bin)).find(|p| p.is_file())
 }

@@ -79,7 +79,7 @@ pub fn har_cmd(ctx: &Ctx, cmd: HarCmd) -> Result<()> {
             }
         }
         HarCmd::Import { file } => {
-            let abs = std::fs::canonicalize(&file).with_context(|| format!("reading {}", file.display()))?;
+            let abs = plonix_core::paths::canonical(&file).with_context(|| format!("reading {}", file.display()))?;
             let v = c.post_bytes(&format!("/api/har/import?path={}", encode(&abs.to_string_lossy())), b"")?;
             if ctx.json {
                 return ctx.print_json(&v);

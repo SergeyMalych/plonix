@@ -6,6 +6,10 @@
 // parsed as HTML: the DOM is built with h() and text nodes only.
 'use strict';
 
+/** Plonix runs on Macs and Windows PCs; text that names the computer says which. */
+const ON_WINDOWS = /Windows/.test(navigator.userAgent);
+const THIS_COMPUTER = ON_WINDOWS ? 'this PC' : 'this Mac';
+
 /* ---------- DOM helpers ---------- */
 
 function h(tag, props, ...kids) {

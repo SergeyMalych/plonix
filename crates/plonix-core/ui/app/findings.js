@@ -189,7 +189,7 @@ function findingForm(f, ids = [], title = '', hint = null) {
     writeBtn.disabled = false;
     writeBtn.lastChild.textContent = ' Write it with Claude';
     const n = evidence();
-    writeNote.textContent = n.length ? `Shares request #${n[0]} and its response with Claude Code on this Mac.` : 'Add an evidence request first.';
+    writeNote.textContent = n.length ? `Shares request #${n[0]} and its response with Claude Code on ${THIS_COMPUTER}.` : 'Add an evidence request first.';
   };
   writeBtn.onclick = async () => {
     if (job.busy) {

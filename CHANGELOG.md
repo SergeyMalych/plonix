@@ -4,6 +4,11 @@ What changed in each Plonix release. The newest release is at the top.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-09
+
+### Added
+- **Plonix for Windows**: `Plonix-Windows-setup.exe` on every release, for 64-bit Windows 10 and 11, with in-app updates like on the Mac. It is not code-signed yet, so Windows SmartScreen may ask before it runs: click **More info**, then **Run anyway**. On Windows Plonix keeps its data in `%USERPROFILE%\.plonix`, opens targets in Chrome, Edge, Brave or Firefox (or downloads the Plonix browser), adds its certificate to your own trusted root certificates when Firefox needs it, and opens Claude Code in PowerShell.
+
 ## [0.1.2] - 2026-10-09
 
 ### Added
@@ -121,7 +126,8 @@ The first public release of Plonix for Mac.
 - Crash reports stay on your Mac; Plonix offers to open a prefilled GitHub issue and never sends anything on its own.
 - Documentation at plonix.io/docs.
 
-[Unreleased]: https://github.com/SergeyMalych/plonix/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/SergeyMalych/plonix/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/SergeyMalych/plonix/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/SergeyMalych/plonix/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/SergeyMalych/plonix/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/SergeyMalych/plonix/releases/tag/v0.1.0

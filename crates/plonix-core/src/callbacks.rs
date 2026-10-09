@@ -36,7 +36,11 @@ use crate::store::Store;
 pub const PROGRAM: &str = "interactsh-client";
 /// interactsh has no Homebrew formula, so the client is built with Go. It
 /// lands in ~/go/bin, which [`crate::program::locate_exe`] searches.
+#[cfg(not(windows))]
 pub const INSTALL: &str = "brew install go && go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest";
+/// On Windows, Go comes from winget; `go` is on the PATH of terminals opened after that.
+#[cfg(windows)]
+pub const INSTALL: &str = "winget install GoLang.Go, then in a new terminal: go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest";
 pub const HOMEPAGE: &str = "https://github.com/projectdiscovery/interactsh";
 /// Where a project keeps its hosts and callbacks.
 const STATE_VIEW: &str = "callbacks";

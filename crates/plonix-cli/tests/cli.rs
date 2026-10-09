@@ -440,6 +440,8 @@ fn market_installs_a_list_pack_and_the_bench_can_use_it() {
     assert!(!p.run(&["bench", "lists"]).ok().stdout().contains("id-formats"));
 }
 
+// The stand-in browser is a shell script.
+#[cfg(unix)]
 #[test]
 fn open_starts_everything_and_launches_the_browser_through_the_proxy() {
     let mut p = Plonix::new();
@@ -915,6 +917,8 @@ fn mcp_server_gives_agents_read_only_access() {
     assert!(c["requests"].as_u64().unwrap() >= 5, "{c}");
 }
 
+// The stand-in claude is a shell script.
+#[cfg(unix)]
 #[test]
 fn connect_claude_adds_the_mcp_server() {
     let mut p = Plonix::new();

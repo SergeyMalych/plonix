@@ -662,7 +662,7 @@ function callbacksInstallCard() {
     'div',
     { class: 'empty cbinstall' },
     h('h3', { text: 'One thing to install' }),
-    h('p', { class: 'mnote', text: 'Callbacks are collected by interactsh, the open-source callback tool by ProjectDiscovery, which runs on this Mac. Install it once in Terminal. It builds with Go in a minute or so, and Plonix finds it in ~/go/bin:' }),
+    h('p', { class: 'mnote', text: `Callbacks are collected by interactsh, the open-source callback tool by ProjectDiscovery, which runs on ${THIS_COMPUTER}. Install it once in a terminal. It builds with Go in a minute or so, and Plonix finds it in ~/go/bin:` }),
     h('div', { class: 'cbcmd' }, h('code', { text: cmd }), h('button', { class: 'btn sm', text: 'Copy', onclick: () => copyText(cmd) })),
     h('div', { class: 'cbacts' }, h('button', { class: 'btn primary', text: 'Check again', onclick: () => renderCallbacks($('#main')) })),
   );

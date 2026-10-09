@@ -55,8 +55,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         if: needs.changes.outputs.code != 'false'
@@ -71,7 +72,63 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev librsvg2-dev
       - name: Test
         if: needs.changes.outputs.code != 'false'
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast
+
+  # The Windows installer (NSIS), unsigned: there is no Windows code-signing
+  # certificate yet. It carries the plonix command next to Plonix.exe.
+  windows-app:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build the plonix command for the app
+        run: |
+          cargo build --release --locked -p plonix
+          host=$(rustc -vV | sed -n 's/^host: //p')
+          mkdir -p crates/plonix-app/binaries
+          cp target/release/plonix.exe "crates/plonix-app/binaries/plonix-cli-$host.exe"
+      - name: Build the installer
+        working-directory: crates/plonix-app
+        run: npx --yes @tauri-apps/cli@2 build --bundles nsis -- --locked
+      - name: Check the installer
+        run: |
+          ls -l target/release/bundle/nsis
+          cp target/release/bundle/nsis/*-setup.exe Plonix-Windows-setup.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Plonix-Windows
+          path: Plonix-Windows-setup.exe
+          if-no-files-found: error
+      # Installs it like a user would, then drives the real app window:
+      # first launch, the demo project, and traffic through its proxy.
+      - name: Try the installed app
+        timeout-minutes: 15
+        run: |
+          npm install --no-save --no-package-lock --prefix .github/scripts playwright-core@1.48.2
+          node .github/scripts/windows-smoke.mjs Plonix-Windows-setup.exe "$RUNNER_TEMP/smoke"
+      # The plonix command the installer put next to the app. (Not the one in
+      # target/release: the app build replaces it there, as Plonix.exe.)
+      - name: Try the installed plonix command
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+        run: bash .github/scripts/windows-cli-smoke.sh "$LOCALAPPDATA/Plonix/plonix-cli.exe"
+      - name: Uninstall
+        if: ${{ !cancelled() }}
+        run: '"$LOCALAPPDATA/Plonix/uninstall.exe" /S'
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: Plonix-Windows-screenshots
+          path: ${{ runner.temp }}/smoke/*.png
 
   # The 100,000-exchange scale tests (crates/plonix-core/tests/scale.rs), in
   # release mode. A 10,000-exchange version runs with the tests above.

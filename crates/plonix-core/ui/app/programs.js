@@ -221,7 +221,7 @@ function connectForm(p) {
     { class: 'progform' },
     h('p', null, `Connect ${p.title} and Plonix pulls every program you can work on there, with its scope and rules. `, p.auth.help, ' ', p.auth.token_url ? h('a', { href: p.auth.token_url, target: '_blank', rel: 'noopener', text: 'Get a token' }) : null),
     h('div', { class: 'progconnect' }, user, secret, h('button', { class: 'btn primary', text: 'Connect', onclick: go })),
-    h('div', { class: 'progfoot' }, status, h('span', { class: 'muted small', text: IN_APP ? 'The token is kept in your Keychain and never shown to AI agents.' : 'The token stays on this computer and is never shown to AI agents.' })),
+    h('div', { class: 'progfoot' }, status, h('span', { class: 'muted small', text: IN_APP && !ON_WINDOWS ? 'The token is kept in your Keychain and never shown to AI agents.' : 'The token stays on this computer and is never shown to AI agents.' })),
   );
 }
 

@@ -17,7 +17,7 @@
 
 **The open-source web security workbench for macOS. Fast, native, and scriptable from day one.**
 
-**[Website](https://plonix.io)** · **[Documentation](https://plonix.io/docs/)** · **[Download for Mac](https://github.com/SergeyMalych/plonix/releases/latest)**
+**[Website](https://plonix.io)** · **[Documentation](https://plonix.io/docs/)** · **[Download for Mac or Windows](https://github.com/SergeyMalych/plonix/releases/latest)**
 
 </div>
 
@@ -30,9 +30,9 @@ Plonix is an assistant, not an automatic vulnerability finder. It analyzes what 
   <img src="docs/images/window-light.webp" alt="The Plonix window: live traffic with filter chips and suggestions, a scope decision bar, and the Lens showing a request, its response and one-click suggested next steps">
 </picture>
 
-> **Status: early, and usable today.** [v0.1.2](https://github.com/SergeyMalych/plonix/releases/latest) is out for Mac. The core engine (proxy, traffic store, search, adaptive scope, local API), the `plonix` CLI, the Plonix app, the Bench with payload runs, the Market, Programs, saved users, Callbacks, scope-gated crawl and scans, and read-only MCP access for AI agents work today and are covered by tests. See [Roadmap](#roadmap).
+> **Status: early, and usable today.** [v0.1.3](https://github.com/SergeyMalych/plonix/releases/latest) is out for Mac and Windows. The core engine (proxy, traffic store, search, adaptive scope, local API), the `plonix` CLI, the Plonix app, the Bench with payload runs, the Market, Programs, saved users, Callbacks, scope-gated crawl and scans, and read-only MCP access for AI agents work today and are covered by tests. See [Roadmap](#roadmap).
 >
-> **New in 0.1.2:** **Test now!** on the demo walkthrough shows each part working for real; act as a saved user from the title bar and open a browser window of their own; a community Market where you can add your own packages; a short-path view in Traffic; scans aimed at one path or a group of paths, with new built-in checks such as GraphQL introspection. Everything is in [CHANGELOG.md](CHANGELOG.md).
+> **New in 0.1.3:** Plonix for Windows, with an installer and in-app updates. 0.1.2 brought **Test now!** on the demo walkthrough, acting as a saved user with a browser window of their own, a community Market, a short-path view in Traffic and scans aimed at a path or a group of paths. Everything is in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -343,6 +343,8 @@ claude                       # then ask:
 Download **[Plonix for Mac](https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-macOS.dmg)** (Apple silicon and Intel, macOS 11 or later), open it and drag Plonix to Applications. Every release is listed on the [releases page](https://github.com/SergeyMalych/plonix/releases), with what changed in [CHANGELOG.md](CHANGELOG.md).
 
 Releases are not notarized by Apple yet, so macOS asks before opening Plonix the first time: open it, click **Done**, then go to **System Settings › Privacy & Security** and click **Open Anyway** next to Plonix. Or run `xattr -dr com.apple.quarantine /Applications/Plonix.app` once.
+
+On Windows, download **[Plonix for Windows](https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-Windows-setup.exe)** (64-bit Windows 10 or 11) and run it. The installer is not code-signed yet, so Windows SmartScreen may say it protected your PC: click **More info**, then **Run anyway**. Plonix keeps its data in `%USERPROFILE%\.plonix`, opens targets in Chrome, Edge, Brave or Firefox, and adds its certificate to your own trusted root certificates when Firefox needs it.
 
 ### Build from source
 

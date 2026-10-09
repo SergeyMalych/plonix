@@ -181,7 +181,7 @@ pub enum AlreadyOpen {
 }
 
 fn absolute(dir: &Path) -> PathBuf {
-    std::fs::canonicalize(dir).unwrap_or_else(|_| std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf()))
+    crate::paths::canonical(dir).unwrap_or_else(|_| std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf()))
 }
 
 fn new_id() -> Result<String> {
@@ -292,7 +292,7 @@ pub fn resolve(home: &Home, selector: &str) -> Result<Project> {
         bail!("empty project name");
     }
     let as_path = Path::new(sel);
-    if sel.contains('/') || sel.starts_with('.') || sel.starts_with('~') {
+    if sel.contains(['/', std::path::MAIN_SEPARATOR]) || as_path.is_absolute() || sel.starts_with('.') || sel.starts_with('~') {
         let dir = expand_tilde(as_path);
         let p = if dir.join(PROJECT_FILE).exists() {
             Project::load(&dir)?
@@ -341,8 +341,8 @@ fn adopt_legacy_db(from: &Path, to: &Path) -> Result<()> {
 }
 
 pub fn expand_tilde(p: &Path) -> PathBuf {
-    match (p.strip_prefix("~"), std::env::var_os("HOME")) {
-        (Ok(rest), Some(h)) => PathBuf::from(h).join(rest),
+    match (p.strip_prefix("~"), crate::paths::user_home()) {
+        (Ok(rest), Some(h)) => h.join(rest),
         _ => p.to_path_buf(),
     }
 }

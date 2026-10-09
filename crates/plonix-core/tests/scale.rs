@@ -26,8 +26,14 @@ use plonix_core::paths::Home;
 use plonix_core::scope::Decision;
 use plonix_core::Engine;
 
-/// Debug builds run SQLite and the analyzers unoptimized.
-const DEBUG_FACTOR: u32 = if cfg!(debug_assertions) { 5 } else { 1 };
+/// Debug builds run SQLite and the analyzers unoptimized, and Windows CI
+/// runners write to disk more slowly. The release `scale` job keeps the
+/// real budgets.
+const DEBUG_FACTOR: u32 = match (cfg!(debug_assertions), cfg!(windows)) {
+    (false, _) => 1,
+    (true, false) => 5,
+    (true, true) => 12,
+};
 
 /// Times `f`, prints the result and fails when it takes longer than `budget_ms`.
 fn timed<T>(what: &str, budget_ms: u64, f: impl FnOnce() -> T) -> T {

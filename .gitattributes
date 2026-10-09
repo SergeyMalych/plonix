@@ -1,0 +1,3 @@
+# Every checkout keeps LF line endings, also on Windows: the Market index and
+# its packages are signed and hashed byte for byte.
+* text=auto eol=lf

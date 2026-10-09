@@ -270,6 +270,10 @@ fn payload(install_id: &str, counts: &BTreeMap<String, u64>) -> Value {
 fn os_version() -> String {
     let raw = if cfg!(target_os = "macos") {
         std::process::Command::new("sw_vers").arg("-productVersion").output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default()
+    } else if cfg!(windows) {
+        // "Microsoft Windows [Version 10.0.22631.4317]"
+        let out = std::process::Command::new("cmd").args(["/C", "ver"]).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+        out.rsplit(' ').next().unwrap_or("").trim().trim_end_matches(']').to_string()
     } else {
         std::fs::read_to_string("/etc/os-release")
             .unwrap_or_default()

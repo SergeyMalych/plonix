@@ -949,7 +949,7 @@ pub fn read_external(source: &str) -> Result<(Vec<u8>, String)> {
     match &loc {
         Location::File(p) => {
             let bytes = extension::read_source(p)?;
-            Ok((bytes, std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()).display().to_string()))
+            Ok((bytes, crate::paths::canonical(p).unwrap_or_else(|_| p.clone()).display().to_string()))
         }
         Location::Url(u) => Ok((registry::fetch(&loc, max_bytes(Kind::Extension))?, u.clone())),
     }

@@ -87,12 +87,17 @@ pub fn start(home: &Home, opts: &StartOptions) -> Result<(Connected, bool)> {
         cmd.arg("--insecure-upstream");
     }
     detach(&mut cmd);
-    let mut child = cmd.spawn().context("starting the engine")?;
+    let mut child = spawn_without_our_stdio(&mut cmd).context("starting the engine")?;
 
     let deadline = Instant::now() + Duration::from_secs(15);
+    // What the session file said the first time it appeared, in case it then goes away.
+    let mut first_seen: Option<String> = None;
     loop {
         if let Some(code) = child.try_wait()? {
             bail!("the engine exited during startup ({code}).{}", log_excerpt(&log_path, log_start));
+        }
+        if first_seen.is_none() && session::session_file(home, project.id()).exists() {
+            first_seen = Some(not_ready(home, project.id(), child.id()));
         }
         if session::find(home, project.id()).is_some_and(|i| i.pid == child.id())
             && let Some(c) = running(home, Some(project.id()), "cli")
@@ -100,10 +105,65 @@ pub fn start(home: &Home, opts: &StartOptions) -> Result<(Connected, bool)> {
             return Ok((c, true));
         }
         if Instant::now() > deadline {
+            let mut why = not_ready(home, project.id(), child.id());
+            if let Some(first) = first_seen {
+                why = format!("{why}; when the session file appeared: {first}");
+            }
             let _ = child.kill();
-            bail!("the engine did not start within 15 seconds.{}", log_excerpt(&log_path, log_start));
+            bail!("the engine did not start within 15 seconds ({why}).{}", log_excerpt(&log_path, log_start));
         }
         std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Starts a background process. Windows hands every inheritable handle to a
+/// new process, this command's own output among them, so whoever reads that
+/// output would wait for the engine to exit; ours are kept out of it.
+fn spawn_without_our_stdio(cmd: &mut Command) -> std::io::Result<std::process::Child> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{GetHandleInformation, HANDLE_FLAG_INHERIT, SetHandleInformation};
+        use windows_sys::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
+        // SAFETY: plain calls on this process's standard handles; a handle that is not valid makes them fail harmlessly.
+        let inherited: Vec<_> = [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE]
+            .into_iter()
+            .map(|which| unsafe { GetStdHandle(which) })
+            .filter(|&h| {
+                let mut flags = 0u32;
+                unsafe { GetHandleInformation(h, &mut flags) != 0 && flags & HANDLE_FLAG_INHERIT != 0 && SetHandleInformation(h, HANDLE_FLAG_INHERIT, 0) != 0 }
+            })
+            .collect();
+        let child = cmd.spawn();
+        for h in inherited {
+            unsafe { SetHandleInformation(h, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) };
+        }
+        return child;
+    }
+    #[cfg(not(windows))]
+    return cmd.spawn();
+}
+
+/// Why a session that was started is not answering yet, for the timeout message.
+/// Reads the session file directly: [`session::find`] removes one whose project looks closed.
+fn not_ready(home: &Home, project_id: &str, pid: u32) -> String {
+    let file = session::session_file(home, project_id);
+    let Some(info) = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice::<EngineInfo>(&b).ok()) else {
+        return format!("no session file at {}", file.display());
+    };
+    if info.pid != pid {
+        return format!("the session file names process {}, not {pid}", info.pid);
+    }
+    let lock = match info.project_dir.as_deref().map(project::Project::load) {
+        None => "the session file names no project folder".to_string(),
+        Some(Err(e)) => format!("its project does not load: {e:#}"),
+        Some(Ok(p)) => match p.lock() {
+            Ok(_) => "its project is not locked".to_string(),
+            Err(e) => format!("its project lock says: {e}"),
+        },
+    };
+    match Client::to(home, &info, "cli").and_then(|c| c.get("/api/status")) {
+        Ok(_) => format!("it answers now; {lock}"),
+        Err(e) => format!("{} does not answer: {e:#}; {lock}", info.api),
     }
 }
 
@@ -235,7 +295,7 @@ pub fn launcher_url(home: &Home) -> Result<String> {
     let mut cmd = Command::new(std::env::current_exe().context("locating the plonix executable")?);
     cmd.env("PLONIX_HOME", &home.root).arg("hub").stdin(Stdio::null()).stdout(log.try_clone()?).stderr(log);
     detach(&mut cmd);
-    let mut child = cmd.spawn().context("starting the Start screen")?;
+    let mut child = spawn_without_our_stdio(&mut cmd).context("starting the Start screen")?;
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         if let Some(code) = child.try_wait()? {

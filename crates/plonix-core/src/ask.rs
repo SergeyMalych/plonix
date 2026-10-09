@@ -384,7 +384,7 @@ fn host_parts(engine: &Engine, host: &str) -> Result<(String, String, Vec<Part>)
 }
 
 /// Opens Claude Code in a new Terminal window with `prompt` as its first
-/// message (macOS). The prompt goes through a private file, never through
+/// message (macOS; a PowerShell window on Windows). The prompt goes through a private file, never through
 /// the shell command line, so captured text cannot run as a command.
 pub fn launch_in_terminal(home: &Home, prompt: &str) -> Result<PathBuf> {
     let dir = home.root.join("claude");
@@ -400,7 +400,7 @@ pub fn launch_in_terminal(home: &Home, prompt: &str) -> Result<PathBuf> {
     }
     let file = dir.join(format!("ask-{}.txt", crate::model::now_ms()));
     write_private(&file, prompt.as_bytes())?;
-    let command = terminal_command(&dir, &file);
+    let command = if cfg!(windows) { powershell_command(&dir, &file) } else { terminal_command(&dir, &file) };
     run_terminal(&command)?;
     Ok(file)
 }
@@ -414,6 +414,15 @@ pub fn terminal_command(dir: &std::path::Path, file: &std::path::Path) -> String
     format!("cd {} && claude \"$(cat {})\"", sh_quote(dir), sh_quote(file))
 }
 
+fn ps_quote(p: &std::path::Path) -> String {
+    format!("'{}'", p.display().to_string().replace('\'', "''"))
+}
+
+/// The same for PowerShell on Windows.
+pub fn powershell_command(dir: &std::path::Path, file: &std::path::Path) -> String {
+    format!("Set-Location -LiteralPath {}; claude (Get-Content -Raw -LiteralPath {})", ps_quote(dir), ps_quote(file))
+}
+
 #[cfg(target_os = "macos")]
 fn run_terminal(command: &str) -> Result<()> {
     let literal = command.replace('\\', "\\\\").replace('"', "\\\"");
@@ -425,7 +434,16 @@ fn run_terminal(command: &str) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(target_os = "macos"))]
+/// A PowerShell window of its own (the app has no console to share).
+#[cfg(windows)]
+fn run_terminal(command: &str) -> Result<()> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+    std::process::Command::new("powershell").args(["-NoExit", "-NoProfile", "-Command", command]).creation_flags(CREATE_NEW_CONSOLE).spawn().context("opening PowerShell")?;
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
 fn run_terminal(_command: &str) -> Result<()> {
     Err(anyhow::anyhow!("opening Claude Code in a terminal is only supported on macOS; copy the prompt instead")).context("unsupported")
 }
@@ -456,6 +474,12 @@ mod tests {
         assert!(f.contains("propose_bench_edit") && f.contains("draft_id \"d-1rm\"") && f.contains("send it themselves"), "{f}");
         assert!(f.starts_with(FOOTER));
         assert_eq!(draft_footer("``"), FOOTER);
+    }
+
+    #[test]
+    fn powershell_command_quotes_its_paths() {
+        let cmd = powershell_command(std::path::Path::new(r"C:\Users\o'neil\.plonix\claude"), std::path::Path::new(r"C:\Temp\ask-1.txt"));
+        assert_eq!(cmd, r"Set-Location -LiteralPath 'C:\Users\o''neil\.plonix\claude'; claude (Get-Content -Raw -LiteralPath 'C:\Temp\ask-1.txt')");
     }
 
     #[test]

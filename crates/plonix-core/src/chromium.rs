@@ -46,6 +46,8 @@ pub fn platform() -> Option<&'static str> {
         Some("mac-x64")
     } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
         Some("linux64")
+    } else if cfg!(all(windows, target_arch = "x86_64")) {
+        Some("win64")
     } else {
         None
     }
@@ -65,6 +67,8 @@ fn exe_in(dir: &Path, platform: &str) -> PathBuf {
     let top = dir.join(format!("chrome-{platform}"));
     if platform.starts_with("mac") {
         top.join("Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing")
+    } else if platform.starts_with("win") {
+        top.join("chrome.exe")
     } else {
         top.join("chrome")
     }
@@ -262,6 +266,11 @@ fn unzip(zip: &Path, dest: &Path) -> Result<()> {
     let mut cmd = if cfg!(target_os = "macos") {
         let mut c = Command::new("/usr/bin/ditto");
         c.args(["-x", "-k"]).arg(zip).arg(dest);
+        c
+    } else if cfg!(windows) {
+        // Windows 10 and later come with a tar that reads zip files.
+        let mut c = Command::new("tar");
+        c.arg("-xf").arg(zip).arg("-C").arg(dest);
         c
     } else {
         let mut c = Command::new("unzip");
