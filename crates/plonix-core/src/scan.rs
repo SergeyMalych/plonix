@@ -1669,6 +1669,29 @@ mod tests {
     }
 
     #[test]
+    fn new_file_exposure_checks_fire_on_their_signature_only() {
+        let cat = builtin_catalog();
+        let fire = |id: &str, body: &[u8]| -> bool {
+            let t = cat.tactics.iter().find(|t| t.def.id == id).unwrap_or_else(|| panic!("missing tactic {id}"));
+            let req = PlannedRequest { method: "GET".into(), url: "https://h/x".into(), headers: vec![], payload: None, body: None };
+            t.evaluate(&req, Some(200), &[], body).is_some()
+        };
+        // Each check fires on a real signature and stays quiet on a decoy page.
+        assert!(fire("exposed-private-key", b"-----BEGIN OPENSSH PRIVATE KEY-----\nabcd\n"));
+        assert!(!fire("exposed-private-key", b"<html>public key infrastructure</html>"));
+        assert!(fire("exposed-htpasswd", b"admin:$apr1$abc$def\n"));
+        assert!(!fire("exposed-htpasswd", b"just some text: not a hash"));
+        assert!(fire("spring-actuator-env", br#"{"activeProfiles":["prod"],"propertySources":[]}"#));
+        assert!(!fire("spring-actuator-env", b"{\"status\":\"ok\"}"));
+        assert!(fire("exposed-sql-dump", b"CREATE TABLE users (id int);\nINSERT INTO users VALUES (1);"));
+        assert!(!fire("exposed-sql-dump", b"<html>backup instructions</html>"));
+        assert!(fire("exposed-dotenv-backup", b"SECRET_KEY=abc\nDB_PASS=xyz\n"));
+        assert!(!fire("exposed-dotenv-backup", b"<html>nothing here</html>"));
+        assert!(fire("exposed-dockerfile", b"FROM alpine:3.20\nRUN apk add curl\n"));
+        assert!(!fire("exposed-dockerfile", b"<html>from our team</html>"));
+    }
+
+    #[test]
     fn soft404_calibration_paths_are_two_distinct_nonexistent_paths() {
         let [a, b] = calibration_paths("abc123");
         assert_ne!(a, b);
