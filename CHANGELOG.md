@@ -7,7 +7,7 @@ What changed in each Plonix release. The newest release is at the top.
 ## [0.1.3] - 2026-10-09
 
 ### Added
-- **Plonix for Windows**: `Plonix-Windows-setup.exe` on every release, for 64-bit Windows 10 and 11, with in-app updates like on the Mac. It is not code-signed yet, so Windows SmartScreen may ask before it runs: click **More info**, then **Run anyway**. On Windows Plonix keeps its data in `%USERPROFILE%\.plonix`, opens targets in Chrome, Edge, Brave or Firefox (or downloads the Plonix browser), adds its certificate to your own trusted root certificates when Firefox needs it, and opens Claude Code in PowerShell.
+- **Plonix for Windows**: `Plonix-Windows-setup.exe` on every release, for 64-bit Windows 10 and 11, with in-app updates like on the Mac. It is not code-signed yet, so Windows SmartScreen may ask before it runs: click **More info**, then **Run anyway**. On Windows Plonix keeps its data in `%USERPROFILE%\.plonix`, opens targets in Chrome, Edge, Brave or Firefox (or downloads the Plonix browser), adds its certificate to your own trusted root certificates when Firefox needs it, and opens Claude Code in PowerShell. Engines started with `plonix start` keep running after you close the terminal, and no console windows pop up.
 
 ## [0.1.2] - 2026-10-09
 

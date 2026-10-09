@@ -258,14 +258,23 @@ pub fn spawn_detached(cmd: &mut Command) -> std::io::Result<std::process::Child>
     cmd.spawn()
 }
 
-/// Puts a child in its own process group.
+/// Puts a child in its own process group. On Windows it also gets no
+/// console: no window pops up, and closing the terminal or pressing Ctrl+C
+/// there does not stop it.
 pub fn detach(cmd: &mut Command) {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    }
+    #[cfg(not(any(unix, windows)))]
     let _ = cmd;
 }
 
