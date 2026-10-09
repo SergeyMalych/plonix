@@ -338,6 +338,168 @@
       "wstg": [
         "WSTG-CONF-05"
       ]
+    },
+    {
+      "id": "exposed-dotenv-backup",
+      "title": "Exposed .env backup",
+      "description": "A backup copy of an environment file is reachable over HTTP and may contain secrets.",
+      "requires": [
+        "web"
+      ],
+      "severity": "high",
+      "intrusiveness": "safe",
+      "remediation": "Remove backup files from the web root and deny access to dotfiles and .bak files.",
+      "check": {
+        "method": "GET",
+        "path": "/.env.bak",
+        "expect": {
+          "status": [
+            200
+          ],
+          "body": "(?m)^[A-Z][A-Z0-9_]+="
+        }
+      },
+      "owasp": [
+        "A05"
+      ],
+      "wstg": [
+        "WSTG-CONF-04"
+      ]
+    },
+    {
+      "id": "spring-actuator-env",
+      "title": "Spring Actuator env exposed",
+      "description": "The Spring Boot Actuator env endpoint is reachable and discloses configuration and property sources.",
+      "requires": [
+        "web"
+      ],
+      "severity": "high",
+      "intrusiveness": "safe",
+      "remediation": "Restrict Actuator endpoints to an internal port or secure them, and do not expose /actuator/env publicly.",
+      "check": {
+        "method": "GET",
+        "path": "/actuator/env",
+        "expect": {
+          "status": [
+            200
+          ],
+          "body": "\"activeProfiles\"|\"propertySources\""
+        }
+      },
+      "owasp": [
+        "A05"
+      ],
+      "wstg": [
+        "WSTG-CONF-05"
+      ]
+    },
+    {
+      "id": "exposed-htpasswd",
+      "title": "Exposed .htpasswd",
+      "description": "An .htpasswd file is reachable over HTTP and discloses user names and password hashes.",
+      "requires": [
+        "web"
+      ],
+      "severity": "high",
+      "intrusiveness": "safe",
+      "remediation": "Move .htpasswd outside the web root and deny access to dotfiles at the server.",
+      "check": {
+        "method": "GET",
+        "path": "/.htpasswd",
+        "expect": {
+          "status": [
+            200
+          ],
+          "body": ":\\$(apr1|2y|2a|2b|1)\\$"
+        }
+      },
+      "owasp": [
+        "A05"
+      ],
+      "wstg": [
+        "WSTG-CONF-05"
+      ]
+    },
+    {
+      "id": "exposed-private-key",
+      "title": "Exposed private key",
+      "description": "A private key file is reachable over HTTP, which can fully compromise the key.",
+      "requires": [
+        "web"
+      ],
+      "severity": "high",
+      "intrusiveness": "safe",
+      "remediation": "Remove private keys from the web root immediately and rotate any key that was reachable.",
+      "check": {
+        "method": "GET",
+        "path": "/.ssh/id_rsa",
+        "expect": {
+          "status": [
+            200
+          ],
+          "body": "-----BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY-----"
+        }
+      },
+      "owasp": [
+        "A05"
+      ],
+      "wstg": [
+        "WSTG-CONF-05"
+      ]
+    },
+    {
+      "id": "exposed-sql-dump",
+      "title": "Exposed SQL dump",
+      "description": "A database dump is reachable over HTTP and may contain the full contents of a database.",
+      "requires": [
+        "web"
+      ],
+      "severity": "high",
+      "intrusiveness": "safe",
+      "remediation": "Remove database dumps from the web root and store backups outside any served directory.",
+      "check": {
+        "method": "GET",
+        "path": "/backup.sql",
+        "expect": {
+          "status": [
+            200
+          ],
+          "body": "CREATE TABLE|INSERT INTO "
+        }
+      },
+      "owasp": [
+        "A05"
+      ],
+      "wstg": [
+        "WSTG-CONF-04"
+      ]
+    },
+    {
+      "id": "exposed-dockerfile",
+      "title": "Exposed Dockerfile",
+      "description": "A Dockerfile is reachable over HTTP and discloses build steps, the base image, and sometimes secrets.",
+      "requires": [
+        "web"
+      ],
+      "severity": "low",
+      "intrusiveness": "safe",
+      "remediation": "Do not serve build files; deny access to Dockerfile and similar build artifacts in the web root.",
+      "check": {
+        "method": "GET",
+        "path": "/Dockerfile",
+        "expect": {
+          "status": [
+            200
+          ],
+          "body": "(?m)^FROM \\S"
+        }
+      },
+      "owasp": [
+        "A05"
+      ],
+      "wstg": [
+        "WSTG-CONF-04"
+      ]
     }
   ]
 }
