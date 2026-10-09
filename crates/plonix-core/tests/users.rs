@@ -149,6 +149,8 @@ async fn acting_as_a_saved_user_swaps_the_browser_session() {
     assert_eq!(browse(s.proxy_addr(), &url("/")).await.0, "s=browser");
 }
 
+// The stand-in browser is a shell script.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_saved_user_gets_a_browser_window_of_their_own() {
     let dir = tempfile::tempdir().unwrap();

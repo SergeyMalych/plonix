@@ -629,7 +629,10 @@ mod tests {
 
     fn fake_status() -> std::process::ExitStatus {
         // A non-success status; the value is irrelevant to these tests.
+        #[cfg(unix)]
         use std::os::unix::process::ExitStatusExt;
+        #[cfg(windows)]
+        use std::os::windows::process::ExitStatusExt;
         std::process::ExitStatus::from_raw(1)
     }
 
