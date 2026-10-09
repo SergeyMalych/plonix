@@ -149,6 +149,7 @@ fn launcher_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     let handle = app.clone();
     let w = WebviewWindowBuilder::new(app, LAUNCHER, WebviewUrl::App("index.html".into()))
         .title("Plonix")
+        .additional_browser_args(&browser_args())
         .inner_size(880.0, 620.0)
         .min_inner_size(640.0, 460.0)
         .initialization_script(INIT_SCRIPT)
@@ -164,6 +165,17 @@ fn launcher_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         let _ = w.navigate(url);
     }
     Ok(w)
+}
+
+/// WebView2's arguments on Windows, the same for every window. They are
+/// wry's defaults, plus a debugging port when `PLONIX_WEBVIEW_DEBUG_PORT` is
+/// set: the Windows check in CI drives the real windows through it.
+fn browser_args() -> String {
+    let mut args = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection".to_string();
+    if let Some(port) = std::env::var("PLONIX_WEBVIEW_DEBUG_PORT").ok().and_then(|p| p.parse::<u16>().ok()) {
+        args.push_str(&format!(" --remote-debugging-port={port}"));
+    }
+    args
 }
 
 fn show_launcher(app: &AppHandle) {
@@ -328,6 +340,7 @@ fn open_project_url(app: &AppHandle, link: &str) {
     let own_origin = api.clone();
     let built = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
         .title(&title)
+        .additional_browser_args(&browser_args())
         .inner_size(1320.0, 840.0)
         .min_inner_size(900.0, 560.0)
         .initialization_script(INIT_SCRIPT)

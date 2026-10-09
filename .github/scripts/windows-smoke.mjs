@@ -71,7 +71,7 @@ if (!cli) throw new Error('the plonix command was not installed next to the app'
 console.log(execFileSync(path.join(dir, cli), ['--version'], { encoding: 'utf8' }).trim());
 
 step('Launch Plonix');
-const env = { ...process.env, PLONIX_HOME: home, PLONIX_NO_ANALYTICS: '1', WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP}` };
+const env = { ...process.env, PLONIX_HOME: home, PLONIX_NO_ANALYTICS: '1', PLONIX_WEBVIEW_DEBUG_PORT: String(CDP) };
 delete env.PLONIX_ACCEPT_TERMS;
 const app = spawn(path.join(dir, 'Plonix.exe'), [], { env, stdio: ['ignore', 'pipe', 'pipe'] });
 app.stdout.on('data', (d) => process.stdout.write(`[app] ${d}`));
