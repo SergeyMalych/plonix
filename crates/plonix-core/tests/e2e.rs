@@ -413,6 +413,40 @@ async fn active_scan_finds_a_real_exposure_and_stays_in_scope() {
 }
 
 #[tokio::test]
+async fn quick_depth_holds_back_active_checks_thorough_runs_them() {
+    use plonix_core::scan::{ScanDepth, ScanRequest};
+
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let up = serve_http().await;
+    let r = start(&home, None).await;
+
+    // /echo reflects its input (an active, per-endpoint check); the fixture
+    // also exposes a .git/config (a safe fixed-path check).
+    via_proxy(r.proxy_addr, &format!("http://localhost:{}/echo?q=1", up.port()), &[]).await;
+    wait_for_count(&r.engine, 1).await;
+    r.engine.decide("localhost", Decision::Accepted, false, "").unwrap();
+
+    // Quick (no explicit tactics): only passive/safe tiers run, so the safe
+    // git probe fires but the active reflected-parameter check is held back.
+    let quick_req = ScanRequest { host: "localhost".into(), depth: ScanDepth::Quick, ..Default::default() };
+    let quick_estimate = r.engine.scan_estimate(&quick_req).unwrap();
+    let quick = r.engine.scan(quick_req, "scan").await.unwrap();
+    assert_eq!(quick_estimate, quick.requests_sent, "the Quick estimate must match what Quick sent");
+    assert!(quick.tactics_run.iter().any(|t| t == "exposed-git-config"), "Quick should still run the safe git probe");
+    assert!(!quick.tactics_run.iter().any(|t| t == "reflected-parameter"), "Quick must hold back the active reflected-parameter check");
+    assert!(!quick.findings.iter().any(|f| f.title.contains("reflected")), "Quick produced no reflected finding, got {:?}", quick.tactics_run);
+
+    // Thorough (no explicit tactics): the active check runs too and sends more.
+    let thorough_req = ScanRequest { host: "localhost".into(), depth: ScanDepth::Thorough, ..Default::default() };
+    let thorough_estimate = r.engine.scan_estimate(&thorough_req).unwrap();
+    let thorough = r.engine.scan(thorough_req, "scan").await.unwrap();
+    assert_eq!(thorough_estimate, thorough.requests_sent, "the Thorough estimate must match what Thorough sent");
+    assert!(thorough.tactics_run.iter().any(|t| t == "reflected-parameter"), "Thorough should run the active reflected-parameter check");
+    assert!(thorough.requests_sent > quick.requests_sent, "Thorough should send more than Quick");
+}
+
+#[tokio::test]
 async fn soft404_calibration_holds_back_a_catch_all_false_positive() {
     use plonix_core::scan::ScanRequest;
 

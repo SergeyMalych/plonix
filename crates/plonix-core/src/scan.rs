@@ -93,6 +93,33 @@ impl Intrusiveness {
     }
 }
 
+/// How deep a scan reaches when the caller does not hand-pick tactics. A
+/// one-tap preset over the intrusiveness tiers: `Quick` keeps the low-volume,
+/// high-signal reads (passive judgements and safe fixed-path probes) and holds
+/// back the active, per-endpoint probes that drive most of the request count;
+/// `Thorough` runs every non-intrusive tactic. Intrusive tactics stay a
+/// separate opt-in (`include_intrusive`) on top of either depth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ScanDepth {
+    /// Passive + safe checks only — dozens of requests, not hundreds.
+    Quick,
+    /// Every applicable non-intrusive check (passive, safe, active).
+    #[default]
+    Thorough,
+}
+
+impl ScanDepth {
+    /// Whether a tactic of this intrusiveness is part of this depth's default
+    /// set. Intrusive is never included here; it is gated separately.
+    pub fn includes(self, i: Intrusiveness) -> bool {
+        match self {
+            ScanDepth::Quick => matches!(i, Intrusiveness::Passive | Intrusiveness::Safe),
+            ScanDepth::Thorough => true,
+        }
+    }
+}
+
 /// A detector as written in a pack. It activates when any listed technology
 /// is detected on the target, or when its traffic conditions match. At least
 /// one of `tech`/`conditions` must be set.
@@ -425,6 +452,11 @@ pub struct ScanRequest {
     /// Allow intrusive tactics. Off by default.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub include_intrusive: bool,
+    /// How deep the default tactic set reaches when `tactics` is empty. An
+    /// explicit `tactics` list is honored as-is and ignores this. Defaults to
+    /// `Thorough`, so a request that omits the field behaves as before.
+    #[serde(default)]
+    pub depth: ScanDepth,
     /// A ceiling on how many requests the scan may send.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_requests: Option<usize>,
@@ -1279,6 +1311,25 @@ mod tests {
         assert_eq!(jwt_only.recommended.len() + jwt_only.optional.len(), 0);
         let both = cat.suggest(&tech(&["php"]), &[ex("h", &[("authorization", "Bearer x")])]);
         assert_eq!(both.recommended.len() + both.optional.len(), 1);
+    }
+
+    #[test]
+    fn scan_depth_tiers_and_default() {
+        // Quick keeps passive + safe; holds back active (and intrusive).
+        assert!(ScanDepth::Quick.includes(Intrusiveness::Passive));
+        assert!(ScanDepth::Quick.includes(Intrusiveness::Safe));
+        assert!(!ScanDepth::Quick.includes(Intrusiveness::Active));
+        assert!(!ScanDepth::Quick.includes(Intrusiveness::Intrusive));
+        // Thorough includes every non-intrusive tier (intrusive is gated apart).
+        assert!(ScanDepth::Thorough.includes(Intrusiveness::Passive));
+        assert!(ScanDepth::Thorough.includes(Intrusiveness::Safe));
+        assert!(ScanDepth::Thorough.includes(Intrusiveness::Active));
+        // Default is Thorough, so a request that omits `depth` is unchanged.
+        assert_eq!(ScanDepth::default(), ScanDepth::Thorough);
+        let req: ScanRequest = serde_json::from_str(r#"{"host":"h"}"#).unwrap();
+        assert_eq!(req.depth, ScanDepth::Thorough);
+        let quick: ScanRequest = serde_json::from_str(r#"{"host":"h","depth":"quick"}"#).unwrap();
+        assert_eq!(quick.depth, ScanDepth::Quick);
     }
 
     #[test]

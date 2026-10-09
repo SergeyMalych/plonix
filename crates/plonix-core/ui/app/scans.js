@@ -121,16 +121,41 @@ async function loadSuggest() {
   if (SC.host !== host || S.view !== 'scans') return;
   SC.suggest = sug;
   // Recommended checks start selected; intrusive ones stay off until opted in.
-  // Under a focus, `categories` is an array of OWASP ids to pre-pick (empty
-  // picks none — e.g. a shape Plonix has no built-in check for yet), or null
-  // for "every recommended check, aimed at this endpoint".
+  SC.picks = recommendedPickIds();
+  SC.intrusive = false;
+  drawScans();
+}
+
+// Depth preset: Quick keeps the low-volume passive/safe reads; Thorough adds
+// the active per-endpoint probes. Default Quick. Kept in sync with the backend
+// ScanDepth tiers.
+function scanDepth() {
+  if (SC.depth !== 'quick' && SC.depth !== 'thorough') SC.depth = 'quick';
+  return SC.depth;
+}
+function depthFits(t) {
+  return scanDepth() === 'thorough' || t.intrusiveness === 'passive' || t.intrusiveness === 'safe';
+}
+
+// The recommended checks to pre-select, given the current focus and depth.
+// Under a focus, `categories` is an array of OWASP ids to pre-pick (empty picks
+// none — e.g. a shape with no built-in check yet), or null for "every
+// recommended check, aimed at this endpoint". Depth then trims to the tier.
+function recommendedPickIds() {
+  const sug = SC.suggest;
+  if (!sug) return new Set();
   const cats = SC.focus ? SC.focus.categories : null;
   const fits = (t) => (t.owasp || []).some((o) => (cats || []).some((c) => o === c || o.startsWith(c)));
-  // A null/absent `categories` (whole host, group, or a plain endpoint focus)
-  // pre-picks every recommended check; an array narrows to the matching ones.
-  const chosen = !SC.focus || cats == null ? sug.recommended : sug.recommended.filter(fits);
-  SC.picks = new Set(chosen.map((t) => t.id));
-  SC.intrusive = false;
+  const scoped = !SC.focus || cats == null ? sug.recommended : sug.recommended.filter(fits);
+  return new Set(scoped.filter(depthFits).map((t) => t.id));
+}
+
+function setScanDepth(d) {
+  SC.depth = d;
+  if (SC.suggest) {
+    SC.picks = recommendedPickIds();
+    SC.intrusive = false;
+  }
   drawScans();
 }
 
@@ -224,7 +249,7 @@ function setScanScope(mode) {
   if (mode === 'host') {
     SC.focus = null;
     if (SC.suggest) {
-      SC.picks = new Set(SC.suggest.recommended.map((t) => t.id));
+      SC.picks = recommendedPickIds();
       SC.intrusive = false;
     }
     drawScans();
@@ -371,15 +396,12 @@ function scanSuggestSection() {
         ? h(
             'span',
             { class: 'shacts' },
-            h('button', {
-              class: 'btn sm',
-              text: 'Select recommended',
-              onclick: () => {
-                SC.picks = new Set(sug.recommended.map((t) => t.id));
-                SC.intrusive = false;
-                drawScans();
-              },
-            }),
+            h(
+              'div',
+              { class: 'seg scandepth' },
+              h('button', { class: 'segbtn' + (scanDepth() === 'quick' ? ' on' : ''), text: 'Quick', title: 'Passive and safe read-only checks — low volume', onclick: () => setScanDepth('quick') }),
+              h('button', { class: 'segbtn' + (scanDepth() === 'thorough' ? ' on' : ''), text: 'Thorough', title: 'Every non-intrusive check, including active per-endpoint probes', onclick: () => setScanDepth('thorough') }),
+            ),
             h('button', { class: 'btn sm', text: 'Clear', onclick: () => ((SC.picks = new Set()), drawScans()) }),
           )
         : null,
@@ -388,6 +410,12 @@ function scanSuggestSection() {
       ? groups
       : h('div', { class: 'empty', text: 'No checks apply to this target yet. A check unlocks only when a matching technology is detected, so browse or crawl the target first.' }),
     sug.skipped ? h('p', { class: 'muted scanskip', text: `${sug.skipped} check${sug.skipped === 1 ? '' : 's'} in the catalog did not match this target's fingerprint.` }) : null,
+    (() => {
+      if (scanDepth() !== 'quick') return null;
+      const held = sug.recommended.filter((t) => t.intrusiveness === 'active').length;
+      if (!held) return null;
+      return h('p', { class: 'muted scandepthnote', text: `Quick runs the passive and safe checks. ${held} active per-endpoint check${held === 1 ? ' is' : 's are'} held back — switch to Thorough to include ${held === 1 ? 'it' : 'them'}.` });
+    })(),
     h(
       'div',
       { class: 'scanrunbar' },
@@ -443,7 +471,7 @@ function toggleIntrusive(on) {
 // The scan request body, built once so the pre-scan estimate and the real run
 // always describe the exact same scan.
 function scanRequestBody() {
-  const body = { host: SC.host, tactics: [...(SC.picks || [])], include_intrusive: SC.intrusive };
+  const body = { host: SC.host, tactics: [...(SC.picks || [])], include_intrusive: SC.intrusive, depth: scanDepth() };
   if (toolOn('saved-users') && actingUser()) body.as_user = S.acting;
   if (SC.focus && SC.focus.mode === 'path') {
     body.endpoints = [{ method: SC.focus.method, path: SC.focus.path }];
@@ -458,7 +486,7 @@ function scanRequestBody() {
 // Keyed so a slow response for an old selection is ignored, and the Run bar
 // refreshes itself when the count lands.
 function scanEstimateKey(body) {
-  return JSON.stringify([body.host, body.tactics.slice().sort(), body.include_intrusive, body.endpoints || null]);
+  return JSON.stringify([body.host, body.tactics.slice().sort(), body.include_intrusive, body.depth, body.endpoints || null]);
 }
 async function refreshScanEstimate() {
   if (!SC.host || !SC.picks || !SC.picks.size) {
