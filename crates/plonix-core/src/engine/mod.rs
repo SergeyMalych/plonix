@@ -60,10 +60,10 @@ pub struct Engine {
     /// response is always analyzed before requests that follow it.
     recorder: mpsc::UnboundedSender<Queued>,
     recorder_rx: Mutex<Option<mpsc::UnboundedReceiver<Queued>>>,
-    detection: Mutex<DetectionState>,
-    filters: Mutex<FilterState>,
-    detectors: Mutex<DetectorState>,
-    lists: Mutex<ListState>,
+    detection: Mutex<Reloading<Library, LoadedRules>>,
+    filters: Mutex<Reloading<FilterLibrary, FilterSet>>,
+    detectors: Mutex<Reloading<DetectorLibrary, DetectorSet>>,
+    lists: Mutex<Reloading<ListLibrary, ListSet>>,
     /// The listen address last asked for in the settings.
     applied_listen: Mutex<Option<SocketAddr>>,
     overrides: Mutex<UpstreamOptions>,
@@ -162,37 +162,37 @@ pub struct ProjectRef {
     pub dir: std::path::PathBuf,
 }
 
-/// Named Traffic filters in effect, reloaded when filter packs change.
-#[derive(Default)]
-struct FilterState {
-    library: Option<FilterLibrary>,
+/// What a pack library holds, loaded again when its files change: named
+/// Traffic filters, detector packs (Mind Reader suggestions), Bench payload
+/// lists and detection rules (`plonix rules add/remove` while the engine runs).
+struct Reloading<L, T> {
+    library: Option<L>,
     loaded_stamp: Option<Option<std::time::SystemTime>>,
-    set: Arc<FilterSet>,
+    value: Arc<T>,
 }
 
-/// Detector packs in effect (Mind Reader suggestions), reloaded when packs change.
-#[derive(Default)]
-struct DetectorState {
-    library: Option<DetectorLibrary>,
-    loaded_stamp: Option<Option<std::time::SystemTime>>,
-    set: Arc<DetectorSet>,
+impl<L, T: Default> Default for Reloading<L, T> {
+    fn default() -> Self {
+        Self { library: None, loaded_stamp: None, value: Arc::default() }
+    }
 }
 
-/// Payload lists in effect for the Bench, reloaded when list packs change.
-#[derive(Default)]
-struct ListState {
-    library: Option<ListLibrary>,
-    loaded_stamp: Option<Option<std::time::SystemTime>>,
-    set: Arc<ListSet>,
-}
+impl<L, T> Reloading<L, T> {
+    fn set_library(&mut self, library: L) {
+        self.library = Some(library);
+        self.loaded_stamp = None;
+    }
 
-/// Detection rules currently in effect. Reloaded when installed packs change
-/// (`plonix rules add/remove` while the engine runs).
-#[derive(Default)]
-struct DetectionState {
-    library: Option<Library>,
-    loaded_stamp: Option<Option<std::time::SystemTime>>,
-    rules: Arc<LoadedRules>,
+    /// The loaded value, loading it again if the library's files changed
+    /// since. `load` gets no library when none was set.
+    fn get(&mut self, stamp: impl Fn(&L) -> Option<std::time::SystemTime>, load: impl FnOnce(Option<&L>) -> T) -> Arc<T> {
+        let now = self.library.as_ref().and_then(stamp);
+        if self.loaded_stamp != Some(now) {
+            self.value = Arc::new(load(self.library.as_ref()));
+            self.loaded_stamp = Some(now);
+        }
+        self.value.clone()
+    }
 }
 
 #[derive(Debug, Default)]
@@ -291,10 +291,10 @@ impl Engine {
             user_proxies: tokio::sync::Mutex::default(),
             interception: RwLock::new(Interception { decrypt: true, passthrough: vec![] }),
             project_ref: OnceLock::new(),
-            detection: Mutex::new(DetectionState::default()),
-            filters: Mutex::new(FilterState::default()),
-            detectors: Mutex::new(DetectorState::default()),
-            lists: Mutex::new(ListState::default()),
+            detection: Mutex::default(),
+            filters: Mutex::default(),
+            detectors: Mutex::default(),
+            lists: Mutex::default(),
             applied_listen: Mutex::new(None),
             overrides: Mutex::default(),
             body_limit: AtomicUsize::new(DEFAULT_BODY_LIMIT),
@@ -653,105 +653,69 @@ impl Engine {
     /// Loads installed filter packs from this library (built-in packs are
     /// always loaded).
     pub fn set_filter_library(&self, library: FilterLibrary) {
-        let mut f = self.filters.lock().unwrap();
-        f.library = Some(library);
-        f.loaded_stamp = None;
+        self.filters.lock().unwrap().set_library(library);
     }
 
     /// Named filters in effect (`is:name`), reloading them if packs changed.
     pub fn filters(&self) -> Arc<FilterSet> {
-        let mut f = self.filters.lock().unwrap();
-        let stamp = f.library.as_ref().and_then(FilterLibrary::stamp);
-        if f.loaded_stamp != Some(stamp) {
-            let set = match &f.library {
-                Some(lib) => lib.load(),
-                None => FilterLibrary::at(std::path::Path::new("/nonexistent")).load(),
-            };
+        self.filters.lock().unwrap().get(FilterLibrary::stamp, |lib| {
+            let set = lib.map_or_else(|| FilterLibrary::at(std::path::Path::new("/nonexistent")).load(), FilterLibrary::load);
             for p in &set.problems {
                 tracing::warn!("filters: {p}");
             }
-            f.set = Arc::new(set);
-            f.loaded_stamp = Some(stamp);
-        }
-        f.set.clone()
+            set
+        })
     }
 
     /// Loads installed detector packs from this library (the built-in pack is
     /// always loaded).
     pub fn set_detector_library(&self, library: DetectorLibrary) {
-        let mut d = self.detectors.lock().unwrap();
-        d.library = Some(library);
-        d.loaded_stamp = None;
+        self.detectors.lock().unwrap().set_library(library);
     }
 
     /// Detectors in effect (Mind Reader suggestions), reloading if packs changed.
     pub fn detectors(&self) -> Arc<DetectorSet> {
-        let mut d = self.detectors.lock().unwrap();
-        let stamp = d.library.as_ref().and_then(DetectorLibrary::stamp);
-        if d.loaded_stamp != Some(stamp) {
-            let set = match &d.library {
-                Some(lib) => lib.load(),
-                None => DetectorLibrary::at(std::path::Path::new("/nonexistent")).load(),
-            };
+        self.detectors.lock().unwrap().get(DetectorLibrary::stamp, |lib| {
+            let set = lib.map_or_else(|| DetectorLibrary::at(std::path::Path::new("/nonexistent")).load(), DetectorLibrary::load);
             for p in &set.problems {
                 tracing::warn!("detectors: {p}");
             }
-            d.set = Arc::new(set);
-            d.loaded_stamp = Some(stamp);
-        }
-        d.set.clone()
+            set
+        })
     }
 
     pub fn set_list_library(&self, library: ListLibrary) {
-        let mut l = self.lists.lock().unwrap();
-        l.library = Some(library);
-        l.loaded_stamp = None;
+        self.lists.lock().unwrap().set_library(library);
     }
 
     /// The payload lists in effect, reloading them if installed packs changed.
     pub fn lists(&self) -> Arc<ListSet> {
-        let mut l = self.lists.lock().unwrap();
-        let stamp = l.library.as_ref().and_then(ListLibrary::stamp);
-        if l.loaded_stamp != Some(stamp) {
-            let set = match &l.library {
-                Some(lib) => lib.load(),
-                None => ListLibrary::at(std::path::Path::new("/nonexistent")).load(),
-            };
+        self.lists.lock().unwrap().get(ListLibrary::stamp, |lib| {
+            let set = lib.map_or_else(|| ListLibrary::at(std::path::Path::new("/nonexistent")).load(), ListLibrary::load);
             for p in &set.problems {
                 tracing::warn!("lists: {p}");
             }
-            l.set = Arc::new(set);
-            l.loaded_stamp = Some(stamp);
-        }
-        l.set.clone()
+            set
+        })
     }
 
     pub fn set_rule_library(&self, library: Library) {
-        let mut d = self.detection.lock().unwrap();
-        d.library = Some(library);
-        d.loaded_stamp = None;
+        self.detection.lock().unwrap().set_library(library);
     }
 
     /// The detection rules in effect, reloading them if packs changed.
     pub fn detection_rules(&self) -> Arc<LoadedRules> {
-        let mut d = self.detection.lock().unwrap();
-        let stamp = d.library.as_ref().and_then(Library::stamp);
-        if d.loaded_stamp != Some(stamp) {
-            let loaded = match &d.library {
-                Some(lib) => lib.load(),
-                None => Library::at(std::path::Path::new("/nonexistent")).load(),
-            };
+        self.detection.lock().unwrap().get(Library::stamp, |lib| {
+            let loaded = lib.map_or_else(|| Library::at(std::path::Path::new("/nonexistent")).load(), Library::load);
             for p in &loaded.problems {
                 tracing::warn!("detection rules: {p}");
             }
-            d.rules = Arc::new(LoadedRules {
+            LoadedRules {
                 detector: loaded.detector(),
                 packs: loaded.packs.into_iter().map(|(_, info)| info).collect(),
                 problems: loaded.problems,
-            });
-            d.loaded_stamp = Some(stamp);
-        }
-        d.rules.clone()
+            }
+        })
     }
 
     /// Technologies detected on one host. Runs over already-captured

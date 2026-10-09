@@ -446,6 +446,27 @@ pub fn resolve(base: &Location, url: &str) -> Result<Location, String> {
 
 // ---- fetching -----------------------------------------------------------------
 
+/// The proxy set in `HTTPS_PROXY` (or `https_proxy`) for a download from
+/// `url`, if any. Every download Plonix makes goes through here. An empty
+/// variable means none, plain `http://` addresses (this machine) never use it,
+/// and hosts listed in `NO_PROXY` (exact, or a parent domain like
+/// `.example.com`; `*` for all) go direct.
+pub fn env_proxy(url: &str) -> anyhow::Result<Option<ureq::Proxy>> {
+    let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
+    let Some(p) = var("HTTPS_PROXY").or_else(|| var("https_proxy")) else { return Ok(None) };
+    let Some(rest) = url.strip_prefix("https://") else { return Ok(None) };
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = host.rsplit_once(':').filter(|(_, port)| port.chars().all(|c| c.is_ascii_digit())).map_or(host, |(h, _)| h).to_ascii_lowercase();
+    if no_proxy(&var("NO_PROXY").or_else(|| var("no_proxy")).unwrap_or_default(), &host) {
+        return Ok(None);
+    }
+    Ok(Some(ureq::Proxy::new(p.trim()).map_err(|e| anyhow::anyhow!("invalid HTTPS_PROXY: {e}"))?))
+}
+
+fn no_proxy(list: &str, host: &str) -> bool {
+    list.split(',').map(|e| e.trim().trim_start_matches('.').to_ascii_lowercase()).filter(|e| !e.is_empty()).any(|e| e == "*" || host == e || host.ends_with(&format!(".{e}")))
+}
+
 /// Reads a local file or downloads a URL, refusing anything over `max`
 /// bytes. Redirects may not leave https.
 pub fn fetch(loc: &Location, max: usize) -> anyhow::Result<Vec<u8>> {
@@ -462,8 +483,8 @@ pub fn fetch(loc: &Location, max: usize) -> anyhow::Result<Vec<u8>> {
             let local = u.starts_with("http://");
             // Refuse a redirect to plain http before it is requested, not after.
             b = b.https_only(!local);
-            if let Some(p) = std::env::var("HTTPS_PROXY").ok().or_else(|| std::env::var("https_proxy").ok()).filter(|_| !local) {
-                b = b.proxy(ureq::Proxy::new(p).context("invalid HTTPS_PROXY")?);
+            if let Some(p) = env_proxy(u)? {
+                b = b.proxy(p);
             }
             let resp = b.build().get(u).call().map_err(|e| match e {
                 ureq::Error::Status(code, _) => anyhow!("{u}: HTTP {code}"),
@@ -594,5 +615,13 @@ mod tests {
             .unwrap();
             assert_eq!((name.as_str(), version.as_str()), (p.name.as_str(), p.version.as_str()));
         }
+    }
+    #[test]
+    fn no_proxy_matches_hosts_and_parent_domains() {
+        assert!(no_proxy("internal.test, .corp.example", "corp.example"));
+        assert!(no_proxy("internal.test,.corp.example", "api.corp.example"));
+        assert!(no_proxy("*", "anything.test"));
+        assert!(!no_proxy("corp.example", "notcorp.example"));
+        assert!(!no_proxy("", "github.com"));
     }
 }

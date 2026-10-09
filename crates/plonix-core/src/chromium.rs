@@ -151,8 +151,8 @@ pub fn stable_download(list: &Value, platform: &str) -> Result<(String, String)>
 
 fn agent() -> Result<ureq::Agent> {
     let mut b = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(15)).timeout_read(Duration::from_secs(60)).redirects(3);
-    if let Some(p) = std::env::var("HTTPS_PROXY").ok().or_else(|| std::env::var("https_proxy").ok()).filter(|p| !p.is_empty()) {
-        b = b.proxy(ureq::Proxy::new(p).context("invalid HTTPS_PROXY")?);
+    if let Some(p) = crate::registry::env_proxy(VERSIONS_URL)? {
+        b = b.proxy(p);
     }
     Ok(b.build())
 }

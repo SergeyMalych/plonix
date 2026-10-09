@@ -585,8 +585,8 @@ pub fn fetch_text(url: &str) -> Result<String> {
         bail!("give an address that starts with https://");
     }
     let mut b = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(10)).timeout(Duration::from_secs(30)).redirects(3).user_agent(&format!("Plonix/{}", env!("CARGO_PKG_VERSION")));
-    if let Some(p) = std::env::var("HTTPS_PROXY").ok().or_else(|| std::env::var("https_proxy").ok()).filter(|p| !p.is_empty()) {
-        b = b.proxy(ureq::Proxy::new(&p).map_err(|e| anyhow::anyhow!("invalid HTTPS_PROXY: {e}"))?);
+    if let Some(p) = crate::registry::env_proxy(url)? {
+        b = b.proxy(p);
     }
     let resp = match b.build().get(url).call() {
         Ok(r) => r,
