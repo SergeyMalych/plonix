@@ -27,6 +27,9 @@ pub enum Source {
     Proxy,
     /// Sent actively by the engine on behalf of a user or agent.
     Replay,
+    /// Sent by an active scan, so a scan's traffic is distinct from a Bench
+    /// replay and can be found on its own (`source:scan`).
+    Scan,
     /// Loaded from a HAR file (see [`crate::har`]).
     Import,
 }
@@ -36,12 +39,14 @@ impl Source {
         match self {
             Source::Proxy => "proxy",
             Source::Replay => "replay",
+            Source::Scan => "scan",
             Source::Import => "import",
         }
     }
     pub fn parse(s: &str) -> Self {
         match s {
             "replay" => Source::Replay,
+            "scan" => Source::Scan,
             "import" => Source::Import,
             _ => Source::Proxy,
         }
@@ -222,6 +227,9 @@ pub struct Facets {
     #[serde(default)]
     pub other_hosts: Vec<Count>,
     pub replays: i64,
+    /// Requests an active scan sent.
+    #[serde(default)]
+    pub scans: i64,
 }
 
 impl Facets {

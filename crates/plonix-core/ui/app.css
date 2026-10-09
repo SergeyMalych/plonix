@@ -1202,6 +1202,18 @@ input.num { width: 72px; }
 .scanfinding .tt { font-weight: 600; }
 .scanfinding .fmeta { margin-left: auto; color: var(--fg-3); font-size: 11px; }
 .scannotes p { margin: 4px 0 0; font-size: 11px; }
+.scanreqs-wrap { margin-top: 12px; }
+.scanreqs-wrap .sublabel { font-size: 11px; color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
+.scanreqs { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; padding: 4px; }
+.scanreq { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: 0; border-radius: 4px; padding: 4px 6px; font: inherit; font-size: 12px; color: var(--fg-1); cursor: pointer; }
+.scanreq:hover { background: var(--hover); }
+.scanreq .m { flex: 0 0 auto; font-weight: 600; color: var(--fg-2); min-width: 42px; }
+.scanreq .p { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.scanreq .tac { flex: 0 0 auto; color: var(--fg-3); font-size: 11px; }
+.scanreq .id { flex: 0 0 auto; color: var(--fg-3); font-size: 11px; }
+.scanreq .st.err { color: var(--crit); font-weight: 600; }
+.scanreq.failed .p { color: var(--fg-2); }
+.scanreqs-wrap > .btn { margin-top: 8px; }
 .cbrowser { display: inline-flex; align-items: center; gap: 4px; }
 .cbnote { font-size: 11px; margin: 2px 0 0; }
 .crawlreport { margin-top: 10px; border-top: 1px solid var(--line-2); padding-top: 10px; }

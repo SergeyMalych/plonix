@@ -457,6 +457,24 @@ pub struct ScanFindingRef {
     pub severity: Severity,
 }
 
+/// One request a scan sent, kept so the scan report can show exactly what the
+/// scan did. Each one is a real exchange in Traffic: `id` opens it in the Lens.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanSent {
+    /// The exchange id in Traffic (opens in the Lens).
+    pub id: i64,
+    /// The tactic that sent it.
+    pub tactic: String,
+    pub method: String,
+    pub path: String,
+    /// The response status, or None when the request did not get one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+    /// The transport error, when the request never got a response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 /// The outcome of an active scan.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanReport {
@@ -466,6 +484,10 @@ pub struct ScanReport {
     pub tactics_run: Vec<String>,
     /// How many requests the scan sent (all through the scope choke point).
     pub requests_sent: usize,
+    /// Every request the scan sent, in order, so the user can see exactly what
+    /// the scan did and open each one in the Lens.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requests: Vec<ScanSent>,
     pub findings: Vec<ScanFindingRef>,
     /// Human-readable notes (e.g. a budget was reached).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

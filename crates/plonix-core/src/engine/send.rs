@@ -11,16 +11,18 @@ use crate::replace::{Passing, Reach, Target};
 impl Engine {
     /// Sends an active request. Refused unless the target host is accepted.
     pub async fn send(&self, req: SendRequest, initiator: &str) -> Result<Exchange, SendError> {
-        self.send_from(req, initiator, Reach::Bench).await
+        self.send_from(req, initiator, Reach::Bench, Source::Replay).await
     }
 
     /// Like [`Self::send`], for Scans, crawls and extensions: the rules that
-    /// apply to them may differ from the Bench's.
-    pub async fn send_scan(&self, req: SendRequest, initiator: &str) -> Result<Exchange, SendError> {
-        self.send_from(req, initiator, Reach::Scans).await
+    /// apply to them may differ from the Bench's. `source` tags where the
+    /// request came from so, for example, a scan's traffic is distinct from a
+    /// Bench replay in Traffic.
+    pub async fn send_scan(&self, req: SendRequest, initiator: &str, source: Source) -> Result<Exchange, SendError> {
+        self.send_from(req, initiator, Reach::Scans, source).await
     }
 
-    async fn send_from(&self, mut req: SendRequest, initiator: &str, reach: Reach) -> Result<Exchange, SendError> {
+    async fn send_from(&self, mut req: SendRequest, initiator: &str, reach: Reach, source: Source) -> Result<Exchange, SendError> {
         let url = req.url.trim();
         let (scheme, rest) = url
             .split_once("://")
@@ -94,7 +96,7 @@ impl Engine {
                 query,
                 req_headers: req.headers.clone(),
                 req_body: body.clone(),
-                source: Some(Source::Replay),
+                source: Some(source),
                 ..Default::default()
             };
             let ctx = Passing { reach, in_scope: true, ex: &before };
@@ -117,7 +119,7 @@ impl Engine {
             query,
             req_headers: req.headers.clone(),
             req_body: body.clone(),
-            source: Some(Source::Replay),
+            source: Some(source),
             initiator: Some(initiator.to_string()),
             original_request,
             ..Default::default()

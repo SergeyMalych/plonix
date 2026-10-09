@@ -394,7 +394,7 @@ const TOUR_STEPS = [
     view: 'scans',
     target: ['#scanbody .scansug', '#scanbody'],
     title: 'Scans',
-    text: 'Plonix lists what it sees in an in-scope host and recommends checks that fit it. You pick the checks and press Run; nothing scans on its own.',
+    text: 'Plonix lists what it sees in an in-scope host and recommends checks that fit it. You pick the checks and press Run; nothing scans on its own. After a run, every request the scan sent is listed here — open any one to see it, or view them all in Traffic.',
   },
   {
     view: 'rules',

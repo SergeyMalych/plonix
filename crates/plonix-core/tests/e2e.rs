@@ -360,6 +360,19 @@ async fn active_scan_finds_a_real_exposure_and_stays_in_scope() {
     assert!(report.requests_sent >= 2);
     assert!(report.tactics_run.iter().any(|t| t == "exposed-git-config"));
 
+    // The report lists every request the scan sent, so the user can see what
+    // it did: one entry per request, each pointing at a real exchange.
+    assert_eq!(report.requests.len(), report.requests_sent, "report should list every request it sent");
+    assert!(report.requests.iter().all(|s| s.id > 0), "each listed request should reference a recorded exchange");
+    assert!(report.requests.iter().any(|s| s.tactic == "exposed-git-config"));
+
+    // Those exchanges are findable as scan traffic on their own.
+    for s in &report.requests {
+        let ex = r.engine.store.get_exchange(s.id).unwrap().unwrap();
+        assert_eq!(ex.source, Some(plonix_core::model::Source::Scan), "scan requests are tagged as scan traffic");
+        assert_eq!(ex.host, "localhost");
+    }
+
     // Every request the scan sent was recorded against the in-scope host.
     let findings = r.engine.store.findings().unwrap();
     assert!(findings.iter().any(|f| f.title.contains(".git/config") && f.severity == "high"));
