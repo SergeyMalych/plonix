@@ -420,8 +420,8 @@ impl Engine {
 
         // Baseline, then a calibration probe with a name nothing should read,
         // to tell whether responses are stable enough to compare by length.
-        let baseline = self.send_scan(probe_request(target_url, None, MARKER), &initiator).await?;
-        let calib = self.send_scan(probe_request(target_url, Some("plnxcalib9z"), MARKER), &initiator).await.ok();
+        let baseline = self.send_scan(probe_request(target_url, None, MARKER), &initiator, Source::Replay).await?;
+        let calib = self.send_scan(probe_request(target_url, Some("plnxcalib9z"), MARKER), &initiator, Source::Replay).await.ok();
         let base_len = baseline.resp_body.len() as i64;
         let base_status = baseline.status;
         let calib_len = calib.as_ref().map(|c| c.resp_body.len() as i64);
@@ -430,7 +430,7 @@ impl Engine {
         let mut report = ParamProbeReport { target: target_url.to_string(), baseline_exchange: baseline.id, ..Default::default() };
         let mut influential: Vec<(String, i64)> = vec![];
         for cand in crate::program::PARAM_NAMES.iter().take(crate::program::MAX_PROBES) {
-            let ex = match self.send_scan(probe_request(target_url, Some(cand), MARKER), &initiator).await {
+            let ex = match self.send_scan(probe_request(target_url, Some(cand), MARKER), &initiator, Source::Replay).await {
                 Ok(ex) => ex,
                 // Scope is the same host throughout: a refusal stops the probe.
                 Err(e @ SendError::OutOfScope { .. }) => return Err(e),

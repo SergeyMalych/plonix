@@ -434,7 +434,8 @@ function toggleIntrusive(on) {
 }
 
 async function runScan() {
-  if (!SC.host || !SC.picks || !SC.picks.size) return;
+  if (!SC.host) return;
+  if (!SC.picks || !SC.picks.size) return toast('Pick at least one check to run first.', 'err');
   const tactics = [...SC.picks];
   SC.running = true;
   SC.report = null;
@@ -461,9 +462,25 @@ async function runScan() {
   drawScans();
 }
 
+function scanReqRow(s) {
+  // One request the scan sent. Clicking it opens the full request and response
+  // in the Lens, so the user can see exactly what the scan did.
+  const failed = !!s.error;
+  return h(
+    'button',
+    { class: 'scanreq' + (failed ? ' failed' : ''), title: failed ? s.error : 'Open this request and response in the Lens', onclick: () => showExchange(s.id) },
+    h('span', { class: 'm', text: s.method }),
+    h('span', { class: 'p', text: s.path }),
+    failed ? h('span', { class: 'st err', text: 'failed' }) : h('span', { class: statusClass(s.status), text: s.status == null ? '—' : s.status }),
+    h('span', { class: 'tac', text: s.tactic }),
+    h('span', { class: 'id', text: '#' + s.id }),
+  );
+}
+
 function scanReportCard() {
   const r = SC.report;
   const findings = r.findings || [];
+  const reqs = r.requests || [];
   return h(
     'div',
     { class: 'card scanreport' },
@@ -475,7 +492,16 @@ function scanReportCard() {
           findings.map((f) => h('div', { class: 'scanfinding' }, h('span', { class: 'sev ' + f.severity, text: f.severity }), h('span', { class: 'tt', text: f.title }), h('span', { class: 'fmeta', text: '#' + f.id }))),
           h('button', { class: 'btn sm', text: 'View in Findings', onclick: () => go('findings') }),
         )
-      : h('div', { class: 'empty', text: 'No issues found. The requests the scan sent are in Traffic.' }),
+      : h('div', { class: 'empty', text: reqs.length ? 'No issues found. Below is every request the scan sent — open any one to see it.' : 'This scan sent no requests: no checks applied to this host. Capture some traffic from it first, or pick checks to run.' }),
+    reqs.length
+      ? h(
+          'div',
+          { class: 'scanreqs-wrap' },
+          h('div', { class: 'sublabel' }, `What the scan sent (${reqs.length})`),
+          h('div', { class: 'scanreqs' }, reqs.map(scanReqRow)),
+          h('button', { class: 'btn sm ghost', text: 'View all in Traffic', onclick: () => setQuery('source:scan host:' + r.host) }),
+        )
+      : null,
     r.notes && r.notes.length ? h('div', { class: 'scannotes' }, r.notes.map((n) => h('p', { class: 'muted', text: n }))) : null,
   );
 }

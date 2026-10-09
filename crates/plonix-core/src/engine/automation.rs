@@ -106,7 +106,7 @@ impl Engine {
         let authority = if default_port { host.clone() } else { format!("{host}:{port}") };
         let budget = req.max_requests.unwrap_or(scan::DEFAULT_REQUEST_BUDGET);
 
-        let mut report = scan::ScanReport { host: host.clone(), signals, tactics_run: vec![], requests_sent: 0, findings: vec![], notes: vec![] };
+        let mut report = scan::ScanReport { host: host.clone(), signals, tactics_run: vec![], requests_sent: 0, requests: vec![], findings: vec![], notes: vec![] };
         let mut budget_hit = false;
 
         for t in &chosen {
@@ -130,6 +130,7 @@ impl Engine {
                         .send_scan(
                             SendRequest { method: planned.method.clone(), url: planned.url.clone(), headers: planned.headers.clone(), body: planned.body.clone(), body_base64: None, as_user: req.as_user.clone() },
                             initiator,
+                            Source::Scan,
                         )
                         .await;
                     let ex = match sent {
@@ -142,6 +143,20 @@ impl Engine {
                             continue;
                         }
                     };
+                    // Keep a reference to every request the scan sent so the
+                    // report can show exactly what it did; each `id` opens the
+                    // full request and response in the Lens.
+                    // The path and query, as the user would read it, taken from
+                    // the recorded exchange (so it reflects any match/replace).
+                    let path = if ex.query.is_empty() { ex.path.clone() } else { format!("{}?{}", ex.path, ex.query) };
+                    report.requests.push(scan::ScanSent {
+                        id: ex.id,
+                        tactic: t.def.id.clone(),
+                        method: ex.method.clone(),
+                        path,
+                        status: ex.status,
+                        error: ex.error.clone(),
+                    });
                     if let Some(mut draft) = t.evaluate(&planned, ex.status, &ex.resp_headers, &ex.resp_body) {
                         draft.exchange_id = ex.id;
                         let f = self
@@ -236,7 +251,7 @@ impl Engine {
                 break;
             }
             report.pages_fetched += 1;
-            let ex = match self.send_scan(SendRequest { method: "GET".into(), url: url.clone(), ..Default::default() }, initiator).await {
+            let ex = match self.send_scan(SendRequest { method: "GET".into(), url: url.clone(), ..Default::default() }, initiator, Source::Replay).await {
                 Ok(ex) => ex,
                 Err(SendError::OutOfScope { .. }) => continue,
                 Err(e) => {
