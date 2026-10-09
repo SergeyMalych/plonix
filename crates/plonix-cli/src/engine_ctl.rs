@@ -110,7 +110,12 @@ pub fn start(home: &Home, opts: &StartOptions) -> Result<(Connected, bool)> {
 /// Why a session that was started is not answering yet, for the timeout message.
 fn not_ready(home: &Home, project_id: &str, pid: u32) -> String {
     let Some(info) = session::find(home, project_id) else {
-        return "no session file for the project".into();
+        let file = session::session_file(home, project_id);
+        let lock = project::resolve(home, project_id).map(|p| match p.lock() {
+            Ok(_) => "the project is not locked".to_string(),
+            Err(e) => e.to_string(),
+        });
+        return format!("no session file for the project; {} exists: {}; lock: {lock:?}", file.display(), file.exists());
     };
     if info.pid != pid {
         return format!("the session file names process {}, not {pid}", info.pid);
