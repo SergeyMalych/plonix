@@ -185,6 +185,40 @@ impl Engine {
         if budget_hit {
             report.notes.push(format!("request budget of {budget} reached; some tactics may not have run"));
         }
+
+        // Passive checks: analysis over the traffic already captured for this
+        // host. They send nothing, so they always run as part of a scan and add
+        // to its findings. Skip any that duplicate a finding already recorded,
+        // so re-running a scan does not pile up the same issue.
+        let existing = self.store.findings().map_err(SendError::Other)?;
+        let seen: std::collections::BTreeSet<String> = existing.iter().map(|f| f.title.clone()).collect();
+        let mut passive_found = 0usize;
+        for p in crate::passive::run(&exchanges) {
+            // One passive finding per distinct issue: its title already names
+            // the issue (the cookie, the endpoint, the version), so an existing
+            // finding with the same title means a re-scan should not re-add it.
+            if seen.contains(&p.title) {
+                continue;
+            }
+            let f = self
+                .store
+                .add_finding(
+                    &crate::model::NewFinding {
+                        title: p.title.clone(),
+                        severity: severity_str(p.severity).to_string(),
+                        description: p.description.clone(),
+                        exchange_ids: vec![p.exchange_id],
+                    },
+                    initiator,
+                )
+                .map_err(SendError::Other)?;
+            report.findings.push(scan::ScanFindingRef { id: f.id, title: f.title, severity: p.severity });
+            passive_found += 1;
+        }
+        if passive_found > 0 {
+            report.notes.push(format!("passive analysis of captured traffic found {passive_found} issue{}", if passive_found == 1 { "" } else { "s" }));
+        }
+
         Ok(report)
     }
 
