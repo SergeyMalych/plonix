@@ -181,7 +181,7 @@ pub enum AlreadyOpen {
 }
 
 fn absolute(dir: &Path) -> PathBuf {
-    std::fs::canonicalize(dir).unwrap_or_else(|_| std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf()))
+    crate::paths::canonical(dir).unwrap_or_else(|_| std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf()))
 }
 
 fn new_id() -> Result<String> {

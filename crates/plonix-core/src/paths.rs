@@ -24,6 +24,22 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+/// `std::fs::canonicalize` without the `\\?\` prefix Windows adds to drive
+/// paths, so paths stay readable and work in other programs' settings.
+pub fn canonical(p: &Path) -> std::io::Result<PathBuf> {
+    let c = std::fs::canonicalize(p)?;
+    #[cfg(windows)]
+    {
+        let s = c.to_string_lossy();
+        if let Some(rest) = s.strip_prefix(r"\\?\")
+            && rest.as_bytes().get(1) == Some(&b':')
+        {
+            return Ok(PathBuf::from(rest));
+        }
+    }
+    Ok(c)
+}
+
 /// The user's home folder: `$HOME`, or `%USERPROFILE%` on Windows.
 pub fn user_home() -> Option<PathBuf> {
     let var = |name| std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from);

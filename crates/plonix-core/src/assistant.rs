@@ -569,7 +569,7 @@ fn started_tag() -> &'static str {
 /// (so it never opens a window). The server names itself after the run, so
 /// the Agents screen can show what each conversation looked at.
 fn mcp_config(home: &Home, name: &str) -> Value {
-    let exe = std::env::current_exe().ok().map(|e| e.canonicalize().unwrap_or(e));
+    let exe = std::env::current_exe().ok().map(|e| crate::paths::canonical(&e).unwrap_or(e));
     let command = exe.map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "plonix".into());
     let mut env = json!({ crate::mcp::CLIENT_ENV: name });
     if !is_default_home(home) {

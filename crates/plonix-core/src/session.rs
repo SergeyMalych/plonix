@@ -246,7 +246,7 @@ pub fn find(home: &Home, selector: &str) -> Option<EngineInfo> {
     let all = running(home);
     let sel = selector.trim();
     let dir = project::expand_tilde(std::path::Path::new(sel));
-    let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
+    let dir = crate::paths::canonical(&dir).unwrap_or(dir);
     all.iter()
         .find(|i| i.project_id == sel)
         .or_else(|| all.iter().find(|i| i.project == sel))
