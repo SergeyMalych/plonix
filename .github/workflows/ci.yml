@@ -108,6 +108,17 @@ jobs:
           name: Plonix-Windows
           path: Plonix-Windows-setup.exe
           if-no-files-found: error
+      # Installs it like a user would, then drives the real app window:
+      # first launch, the demo project, and traffic through its proxy.
+      - name: Try the installed app
+        run: |
+          npm install --no-save --no-package-lock --prefix .github/scripts playwright-core@1.48.2
+          node .github/scripts/windows-smoke.mjs Plonix-Windows-setup.exe "$RUNNER_TEMP/smoke"
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: Plonix-Windows-screenshots
+          path: ${{ runner.temp }}/smoke/*.png
 
   # The 100,000-exchange scale tests (crates/plonix-core/tests/scale.rs), in
   # release mode. A 10,000-exchange version runs with the tests above.
