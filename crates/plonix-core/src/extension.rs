@@ -499,7 +499,9 @@ pub struct ExtensionLibrary {
 }
 
 /// A value that changes whenever installed extensions or their state change.
-pub type Stamp = (Option<std::time::SystemTime>, Option<std::time::SystemTime>);
+/// The state file's length counts too: on Windows two quick writes can share
+/// a modified time.
+pub type Stamp = (Option<std::time::SystemTime>, Option<(std::time::SystemTime, u64)>);
 
 impl ExtensionLibrary {
     pub fn new(home: &Home) -> Self {
@@ -527,7 +529,7 @@ impl ExtensionLibrary {
     }
 
     pub fn stamp(&self) -> Stamp {
-        (self.shelf.stamp(), std::fs::metadata(self.state_path()).and_then(|m| m.modified()).ok())
+        (self.shelf.stamp(), std::fs::metadata(self.state_path()).and_then(|m| Ok((m.modified()?, m.len()))).ok())
     }
 
     /// Installs a package. Capabilities that are not sensitive are granted
