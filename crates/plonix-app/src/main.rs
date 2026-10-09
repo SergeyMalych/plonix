@@ -13,6 +13,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod app_icon;
 #[cfg(unix)]
 mod cli_tool;
 mod crashes;
@@ -115,6 +116,10 @@ fn main() {
             let handle = app.handle().clone();
             launcher_window(&handle)?;
             std::thread::Builder::new().name("plonix-start".into()).spawn(move || start(handle))?;
+            if let Ok(home) = Home::resolve(None) {
+                let handle = app.handle().clone();
+                std::thread::Builder::new().name("plonix-icon".into()).spawn(move || app_icon::follow(handle, home))?;
+            }
             // A report from last time is asked about first, then updates.
             let handle = app.handle().clone();
             std::thread::Builder::new().name("plonix-crashes".into()).spawn(move || {

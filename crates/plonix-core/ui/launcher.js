@@ -72,6 +72,13 @@ async function boot() {
   }
   L.token = store('plonix.hubtoken');
   if (!L.token) return showLock();
+  api('/api/ui/style')
+    .then((r) => {
+      if (r.style === 'studio') document.documentElement.setAttribute('data-style', 'studio');
+      else document.documentElement.removeAttribute('data-style');
+      store('plonix.style', r.style);
+    })
+    .catch(() => {});
   let terms;
   try {
     [L.about, terms] = await Promise.all([api('/api/hub'), api('/api/terms')]);

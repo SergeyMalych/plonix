@@ -98,6 +98,7 @@ async function boot() {
     if (e.code === 'unauthorized') return;
     return showLock(e.message);
   }
+  syncStyle();
   if (S.status.demo) await loadDemoBench();
   const v = (location.hash.match(/^#\/(\w+)/) || [])[1];
   if (VIEWS[v]) S.view = v;
@@ -1261,6 +1262,18 @@ function applyTheme(t) {
 function applyDensity(d) {
   document.documentElement.setAttribute('data-density', d === 'roomy' ? 'roomy' : 'dense');
   S.density = d === 'roomy' ? 'roomy' : 'dense';
+}
+
+/** Takes the style chosen in any Plonix window: it is kept with the engine,
+ * so every project and the desktop app's icon follow it. */
+async function syncStyle() {
+  try {
+    const r = await api('/api/ui/style');
+    if (r.style !== S.style) {
+      applyStyle(r.style);
+      store('plonix.style', r.style);
+    }
+  } catch (_) {}
 }
 
 /** Classic (the default) or Studio, the optional geometric style in studio.css. */

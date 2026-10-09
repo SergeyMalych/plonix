@@ -30,6 +30,7 @@ async function renderSettings(main) {
         store('plonix.density', values.density);
         applyStyle(values.style);
         store('plonix.style', values.style);
+        await api('/api/ui/style', { method: 'PUT', body: { style: values.style } }).catch(() => {});
         return { applies: 'now' };
       }
       const r = await api('/api/settings/' + section, { method: 'PUT', body: { values } });

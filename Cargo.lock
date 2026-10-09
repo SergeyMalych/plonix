@@ -2867,6 +2867,9 @@ name = "plonix-app"
 version = "0.1.3"
 dependencies = [
  "anyhow",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "plonix-core",
  "serde",
  "serde_json",
