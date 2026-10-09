@@ -184,10 +184,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Advisories, licenses, duplicate crates and sources; see deny.toml.
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: dtolnay/rust-toolchain@stable
+      # Install a prebuilt cargo-deny binary instead of the Docker-based
+      # action, which pulls its base image from Docker Hub unauthenticated and
+      # intermittently fails the job with a 429 rate limit.
+      - uses: taiki-e/install-action@v2
         with:
-          command: check
+          tool: cargo-deny
+      # Advisories, licenses, duplicate crates and sources; see deny.toml.
+      - run: cargo deny check
 
   macos-app:
     needs: changes
