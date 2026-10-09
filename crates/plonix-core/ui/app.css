@@ -271,7 +271,7 @@ code, .mono { font-family: var(--mono); }
 .insp-head .meta { display: flex; gap: 12px; color: var(--fg-3); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .insp-head .lens { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3); }
 .split { flex: 1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr); min-height: 0; }
-/* Side-by-side panes with a draggable divider (sideBySide in app.js). */
+/* Side-by-side panes with a draggable divider (sideBySide in app/lens.js). */
 .split.sbs { grid-template-columns: minmax(0, var(--lw, 1fr)) 7px minmax(0, var(--rw, 1fr)); }
 .rsplit.sbs { grid-template-columns: minmax(0, var(--lw, 1fr)) 13px minmax(0, var(--rw, 1fr)); gap: 0; }
 .vsplit { cursor: col-resize; position: relative; }

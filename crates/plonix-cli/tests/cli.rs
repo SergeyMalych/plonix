@@ -530,8 +530,8 @@ fn ui_serves_the_window_and_signs_in_with_a_one_time_link() {
     let page = ureq::get(&format!("{api}/")).call().unwrap();
     let csp = page.header("content-security-policy").unwrap().to_string();
     assert!(csp.contains("script-src 'self'") && csp.contains("frame-ancestors 'none'"), "{csp}");
-    assert!(page.into_string().unwrap().contains("/ui/app.js"));
-    for asset in ["/ui/common.js", "/ui/app.js", "/ui/app.css", "/ui/icon.svg"] {
+    assert!(page.into_string().unwrap().contains("/ui/app/shell.js"));
+    for asset in ["/ui/common.js", "/ui/app/core.js", "/ui/app/shell.js", "/ui/app.css", "/ui/icon.svg"] {
         assert_eq!(ureq::get(&format!("{api}{asset}")).call().unwrap().status(), 200, "{asset}");
     }
     assert!(matches!(ureq::get(&format!("{api}/ui/nope.js")).call(), Err(ureq::Error::Status(404, _))));

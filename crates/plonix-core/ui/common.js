@@ -1,4 +1,4 @@
-// Helpers shared by the project window (app.js), the Start screen
+// Helpers shared by the project window (app/*.js), the Start screen
 // (launcher.js) and the settings forms (settings.js). Loaded first on both
 // pages; plain JavaScript, no build step.
 //

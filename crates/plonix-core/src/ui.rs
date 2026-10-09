@@ -26,7 +26,22 @@ const LAUNCHER_HTML: &str = include_str!("../ui/launcher.html");
 const FILES: &[(&str, &'static str, &str)] = &[
     ("common.js", "text/javascript; charset=utf-8", include_str!("../ui/common.js")),
     ("settings.js", "text/javascript; charset=utf-8", include_str!("../ui/settings.js")),
-    ("app.js", "text/javascript; charset=utf-8", include_str!("../ui/app.js")),
+    ("app/core.js", "text/javascript; charset=utf-8", include_str!("../ui/app/core.js")),
+    ("app/traffic.js", "text/javascript; charset=utf-8", include_str!("../ui/app/traffic.js")),
+    ("app/lens.js", "text/javascript; charset=utf-8", include_str!("../ui/app/lens.js")),
+    ("app/bench.js", "text/javascript; charset=utf-8", include_str!("../ui/app/bench.js")),
+    ("app/scope.js", "text/javascript; charset=utf-8", include_str!("../ui/app/scope.js")),
+    ("app/map.js", "text/javascript; charset=utf-8", include_str!("../ui/app/map.js")),
+    ("app/users.js", "text/javascript; charset=utf-8", include_str!("../ui/app/users.js")),
+    ("app/findings.js", "text/javascript; charset=utf-8", include_str!("../ui/app/findings.js")),
+    ("app/scans.js", "text/javascript; charset=utf-8", include_str!("../ui/app/scans.js")),
+    ("app/programs.js", "text/javascript; charset=utf-8", include_str!("../ui/app/programs.js")),
+    ("app/agents.js", "text/javascript; charset=utf-8", include_str!("../ui/app/agents.js")),
+    ("app/market.js", "text/javascript; charset=utf-8", include_str!("../ui/app/market.js")),
+    ("app/ask.js", "text/javascript; charset=utf-8", include_str!("../ui/app/ask.js")),
+    ("app/settings.js", "text/javascript; charset=utf-8", include_str!("../ui/app/settings.js")),
+    ("app/rules.js", "text/javascript; charset=utf-8", include_str!("../ui/app/rules.js")),
+    ("app/shell.js", "text/javascript; charset=utf-8", include_str!("../ui/app/shell.js")),
     ("launcher.js", "text/javascript; charset=utf-8", include_str!("../ui/launcher.js")),
     ("app.css", "text/css; charset=utf-8", include_str!("../ui/app.css")),
     ("icon.svg", "image/svg+xml", include_str!("../ui/icon.svg")),
@@ -96,7 +111,7 @@ pub async fn launcher() -> Response {
     asset("text/html; charset=utf-8", LAUNCHER_HTML)
 }
 
-/// A script, stylesheet or icon the pages load, by name (`/ui/{file}`).
+/// A script, stylesheet or icon the pages load, by name (`/ui/{*file}`).
 pub async fn file(Path(name): Path<String>) -> Response {
     match FILES.iter().find(|(n, ..)| *n == name) {
         Some((_, content_type, body)) => asset(content_type, *body),
