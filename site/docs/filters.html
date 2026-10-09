@@ -77,7 +77,7 @@
 }</code></pre>
 <div class="table"><table><thead><tr><th>Field</th><th>Rules</th></tr></thead><tbody><tr><td><code>id</code></td><td><code>[a-z0-9-]</code>, at most 40 characters. Used as <code>is:&lt;id&gt;</code>.</td></tr><tr><td><code>label</code></td><td>What the chip shows, at most 40 characters.</td></tr><tr><td><code>description</code></td><td>Optional, at most 300 characters. Shown as the tooltip.</td></tr><tr><td><code>query</code></td><td>Any search (see <code>plonix search --help</code>), at most 500 characters. It may not use <code>is:</code>, so filters can't nest or loop.</td></tr></tbody></table></div>
 <pre><code class="language-sh">plonix filters check acme-filters.json    # validate and print the sha256
-plonix filters add acme-filters.json      # or an https:// URL, optionally --sha256 &lt;hex&gt;
+plonix filters add acme-filters.json --yes # or an https:// URL, optionally --sha256 &lt;hex&gt;
 plonix filters remove acme-filters</code></pre>
 <p>New packs take effect right away, even while the engine runs. If two packs define the same id, the first one wins (built-in packs, then installed packs by name), and <code>plonix filters</code> warns about the one that was ignored.</p>
 <h2 id="safety">Safety<a class="anchor" href="#safety" aria-label="Link to this section">#</a></h2>

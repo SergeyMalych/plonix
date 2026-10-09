@@ -150,8 +150,8 @@ error: invalid rule pack:
 ```sh
 plonix rules                                   # packs in effect: built-in and installed
 plonix rules check ./my-pack.json              # validate without installing; prints the sha256
-plonix rules add ./my-pack.json                # install from a file
-plonix rules add https://example.com/pack.json --sha256 <hex>   # from a URL, pinned
+plonix rules add ./my-pack.json --yes          # install from a file
+plonix rules add https://example.com/pack.json --sha256 <hex> --yes # from a URL, pinned
 plonix rules remove my-pack
 plonix tech                                    # what the rules found, per host
 plonix tech shop.example.com
@@ -232,7 +232,7 @@ The index is the root of trust: whoever controls it decides which bytes are acce
 
 ## Contributing a pack
 
-1. Write your pack and run `plonix rules check your-pack.json` until it's clean. Test it against real traffic with `plonix rules add` and `plonix tech`.
+1. Write your pack and run `plonix rules check your-pack.json` until it's clean. Test it against real traffic with `plonix rules add --yes` and `plonix tech`.
 2. Prefer specific signals (a distinctive header, a framework-specific cookie) over generic ones, and lower `confidence` for anything that could be a coincidence.
 3. Reuse existing ids for existing technologies so detections merge instead of duplicating.
 4. Open a pull request that adds `store/packs/<name>.json` and an entry in `store/index.json` with the `sha256` printed by `plonix rules check`. `cargo test` (and CI) checks that every index entry matches its file.

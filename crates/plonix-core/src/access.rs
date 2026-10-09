@@ -177,11 +177,23 @@ impl Default for AgentSettings {
 impl AgentSettings {
     pub const BUDGETS: &[usize] = &[2000, 4000, 8000, 16000, 32000];
 
+    /// The saved choices, or the defaults when there is no file yet. A file
+    /// that exists but does not parse (say, written by a newer build) reads
+    /// as access off rather than as the defaults, which would turn back on
+    /// anything the user had switched off.
     pub fn load(home: &Home) -> Self {
-        std::fs::read(home.agent_settings()).ok().and_then(|b| serde_json::from_slice::<Self>(&b).ok()).map(Self::sanitized).unwrap_or_default()
+        let Ok(bytes) = std::fs::read(home.agent_settings()) else { return Self::default() };
+        match serde_json::from_slice::<Self>(&bytes) {
+            Ok(s) => s.sanitized(),
+            Err(e) => {
+                tracing::warn!("{} could not be read ({e}); agent access is off until it is saved again", home.agent_settings().display());
+                Self { enabled: false, ..Self::default() }
+            }
+        }
     }
 
     pub fn save(&self, home: &Home) -> Result<()> {
+        crate::paths::set_aside_unreadable::<Self>(&home.agent_settings());
         write_private(&home.agent_settings(), &serde_json::to_vec_pretty(self)?)
     }
 
@@ -622,6 +634,13 @@ mod tests {
         std::fs::write(home.agent_settings(), "{\"data\": \"all\"}").unwrap();
         let s = AgentSettings::load(&home);
         assert!(s.enabled && s.data == DataScope::All && s.context_budget == 8000);
+        // A file this build cannot read turns access off, and saving keeps it aside.
+        std::fs::write(home.agent_settings(), "{\"off\": [\"some-future-group\"]}").unwrap();
+        assert!(!AgentSettings::load(&home).enabled);
+        AgentSettings::default().save(&home).unwrap();
+        assert!(AgentSettings::load(&home).enabled);
+        let aside = std::fs::read_dir(dir.path()).unwrap().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().contains(".corrupt-")).count();
+        assert_eq!(aside, 1);
     }
 
     #[test]

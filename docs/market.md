@@ -105,7 +105,7 @@ Skills never widen what an agent can do. A skill declares which data it reads (`
 ```sh
 plonix skills                                    # skills, and which ones agents are offered
 plonix skills show explain-request --arg id=42   # exactly what the agent receives
-plonix skills add ./my-skill.md                  # your own, from a file or https URL
+plonix skills add ./my-skill.md --yes            # your own, from a file or https URL
 plonix skills check ./my-skill.md                # validate before sharing
 ```
 

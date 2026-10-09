@@ -114,13 +114,16 @@ pub enum SkillsCmd {
         #[arg(long = "arg", value_name = "NAME=VALUE")]
         args: Vec<String>,
     },
-    /// Install a skill from a file or an https:// URL
+    /// Add a skill of your own from a file or an https:// URL, after showing what it does
     Add {
         /// Path or URL of a skill (.md)
         source: String,
         /// Refuse the skill unless its SHA-256 is exactly this
         #[arg(long, value_name = "HEX")]
         sha256: Option<String>,
+        /// Add it without asking (it is still marked Your own)
+        #[arg(long)]
+        yes: bool,
     },
     /// Uninstall a skill
     #[command(visible_alias = "rm")]
@@ -440,34 +443,7 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
                 return ctx.print_json(&json!({ "changes": all }));
             }
         }
-        MarketCmd::Add { source, yes } => {
-            let (bytes, label) = market::read_external(&source)?;
-            let ext = m.inspect_external(bytes, &label).map_err(|e| anyhow!(e))?;
-            if ext.kind == Kind::Extension {
-                bail!("that is an extension: add it with `plonix extensions add {source}`, which shows what it asks to do first");
-            }
-            if !ctx.json {
-                println!("{} {} · {} by {}", ext.name, ext.version, ext.kind.noun(), ext.author);
-                println!("{}", ext.description);
-                for e in &ext.effects {
-                    println!("  - {e}");
-                }
-                println!("sha256 {}", ext.sha256);
-                println!("! YOUR OWN: it comes from {}, not a signed Market, so nobody has reviewed it. It is validated and cannot run code.", market::describe_source(&ext.source));
-            }
-            if !yes {
-                if ctx.json {
-                    return ctx.print_json(&json!({ "added": false, "file": ext }));
-                }
-                bail!("not added yet. Read the above, then run it again with --yes to add it");
-            }
-            let change = m.add_external(&ext, &Default::default())?;
-            if ctx.json {
-                return ctx.print_json(&json!({ "added": true, "file": ext, "change": change }));
-            }
-            print_changes(&[change], &ext.name);
-            println!("It shows as Your own in the Market.");
-        }
+        MarketCmd::Add { source, yes } => add_own(ctx, &source, yes, None, None)?,
         MarketCmd::Trust { key } => {
             registry::parse_public_key(&key).map_err(|e| anyhow!(e))?;
             let mut values = settings::global(&ctx.home, market::SETTINGS);
@@ -569,6 +545,51 @@ fn group_label(g: Group) -> &'static str {
 
 // ---- plonix skills ---------------------------------------------------------------
 
+/// Adds a package of your own after showing what it does and who wrote it,
+/// and only with `yes`. `skills add`, `rules add` and `filters add` come
+/// through here too, so every way in asks the same way and the Market sees
+/// the same thing. `want` refuses another kind of file, `sha256` another build.
+pub fn add_own(ctx: &Ctx, source: &str, yes: bool, want: Option<Kind>, sha256: Option<&str>) -> Result<()> {
+    let m = Market::new(&ctx.home);
+    let (bytes, label) = market::read_external(source)?;
+    let ext = m.inspect_external(bytes, &label).map_err(|e| anyhow!(e))?;
+    if ext.kind == Kind::Extension {
+        bail!("that is an extension: add it with `plonix extensions add {source}`, which shows what it asks to do first");
+    }
+    if let Some(k) = want
+        && ext.kind != k
+    {
+        bail!("that is a {}, not a {}: add it with `plonix market add {source}`", ext.kind.noun(), k.noun());
+    }
+    if let Some(h) = sha256
+        && !h.trim().eq_ignore_ascii_case(&ext.sha256)
+    {
+        bail!("checksum mismatch: expected sha256 {}, got {}", h.trim(), ext.sha256);
+    }
+    if !ctx.json {
+        println!("{} {} · {} by {}", ext.name, ext.version, ext.kind.noun(), ext.author);
+        println!("{}", ext.description);
+        for e in &ext.effects {
+            println!("  - {e}");
+        }
+        println!("sha256 {}", ext.sha256);
+        println!("! YOUR OWN: it comes from {}, not a signed Market, so nobody has reviewed it. It is validated and cannot run code.", market::describe_source(&ext.source));
+    }
+    if !yes {
+        if ctx.json {
+            return ctx.print_json(&json!({ "added": false, "file": ext }));
+        }
+        bail!("not added yet. Read the above, then run it again with --yes to add it");
+    }
+    let change = m.add_external(&ext, &Default::default())?;
+    if ctx.json {
+        return ctx.print_json(&json!({ "added": true, "file": ext, "change": change }));
+    }
+    print_changes(&[change], &ext.name);
+    println!("It shows as Your own in the Market.");
+    Ok(())
+}
+
 pub fn skills_cmd(ctx: &Ctx, cmd: SkillsCmd) -> Result<()> {
     let lib = SkillLibrary::new(&ctx.home);
     let settings = AgentSettings::load(&ctx.home);
@@ -622,26 +643,7 @@ pub fn skills_cmd(ctx: &Ctx, cmd: SkillsCmd) -> Result<()> {
             };
             println!("{text}");
         }
-        SkillsCmd::Add { source, sha256 } => {
-            let loc = registry::location(&source).map_err(|e| anyhow!(e))?;
-            let bytes = registry::fetch(&loc, skill::MAX_SKILL_BYTES)?;
-            let label = match &loc {
-                registry::Location::File(p) => std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()).display().to_string(),
-                registry::Location::Url(u) => u.clone(),
-            };
-            let (s, previous) = lib.install(&bytes, &label, sha256.as_deref())?;
-            if ctx.json {
-                return ctx.print_json(&json!({ "installed": s, "replaced": previous }));
-            }
-            match previous {
-                Some(v) if v != s.version => println!("Updated skill {} {v} → {}.", s.name, s.version),
-                Some(_) => println!("Reinstalled skill {} {}.", s.name, s.version),
-                None => println!("Installed skill {} {}: {}.", s.name, s.version, s.title),
-            }
-            if !s.missing(&settings).is_empty() {
-                println!("Agents will not be offered it until the capabilities it uses are switched on in Settings › AI agents.");
-            }
-        }
+        SkillsCmd::Add { source, sha256, yes } => add_own(ctx, &source, yes, Some(Kind::Skill), sha256.as_deref())?,
         SkillsCmd::Remove { names } => {
             for name in names {
                 if lib.remove(&name)? {

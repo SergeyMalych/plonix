@@ -74,7 +74,7 @@ There is no Contributor License Agreement and no DCO sign-off. By contributing y
 The easiest way to contribute is a **detection rule pack**: a JSON file that teaches Plonix to recognise a technology. No Rust needed.
 
 1. Write the pack and run `plonix rules check your-pack.json` until it's clean.
-2. Try it on real traffic with `plonix rules add your-pack.json` and `plonix tech`.
+2. Try it on real traffic with `plonix rules add your-pack.json --yes` and `plonix tech`.
 3. Open a pull request that adds `store/packs/<name>.json` and its entry in `store/index.json`, with the `sha256` that `plonix rules check` prints. `cargo test` checks that every index entry matches its file.
 
 Prefer specific signals over generic ones, and reuse existing technology ids so detections merge. The full format and review checklist are in [docs/detection-rules.md](docs/detection-rules.md#contributing-a-pack). Scan packs (`store/scanpacks/`) follow the same model; see [docs/scanning.md](docs/scanning.md). New checks must be bounded and non-destructive, or clearly labeled as intrusive.

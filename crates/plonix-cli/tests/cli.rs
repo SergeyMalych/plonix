@@ -639,17 +639,22 @@ fn rules_check_add_list_remove() {
     let out = p.run(&["rules"]).ok().stdout();
     assert!(out.contains("web-servers") && out.contains("built-in"), "{out}");
 
-    let r = p.run(&["rules", "add", pack, "--sha256", &"0".repeat(64)]);
+    let r = p.run(&["rules", "add", pack, "--sha256", &"0".repeat(64), "--yes"]);
     assert_eq!(r.code(), 1);
     assert!(r.stderr().contains("checksum mismatch"), "{}", r.stderr());
     assert!(!p.run(&["rules"]).ok().stdout().contains("acme-internal"));
 
-    let out = p.run(&["rules", "add", pack]).ok().stdout();
-    assert!(out.contains("Installed acme-internal 1.0.0: 1 rules by acme red team."), "{out}");
+    // Like `market add`, it shows what the pack does and adds it only with --yes.
+    let r = p.run(&["rules", "add", pack]);
+    assert_eq!(r.code(), 1);
+    assert!(r.stdout().contains("acme-internal 1.0.0 · rule pack by acme red team") && r.stderr().contains("--yes"), "{}", r.stdout());
+    assert!(!p.run(&["rules"]).ok().stdout().contains("acme-internal"));
+    let out = p.run(&["rules", "add", pack, "--yes"]).ok().stdout();
+    assert!(out.contains("Installed acme-internal 1.0.0") && out.contains("Your own"), "{out}");
     let out = p.run(&["rules", "list"]).ok().stdout();
     assert!(out.contains("acme-internal") && out.contains("acme.json"), "{out}");
 
-    assert!(p.run(&["rules", "add", "http://example.com/pack.json"]).stderr().contains("https"));
+    assert!(p.run(&["rules", "add", "http://example.com/pack.json", "--yes"]).stderr().contains("https"));
     assert_eq!(p.run(&["rules", "remove", "web-servers"]).code(), 1);
     assert!(p.run(&["rules", "remove", "acme-internal"]).ok().stdout().contains("Removed acme-internal."));
     assert!(!p.run(&["rules"]).ok().stdout().contains("acme-internal"));
@@ -753,7 +758,7 @@ fn tech_detects_from_captured_traffic() {
     let dir = tempfile::tempdir().unwrap();
     let pack = dir.path().join("acme.json");
     std::fs::write(&pack, ACME_PACK).unwrap();
-    p.run(&["rules", "add", pack.to_str().unwrap()]).ok();
+    p.run(&["rules", "add", pack.to_str().unwrap(), "--yes"]).ok();
     let out = p.run(&["tech", "localhost"]).ok().stdout();
     assert!(out.contains("Acme Gateway 3.4"), "{out}");
 
@@ -985,7 +990,7 @@ fn filter_packs_add_named_filters_to_search() {
     assert!(r.stderr().contains("unknown filter is:acme-console"), "{}", r.stderr());
 
     // Installed while the engine runs: picked up without a restart.
-    assert!(p.run(&["filters", "add", pack]).ok().stdout().contains("Installed acme-filters 1.0.0: 1 filters"));
+    assert!(p.run(&["filters", "add", pack, "--yes"]).ok().stdout().contains("Installed acme-filters 1.0.0"));
     assert_eq!(paths("is:acme-console"), ["/console"]);
     assert_eq!(paths("is:acme-console,graphql").len(), 2);
 
@@ -1051,7 +1056,7 @@ fn market_installs_bundles_and_skills_from_a_signed_index() {
     assert!(line(&listing, "triage-host").contains("built-in"), "{listing}");
     let mine = p.home.path().join("mine.md");
     std::fs::write(&mine, "---\nplonix_skill: 1\nname: mine\nversion: 1.0.0\ntitle: Mine\ndescription: My skill.\nauthor: me\nuses: [traffic]\n---\nLook at traffic.\n").unwrap();
-    p.run(&["skills", "add", mine.to_str().unwrap()]).ok();
+    p.run(&["skills", "add", mine.to_str().unwrap(), "--yes"]).ok();
     let listing = p.run(&["market", "--index", index]).ok().stdout();
     assert!(line(&listing, "mine").contains("your own") && line(&listing, "mine").contains("skill"), "{listing}");
     assert!(listing.contains("1 not reviewed"), "{listing}");
