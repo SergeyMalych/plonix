@@ -80,6 +80,28 @@ async fn serve_http() -> SocketAddr {
     addr
 }
 
+/// A catch-all host: every path, known or not, answers 200 with the same page.
+/// The page even carries a string a fixed-path check looks for, so without
+/// soft-404 calibration the check would false-positive on every host like this.
+async fn catchall_handler(_req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Infallible> {
+    Ok(Response::builder()
+        .header("content-type", "text/html")
+        .body(Full::new(Bytes::from_static(b"<html><body><h1>Apache Server Status</h1><p>Our app could not find that page.</p></body></html>")))
+        .unwrap())
+}
+
+async fn serve_catchall() -> SocketAddr {
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let (s, _) = l.accept().await.unwrap();
+            tokio::spawn(hyper::server::conn::http1::Builder::new().serve_connection(TokioIo::new(s), service_fn(catchall_handler)));
+        }
+    });
+    addr
+}
+
 /// HTTPS server for `localhost` with a certificate from a separate test CA.
 async fn serve_https() -> (SocketAddr, CertificateDer<'static>) {
     let (ca_pem, ca_key) = CertAuthority::generate_pem().unwrap();
@@ -388,6 +410,45 @@ async fn active_scan_finds_a_real_exposure_and_stays_in_scope() {
         r.engine.scan(ScanRequest { host: "localhost".into(), ..Default::default() }, "scan").await,
         Err(SendError::OutOfScope { decision: "rejected", .. })
     ));
+}
+
+#[tokio::test]
+async fn soft404_calibration_holds_back_a_catch_all_false_positive() {
+    use plonix_core::scan::ScanRequest;
+
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home { root: dir.path().into() };
+    let up = serve_catchall().await;
+    let r = start(&home, None).await;
+
+    // Capture one request so the host is known and the `web` signal is active.
+    via_proxy(r.proxy_addr, &format!("http://localhost:{}/", up.port()), &[]).await;
+    wait_for_count(&r.engine, 1).await;
+    r.engine.decide("localhost", Decision::Accepted, false, "").unwrap();
+
+    // The server-status check expects a 200 whose body says "Apache Server
+    // Status" — which this catch-all returns for every path, including the
+    // check's /server-status. Calibration learns the catch-all first, so the
+    // probe is recognised as that page and no finding is raised.
+    let req = ScanRequest { host: "localhost".into(), tactics: vec!["apache-server-status".into()], ..Default::default() };
+    let estimate = r.engine.scan_estimate(&req).unwrap();
+    let report = r.engine.scan(req, "scan").await.unwrap();
+
+    assert!(
+        !report.findings.iter().any(|f| f.title.to_lowercase().contains("server-status") || f.title.to_lowercase().contains("server status")),
+        "the catch-all page must not be reported as a real server-status exposure, got {:?}",
+        report.findings.iter().map(|f| &f.title).collect::<Vec<_>>()
+    );
+    assert!(report.notes.iter().any(|n| n.contains("catch-all")), "the report should say the host was calibrated, got {:?}", report.notes);
+    assert!(
+        report.notes.iter().any(|n| n.contains("not reported")),
+        "a check that matched the catch-all should be counted as held back, got {:?}",
+        report.notes
+    );
+    // The calibration requests and the probe are all listed, and the estimate
+    // still matches exactly what the scan sent.
+    assert!(report.requests.iter().any(|s| s.tactic == "(calibration)"), "calibration requests are listed in the report");
+    assert_eq!(estimate, report.requests_sent, "the estimate still accounts for the calibration requests");
 }
 
 #[tokio::test]

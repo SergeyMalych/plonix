@@ -946,6 +946,67 @@ pub struct PlannedRequest {
     pub body: Option<String>,
 }
 
+/// A host's catch-all fingerprint, learned by asking for paths that cannot
+/// exist. Some hosts answer every unknown path with a friendly 200 page (a
+/// single-page app, a custom error page), which makes a fixed-path file check
+/// look like it found something when it did not. When a file-exposure probe
+/// comes back looking just like this fingerprint, it is that catch-all page,
+/// not a real exposure, so the finding is held back.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Soft404 {
+    status: u16,
+    /// Representative body length of the catch-all page.
+    len: usize,
+    /// How far a body length may sit from `len` and still count as a match.
+    tol: usize,
+}
+
+/// Two distinct paths that should not exist on any host, used to calibrate a
+/// catch-all fingerprint. `nonce` keeps them from colliding with real content
+/// or a cached response; the two differ in shape so a host that merely echoes
+/// the path back produces visibly different bodies (and so is not fingerprinted).
+pub fn calibration_paths(nonce: &str) -> [String; 2] {
+    [format!("/plonix-calibration-{nonce}"), format!("/plonix-calibration-{nonce}/{nonce}-not-here.txt")]
+}
+
+impl Soft404 {
+    /// Learns a fingerprint from calibration samples of `(status, body length)`.
+    /// Returns `Some` only when the host answers unknown paths with a stable,
+    /// success-looking page: a real 4xx/5xx is the correct answer to a missing
+    /// path and needs no calibration, and samples that disagree in status or
+    /// vary too much in length are not one page, so no fingerprint is formed.
+    pub fn learn(samples: &[(Option<u16>, usize)]) -> Option<Soft404> {
+        if samples.len() < 2 {
+            return None;
+        }
+        let status = samples[0].0?;
+        // Only a success-looking catch-all (2xx/3xx) causes false positives;
+        // a proper "not found" needs no suppression.
+        if !(200..400).contains(&status) {
+            return None;
+        }
+        if samples.iter().any(|(s, _)| *s != Some(status)) {
+            return None;
+        }
+        let max = samples.iter().map(|(_, l)| *l).max().unwrap_or(0);
+        let min = samples.iter().map(|(_, l)| *l).min().unwrap_or(0);
+        let spread = max - min;
+        // Too variable between unknown paths to be one stable page.
+        if spread > max.max(64) / 4 {
+            return None;
+        }
+        let len = (min + max) / 2;
+        let tol = (len / 10).max(spread).max(64);
+        Some(Soft404 { status, len, tol })
+    }
+
+    /// Whether a response looks like the learned catch-all page: same status,
+    /// and a body length within the learned tolerance.
+    pub fn matches(&self, status: Option<u16>, body_len: usize) -> bool {
+        status == Some(self.status) && body_len.abs_diff(self.len) <= self.tol
+    }
+}
+
 /// A finding a tactic produced, ready to record once a person's scan recorded it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FindingDraft {
@@ -1605,5 +1666,46 @@ mod tests {
         let git = cat.tactics.iter().find(|t| t.def.id == "exposed-git-config").unwrap();
         assert_eq!(git.def.owasp, vec!["A05".to_string()]);
         assert_eq!(git.def.wstg, vec!["WSTG-CONF-04".to_string()]);
+    }
+
+    #[test]
+    fn soft404_calibration_paths_are_two_distinct_nonexistent_paths() {
+        let [a, b] = calibration_paths("abc123");
+        assert_ne!(a, b);
+        assert!(a.starts_with("/plonix-calibration-abc123"));
+        assert!(b.starts_with("/plonix-calibration-abc123"));
+    }
+
+    #[test]
+    fn soft404_learns_a_stable_success_catch_all() {
+        // Two unknown paths both answer 200 with near-identical bodies: a
+        // catch-all page, so a fingerprint forms and a like-sized 200 matches.
+        let sf = Soft404::learn(&[(Some(200), 1200), (Some(200), 1208)]).expect("a stable 200 catch-all is fingerprinted");
+        assert!(sf.matches(Some(200), 1205), "a response just like the catch-all matches");
+        assert!(!sf.matches(Some(404), 1205), "a different status never matches");
+    }
+
+    #[test]
+    fn soft404_ignores_a_proper_not_found() {
+        // A real 404 to an unknown path is the correct answer and needs no
+        // suppression, so no fingerprint forms.
+        assert!(Soft404::learn(&[(Some(404), 20), (Some(404), 22)]).is_none());
+    }
+
+    #[test]
+    fn soft404_needs_a_stable_page() {
+        // Disagreeing statuses, or bodies too different to be one page, are not
+        // a catch-all fingerprint.
+        assert!(Soft404::learn(&[(Some(200), 1200), (Some(302), 0)]).is_none());
+        assert!(Soft404::learn(&[(Some(200), 100), (Some(200), 9000)]).is_none());
+        assert!(Soft404::learn(&[(Some(200), 1200)]).is_none(), "one sample is not enough");
+    }
+
+    #[test]
+    fn soft404_does_not_match_a_real_exposure() {
+        // A catch-all of ~1.2 KB; a real /.git/config is tiny, so it sits well
+        // outside the tolerance and is still reported.
+        let sf = Soft404::learn(&[(Some(200), 1200), (Some(200), 1200)]).unwrap();
+        assert!(!sf.matches(Some(200), 34), "a short real file is not the catch-all page");
     }
 }

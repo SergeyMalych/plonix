@@ -109,6 +109,42 @@ impl Engine {
         let mut report = scan::ScanReport { host: host.clone(), signals, tactics_run: vec![], requests_sent: 0, requests: vec![], findings: vec![], notes: vec![] };
         let mut budget_hit = false;
 
+        // Soft-404 calibration: some hosts answer every unknown path with a
+        // friendly 200 page, which makes a fixed-path file check look like it
+        // found something. Before running any fixed-path tactic, ask for a
+        // couple of paths that cannot exist and learn that catch-all page, so a
+        // probe that just echoes it is not reported as a real exposure. Only
+        // worth the requests when a fixed-path tactic is actually going to run.
+        let mut soft404: Option<scan::Soft404> = None;
+        let mut calibrated_out = 0usize;
+        if chosen.iter().any(|t| t.def.check.path.is_some()) {
+            let nonce = format!(
+                "{:x}",
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0)
+            );
+            let mut samples: Vec<(Option<u16>, usize)> = vec![];
+            for path in scan::calibration_paths(&nonce) {
+                if report.requests_sent >= budget {
+                    break;
+                }
+                report.requests_sent += 1;
+                let url = format!("{scheme}://{authority}{path}");
+                match self.send_scan(SendRequest { method: "GET".into(), url, as_user: req.as_user.clone(), ..Default::default() }, initiator, Source::Scan).await {
+                    Ok(ex) => {
+                        let shown = if ex.query.is_empty() { ex.path.clone() } else { format!("{}?{}", ex.path, ex.query) };
+                        report.requests.push(scan::ScanSent { id: ex.id, tactic: "(calibration)".into(), method: ex.method.clone(), path: shown, status: ex.status, error: ex.error.clone() });
+                        samples.push((ex.status, ex.resp_body.len()));
+                    }
+                    Err(SendError::OutOfScope { .. }) => {}
+                    Err(e) => report.notes.push(format!("calibration request failed: {e}")),
+                }
+            }
+            soft404 = scan::Soft404::learn(&samples);
+            if soft404.is_some() {
+                report.notes.push(format!("{host} serves a catch-all page for unknown paths; file checks were judged against it to avoid false matches"));
+            }
+        }
+
         for t in &chosen {
             // Fixed-path tactics plan once per host; injecting tactics plan
             // against each discovered endpoint.
@@ -157,6 +193,18 @@ impl Engine {
                         status: ex.status,
                         error: ex.error.clone(),
                     });
+                    // A fixed-path probe whose response looks just like the
+                    // host's catch-all page is that page, not an exposure. The
+                    // request still shows in the list; it just does not become
+                    // a finding.
+                    if t.def.check.path.is_some() {
+                        if let Some(sf) = &soft404 {
+                            if sf.matches(ex.status, ex.resp_body.len()) {
+                                calibrated_out += 1;
+                                continue;
+                            }
+                        }
+                    }
                     if let Some(mut draft) = t.evaluate(&planned, ex.status, &ex.resp_headers, &ex.resp_body) {
                         draft.exchange_id = ex.id;
                         let f = self
@@ -181,6 +229,13 @@ impl Engine {
             if budget_hit {
                 break;
             }
+        }
+        if calibrated_out > 0 {
+            report.notes.push(format!(
+                "{calibrated_out} file check{} matched the host's catch-all page and {} not reported",
+                if calibrated_out == 1 { "" } else { "s" },
+                if calibrated_out == 1 { "was" } else { "were" }
+            ));
         }
         if budget_hit {
             report.notes.push(format!("request budget of {budget} reached; some tactics may not have run"));
@@ -263,7 +318,9 @@ impl Engine {
         let authority = if default_port { host.clone() } else { format!("{host}:{port}") };
         let budget = req.max_requests.unwrap_or(scan::DEFAULT_REQUEST_BUDGET);
 
-        let mut n = 0usize;
+        // Soft-404 calibration sends a couple of probes before any fixed-path
+        // tactic runs; count them so the estimate matches what the scan sends.
+        let mut n = if chosen.iter().any(|t| t.def.check.path.is_some()) { scan::calibration_paths("x").len() } else { 0 };
         for t in &chosen {
             let targets: Vec<Option<scan::ScanTarget>> = if t.def.check.path.is_some() {
                 vec![None]
