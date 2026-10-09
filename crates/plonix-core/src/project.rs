@@ -292,7 +292,7 @@ pub fn resolve(home: &Home, selector: &str) -> Result<Project> {
         bail!("empty project name");
     }
     let as_path = Path::new(sel);
-    if sel.contains('/') || sel.starts_with('.') || sel.starts_with('~') {
+    if sel.contains(['/', std::path::MAIN_SEPARATOR]) || as_path.is_absolute() || sel.starts_with('.') || sel.starts_with('~') {
         let dir = expand_tilde(as_path);
         let p = if dir.join(PROJECT_FILE).exists() {
             Project::load(&dir)?
