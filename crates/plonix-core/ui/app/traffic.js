@@ -1123,9 +1123,10 @@ function rowMenu(e, ex) {
   ];
   const idT = idTargetOf(ex);
   const actions = [{ label: 'Send to Bench', run: () => sendToBench(ex.id) }, { label: 'Copy as curl', run: () => copyCurl(ex.id) }];
-  if (decide(ex.host) === 'accepted' && toolOn('access-check')) {
-    if (idT) actions.push({ label: 'Check this id across users', run: () => startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}` }) });
-    actions.push({ label: 'Replay signed out', run: () => startAccessCheck({ targets: [ex.id], sourceLabel: `${ex.method} ${ex.path}`, onlyAnon: true }) });
+  if (sessionGrant(ex)) actions.push({ label: 'Save login as a user', run: () => saveLoginAsUser(ex) });
+  if (decide(ex.host) === 'accepted') {
+    if (idT) actions.push({ label: 'Check this id across users', run: () => checkIdAcrossUsers(ex) });
+    actions.push({ label: 'Replay signed out', run: () => replaySignedOut(ex) });
   }
   if (decide(ex.host) === 'accepted') {
     for (const name of extsThat('probe')) actions.push({ label: 'Probe for hidden parameters', run: () => probeExchange(name, ex) });
