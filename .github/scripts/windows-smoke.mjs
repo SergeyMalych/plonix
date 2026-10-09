@@ -109,8 +109,11 @@ try {
   await project.waitForLoadState();
   await until('demo traffic in the window', () => project.evaluate(() => document.body.innerText.includes('brightcart')));
   // First-open questions a user would answer, so the screenshots show the app.
-  const notNow = project.getByRole('button', { name: 'Not now' });
-  if (await notNow.waitFor({ timeout: 5000 }).then(() => true, () => false)) await notNow.click();
+  const notNow = project.locator('.modal button', { hasText: 'Not now' }).first();
+  for (let i = 0; i < 3 && (await notNow.waitFor({ timeout: 8000 }).then(() => true, () => false)); i++) {
+    await notNow.click();
+    await sleep(500);
+  }
   await project.evaluate(() => window.endTour?.());
   await shot(project, '3-demo.png');
 
