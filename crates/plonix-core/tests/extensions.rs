@@ -118,9 +118,13 @@ fn a_misbehaving_extension_is_stopped_and_switched_off() {
     let id = engine.record(page("shop.test")).unwrap();
     assert!(engine.store.get_exchange(id).unwrap().is_some());
 
-    // Turned back on by the user, it is loaded again.
+    // Turned back on by the user, it is loaded again. The background worker
+    // may still hold the page recorded above: then it runs the crasher on it
+    // and switches it off again, which shows it was loaded too.
     lib.set_enabled("crasher", true).unwrap();
-    assert_eq!(engine.extensions().extensions.len(), 1);
+    let loaded = engine.extensions().extensions.len() == 1;
+    let stopped_again = || lib.info("crasher").unwrap().state.disabled_reason.is_some();
+    assert!(loaded || stopped_again(), "the crasher was not loaded again");
 }
 
 const SUBDOMAIN: &[u8] = include_bytes!("../../../store/extensions/subdomain-discovery.plonixext");
