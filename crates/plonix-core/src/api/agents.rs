@@ -6,6 +6,7 @@ use crate::access::AgentSettings;
 use crate::ask::{self, AskError, AskRequest};
 use crate::assistant::StartError;
 use crate::proposal::{self, DraftRequest, NewProposal};
+use crate::access::Group;
 
 pub(super) fn routes() -> Router<AppState> {
     Router::new()
