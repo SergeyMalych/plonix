@@ -1198,6 +1198,7 @@ input.num { width: 72px; }
 .scantactic input:disabled { opacity: .5; }
 .scanskip { font-size: 11px; margin: 8px 0 0; }
 .scanrunbar { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 12px; }
+.scanrunbar .scanest { padding-left: 12px; border-left: 1px solid var(--line); }
 .scanreport .scanfinding, .scanfinding { display: flex; align-items: center; gap: 10px; font-size: 12px; padding: 4px 0; }
 .scanfinding .tt { font-weight: 600; }
 .scanfinding .fmeta { margin-left: auto; color: var(--fg-3); font-size: 11px; }

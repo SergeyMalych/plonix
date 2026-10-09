@@ -7,6 +7,7 @@ pub(super) fn routes() -> Router<AppState> {
         .route("/api/scan/catalog", get(scan_catalog))
         .route("/api/scan/suggest/{host}", get(scan_suggest))
         .route("/api/scan/plan/{host}", get(scan_plan))
+        .route("/api/scan/estimate", post(scan_estimate))
         .route("/api/scan", post(scan_run))
         .route("/api/crawl", post(crawl_run))
 }
@@ -48,6 +49,15 @@ async fn scan_run(State(s): State<AppState>, headers: HeaderMap, Json(req): Json
     match s.engine.scan(req, &initiator(&headers)).await {
         Ok(report) => Json(report).into_response(),
         Err(e) => send_error(e),
+    }
+}
+
+async fn scan_estimate(State(s): State<AppState>, Json(req): Json<crate::scan::ScanRequest>) -> Response {
+    let engine = s.engine.clone();
+    match tokio::task::spawn_blocking(move || engine.scan_estimate(&req)).await {
+        Ok(Ok(requests)) => Json(serde_json::json!({ "requests": requests })).into_response(),
+        Ok(Err(e)) => internal(e),
+        Err(e) => internal(e.into()),
     }
 }
 

@@ -351,7 +351,12 @@ async fn active_scan_finds_a_real_exposure_and_stays_in_scope() {
     assert!(matches!(out_of_scope, Err(SendError::OutOfScope { .. })), "scan must refuse an un-accepted host");
 
     r.engine.decide("localhost", Decision::Accepted, false, "").unwrap();
-    let report = r.engine.scan(ScanRequest { host: "localhost".into(), ..Default::default() }, "scan").await.unwrap();
+    // The pre-scan estimate must match exactly what the scan then sends, so the
+    // "~N requests" shown before Run is honest.
+    let req = ScanRequest { host: "localhost".into(), ..Default::default() };
+    let estimate = r.engine.scan_estimate(&req).unwrap();
+    let report = r.engine.scan(req, "scan").await.unwrap();
+    assert_eq!(estimate, report.requests_sent, "pre-scan estimate must equal what the scan sent");
 
     // The fixed-path git probe and the reflected-parameter check both fire.
     let titles: Vec<&str> = report.findings.iter().map(|f| f.title.as_str()).collect();

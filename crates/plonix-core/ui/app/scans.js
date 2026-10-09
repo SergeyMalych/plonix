@@ -388,8 +388,15 @@ function scanSuggestSection() {
       ? groups
       : h('div', { class: 'empty', text: 'No checks apply to this target yet. A check unlocks only when a matching technology is detected, so browse or crawl the target first.' }),
     sug.skipped ? h('p', { class: 'muted scanskip', text: `${sug.skipped} check${sug.skipped === 1 ? '' : 's'} in the catalog did not match this target's fingerprint.` }) : null,
-    h('div', { class: 'scanrunbar' }, h('span', { class: 'muted', text: `${picks.size} selected` }), runBtn),
+    h(
+      'div',
+      { class: 'scanrunbar' },
+      h('span', { class: 'muted', text: `${picks.size} selected` }),
+      picks.size ? h('span', { class: 'muted scanest', text: SC.estimate == null ? 'estimating…' : `~${SC.estimate} request${SC.estimate === 1 ? '' : 's'}` }) : null,
+      runBtn,
+    ),
   );
+  if (!SC.running) refreshScanEstimate();
   wrap.append(checksCard);
   if (SC.report) wrap.append(scanReportCard());
   return wrap;
@@ -433,14 +440,10 @@ function toggleIntrusive(on) {
   drawScans();
 }
 
-async function runScan() {
-  if (!SC.host) return;
-  if (!SC.picks || !SC.picks.size) return toast('Pick at least one check to run first.', 'err');
-  const tactics = [...SC.picks];
-  SC.running = true;
-  SC.report = null;
-  drawScans();
-  const body = { host: SC.host, tactics, include_intrusive: SC.intrusive };
+// The scan request body, built once so the pre-scan estimate and the real run
+// always describe the exact same scan.
+function scanRequestBody() {
+  const body = { host: SC.host, tactics: [...(SC.picks || [])], include_intrusive: SC.intrusive };
   if (toolOn('saved-users') && actingUser()) body.as_user = S.acting;
   if (SC.focus && SC.focus.mode === 'path') {
     body.endpoints = [{ method: SC.focus.method, path: SC.focus.path }];
@@ -448,6 +451,43 @@ async function runScan() {
     const eps = scanGroupEndpoints().map((e) => ({ method: e.method, path: e.path }));
     if (eps.length) body.endpoints = eps;
   }
+  return body;
+}
+
+// How many requests the current selection would send, before anything is sent.
+// Keyed so a slow response for an old selection is ignored, and the Run bar
+// refreshes itself when the count lands.
+function scanEstimateKey(body) {
+  return JSON.stringify([body.host, body.tactics.slice().sort(), body.include_intrusive, body.endpoints || null]);
+}
+async function refreshScanEstimate() {
+  if (!SC.host || !SC.picks || !SC.picks.size) {
+    SC.estimate = null;
+    SC.estKey = null;
+    return;
+  }
+  const body = scanRequestBody();
+  const key = scanEstimateKey(body);
+  if (key === SC.estKey) return;
+  SC.estKey = key;
+  SC.estimate = null;
+  try {
+    const r = await api('/api/scan/estimate', { method: 'POST', body });
+    if (SC.estKey !== key || S.view !== 'scans') return;
+    SC.estimate = r.requests;
+    drawScans();
+  } catch {
+    if (SC.estKey === key) SC.estimate = null;
+  }
+}
+
+async function runScan() {
+  if (!SC.host) return;
+  if (!SC.picks || !SC.picks.size) return toast('Pick at least one check to run first.', 'err');
+  SC.running = true;
+  SC.report = null;
+  drawScans();
+  const body = scanRequestBody();
   try {
     SC.report = await api('/api/scan', { method: 'POST', body });
   } catch (e) {

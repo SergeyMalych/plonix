@@ -222,6 +222,61 @@ impl Engine {
         Ok(report)
     }
 
+    /// How many requests a scan with this request would send, without sending
+    /// any. Read-only and pure, so the Scans screen can show "this will send
+    /// about N requests" before the person presses Run — the volume is theirs
+    /// to approve. It mirrors `scan`'s selection and planning exactly (a test
+    /// pins the two together), and passive checks add nothing because they send
+    /// nothing.
+    pub fn scan_estimate(&self, req: &scan::ScanRequest) -> Result<usize> {
+        let host = scope::normalize_host(&req.host);
+        let no_intrusive = self.program().is_some_and(|g| g.no_intrusive());
+        let include_intrusive = req.include_intrusive && !no_intrusive;
+
+        let catalog = self.scan_catalog();
+        let tech = self.detect_host(&host)?;
+        let exchanges = self.store.exchanges_for_host(&host, detect::HOST_SAMPLE)?;
+        let active: std::collections::BTreeSet<String> = catalog.signals(&tech, &exchanges).into_iter().map(|s| s.signal).collect();
+        let selected = catalog.select(&active);
+        let chosen: Vec<&scan::Tactic> = catalog
+            .tactics
+            .iter()
+            .filter(|t| selected.iter().any(|s| s.id == t.def.id))
+            .filter(|t| !(no_intrusive && t.def.intrusiveness == scan::Intrusiveness::Intrusive))
+            .filter(|t| {
+                if req.tactics.is_empty() {
+                    include_intrusive || t.def.intrusiveness.default_on()
+                } else {
+                    req.tactics.iter().any(|id| id == &t.def.id)
+                }
+            })
+            .collect();
+
+        let mut endpoints = self.store.endpoints(&host)?;
+        if !req.endpoints.is_empty() {
+            let want: std::collections::BTreeSet<(String, String)> =
+                req.endpoints.iter().map(|e| (e.method.to_ascii_uppercase(), crate::store::fold_path(&e.path))).collect();
+            endpoints.retain(|e| want.contains(&(e.method.to_ascii_uppercase(), e.path.clone())));
+        }
+        let (scheme, port) = exchanges.first().map(|e| (e.scheme.clone(), e.port)).unwrap_or_else(|| ("https".into(), 443));
+        let default_port = (scheme == "https" && port == 443) || (scheme == "http" && port == 80);
+        let authority = if default_port { host.clone() } else { format!("{host}:{port}") };
+        let budget = req.max_requests.unwrap_or(scan::DEFAULT_REQUEST_BUDGET);
+
+        let mut n = 0usize;
+        for t in &chosen {
+            let targets: Vec<Option<scan::ScanTarget>> = if t.def.check.path.is_some() {
+                vec![None]
+            } else {
+                endpoints.iter().map(|e| Some(scan::ScanTarget { method: e.method.clone(), path: self.real_path(e) })).collect()
+            };
+            for target in &targets {
+                n += t.plan(&scheme, &authority, target.as_ref()).len();
+            }
+        }
+        Ok(n.min(budget))
+    }
+
     /// Crawls an accepted host: fetches in-scope pages through `send`, follows
     /// the same-host links it finds, and records what it sees. GET only; it
     /// never submits a form and never leaves accepted scope. With `browser`,
