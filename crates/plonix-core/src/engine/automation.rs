@@ -82,7 +82,7 @@ impl Engine {
             .filter(|t| !(no_intrusive && t.def.intrusiveness == scan::Intrusiveness::Intrusive))
             .filter(|t| {
                 if req.tactics.is_empty() {
-                    req.include_intrusive || t.def.intrusiveness.default_on()
+                    req.depth.includes(t.def.intrusiveness) && (req.include_intrusive || t.def.intrusiveness.default_on())
                 } else {
                     req.tactics.iter().any(|id| id == &t.def.id)
                 }
@@ -300,7 +300,7 @@ impl Engine {
             .filter(|t| !(no_intrusive && t.def.intrusiveness == scan::Intrusiveness::Intrusive))
             .filter(|t| {
                 if req.tactics.is_empty() {
-                    include_intrusive || t.def.intrusiveness.default_on()
+                    req.depth.includes(t.def.intrusiveness) && (include_intrusive || t.def.intrusiveness.default_on())
                 } else {
                     req.tactics.iter().any(|id| id == &t.def.id)
                 }
