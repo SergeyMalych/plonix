@@ -111,7 +111,7 @@ pub struct Hit {
 fn search_dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|v| std::env::split_paths(&v).collect()).unwrap_or_default();
     dirs.extend(["/opt/homebrew/bin", "/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin"].map(PathBuf::from));
-    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+    if let Some(home) = crate::paths::user_home() {
         dirs.extend([home.join("go/bin"), home.join(".local/bin"), home.join("bin")]);
     }
     dirs
@@ -119,7 +119,8 @@ fn search_dirs() -> Vec<PathBuf> {
 
 /// Where an executable named `name` is installed, if it is.
 pub fn locate_exe(name: &str) -> Option<PathBuf> {
-    search_dirs().into_iter().map(|d| d.join(name)).find(|f| f.is_file())
+    let file = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+    search_dirs().into_iter().map(|d| d.join(&file)).find(|f| f.is_file())
 }
 
 /// Where the program is installed, if it is. A built-in has no executable.

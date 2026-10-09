@@ -3,7 +3,7 @@
 //! The capture browser itself lives in [`plonix_core::browser`], so the
 //! Plonix app can open it too.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use anyhow::{Result, bail};
@@ -55,7 +55,7 @@ Undo it any time in Keychain Access by deleting \"Plonix CA\".
 
 /// Shortens paths under the home directory to `~/...` for display.
 pub fn tilde(path: &Path) -> String {
-    match std::env::var_os("HOME").map(PathBuf::from) {
+    match plonix_core::paths::user_home() {
         Some(h) if !h.as_os_str().is_empty() && path.starts_with(&h) => {
             format!("~/{}", path.strip_prefix(&h).unwrap_or(path).display())
         }

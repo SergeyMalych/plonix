@@ -109,7 +109,7 @@ function drawAgentAsk() {
       h(
         'div',
         { class: 'ab' },
-        h('b', { text: 'Claude Code is not installed on this Mac.' }),
+        h('b', { text: `Claude Code is not installed on ${THIS_COMPUTER}.` }),
         ' Install it from claude.com/claude-code to ask about this project right here. Other agents can still connect: ',
         h('button', { class: 'link', text: 'see Setup', onclick: () => toggleAgentSetup(true) }),
         '.',
@@ -682,7 +682,7 @@ function drawAgentSetup() {
     h(
       'p',
       { class: 'muted fine' },
-      'The engine enforces this: agents sign in with their own token, and anything outside this list is refused. Captured traffic never leaves this Mac through Plonix, but it can hold passwords and session tokens, so connect only agents you trust.',
+      `The engine enforces this: agents sign in with their own token, and anything outside this list is refused. Captured traffic never leaves ${THIS_COMPUTER} through Plonix, but it can hold passwords and session tokens, so connect only agents you trust.`,
     ),
     h('div', { class: 'sechead' }, h('h3', { text: 'Skills' }), h('button', { class: 'btn sm ghost', text: 'Get more in the Market', onclick: () => leaveTo('market') })),
     h('div', { class: 'card', id: 'agentskills' }, h('div', { class: 'ab muted', text: 'Loading skills…' })),

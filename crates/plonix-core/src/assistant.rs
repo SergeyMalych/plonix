@@ -581,7 +581,7 @@ fn mcp_config(home: &Home, name: &str) -> Value {
 /// Whether `home` is the standard `~/.plonix`, in which case `plonix mcp` finds
 /// it on its own and needs no `PLONIX_HOME` in the environment.
 fn is_default_home(home: &Home) -> bool {
-    std::env::var_os("PLONIX_HOME").is_none() && std::env::var_os("HOME").map(PathBuf::from).map(|h| h.join(".plonix")) == Some(home.root.clone())
+    std::env::var_os("PLONIX_HOME").is_none() && crate::paths::user_home().map(|h| h.join(".plonix")) == Some(home.root.clone())
 }
 
 /// Whether this `claude` can stream token by token. Older versions reject the

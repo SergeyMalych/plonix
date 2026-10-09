@@ -363,7 +363,7 @@ function trustCertificate(browser, canTrust) {
     text: 'Trust certificate',
     onclick: async () => {
       btn.disabled = true;
-      btn.textContent = 'Waiting for macOS…';
+      btn.textContent = ON_WINDOWS ? 'Waiting for Windows…' : 'Waiting for macOS…';
       m.err.textContent = '';
       try {
         await api('/api/ca/trust', { method: 'POST' });
@@ -379,10 +379,12 @@ function trustCertificate(browser, canTrust) {
   const m = modal(
     'Trust the Plonix certificate',
     [
-      h('p', { class: 'mnote', text: `${browser} checks the certificates your Mac trusts, so HTTPS sites show a warning until the Plonix certificate is trusted.` }),
+      h('p', { class: 'mnote', text: `${browser} checks the certificates ${THIS_COMPUTER} trusts, so HTTPS sites show a warning until the Plonix certificate is trusted.` }),
       h('p', {
         class: 'muted mnote',
-        text: 'Plonix adds it to your login keychain; macOS asks for your password or Touch ID. The certificate was made on this Mac and its key never leaves it. Remove it any time in Keychain Access ("Plonix CA").',
+        text: ON_WINDOWS
+          ? 'Plonix adds it to your own trusted root certificates; Windows asks you to confirm. The certificate was made on this PC and its key never leaves it. Remove it any time in Manage user certificates ("Plonix CA").'
+          : 'Plonix adds it to your login keychain; macOS asks for your password or Touch ID. The certificate was made on this Mac and its key never leaves it. Remove it any time in Keychain Access ("Plonix CA").',
       }),
     ],
     [h('button', { class: 'btn', text: 'Not now', onclick: closeModal }), btn],

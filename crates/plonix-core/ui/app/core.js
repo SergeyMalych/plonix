@@ -759,7 +759,7 @@ const TOUR_TESTS = {
       if (!btn) return 'Open a request in the Lens to ask about it.';
       await t.press(btn);
       const m = await t.until(() => $('.modal textarea.askq'));
-      if (!m) return 'Ask Claude needs Claude Code on this Mac.';
+      if (!m) return `Ask Claude needs Claude Code on ${THIS_COMPUTER}.`;
       $('.modal').classList.add('tourmodal');
       t.ring($('.modal .mcard'));
       await t.type(m, 'Can this token read other customers’ orders? What should I try next?', { ms: 22 });

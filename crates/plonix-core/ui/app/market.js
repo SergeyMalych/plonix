@@ -367,9 +367,9 @@ async function extensionConsent(p, action) {
 
 /** The program an extension runs: installed on this Mac, or how to install it. */
 function programNeeds(pr) {
-  if (pr.found) return h('div', { class: 'mcap' }, capIcon('ok'), h('span', { text: `${pr.id} is installed on this Mac.` }));
+  if (pr.found) return h('div', { class: 'mcap' }, capIcon('ok'), h('span', { text: `${pr.id} is installed on ${THIS_COMPUTER}.` }));
   return [
-    h('div', { class: 'mcap' }, capIcon('warn'), h('span', { text: `${pr.id} is not installed on this Mac yet. Install it in Terminal, then come back:` })),
+    h('div', { class: 'mcap' }, capIcon('warn'), h('span', { text: `${pr.id} is not installed on ${THIS_COMPUTER} yet. Install it in a terminal, then come back:` })),
     h('div', { class: 'mneeds' }, h('code', { text: pr.install }), h('button', { class: 'btn sm', text: 'Copy', onclick: () => copyText(pr.install) })),
   ];
 }

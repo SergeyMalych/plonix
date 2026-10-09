@@ -419,7 +419,7 @@ async function askClaude(subject, opts = {}) {
     partsBox,
     meter,
     warn,
-    h('p', { class: 'muted fine', text: 'Only what is ticked is sent, straight from this Mac to Claude Code. It may include passwords or session tokens from captured traffic.' }),
+    h('p', { class: 'muted fine', text: `Only what is ticked is sent, straight from ${THIS_COMPUTER} to Claude Code. It may include passwords or session tokens from captured traffic.` }),
     cliHint,
   );
 
@@ -578,7 +578,7 @@ async function askClaude(subject, opts = {}) {
     } catch (e) {
       if (e.code === 'unsupported') {
         await copyText(st.bundle.prompt);
-        m.err.textContent = 'Opening a terminal works on macOS only. The prompt is on your clipboard: paste it into Claude Code.';
+        m.err.textContent = 'Opening a terminal works on macOS and Windows only. The prompt is on your clipboard: paste it into Claude Code.';
       } else m.err.textContent = e.message;
     }
   };

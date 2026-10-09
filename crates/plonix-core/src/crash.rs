@@ -248,7 +248,7 @@ static HOME_DIR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:/Users/|/hom
 /// keys and passwords, email addresses and the home folder.
 pub fn scrub(text: &str) -> String {
     let mut s = text.to_string();
-    if let Some(home) = std::env::var_os("HOME").map(|h| h.to_string_lossy().trim_end_matches('/').to_string())
+    if let Some(home) = crate::paths::user_home().map(|h| h.to_string_lossy().trim_end_matches(['/', '\\']).to_string())
         && home.len() > 1
     {
         s = s.replace(&home, "~");

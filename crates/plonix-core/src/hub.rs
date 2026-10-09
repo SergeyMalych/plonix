@@ -341,7 +341,7 @@ async fn about(State(hub): State<Arc<Hub>>) -> Response {
     Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
         "projects_dir": hub.home.default_projects_dir(),
-        "home_dir": std::env::var_os("HOME").map(PathBuf::from),
+        "home_dir": crate::paths::user_home(),
         "can_pick_folder": folder_picker().is_some(),
         "open_in_browser": interface.open_in_browser,
     }))
@@ -533,7 +533,13 @@ async fn reveal(State(hub): State<Arc<Hub>>, Path(id): Path<String>) -> Response
     let Some(entry) = project::find(&hub.home, &id) else {
         return err(StatusCode::NOT_FOUND, "not_found", "no such project");
     };
-    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(windows) {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
     match crate::browser::spawn_detached(std::process::Command::new(opener).arg(&entry.path)) {
         Ok(_) => Json(json!({ "ok": true })).into_response(),
         Err(e) => internal(e.into()),
@@ -657,6 +663,16 @@ fn folder_picker() -> Option<Vec<String>> {
             "osascript".into(),
             "-e".into(),
             "POSIX path of (choose folder with prompt \"Choose where the Plonix project folder goes\")".into(),
+        ]);
+    }
+    if cfg!(windows) {
+        return Some(vec![
+            "powershell".into(),
+            "-NoProfile".into(),
+            "-Command".into(),
+            "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; \
+             $d.Description = 'Choose where the Plonix project folder goes'; if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath } else { exit 1 }"
+                .into(),
         ]);
     }
     let zenity = ["/usr/bin/zenity", "/usr/local/bin/zenity"].into_iter().find(|p| FsPath::new(p).exists())?;

@@ -69,7 +69,7 @@ fn server_config(home: &Home) -> Result<Value> {
 }
 
 fn is_default_home(root: &Path) -> bool {
-    std::env::var_os("HOME").is_some_and(|h| Path::new(&h).join(".plonix") == root)
+    plonix_core::paths::user_home().is_some_and(|h| h.join(".plonix") == root)
 }
 
 fn claude(ctx: &Ctx, a: ClaudeArgs) -> Result<()> {

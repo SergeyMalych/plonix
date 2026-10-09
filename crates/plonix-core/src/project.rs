@@ -341,8 +341,8 @@ fn adopt_legacy_db(from: &Path, to: &Path) -> Result<()> {
 }
 
 pub fn expand_tilde(p: &Path) -> PathBuf {
-    match (p.strip_prefix("~"), std::env::var_os("HOME")) {
-        (Ok(rest), Some(h)) => PathBuf::from(h).join(rest),
+    match (p.strip_prefix("~"), crate::paths::user_home()) {
+        (Ok(rest), Some(h)) => h.join(rest),
         _ => p.to_path_buf(),
     }
 }

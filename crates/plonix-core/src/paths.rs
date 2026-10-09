@@ -24,6 +24,12 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+/// The user's home folder: `$HOME`, or `%USERPROFILE%` on Windows.
+pub fn user_home() -> Option<PathBuf> {
+    let var = |name| std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from);
+    var("HOME").or_else(|| if cfg!(windows) { var("USERPROFILE") } else { None })
+}
+
 #[derive(Debug, Clone)]
 pub struct Home {
     pub root: PathBuf,
@@ -37,8 +43,8 @@ impl Home {
             None => match std::env::var_os("PLONIX_HOME").filter(|p| !p.is_empty()) {
                 Some(p) => PathBuf::from(p),
                 None => {
-                    let home = std::env::var_os("HOME").context("HOME is not set")?;
-                    PathBuf::from(home).join(".plonix")
+                    let home = user_home().context("HOME is not set")?;
+                    home.join(".plonix")
                 }
             },
         };
@@ -97,7 +103,7 @@ impl Home {
     /// Where new projects go unless the user picks a folder: `~/Plonix` for
     /// the standard data directory, else inside the chosen one.
     pub fn default_projects_dir(&self) -> PathBuf {
-        match std::env::var_os("HOME").map(PathBuf::from) {
+        match user_home() {
             Some(h) if self.root == h.join(".plonix") => h.join("Plonix"),
             _ => self.root.join("projects"),
         }
