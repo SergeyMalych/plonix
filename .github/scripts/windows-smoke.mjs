@@ -4,7 +4,8 @@
 //
 //   node windows-smoke.mjs <Plonix-Windows-setup.exe> <output folder>
 //
-// Screenshots of each step land in the output folder.
+// Screenshots of each step land in the output folder. The app stays
+// installed, for the command check that follows; uninstall.exe /S removes it.
 
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -182,9 +183,6 @@ try {
 } finally {
   if (exited === null) execFileSync('taskkill', ['/PID', String(app.pid), '/T', '/F'], { stdio: 'ignore' });
 }
-
-step('Uninstall');
-execFileSync(path.join(dir, 'uninstall.exe'), ['/S'], { stdio: 'inherit' });
 
 if (failed) {
   console.error(failed);

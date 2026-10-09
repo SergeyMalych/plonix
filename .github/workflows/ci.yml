@@ -110,15 +110,20 @@ jobs:
           if-no-files-found: error
       # Installs it like a user would, then drives the real app window:
       # first launch, the demo project, and traffic through its proxy.
-      - name: Try the plonix command
-        timeout-minutes: 15
-        run: bash .github/scripts/windows-cli-smoke.sh target/release/plonix.exe
       - name: Try the installed app
-        if: ${{ !cancelled() }}
         timeout-minutes: 15
         run: |
           npm install --no-save --no-package-lock --prefix .github/scripts playwright-core@1.48.2
           node .github/scripts/windows-smoke.mjs Plonix-Windows-setup.exe "$RUNNER_TEMP/smoke"
+      # The plonix command the installer put next to the app. (Not the one in
+      # target/release: the app build replaces it there, as Plonix.exe.)
+      - name: Try the installed plonix command
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+        run: bash .github/scripts/windows-cli-smoke.sh "$LOCALAPPDATA/Plonix/plonix-cli.exe"
+      - name: Uninstall
+        if: ${{ !cancelled() }}
+        run: '"$LOCALAPPDATA/Plonix/uninstall.exe" /S'
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:

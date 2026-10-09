@@ -26,8 +26,9 @@ step "scope accept"   "$P" -p smoke scope --help
 step "capture http via proxy" curl -sS -f -o /dev/null --max-time 20 -x http://127.0.0.1:18080 http://127.0.0.1:18081/
 step "capture https via proxy (insecure)" curl -sS -f -o /dev/null --max-time 30 -k -x http://127.0.0.1:18080 https://example.com/
 sleep 2
-step "search finds http"  bash -c "\"$P\" -p smoke search 127.0.0.1 | tee /dev/stderr | grep -q 18081"
-step "search finds https" bash -c "\"$P\" -p smoke search example.com | tee /dev/stderr | grep -q example.com"
+found() { "$P" -p smoke search "$1" > "$PLONIX_HOME/found.txt"; cat "$PLONIX_HOME/found.txt"; grep -q "$2" "$PLONIX_HOME/found.txt"; }
+step "search finds http"  found 127.0.0.1 18081
+step "search finds https" found example.com example.com
 step "hosts"          "$P" -p smoke hosts
 step "har export"     "$P" -p smoke har export -o "$PLONIX_HOME/out.har"
 step "har file non-empty" test -s "$PLONIX_HOME/out.har"
