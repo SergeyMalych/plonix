@@ -17,3 +17,6 @@ ureq = { version = "2", default-features = false, features = ["json", "tls", "na
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Console"] }

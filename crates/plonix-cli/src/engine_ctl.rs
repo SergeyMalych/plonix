@@ -87,7 +87,7 @@ pub fn start(home: &Home, opts: &StartOptions) -> Result<(Connected, bool)> {
         cmd.arg("--insecure-upstream");
     }
     detach(&mut cmd);
-    let mut child = cmd.spawn().context("starting the engine")?;
+    let mut child = spawn_without_our_stdio(&mut cmd).context("starting the engine")?;
 
     let deadline = Instant::now() + Duration::from_secs(15);
     // What the session file said the first time it appeared, in case it then goes away.
@@ -114,6 +114,33 @@ pub fn start(home: &Home, opts: &StartOptions) -> Result<(Connected, bool)> {
         }
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+/// Starts a background process. Windows hands every inheritable handle to a
+/// new process, this command's own output among them, so whoever reads that
+/// output would wait for the engine to exit; ours are kept out of it.
+fn spawn_without_our_stdio(cmd: &mut Command) -> std::io::Result<std::process::Child> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{GetHandleInformation, HANDLE_FLAG_INHERIT, SetHandleInformation};
+        use windows_sys::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
+        // SAFETY: plain calls on this process's standard handles; a handle that is not valid makes them fail harmlessly.
+        let inherited: Vec<_> = [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE]
+            .into_iter()
+            .map(|which| unsafe { GetStdHandle(which) })
+            .filter(|&h| {
+                let mut flags = 0u32;
+                unsafe { GetHandleInformation(h, &mut flags) != 0 && flags & HANDLE_FLAG_INHERIT != 0 && SetHandleInformation(h, HANDLE_FLAG_INHERIT, 0) != 0 }
+            })
+            .collect();
+        let child = cmd.spawn();
+        for h in inherited {
+            unsafe { SetHandleInformation(h, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) };
+        }
+        return child;
+    }
+    #[cfg(not(windows))]
+    return cmd.spawn();
 }
 
 /// Why a session that was started is not answering yet, for the timeout message.
@@ -268,7 +295,7 @@ pub fn launcher_url(home: &Home) -> Result<String> {
     let mut cmd = Command::new(std::env::current_exe().context("locating the plonix executable")?);
     cmd.env("PLONIX_HOME", &home.root).arg("hub").stdin(Stdio::null()).stdout(log.try_clone()?).stderr(log);
     detach(&mut cmd);
-    let mut child = cmd.spawn().context("starting the Start screen")?;
+    let mut child = spawn_without_our_stdio(&mut cmd).context("starting the Start screen")?;
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         if let Some(code) = child.try_wait()? {
