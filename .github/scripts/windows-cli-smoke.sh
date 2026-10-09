@@ -8,7 +8,8 @@ export PLONIX_ACCEPT_TERMS=1
 export PLONIX_HOME="${RUNNER_TEMP:-$(mktemp -d)}/plonix-home"
 rm -rf "$PLONIX_HOME"; mkdir -p "$PLONIX_HOME"
 fails=0
-step() { echo; echo "::group::$1"; shift; if "$@"; then echo "OK"; else echo "::error::FAILED: $*"; fails=$((fails+1)); fi; echo "::endgroup::"; }
+# Each step gets two minutes and no input, so one stuck command can't hang the run.
+step() { echo; echo "::group::$1"; shift; if timeout 120 "$@" </dev/null; then echo "OK"; else echo "::error::FAILED ($?): $*"; fails=$((fails+1)); fi; echo "::endgroup::"; }
 
 "$(command -v python3 || command -v python)" -m http.server 18081 --bind 127.0.0.1 >/dev/null 2>&1 &
 WEB=$!
@@ -37,5 +38,6 @@ step "demo project"   "$P" projects demo
 step "mcp help"       "$P" mcp --help
 step "stop"           "$P" -p smoke stop
 kill $WEB 2>/dev/null
+echo "Still running:"; tasklist | grep -iE "plonix|python" || true
 echo; echo "smoke failures: $fails"
 exit $fails
