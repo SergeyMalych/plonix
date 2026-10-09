@@ -3,7 +3,8 @@
 //! Chromium-based browsers are launched with an isolated profile that routes
 //! through the proxy and trusts the Plonix CA by its key pin
 //! (`--ignore-certificate-errors-spki-list`), so HTTPS works without touching
-//! the system keychain. Without one installed, Plonix can download its own
+//! the system keychain. `--test-type` keeps Chromium from showing its
+//! "unsupported command-line flag" bar for that pin. Without one installed, Plonix can download its own
 //! Chromium (see [`crate::chromium`]). Firefox gets an isolated profile with
 //! proxy settings that follows the macOS keychain, so it needs the CA trusted
 //! there once (see [`crate::trust`]).
@@ -182,6 +183,11 @@ fn proxied_chromium(profile: &Path, proxy: &str, spki: &str) -> Vec<String> {
         // Chromium never proxies loopback by default; local targets should be captured too.
         "--proxy-bypass-list=<-loopback>".into(),
         format!("--ignore-certificate-errors-spki-list={spki}"),
+        // Chromium warns about the key pin above in a bar on every window
+        // ("unsupported command-line flag"). This marks the browser as a
+        // test instance, which hides that bar; it does not relax anything
+        // beyond the pin itself.
+        "--test-type".into(),
         "--no-first-run".into(),
         "--no-default-browser-check".into(),
         // Keep the capture about the target, not the browser's own chatter.
@@ -305,6 +311,7 @@ mod tests {
         assert!(args.contains(&"--proxy-server=http://127.0.0.1:8080".to_string()));
         assert!(args.contains(&"--proxy-bypass-list=<-loopback>".to_string()));
         assert!(args.contains(&"--ignore-certificate-errors-spki-list=AbC=".to_string()));
+        assert!(args.contains(&"--test-type".to_string()), "no flag warning bar");
         assert_eq!(args.last().unwrap(), "https://example.com/");
     }
 
