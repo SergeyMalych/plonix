@@ -28,6 +28,8 @@ async function renderSettings(main) {
         store('plonix.theme', values.theme);
         applyDensity(values.density);
         store('plonix.density', values.density);
+        applyStyle(values.style);
+        store('plonix.style', values.style);
         return { applies: 'now' };
       }
       const r = await api('/api/settings/' + section, { method: 'PUT', body: { values } });
@@ -60,8 +62,9 @@ function appearanceSection() {
     fields: [
       { key: 'theme', label: 'Theme', type: 'choice', options: [{ value: 'auto', label: 'Match system' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }] },
       { key: 'density', label: 'Spacing', type: 'choice', help: 'Dense fits more on screen. Roomy gives rows and panels more air.', options: [{ value: 'dense', label: 'Dense' }, { value: 'roomy', label: 'Roomy' }] },
+      { key: 'style', label: 'Style', type: 'choice', help: 'Classic is the standard Plonix look. Studio adds cream paper, a blue sidebar, round controls and a shape for every tool. Works with light, dark and both spacings.', options: [{ value: 'classic', label: 'Classic' }, { value: 'studio', label: 'Studio' }] },
     ],
-    values: { theme: S.theme || 'auto', density: S.density || 'dense' },
+    values: { theme: S.theme || 'auto', density: S.density || 'dense', style: S.style || 'classic' },
   };
 }
 

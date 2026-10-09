@@ -1,0 +1,99 @@
+/* Studio: an optional style (Settings › Appearance › Style). Cream paper, a blue
+ * sidebar, round controls, geometric type and one flat shape per tool.
+ * Everything here applies only while <html data-style="studio">. */
+@font-face {
+  font-family: "Jost";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/ui/fonts/jost.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root[data-style="studio"] {
+  --st-red: #e5401f; --st-blue: #1d4fc4; --st-yellow: #f1b11b; --st-green: #16875a; --st-pink: #f29bbf; --st-ink: #1e1c19;
+  --st-rail: #1d4fc4;
+  --bg: #ece5d6; --chrome: #f2ecdf; --chrome-2: #f2ecdf; --surface: #faf6ee; --surface-2: #f2ecdf;
+  --line: #d9cfbc; --line-2: #e7e0d1; --fg: #1e1c19; --fg-2: #4a453d; --fg-3: #6f685b;
+  --accent: #1d4fc4; --accent-soft: #dfe6f8; --accent-fg: #fff;
+  --ok: #16875a; --ok-soft: #d8ede0; --warn: #9c6b00; --warn-soft: #fbefc8; --crit: #d6391b; --crit-soft: #fadcd2;
+  --info: #1d4fc4; --info-soft: #dfe6f8; --violet: #c2477f; --violet-soft: #fae0ec; --orange: #d0701a;
+  --sel: #fbe6a2; --new: #fcf0c4;
+  --ui: "Jost", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-style="studio"]:not([data-theme="light"]) {
+    --st-red: #ff5a36; --st-blue: #5a86ff; --st-yellow: #ffc533; --st-green: #3dbb83; --st-pink: #ff9fc8; --st-ink: #efe8da;
+    --st-rail: #142a66;
+    --bg: #13120f; --chrome: #1b1916; --chrome-2: #1b1916; --surface: #1a1815; --surface-2: #23201c;
+    --line: #36312a; --line-2: #2a2622; --fg: #f1eadd; --fg-2: #c0b7a6; --fg-3: #8d8576;
+    --accent: #5a86ff; --accent-soft: #1b2649; --ok: #3dbb83; --ok-soft: #14301f; --warn: #ffc533; --warn-soft: #3a2e0c;
+    --crit: #ff5a36; --crit-soft: #3d1d14; --info: #5a86ff; --info-soft: #1b2649; --violet: #ff9fc8; --violet-soft: #3a1c2b; --orange: #ff9a3d;
+    --sel: #3a3014; --new: #3a3014;
+  }
+}
+:root[data-style="studio"][data-theme="dark"] {
+  --st-red: #ff5a36; --st-blue: #5a86ff; --st-yellow: #ffc533; --st-green: #3dbb83; --st-pink: #ff9fc8; --st-ink: #efe8da;
+  --st-rail: #142a66;
+  --bg: #13120f; --chrome: #1b1916; --chrome-2: #1b1916; --surface: #1a1815; --surface-2: #23201c;
+  --line: #36312a; --line-2: #2a2622; --fg: #f1eadd; --fg-2: #c0b7a6; --fg-3: #8d8576;
+  --accent: #5a86ff; --accent-soft: #1b2649; --ok: #3dbb83; --ok-soft: #14301f; --warn: #ffc533; --warn-soft: #3a2e0c;
+  --crit: #ff5a36; --crit-soft: #3d1d14; --info: #5a86ff; --info-soft: #1b2649; --violet: #ff9fc8; --violet-soft: #3a1c2b; --orange: #ff9a3d;
+  --sel: #3a3014; --new: #3a3014;
+}
+
+/* title bar: the logo in the three primaries, and three shapes at the far right */
+[data-style="studio"] .titlebar .brand { font-weight: 700; }
+[data-style="studio"] .brand img { content: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23e5401f'/%3E%3Crect x='7' y='6' width='5' height='20' fill='%231e1c19'/%3E%3Ccircle cx='18' cy='13' r='7' fill='%23f1b11b'/%3E%3Cpath d='M18 6a7 7 0 0 1 0 14z' fill='%231d4fc4'/%3E%3C/svg%3E"); }
+[data-style="studio"] .titlebar::after { content: ""; order: 99; flex: 0 0 46px; width: 46px; height: 16px; background:
+  radial-gradient(circle 8px at 8px 8px, var(--st-red) 98%, transparent) 0 0 / 16px 16px no-repeat,
+  radial-gradient(circle 8px at 8px 16px, var(--st-yellow) 98%, transparent) 15px 0 / 16px 16px no-repeat,
+  radial-gradient(circle 8px at 8px 8px, var(--st-blue) 98%, transparent) 30px 0 / 16px 16px no-repeat; }
+
+/* the blue sidebar; the open tool is a yellow pill */
+[data-style="studio"] .rail { background: var(--st-rail); color: #fff; border-right: 0; --st-ink: #fff; --st-blue: #fff; }
+[data-style="studio"] .rail .navsec { color: #ffffffb0; letter-spacing: .1em; }
+[data-style="studio"] .rail .nav button, [data-style="studio"] .rail .railtoggle { color: #ffffffd9; border-radius: 999px; }
+[data-style="studio"] .rail .nav button .ct { color: #ffffffa0; }
+[data-style="studio"] .rail .nav button:hover, [data-style="studio"] .rail .railtoggle:hover { background: #ffffff1f; color: #fff; }
+[data-style="studio"] .rail .nav button.on { background: #f1b11b; color: #1e1c19; font-weight: 600; --st-ink: #1e1c19; --st-blue: #1d4fc4; }
+[data-style="studio"] .rail .nav button.on .ct { color: #1e1c19b0; }
+[data-style="studio"] .rail .nav button .ct.hot { background: #e5401f; color: #fff; }
+[data-style="studio"] .rail .opentarget { color: #fff; border: 1.5px solid #ffffff70; border-radius: 999px; background: transparent; }
+[data-style="studio"] .rail .opentarget .ico { color: #fff; }
+[data-style="studio"] .rail .opentarget:hover { background: #ffffff1f; }
+[data-style="studio"] .rail .railrow { color: #ffffffcc; border-radius: 999px; }
+[data-style="studio"] .rail .railrow .ct, [data-style="studio"] .rail .railnote { color: #ffffff99; }
+[data-style="studio"] .rail .hostlink:hover, [data-style="studio"] .rail .sugg-row:hover { background: #ffffff1f; color: #fff; }
+[data-style="studio"] .rail .sugg-row .rl { color: #ffc533; }
+[data-style="studio"] .rail .mini { background: transparent; border-color: #ffffff50; color: #fff; border-radius: 50%; }
+
+/* one flat shape per tool */
+[data-style="studio"] .nav button .ico, [data-style="studio"] .opentarget .ico { font-size: 0; width: 14px; height: 14px; flex: 0 0 14px; margin: 0 2px; background: var(--st-ink); }
+[data-style="studio"] .nav button[data-v="traffic"] .ico { background: repeating-linear-gradient(90deg, var(--st-blue) 0 3px, transparent 3px 5.5px); }
+[data-style="studio"] .nav button[data-v="bench"] .ico { background: var(--st-yellow); }
+[data-style="studio"] .nav button[data-v="scope"] .ico { background: var(--st-red); border-radius: 50%; }
+[data-style="studio"] .nav button[data-v="map"] .ico { background: var(--st-green); clip-path: polygon(50% 4%, 100% 96%, 0 96%); }
+[data-style="studio"] .nav button[data-v="users"] .ico { background: radial-gradient(circle 7px at 50% 100%, var(--st-pink) 97%, transparent); }
+[data-style="studio"] .nav button[data-v="access"] .ico { background: linear-gradient(90deg, var(--st-blue) 50%, var(--st-yellow) 50%); border-radius: 50%; }
+[data-style="studio"] .nav button[data-v="callbacks"] .ico { background: var(--st-green); border-radius: 0 100% 0 0; }
+[data-style="studio"] .nav button[data-v="findings"] .ico { background: var(--st-red); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+[data-style="studio"] .nav button[data-v="agents"] .ico { background: radial-gradient(circle, var(--st-yellow) 0 32%, var(--st-blue) 33%); border-radius: 50%; }
+[data-style="studio"] .nav button[data-v="market"] .ico { background: conic-gradient(var(--st-red) 0 25%, var(--st-blue) 0 50%, var(--st-yellow) 0 75%, var(--st-green) 0); }
+[data-style="studio"] .nav button[data-v="scans"] .ico { background: repeating-linear-gradient(0deg, var(--st-yellow) 0 3px, transparent 3px 5.5px); border-radius: 50%; }
+[data-style="studio"] .nav button[data-v="programs"] .ico { background: var(--st-ink); clip-path: polygon(0 0, 100% 0, 50% 100%); }
+[data-style="studio"] .nav button[data-v="rules"] .ico { background: linear-gradient(90deg, var(--st-pink) 50%, var(--st-ink) 50%); border-radius: 50% 0 0 50%; }
+[data-style="studio"] .nav button[data-v="settings"] .ico { background: transparent; border: 3px solid var(--st-ink); border-radius: 50%; }
+[data-style="studio"] .opentarget .ico { background: linear-gradient(currentColor 0 0) center / 100% 3px no-repeat, linear-gradient(currentColor 0 0) center / 3px 100% no-repeat; }
+
+/* round controls */
+[data-style="studio"] .toolbar h2 { font-weight: 700; font-size: 15px; }
+[data-style="studio"] :is(.btn, .search, .chip, .fchip, .addfilter, .iconbtn, .seg, .seg button, .seg-ctl, .segbtn, .spot, .namedlist .named, .tag, .sev) { border-radius: 999px; }
+[data-style="studio"] :is(.card, .hist, .rcol, .sugg, .finding, .scopequeue, .spanel, .settings-host, .mpkg, .runcard, .popover, .ctxmenu, .qsugg, .spotdetail, .qbar, .modal, .mcard) { border-radius: 14px; }
+[data-style="studio"] .btn.primary { background: var(--st-red); border-color: var(--st-red); color: #fff; }
+[data-style="studio"] .chip.on { background: var(--st-blue); border-color: var(--st-blue); color: #fff; }
+[data-style="studio"] .chip.on .n { color: #ffffffcc; }
+[data-style="studio"] .ttable thead th { font-weight: 600; color: var(--fg-2); }
+[data-style="studio"] .ttable tbody tr.picked td:first-child { box-shadow: inset 4px 0 0 var(--st-yellow); }
+[data-style="studio"] .sev.critical { background: var(--st-red); color: #fff; }
+[data-style="studio"] .sev.medium { background: var(--st-yellow); color: #1e1c19; }

@@ -57,6 +57,7 @@ function slug(name) {
 async function boot() {
   const t = store('plonix.theme');
   if (t && t !== 'auto') document.documentElement.setAttribute('data-theme', t);
+  if (store('plonix.style') === 'studio') document.documentElement.setAttribute('data-style', 'studio');
   const hash = location.hash;
   if (hash.startsWith('#code=')) {
     history.replaceState(null, '', location.pathname);

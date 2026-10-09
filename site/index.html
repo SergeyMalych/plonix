@@ -15,7 +15,7 @@
 <link rel="icon" href="assets/plonix-mark.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Jost:wght@400..700&display=swap">
 <style>
 /* Layout: one optical bench, light by default with a dark twin. A live "lens" over raw traffic opens the page;
    below it the real app, then the five-step loop, then each tool shown as it is. */
@@ -417,6 +417,83 @@ footer a:hover { color: var(--fg); }
 .mr-result::before { content: "✓"; color: var(--green); font-weight: 700; }
 .mr-result[hidden] { display: none; }
 .mr-note { margin-top: 14px; color: var(--faint); font-size: .9rem; text-align: center; }
+
+/* ---------- Studio: the optional style behind the "I like style" button ---------- */
+.style-btn { height: 36px; border-radius: 999px; border: 1px solid var(--line); background: var(--ink-2); color: var(--fg); display: inline-flex; align-items: center; gap: 8px; cursor: pointer; margin-left: 4px; padding: 0 14px 0 10px; font: 600 .9rem var(--body); white-space: nowrap; }
+.style-btn:hover { border-color: var(--fg); }
+.style-btn svg { width: 22px; height: 14px; flex: none; }
+@media (max-width: 760px) { .style-btn span { display: none; } .style-btn { padding: 0 9px; } }
+.geo { display: none; }
+:root[data-style="studio"] {
+  --st-red: #e5401f; --st-blue: #1d4fc4; --st-yellow: #f1b11b; --st-green: #16875a; --st-pink: #f29bbf; --st-ink: #1e1c19;
+  --ink: #ece5d6; --ink-2: #faf6ee; --ink-3: #e4dccb; --line: #d6ccb8; --fg: #1e1c19; --muted: #4f493f; --faint: #6f675a;
+  --indigo: #1d4fc4; --indigo-deep: #1d4fc4; --wash: #1d4fc4; --amber: #f1b11b; --tag: #8a5a00;
+  --code-fg: #4f493f; --code-key: #1d4fc4; --code-enc: #8f8676; --decoded-bg: #fdf5e0;
+  --chrome: #e4dccb; --shadow: #3a2e1a55; --ring-glow: #e5401f33;
+  --display: "Jost", "Avenir Next", system-ui, sans-serif; --body: "Jost", -apple-system, "Helvetica Neue", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-style="studio"]:not([data-theme="light"]) {
+    --st-red: #ff5a36; --st-blue: #5a86ff; --st-yellow: #ffc533; --st-green: #3dbb83; --st-pink: #ff9fc8; --st-ink: #efe8da;
+    --ink: #13120f; --ink-2: #1c1a17; --ink-3: #25221e; --line: #36312a; --fg: #f1eadd; --muted: #c0b7a6; --faint: #8d8576;
+    --indigo: #5a86ff; --indigo-deep: #1d4fc4; --wash: #5a86ff; --amber: #ffc533; --tag: #ffc533;
+    --code-fg: #c9c0ae; --code-key: #7da0ff; --code-enc: #7d7566; --decoded-bg: #25221e;
+    --chrome: #25221e; --shadow: #000000aa; --ring-glow: #ff5a3633;
+  }
+}
+:root[data-style="studio"][data-theme="dark"] {
+  --st-red: #ff5a36; --st-blue: #5a86ff; --st-yellow: #ffc533; --st-green: #3dbb83; --st-pink: #ff9fc8; --st-ink: #efe8da;
+  --ink: #13120f; --ink-2: #1c1a17; --ink-3: #25221e; --line: #36312a; --fg: #f1eadd; --muted: #c0b7a6; --faint: #8d8576;
+  --indigo: #5a86ff; --indigo-deep: #1d4fc4; --wash: #5a86ff; --amber: #ffc533; --tag: #ffc533;
+  --code-fg: #c9c0ae; --code-key: #7da0ff; --code-enc: #7d7566; --decoded-bg: #25221e;
+  --chrome: #25221e; --shadow: #000000aa; --ring-glow: #ff5a3633;
+}
+[data-style="studio"] body { font-size: 18px; }
+[data-style="studio"] .style-btn { background: var(--st-yellow); border-color: var(--st-yellow); color: #1e1c19; }
+[data-style="studio"] .style-btn path { fill: #1e1c19; }
+[data-style="studio"] .brand svg rect { fill: var(--st-red); }
+[data-style="studio"] .brand svg g { stroke: #1e1c19; }
+[data-style="studio"] .brand svg > circle { fill: #f1b11b; }
+[data-style="studio"] h1, [data-style="studio"] h2 { font-weight: 700; letter-spacing: -.02em; }
+[data-style="studio"] h2 { font-size: clamp(2.2rem, 4.6vw, 3.6rem); }
+[data-style="studio"] .eyebrow::before { width: 10px; height: 10px; border: 0; background: var(--st-red); box-shadow: 14px 0 0 var(--st-yellow), 28px 0 0 var(--st-blue); margin-right: 28px; }
+[data-style="studio"] .btn, [data-style="studio"] .theme-btn { border-radius: 999px; }
+[data-style="studio"] .btn.primary { background: var(--st-red); border-color: var(--st-red); box-shadow: none; }
+[data-style="studio"] .btn.primary:hover { background: var(--st-red); filter: brightness(1.06); }
+[data-style="studio"] .tour-btn .play { background: var(--st-yellow); color: #1e1c19; }
+[data-style="studio"] .hero { overflow: hidden; }
+[data-style="studio"] .hero::before { display: none; }
+[data-style="studio"] .hero h1 { font-size: clamp(2.8rem, 5.4vw, 4.6rem); line-height: 1; }
+[data-style="studio"] .hero h1 .hl { color: var(--st-blue); }
+[data-style="studio"] .geo { display: block; position: absolute; inset: 0; z-index: -1; pointer-events: none; }
+[data-style="studio"] .geo i { position: absolute; display: block; border-radius: 50%; }
+[data-style="studio"] .geo .a { right: -60px; top: 10px; width: 520px; height: 520px; background: var(--st-yellow); }
+[data-style="studio"] .geo .b { right: 650px; top: 110px; width: 120px; height: 120px; background: var(--st-red); }
+[data-style="studio"] .geo .c { right: 20px; bottom: -80px; width: 260px; height: 130px; border-radius: 260px 260px 0 0; background: var(--st-green); }
+@media (max-width: 1200px) { [data-style="studio"] .geo .b { display: none; } }
+@media (max-width: 940px) { [data-style="studio"] .geo .b { display: none; } [data-style="studio"] .geo .a { width: 360px; height: 360px; right: -140px; top: auto; bottom: 40px; } }
+[data-style="studio"] .lensbox { border-radius: 26px; border: 0; box-shadow: 0 30px 70px -30px var(--shadow); }
+[data-style="studio"] .lensbox-bar { background: var(--st-blue); color: #fff; border: 0; }
+[data-style="studio"] .lensbox-bar b { color: #fff; }
+[data-style="studio"] .lensbox-bar .st { color: #ffc533; }
+[data-style="studio"] .ring-el { border-color: var(--st-red); box-shadow: none; }
+[data-style="studio"] .ring-el::after { background: var(--st-red); }
+[data-style="studio"] .http.decoded .dec { background: #f1b11b; color: #1e1c19; }
+[data-style="studio"] .shot { border-radius: 22px; }
+[data-style="studio"] .showcase .shot { transform: none; }
+[data-style="studio"] .fcard { border-radius: 26px; border: 0; }
+[data-style="studio"] .fcard .demo { border-radius: 18px; }
+[data-style="studio"] .fcard .more { color: var(--st-red); }
+[data-style="studio"] .fcard.tint { background: #1d4fc4; }
+[data-style="studio"] .fcard.tint h3, [data-style="studio"] .fcard.tint p, [data-style="studio"] .fcard.tint .more { color: #fff; }
+[data-style="studio"] .fcard h3::before { content: ""; display: inline-block; width: .7em; height: .7em; margin-right: .4em; border-radius: 50%; background: var(--band, var(--st-red)); }
+[data-style="studio"] .fcard:nth-child(2) { --band: var(--st-blue); }
+[data-style="studio"] .fcard:nth-child(3) { --band: var(--st-yellow); }
+[data-style="studio"] .fcard:nth-child(4) { --band: var(--st-green); }
+[data-style="studio"] .fcard:nth-child(5) { --band: var(--st-yellow); }
+[data-style="studio"] .fcard:nth-child(6) { --band: var(--st-pink); }
+[data-style="studio"] .demo .pillbtn { border-radius: 999px; background: var(--st-red); }
+[data-style="studio"] .demo .av { border-radius: 50%; background: var(--st-blue); }
 </style>
 </head>
 <body>
@@ -439,6 +516,7 @@ footer a:hover { color: var(--fg); }
       <a href="docs/">Docs</a>
     </nav>
     <button type="button" class="theme-btn" id="theme" aria-label="Switch to dark mode" title="Switch theme"></button>
+    <button type="button" class="style-btn" id="style" aria-pressed="false"><svg viewBox="0 0 22 14" aria-hidden="true"><circle cx="5" cy="7" r="5" fill="#e5401f"/><path d="M8 14a5 5 0 0 1 10 0z" fill="#f1b11b"/><circle cx="17" cy="7" r="5" fill="#1d4fc4"/></svg><span>I like style</span></button>
     <a class="btn small" href="https://github.com/SergeyMalych/plonix">
       <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
       GitHub
@@ -449,10 +527,11 @@ footer a:hover { color: var(--fg); }
 <main id="top">
 
 <section class="hero">
+  <div class="geo" aria-hidden="true"><i class="a"></i><i class="b"></i><i class="c"></i></div>
   <div class="wrap hero-grid">
     <div>
       <span class="eyebrow">Open source, native on macOS</span>
-      <h1>Test web app security from your Mac.</h1>
+      <h1>Test web app <span class="hl">security</span> from your Mac.</h1>
       <p class="lede">Plonix captures every request, maps the target as you browse, and helps you prove what you find. From a window, a terminal or Claude Code.</p>
       <div class="cta-row">
         <a class="btn primary" href="#start">
@@ -814,6 +893,24 @@ footer a:hover { color: var(--fg); }
     const next = current() === 'dark' ? 'light' : 'dark';
     root.dataset.theme = next; paint();
     try { localStorage.setItem('plonix-theme', next); } catch (e) {}
+  });
+
+  /* ---- style switch: Classic (default) or Studio, saved per browser ---- */
+  const sbtn = document.getElementById('style');
+  const winL = document.querySelector('.showcase .shot-light'), winD = document.querySelector('.showcase .shot-dark');
+  const setStyle = (on) => {
+    if (on) root.dataset.style = 'studio'; else delete root.dataset.style;
+    sbtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    sbtn.querySelector('span').textContent = on ? 'Back to classic' : 'I like style';
+    sbtn.title = on ? 'Back to the standard look' : 'Try the Studio style';
+    winL.src = on ? 'assets/studio-window-light.webp' : 'assets/window-light.webp';
+    winD.src = on ? 'assets/studio-window-dark.webp' : 'assets/window-dark.webp';
+  };
+  try { if (localStorage.getItem('plonix-style') === 'studio') setStyle(true); } catch (e) {}
+  sbtn.addEventListener('click', () => {
+    const on = root.dataset.style !== 'studio';
+    setStyle(on);
+    try { localStorage.setItem('plonix-style', on ? 'studio' : 'classic'); } catch (e) {}
   });
 
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
