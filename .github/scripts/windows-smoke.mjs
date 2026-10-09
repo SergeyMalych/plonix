@@ -108,6 +108,9 @@ try {
   const project = await until('the project window', () => pages().find((p) => p !== launcher && /^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(p.url()) && new URL(p.url()).origin !== hubUrl));
   await project.waitForLoadState();
   await until('demo traffic in the window', () => project.evaluate(() => document.body.innerText.includes('brightcart')));
+  // First-open questions a user would answer, so the screenshots show the app.
+  const notNow = project.getByRole('button', { name: 'Not now' });
+  if (await notNow.waitFor({ timeout: 5000 }).then(() => true, () => false)) await notNow.click();
   await project.evaluate(() => window.endTour?.());
   await shot(project, '3-demo.png');
 

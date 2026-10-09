@@ -415,7 +415,7 @@ enum CaCmd {
     Show,
     /// Print the certificate in PEM form
     Pem,
-    /// Trust the certificate in your macOS login keychain
+    /// Trust the certificate on this computer (macOS login keychain, or your Windows certificate store)
     Trust,
 }
 
