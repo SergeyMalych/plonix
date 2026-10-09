@@ -1056,6 +1056,9 @@ function placeTour() {
     else if (r.top - pad >= ch + gap * 2) [x, y] = [clampX(r.left), r.top - pad - gap - ch];
     else [x, y] = [clampX(r.right - cw - 20), clampY(r.bottom - ch - 20)];
   }
+  // Whatever the placement, the whole card stays inside the window.
+  x = Math.max(12, Math.min(x, vw - cw - 12));
+  y = Math.max(12, Math.min(y, vh - ch - 12));
   TOUR.el.style.left = Math.round(x) + 'px';
   TOUR.el.style.top = Math.round(y) + 'px';
 }
