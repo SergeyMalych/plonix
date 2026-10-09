@@ -897,14 +897,15 @@ footer a:hover { color: var(--fg); }
 
   /* ---- style switch: Classic (default) or Studio, saved per browser ---- */
   const sbtn = document.getElementById('style');
-  const winL = document.querySelector('.showcase .shot-light'), winD = document.querySelector('.showcase .shot-dark');
+  // every app screenshot has a Studio twin: assets/studio-<name>-<theme>.webp
+  const shots = [...document.querySelectorAll('img.shot-light, img.shot-dark')].filter((i) => /^assets\/[a-z]+-(light|dark)\.webp$/.test(i.getAttribute('src')));
+  shots.forEach((i) => { i.dataset.classic = i.getAttribute('src'); });
   const setStyle = (on) => {
     if (on) root.dataset.style = 'studio'; else delete root.dataset.style;
     sbtn.setAttribute('aria-pressed', on ? 'true' : 'false');
     sbtn.querySelector('span').textContent = on ? 'Back to classic' : 'I like style';
     sbtn.title = on ? 'Back to the standard look' : 'Try the Studio style';
-    winL.src = on ? 'assets/studio-window-light.webp' : 'assets/window-light.webp';
-    winD.src = on ? 'assets/studio-window-dark.webp' : 'assets/window-dark.webp';
+    shots.forEach((i) => { i.src = on ? i.dataset.classic.replace('assets/', 'assets/studio-') : i.dataset.classic; });
   };
   try { if (localStorage.getItem('plonix-style') === 'studio') setStyle(true); } catch (e) {}
   sbtn.addEventListener('click', () => {

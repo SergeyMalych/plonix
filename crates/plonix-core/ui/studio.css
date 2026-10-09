@@ -44,7 +44,7 @@
 
 /* title bar: the logo in the three primaries, and three shapes at the far right */
 [data-style="studio"] .titlebar .brand { font-weight: 700; }
-[data-style="studio"] .brand img { content: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23e5401f'/%3E%3Crect x='7' y='6' width='5' height='20' fill='%231e1c19'/%3E%3Ccircle cx='18' cy='13' r='7' fill='%23f1b11b'/%3E%3Cpath d='M18 6a7 7 0 0 1 0 14z' fill='%231d4fc4'/%3E%3C/svg%3E"); }
+[data-style="studio"] :is(.brand img, img[src="/ui/icon.svg"]) { content: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23e5401f'/%3E%3Crect x='7' y='6' width='5' height='20' fill='%231e1c19'/%3E%3Ccircle cx='18' cy='13' r='7' fill='%23f1b11b'/%3E%3Cpath d='M18 6a7 7 0 0 1 0 14z' fill='%231d4fc4'/%3E%3C/svg%3E"); }
 [data-style="studio"] .titlebar::after { content: ""; order: 99; flex: 0 0 46px; width: 46px; height: 16px; background:
   radial-gradient(circle 8px at 8px 8px, var(--st-red) 98%, transparent) 0 0 / 16px 16px no-repeat,
   radial-gradient(circle 8px at 8px 16px, var(--st-yellow) 98%, transparent) 15px 0 / 16px 16px no-repeat,
