@@ -12,7 +12,7 @@
 <link rel="canonical" href="https://plonix.io/">
 <meta name="theme-color" content="#f5f5fa" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0d0e13" media="(prefers-color-scheme: dark)">
-<link rel="icon" href="assets/plonix-mark.svg" type="image/svg+xml">
+<link rel="icon" id="favicon" href="assets/plonix-mark.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Jost:wght@400..700&display=swap">
@@ -451,9 +451,9 @@ footer a:hover { color: var(--fg); }
 [data-style="studio"] body { font-size: 18px; }
 [data-style="studio"] .style-btn { background: var(--st-yellow); border-color: var(--st-yellow); color: #1e1c19; }
 [data-style="studio"] .style-btn path { fill: #1e1c19; }
-[data-style="studio"] .brand svg rect { fill: var(--st-red); }
-[data-style="studio"] .brand svg g { stroke: #1e1c19; }
-[data-style="studio"] .brand svg > circle { fill: #f1b11b; }
+.brand .mark-studio { display: none; }
+[data-style="studio"] .brand svg { display: none; }
+[data-style="studio"] .brand .mark-studio { display: block; }
 [data-style="studio"] h1, [data-style="studio"] h2 { font-weight: 700; letter-spacing: -.02em; }
 [data-style="studio"] h2 { font-size: clamp(2.2rem, 4.6vw, 3.6rem); }
 [data-style="studio"] .eyebrow::before { width: 10px; height: 10px; border: 0; background: var(--st-red); box-shadow: 14px 0 0 var(--st-yellow), 28px 0 0 var(--st-blue); margin-right: 28px; }
@@ -503,6 +503,7 @@ footer a:hover { color: var(--fg); }
   <div class="wrap">
     <a class="brand" href="#top" aria-label="Plonix home">
       <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>
+      <svg class="mark-studio" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#e5401f"/><rect x="7" y="6" width="5" height="20" fill="#1e1c19"/><circle cx="18" cy="13" r="7" fill="#f1b11b"/><path d="M18 6a7 7 0 0 1 0 14z" fill="#1d4fc4"/></svg>
       Plonix
     </a>
     <nav class="nav-links" aria-label="Sections">
@@ -859,6 +860,7 @@ footer a:hover { color: var(--fg); }
   <div class="wrap">
     <a class="brand" href="#top" aria-label="Plonix home">
       <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>
+      <svg class="mark-studio" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#e5401f"/><rect x="7" y="6" width="5" height="20" fill="#1e1c19"/><circle cx="18" cy="13" r="7" fill="#f1b11b"/><path d="M18 6a7 7 0 0 1 0 14z" fill="#1d4fc4"/></svg>
       Plonix
     </a>
     <span>Open-source web security workbench for macOS. Apache-2.0.</span>
@@ -906,6 +908,7 @@ footer a:hover { color: var(--fg); }
     sbtn.querySelector('span').textContent = on ? 'Back to classic' : 'I like style';
     sbtn.title = on ? 'Back to the standard look' : 'Try the Studio style';
     shots.forEach((i) => { i.src = on ? i.dataset.classic.replace('assets/', 'assets/studio-') : i.dataset.classic; });
+    document.getElementById('favicon').href = on ? 'assets/studio-mark.svg' : 'assets/plonix-mark.svg';
   };
   try { if (localStorage.getItem('plonix-style') === 'studio') setStyle(true); } catch (e) {}
   sbtn.addEventListener('click', () => {
