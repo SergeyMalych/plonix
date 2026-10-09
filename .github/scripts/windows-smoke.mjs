@@ -35,22 +35,30 @@ async function until(what, fn, ms = 60000) {
   throw new Error(`timed out waiting for ${what}${last ? `: ${last.message}` : ''}`);
 }
 
-function desktop(name) {
+// A screenshot of the whole screen; `print` also puts a small copy in the log.
+function desktop(name, print = false) {
   const file = path.join(out, name);
+  const small = path.join(out, 'small.jpg');
+  const q = (p) => p.replace(/'/g, "''");
   const ps = `Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
 [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
-$bmp.Save('${file.replace(/'/g, "''")}', [System.Drawing.Imaging.ImageFormat]::Png)`;
+$bmp.Save('${q(file)}', [System.Drawing.Imaging.ImageFormat]::Png)
+$s = New-Object System.Drawing.Bitmap $bmp, ([int]($b.Width / 2)), ([int]($b.Height / 2))
+$s.Save('${q(small)}', [System.Drawing.Imaging.ImageFormat]::Jpeg)`;
   execFileSync('powershell', ['-NoProfile', '-Command', ps], { stdio: 'inherit' });
+  if (print) printImage(name, fs.readFileSync(small));
+  fs.rmSync(small, { force: true });
 }
 
-// Each screenshot is also printed into the log, small, so it can be looked
-// at without downloading the artifact.
+function printImage(name, bytes) {
+  console.log(`--- ${name} jpeg base64 ---\n${bytes.toString('base64').match(/.{1,4000}/g).join('\n')}\n--- end ${name} ---`);
+}
+
 async function shot(page, name) {
   await page.screenshot({ path: path.join(out, name) });
-  const small = await page.screenshot({ type: 'jpeg', quality: 45 });
-  console.log(`saved ${name}\n--- ${name} jpeg base64 ---\n${small.toString('base64').match(/.{1,4000}/g).join('\n')}\n--- end ${name} ---`);
+  printImage(name, await page.screenshot({ type: 'jpeg', quality: 45 }));
 }
 
 step('Install silently');
@@ -76,7 +84,7 @@ try {
   await until('the app window', async () => {
     if (exited !== null) throw new Error(`Plonix exited with code ${exited}`);
     return (await fetch(`http://127.0.0.1:${CDP}/json/version`)).ok;
-  });
+  }, 90000);
   const browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP}`);
   const pages = () => browser.contexts().flatMap((c) => c.pages());
   const launcher = await until('the Start screen', () => pages().find((p) => /^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(p.url())));
@@ -159,8 +167,17 @@ try {
   await browser.close().catch(() => {});
 } catch (e) {
   failed = e;
+  console.log(`--- Plonix home ---\n${fs.readdirSync(home).join(', ')}`);
+  for (const [what, cmd, args] of [
+    ['Processes', 'tasklist', []],
+    ['Listening ports', 'netstat', ['-ano', '-p', 'TCP']],
+  ]) {
+    try {
+      console.log(`--- ${what} ---\n${execFileSync(cmd, args, { encoding: 'utf8' })}`);
+    } catch {}
+  }
   try {
-    desktop('failure-desktop.png');
+    desktop('failure-desktop.png', true);
   } catch {}
 } finally {
   if (exited === null) execFileSync('taskkill', ['/PID', String(app.pid), '/T', '/F'], { stdio: 'ignore' });
