@@ -473,11 +473,11 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 
 /* map */
 .mapwrap { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px minmax(0, 1fr); }
-.hostlist { border-right: 1px solid var(--line); overflow: auto; background: var(--chrome-2); }
-.hostrow { display: flex; flex-direction: column; gap: 3px; padding: 8px 12px; border-bottom: 1px solid var(--line-2); cursor: pointer; }
+.hostlist { border-right: 1px solid var(--line); overflow: auto; padding: 8px; display: flex; flex-direction: column; gap: 2px; background: var(--chrome); }
+.hostrow { display: flex; flex-direction: column; gap: 3px; padding: 7px 8px; border-radius: 7px; cursor: pointer; color: var(--fg); }
 .hostrow:hover { background: var(--surface-2); }
-.hostrow.on { background: var(--sel); }
-.hostrow .hn { font-family: var(--mono); font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; gap: 6px; align-items: center; }
+.hostrow.on { background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.hostrow .hn { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; gap: 6px; align-items: center; }
 .hostrow .hn span { overflow: hidden; text-overflow: ellipsis; }
 .hostrow .hm { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--fg-3); flex-wrap: wrap; }
 .techchip { font-size: 10.5px; border: 1px solid var(--line-2); background: var(--surface); border-radius: 5px; padding: 0 5px; color: var(--fg-2); }
