@@ -42,6 +42,7 @@ pub mod filterpack;
 pub mod har;
 pub mod hub;
 pub mod model;
+pub mod passive;
 pub mod paths;
 pub mod platform;
 pub mod blocklist;
