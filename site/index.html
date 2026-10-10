@@ -457,7 +457,7 @@ footer a:hover { color: var(--fg); }
 [data-style="studio"] .brand .mark-studio { display: block; }
 [data-style="studio"] h1, [data-style="studio"] h2 { font-weight: 700; letter-spacing: -.02em; }
 [data-style="studio"] h2 { font-size: clamp(2.2rem, 4.6vw, 3.6rem); }
-[data-style="studio"] .eyebrow::before { width: 10px; height: 10px; border: 0; background: var(--st-red); box-shadow: 14px 0 0 var(--st-yellow), 28px 0 0 var(--st-blue); margin-right: 28px; }
+[data-style="studio"] .eyebrow::before { width: 10px; height: 10px; border: 0; background: var(--st-red); box-shadow: 14px 0 0 var(--st-yellow), 28px 0 0 var(--st-blue), 42px 0 0 var(--st-green); margin-right: 42px; }
 [data-style="studio"] .btn, [data-style="studio"] .theme-btn { border-radius: 999px; }
 [data-style="studio"] .btn.primary { background: var(--st-red); border-color: var(--st-red); box-shadow: none; }
 [data-style="studio"] .btn.primary:hover { background: var(--st-red); filter: brightness(1.06); }
@@ -491,10 +491,17 @@ footer a:hover { color: var(--fg); }
 [data-style="studio"] .fcard:nth-child(2) { --band: var(--st-blue); }
 [data-style="studio"] .fcard:nth-child(3) { --band: var(--st-yellow); }
 [data-style="studio"] .fcard:nth-child(4) { --band: var(--st-green); }
-[data-style="studio"] .fcard:nth-child(5) { --band: var(--st-yellow); }
-[data-style="studio"] .fcard:nth-child(6) { --band: var(--st-pink); }
+[data-style="studio"] .fcard:nth-child(5) { --band: var(--st-pink); }
+[data-style="studio"] .fcard:nth-child(6) { --band: var(--st-green); }
 [data-style="studio"] .demo .pillbtn { border-radius: 999px; background: var(--st-red); }
 [data-style="studio"] .demo .av { border-radius: 50%; background: var(--st-blue); }
+[data-style="studio"] .demo .sug .acc { background: var(--st-green); border-color: var(--st-green); color: #fff; }
+[data-style="studio"] .ticks li::before { border: 0; width: 12px; height: 12px; background: var(--st-red); }
+[data-style="studio"] .ticks li:nth-child(4n+2)::before { background: var(--st-yellow); }
+[data-style="studio"] .ticks li:nth-child(4n+3)::before { background: var(--st-blue); }
+[data-style="studio"] .ticks li:nth-child(4n+4)::before { background: var(--st-green); }
+[data-style="studio"] .start::before { border: 0; background: var(--st-green); width: 420px; height: 420px; right: -150px; top: -170px; }
+[data-style="studio"] .start::after { background: var(--st-yellow); width: 64px; height: 64px; top: auto; right: 64px; bottom: 56px; }
 </style>
 </head>
 <body>

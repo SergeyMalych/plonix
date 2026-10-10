@@ -1,17 +1,18 @@
 <div align="center">
 
-<img src="docs/images/plonix-mark.svg" width="64" height="64" alt="Plonix logo">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/plonix-banner-dark.webp">
+  <img src="docs/images/plonix-banner-light.webp" alt="Plonix: the web hacking toolkit for the AI era">
+</picture>
 
-# Plonix
-
-[![Website](https://img.shields.io/badge/website-plonix.io-blue)](https://plonix.io)
+[![Website](https://img.shields.io/badge/website-plonix.io-e5401f)](https://plonix.io)
 [![CI](https://github.com/SergeyMalych/plonix/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SergeyMalych/plonix/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/SergeyMalych/plonix)](https://github.com/SergeyMalych/plonix/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/SergeyMalych/plonix/total)](https://github.com/SergeyMalych/plonix/releases)
 [![License: Apache 2.0](https://img.shields.io/github/license/SergeyMalych/plonix)](LICENSE)
-[![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey?logo=apple)](https://github.com/SergeyMalych/plonix/releases/latest)
+[![Platform: macOS and Windows](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-1d4fc4)](https://github.com/SergeyMalych/plonix/releases/latest)
 [![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange?logo=rust)](https://www.rust-lang.org)
-[![Docs](https://img.shields.io/badge/docs-plonix.io%2Fdocs-informational)](https://plonix.io/docs/)
+[![Docs](https://img.shields.io/badge/docs-plonix.io%2Fdocs-16875a)](https://plonix.io/docs/)
 [![Last commit](https://img.shields.io/github/last-commit/SergeyMalych/plonix)](https://github.com/SergeyMalych/plonix/commits/main)
 [![Stars](https://img.shields.io/github/stars/SergeyMalych/plonix?style=flat)](https://github.com/SergeyMalych/plonix/stargazers)
 
