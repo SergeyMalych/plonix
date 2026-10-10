@@ -232,19 +232,14 @@ async fn ui_launch(State(s): State<AppState>) -> Response {
     }
 }
 
-#[derive(Deserialize)]
-pub(crate) struct StyleBody {
-    pub(crate) style: String,
-}
-
-/// The window style all projects share (see `settings::style`).
+/// The look (style, theme, spacing) all windows share (see `settings::look`).
 async fn ui_style(State(s): State<AppState>) -> Response {
-    Json(json!({ "style": crate::settings::style(&s.home) })).into_response()
+    Json(crate::settings::look(&s.home)).into_response()
 }
 
-async fn put_ui_style(State(s): State<AppState>, Json(b): Json<StyleBody>) -> Response {
-    match crate::settings::set_style(&s.home, &b.style) {
-        Ok(()) => Json(json!({ "style": crate::settings::style(&s.home) })).into_response(),
+async fn put_ui_style(State(s): State<AppState>, Json(b): Json<Value>) -> Response {
+    match crate::settings::set_look(&s.home, &b) {
+        Ok(()) => Json(crate::settings::look(&s.home)).into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, "bad_style", &e.to_string()),
     }
 }

@@ -29,7 +29,7 @@ use plonix_core::hub::{self, Hub, HubEvent};
 use plonix_core::paths::Home;
 use plonix_core::settings::InterfaceSettings;
 use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu};
-use tauri::webview::PageLoadEvent;
+use tauri::webview::{NewWindowResponse, PageLoadEvent};
 use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent, Wry};
 use tauri_plugin_dialog::DialogExt;
 
@@ -343,6 +343,7 @@ fn open_project_url(app: &AppHandle, link: &str) {
         None => ("Plonix".to_string(), String::new()),
     };
     let own_origin = api.clone();
+    let (lens_app, lens_origin) = (app.clone(), api.clone());
     let built = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
         .title(&title)
         .additional_browser_args(&browser_args())
@@ -358,6 +359,16 @@ fn open_project_url(app: &AppHandle, link: &str) {
             }
             false
         })
+        // The Lens's "Open in a new window": a window of its own for one request.
+        .on_new_window(move |u, _| {
+            if is_loopback(&u) && origin(&u) == lens_origin {
+                let app = lens_app.clone();
+                std::thread::spawn(move || open_lens_window(&app, u));
+            } else if matches!(u.scheme(), "http" | "https") {
+                open_externally(u.as_str());
+            }
+            NewWindowResponse::Deny
+        })
         .build();
     match built {
         Ok(w) => {
@@ -369,6 +380,42 @@ fn open_project_url(app: &AppHandle, link: &str) {
             });
         }
         Err(e) => tracing::error!("could not open the project window: {e}"),
+    }
+}
+
+/// A request opened from a project window's Lens (`#/lens/<id>`). It shares
+/// the project window's storage, so it is signed in already. Closing it
+/// leaves the project open.
+fn open_lens_window(app: &AppHandle, url: Url) {
+    let id = url.fragment().and_then(|f| f.strip_prefix("/lens/")).unwrap_or("0").to_string();
+    let label = format!("lens-{}-{id}", url.port().unwrap_or(0));
+    if let Some(w) = app.get_webview_window(&label) {
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let own_origin = origin(&url);
+    let built = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
+        .title(format!("Request #{id} — Plonix"))
+        .additional_browser_args(&browser_args())
+        .inner_size(1100.0, 760.0)
+        .min_inner_size(480.0, 360.0)
+        .initialization_script(INIT_SCRIPT)
+        .on_document_title_changed(|w, title| {
+            let _ = w.set_title(&title);
+        })
+        .on_navigation(move |u| {
+            if is_loopback(u) && origin(u) == own_origin {
+                return true;
+            }
+            if matches!(u.scheme(), "http" | "https") {
+                open_externally(u.as_str());
+            }
+            false
+        })
+        .build();
+    if let Err(e) = built {
+        tracing::error!("could not open the request window: {e}");
     }
 }
 

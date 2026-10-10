@@ -98,12 +98,18 @@ async function boot() {
     if (e.code === 'unauthorized') return;
     return showLock(e.message);
   }
-  syncStyle();
+  syncLook();
+  addEventListener('focus', syncLook);
   if (S.status.demo) await loadDemoBench();
   const v = (location.hash.match(/^#\/(\w+)/) || [])[1];
   if (VIEWS[v]) S.view = v;
+  if (LENS_WINDOW) {
+    document.documentElement.classList.add('lenswin');
+    S.view = 'traffic';
+  }
   renderShell();
   poll();
+  if (LENS_WINDOW) return openInspector(LENS_WINDOW);
   if (S.status.demo && !pstore('plonix.demoTourSeen')) autoTour();
 }
 
@@ -1543,16 +1549,29 @@ function applyDensity(d) {
   S.density = d === 'roomy' ? 'roomy' : 'dense';
 }
 
-/** Takes the style chosen in any Plonix window: it is kept with the engine,
- * so every project and the desktop app's icon follow it. */
-async function syncStyle() {
+/** Takes the look (style, theme, spacing) chosen in any Plonix window: it is
+ * kept with the engine, so every project, the Start screen and the desktop
+ * app's icon follow it. Each window's own storage only avoids a flash. */
+async function syncLook() {
   try {
-    const r = await api('/api/ui/style');
-    if (r.style !== S.style) {
-      applyStyle(r.style);
-      store('plonix.style', r.style);
-    }
+    applyLook(await api('/api/ui/style'));
   } catch (_) {}
+}
+
+function applyLook(r) {
+  if (!r) return;
+  if (r.theme && r.theme !== S.theme) {
+    applyTheme(r.theme);
+    store('plonix.theme', r.theme);
+  }
+  if (r.density && r.density !== S.density) {
+    applyDensity(r.density);
+    store('plonix.density', r.density);
+  }
+  if (r.style && r.style !== S.style) {
+    applyStyle(r.style);
+    store('plonix.style', r.style);
+  }
 }
 
 /** Studio (the default, the geometric style in studio.css) or Classic. */
@@ -1566,6 +1585,7 @@ function cycleTheme() {
   const next = { auto: 'light', light: 'dark', dark: 'auto' }[S.theme] || 'auto';
   applyTheme(next);
   store('plonix.theme', next);
+  api('/api/ui/style', { method: 'PUT', body: { theme: next } }).catch(() => {});
   toast('Theme: ' + next);
 }
 

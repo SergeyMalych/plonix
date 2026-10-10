@@ -401,21 +401,48 @@ const LOOK: &str = "look";
 /// The window style every Plonix window shares: "studio" (the default) or
 /// "classic". The desktop app also picks its icon from it.
 pub fn style(home: &Home) -> &'static str {
-    let file = read_global(home);
-    match file.sections.get(LOOK).and_then(|v| v.get("style")).and_then(Value::as_str) {
+    match look(home)["style"].as_str() {
         Some("classic") => "classic",
         _ => "studio",
     }
 }
 
 pub fn set_style(home: &Home, style: &str) -> Result<()> {
-    if style != "classic" && style != "studio" {
-        anyhow::bail!("style must be classic or studio");
+    set_look(home, &json!({ "style": style }))
+}
+
+/// Style, theme and spacing, shared by the Start screen and every project
+/// window. Each window has a browser storage of its own, so the look is kept
+/// here for all of them to read.
+pub fn look(home: &Home) -> Value {
+    let file = read_global(home);
+    let saved = file.sections.get(LOOK);
+    let pick = |key: &str, allowed: &[&'static str]| -> &'static str {
+        let v = saved.and_then(|v| v.get(key)).and_then(Value::as_str);
+        allowed.iter().copied().find(|a| Some(*a) == v).unwrap_or(allowed[0])
+    };
+    json!({
+        "style": pick("style", &["studio", "classic"]),
+        "theme": pick("theme", &["auto", "light", "dark"]),
+        "density": pick("density", &["dense", "roomy"]),
+    })
+}
+
+/// Saves the parts of the look that `changes` names and keeps the rest.
+pub fn set_look(home: &Home, changes: &Value) -> Result<()> {
+    let allowed: [(&str, &[&str]); 3] = [("style", &["studio", "classic"]), ("theme", &["auto", "light", "dark"]), ("density", &["dense", "roomy"])];
+    let mut next = look(home);
+    for (key, values) in allowed {
+        let Some(v) = changes.get(key).filter(|v| !v.is_null()) else { continue };
+        match v.as_str().filter(|v| values.contains(v)) {
+            Some(v) => next[key] = json!(v),
+            None => anyhow::bail!("{key} must be one of {}", values.join(", ")),
+        }
     }
     home.ensure()?;
     crate::paths::set_aside_unreadable::<GlobalFile>(&global_path(home));
     let mut file = read_global(home);
-    file.sections.insert(LOOK.to_string(), json!({ "style": style }));
+    file.sections.insert(LOOK.to_string(), next);
     write_atomic(&global_path(home), &serde_json::to_vec_pretty(&file)?)
 }
 
@@ -716,6 +743,9 @@ mod tests {
         assert_eq!(style(&home), "classic");
         assert!(set_style(&home, "neon").is_err());
         assert_eq!(style(&home), "classic");
+        set_look(&home, &json!({ "theme": "dark" })).unwrap();
+        assert_eq!(look(&home), json!({ "style": "classic", "theme": "dark", "density": "dense" }), "the theme keeps the style");
+        assert!(set_look(&home, &json!({ "density": "huge" })).is_err());
         assert!(global_values(&home).contains_key(INTERFACE), "the style keeps the other sections");
         assert!(!describe(&home, None).to_string().contains("\"look\""), "the style is not a section of its own");
     }
