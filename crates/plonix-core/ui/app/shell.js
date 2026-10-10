@@ -104,6 +104,7 @@ function redrawNav() {
   const nav = navList();
   for (const b of nav.children) b.classList.toggle('on', b.dataset.v === S.view);
   old.replaceWith(nav);
+  railShade();
   const pill = $('#actas');
   if (toolOn('saved-users') && !pill) {
     $('#engine').before(actasPill());
@@ -144,9 +145,12 @@ function renderShell() {
           h('span', { class: 'ico', text: '+' }),
           h('span', { class: 'nl', text: 'Open target' }),
         ),
-        nav,
-        h('div', { class: 'railsecs', id: 'railsecs' }),
-        h('div', { class: 'spacer' }),
+        h(
+          'div',
+          { class: 'railmid', id: 'railmid' },
+          h('div', { class: 'railscroll', id: 'railscroll', onscroll: railShade }, nav, h('div', { class: 'railsecs', id: 'railsecs' })),
+          h('button', { class: 'railmore', tabindex: '-1', 'aria-hidden': 'true', title: 'More below', onclick: () => $('#railscroll').scrollBy({ top: 160, behavior: 'smooth' }), text: '⌄' }),
+        ),
         h(
           'div',
           { class: 'nav navfoot' },
@@ -176,6 +180,7 @@ function renderShell() {
     ),
   );
   updateToggle();
+  railShade();
   updateChrome();
   loadScope();
   loadFacets();
@@ -184,12 +189,23 @@ function renderShell() {
   if (toolOn('saved-users')) loadUsers().then(drawActing);
 }
 
+/** Shade the sidebar's scrolling middle at an edge where items are hidden, so a short window shows there is more. */
+function railShade() {
+  const box = $('#railscroll');
+  const mid = $('#railmid');
+  if (!box || !mid) return;
+  mid.classList.toggle('more-above', box.scrollTop > 1);
+  mid.classList.toggle('more-below', box.scrollTop + box.clientHeight < box.scrollHeight - 1);
+}
+window.addEventListener('resize', railShade);
+
 function toggleSidebar() {
   S.railCollapsed = !S.railCollapsed;
   store('plonix.rail', S.railCollapsed ? 'collapsed' : null);
   const rail = $('#rail');
   if (rail) rail.classList.toggle('collapsed', S.railCollapsed);
   updateToggle();
+  setTimeout(railShade, 200);
 }
 
 function updateToggle() {
@@ -242,6 +258,7 @@ function renderRail() {
     );
   }
   clear(box, secs);
+  railShade();
 }
 
 /** Opens a target in the capture browser: an isolated browser that routes

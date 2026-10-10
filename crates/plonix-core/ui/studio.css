@@ -67,6 +67,10 @@
 [data-style="studio"] .rail .hostlink:hover, [data-style="studio"] .rail .sugg-row:hover { background: #ffffff1f; color: #fff; }
 [data-style="studio"] .rail .sugg-row .rl { color: #ffc533; }
 [data-style="studio"] .rail .mini { background: transparent; border-color: #ffffff50; color: #fff; border-radius: 50%; }
+[data-style="studio"] .railmid::before { background: linear-gradient(var(--st-rail), transparent); }
+[data-style="studio"] .railmid::after { background: linear-gradient(transparent, var(--st-rail) 85%); }
+[data-style="studio"] .railmid.more-below { border-bottom-color: #ffffff30; }
+[data-style="studio"] .railmore { background: var(--st-rail); border-color: #ffffff70; color: #fff; box-shadow: none; }
 
 /* one flat shape per tool */
 [data-style="studio"] .nav button .ico, [data-style="studio"] .opentarget .ico { font-size: 0; width: 14px; height: 14px; flex: 0 0 14px; margin: 0 2px; background: var(--st-ink); }
