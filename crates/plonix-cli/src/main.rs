@@ -407,6 +407,8 @@ enum UsageCmd {
     On,
     /// Stop sharing, and delete the counts and install id kept so far
     Off,
+    /// Delete the counts and install id kept so far and start over with a new id
+    Reset,
 }
 
 #[derive(Subcommand)]
@@ -1087,10 +1089,11 @@ fn ensure_terms(ctx: &Ctx, flag: bool) -> Result<()> {
     } else {
         eprintln!(
             "\nPlonix can share anonymous usage statistics once a day: a random install id, the version, your OS and CPU type,\n\
-             and how often features were used. Never URLs, hosts, traffic, project names or anything you type.\n  {}",
+             how often features and screens were used, and sizes as ranges. Never URLs, hosts, traffic, project names or\n\
+             anything you type. The totals are public at https://plonix.io/analytics.\n  {}",
             terms::PRIVACY_URL
         );
-        !matches!(ask("Share anonymous usage statistics? [Y/n] ")?.as_str(), "n" | "no")
+        matches!(ask("Share anonymous usage statistics? [y/N] ")?.as_str(), "y" | "yes")
     };
     usage::set_sharing(&ctx.home, share)?;
     terms::accept(&ctx.home)?;
@@ -1104,6 +1107,7 @@ fn usage_cmd(ctx: &Ctx, cmd: UsageCmd) -> Result<()> {
         UsageCmd::Show => {}
         UsageCmd::On => usage::set_sharing(&ctx.home, true)?,
         UsageCmd::Off => usage::set_sharing(&ctx.home, false)?,
+        UsageCmd::Reset => usage::reset(&ctx.home)?,
     }
     let v = usage::preview(&ctx.home);
     if ctx.json {

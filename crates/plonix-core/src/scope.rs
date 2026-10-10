@@ -239,7 +239,7 @@ pub struct Analysis {
 }
 
 /// Third-party analytics/telemetry that is never worth suggesting.
-const NOISE: &[&str] = &[
+pub(crate) const NOISE: &[&str] = &[
     "google-analytics.com",
     "googletagmanager.com",
     "doubleclick.net",

@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en" data-style="studio">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Plonix analytics</title>
+<meta name="description" content="Open numbers: how Plonix is used, from anonymous, opt-in usage statistics. Totals only, no URLs, hosts or anything people type.">
+<meta property="og:title" content="Plonix analytics">
+<meta property="og:description" content="Open numbers: how Plonix is used, from anonymous, opt-in usage statistics.">
+<meta property="og:url" content="https://plonix.io/analytics">
+<link rel="canonical" href="https://plonix.io/analytics">
+<meta name="theme-color" content="#ece5d6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#13120f" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="assets/studio-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@400..700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Studio: cream paper, Jost, and four equal primaries. Each chart is one series in one of the four colours,
+   so colour names the section, never a rank. Light by default, a dark twin that follows the system. */
+:root {
+  --red: #e5401f; --blue: #1d4fc4; --yellow: #f1b11b; --green: #16875a; --black: #1e1c19;
+  --bg: #ece5d6; --surface: #faf6ee; --sunk: #e4dccb; --line: #d6ccb8;
+  --fg: #1e1c19; --muted: #4f493f; --faint: #6f675a;
+  --display: "Jost", "Avenir Next", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --red: #ff5a36; --blue: #5a86ff; --yellow: #ffc533; --green: #3dbb83; --black: #efe8da;
+    --bg: #13120f; --surface: #1c1a17; --sunk: #25221e; --line: #36312a;
+    --fg: #f1eadd; --muted: #c0b7a6; --faint: #8d8576;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --red: #ff5a36; --blue: #5a86ff; --yellow: #ffc533; --green: #3dbb83; --black: #efe8da;
+  --bg: #13120f; --surface: #1c1a17; --sunk: #25221e; --line: #36312a;
+  --fg: #f1eadd; --muted: #c0b7a6; --faint: #8d8576;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 400 18px/1.55 var(--display); -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; border-radius: 6px; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-inline: 24px; }
+@media (max-width: 520px) { .wrap { padding-inline: 16px; } }
+h1, h2, h3 { font-family: var(--display); margin: 0; text-wrap: balance; letter-spacing: -0.02em; }
+h1 { font-size: clamp(2.8rem, 5.4vw, 4.6rem); line-height: 1; font-weight: 700; }
+h2 { font-size: clamp(1.9rem, 3.6vw, 2.8rem); line-height: 1.05; font-weight: 700; }
+h3 { font-size: 1.15rem; font-weight: 600; letter-spacing: -0.01em; }
+p { margin: 0; }
+.mono { font-family: var(--mono); font-size: 0.86em; }
+.muted { color: var(--muted); }
+.faint { color: var(--faint); }
+
+/* nav */
+.nav { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+.nav .wrap { display: flex; align-items: center; gap: 22px; height: 62px; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; font: 700 1.25rem var(--display); letter-spacing: -0.03em; }
+.brand svg { width: 28px; height: 28px; }
+.nav-links { display: flex; gap: 20px; margin-left: auto; font-size: 0.98rem; color: var(--muted); }
+.nav-links a { text-decoration: none; }
+.nav-links a:hover, .nav-links a[aria-current] { color: var(--fg); }
+.theme-btn { width: 38px; height: 36px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); display: grid; place-items: center; cursor: pointer; }
+.theme-btn svg { width: 18px; height: 18px; }
+@media (max-width: 640px) { .nav-links { display: none; } .theme-btn { margin-left: auto; } }
+
+/* hero */
+.hero { position: relative; overflow: hidden; padding: 84px 0 64px; }
+.eyebrow { display: inline-flex; align-items: center; gap: 12px; font: 500 0.78rem/1 var(--mono); text-transform: uppercase; letter-spacing: 0.12em; color: var(--blue); margin-bottom: 22px; }
+.dots { display: inline-flex; gap: 4px; }
+.dots i { width: 10px; height: 10px; display: block; }
+.dots i:nth-child(1) { background: var(--red); }
+.dots i:nth-child(2) { background: var(--yellow); border-radius: 50%; }
+.dots i:nth-child(3) { background: var(--blue); border-radius: 10px 10px 0 0; height: 5px; margin-top: 5px; }
+.dots i:nth-child(4) { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 10px solid var(--green); }
+.hero h1 .hl { color: var(--blue); }
+.hero .lede { margin-top: 20px; max-width: 56ch; font-size: 1.15rem; color: var(--muted); }
+.hero .meta { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 10px; }
+.chip { display: inline-flex; align-items: center; height: 32px; padding: 0 14px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font: 400 0.8rem var(--mono); color: var(--muted); }
+.geo { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
+.geo i { position: absolute; display: block; }
+.geo .a { right: -70px; top: 30px; width: 380px; height: 380px; border-radius: 50%; background: var(--yellow); }
+.geo .b { right: 250px; top: 300px; width: 110px; height: 110px; background: var(--red); }
+.geo .c { right: 40px; bottom: -10px; width: 220px; height: 110px; border-radius: 220px 220px 0 0; background: var(--blue); }
+.geo .d { right: 330px; top: 70px; width: 0; height: 0; border-left: 46px solid transparent; border-right: 46px solid transparent; border-bottom: 80px solid var(--green); }
+@media (max-width: 1080px) { .geo .b, .geo .d { display: none; } .geo .a { width: 260px; height: 260px; right: -120px; } .geo .c { display: none; } }
+@media (max-width: 640px) { .geo { display: none; } .hero { padding: 56px 0 40px; } }
+
+/* stat tiles */
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+@media (max-width: 980px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 480px) { .kpis { grid-template-columns: 1fr; } }
+.kpi { position: relative; background: var(--surface); border-radius: 26px; padding: 22px 22px 20px; overflow: hidden; min-height: 168px; display: flex; flex-direction: column; }
+.kpi .shape { position: absolute; right: 18px; top: 18px; width: 34px; height: 34px; }
+.kpi .label { font-size: 0.98rem; color: var(--muted); padding-right: 48px; }
+.kpi .num { font-size: clamp(2.6rem, 4.6vw, 3.4rem); font-weight: 700; letter-spacing: -0.03em; line-height: 1.05; margin-top: auto; font-variant-numeric: tabular-nums; }
+.kpi .num.na { color: var(--faint); font-size: 2rem; }
+.kpi .sub { font-size: 0.9rem; color: var(--faint); margin-top: 4px; }
+.s-red { background: var(--red); }
+.s-blue { background: var(--blue); border-radius: 50%; }
+.s-yellow { background: var(--yellow); border-radius: 34px 34px 0 0; height: 17px !important; top: 35px !important; }
+.s-green { width: 0 !important; height: 0 !important; border-left: 17px solid transparent; border-right: 17px solid transparent; border-bottom: 32px solid var(--green); }
+
+/* sections */
+section.block { padding: 72px 0 0; }
+.head { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px 24px; margin-bottom: 24px; }
+.head p { color: var(--muted); max-width: 58ch; }
+.card { background: var(--surface); border-radius: 26px; padding: 24px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.grid4 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+@media (min-width: 1100px) { .grid4 { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 760px) { .grid2, .grid4 { grid-template-columns: 1fr; } }
+.card h3 { margin-bottom: 4px; }
+.card .note { font-size: 0.88rem; color: var(--faint); margin-bottom: 16px; }
+
+/* daily columns */
+.cols { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; align-items: end; height: 200px; padding-top: 8px; }
+.cols .c { position: relative; height: 100%; display: flex; align-items: end; cursor: default; }
+.cols .c span { display: block; width: 100%; border-radius: 4px 4px 0 0; background: var(--blue); min-height: 2px; }
+.cols .c.hidden span { background: repeating-linear-gradient(135deg, var(--line) 0 3px, transparent 3px 6px); height: 14px; border-radius: 4px 4px 0 0; }
+.cols .c:hover span { filter: brightness(1.12); }
+.axis { display: flex; justify-content: space-between; font: 400 0.76rem var(--mono); color: var(--faint); margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+
+/* bar lists */
+.bars { display: grid; gap: 10px; }
+.bar { display: grid; grid-template-columns: minmax(96px, 32%) 1fr auto; align-items: center; gap: 12px; font-size: 0.95rem; }
+.bar .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar .name.mono { font-size: 0.8rem; }
+.bar .track { height: 14px; border-radius: 0 4px 4px 0; background: transparent; position: relative; }
+.bar .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 0 4px 4px 0; background: var(--c, var(--blue)); min-width: 3px; }
+.bar .val { font: 500 0.82rem var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; min-width: 4ch; text-align: right; }
+.bar:hover .fill { filter: brightness(1.1); }
+.compact .bar { grid-template-columns: minmax(80px, 40%) 1fr auto; font-size: 0.9rem; }
+.c-red { --c: var(--red); } .c-blue { --c: var(--blue); } .c-yellow { --c: var(--yellow); } .c-green { --c: var(--green); }
+
+.empty { padding: 26px 18px; border-radius: 18px; background: var(--sunk); color: var(--muted); font-size: 0.95rem; text-align: center; }
+
+/* how it's made */
+.how { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+@media (max-width: 980px) { .how { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 520px) { .how { grid-template-columns: 1fr; } }
+.how .card p { color: var(--muted); font-size: 0.95rem; margin-top: 6px; }
+.how .card i { display: block; width: 22px; height: 22px; margin-bottom: 14px; }
+
+footer { margin-top: 88px; padding: 32px 0 48px; border-top: 1px solid var(--line); color: var(--faint); font-size: 0.92rem; }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: center; }
+footer nav { display: flex; gap: 18px; margin-left: auto; }
+footer a { text-decoration: none; }
+footer a:hover { color: var(--fg); }
+
+#tip { position: fixed; z-index: 30; pointer-events: none; padding: 7px 11px; border-radius: 10px; background: var(--black); color: var(--bg); font: 500 0.82rem var(--mono); opacity: 0; transform: translateY(4px); transition: opacity .1s, transform .1s; white-space: nowrap; }
+#tip.on { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) { #tip { transition: none; } }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="Plonix home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#e5401f"/><rect x="7" y="6" width="5" height="20" fill="#1e1c19"/><circle cx="18" cy="13" r="7" fill="#f1b11b"/><path d="M18 6a7 7 0 0 1 0 14z" fill="#1d4fc4"/></svg>
+      Plonix
+    </a>
+    <nav class="nav-links" aria-label="Site">
+      <a href="/">Home</a>
+      <a href="docs/">Docs</a>
+      <a href="analytics" aria-current="page">Analytics</a>
+      <a href="docs/privacy.html">Privacy</a>
+    </nav>
+    <button type="button" class="theme-btn" id="theme" aria-label="Switch to dark mode" title="Switch theme"></button>
+  </div>
+</header>
+
+<main>
+<section class="hero">
+  <div class="geo" aria-hidden="true"><i class="a"></i><i class="b"></i><i class="c"></i><i class="d"></i></div>
+  <div class="wrap">
+    <div class="eyebrow"><span class="dots" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Open numbers</div>
+    <h1>How Plonix<br>is <span class="hl">used.</span></h1>
+    <p class="lede">Totals from installs that chose to share anonymous statistics. No URLs, hosts or anything people type ever leave their computer, and no group smaller than five installs is shown.</p>
+    <div class="meta"><span class="chip" id="m-window">Last 30 days</span><span class="chip" id="m-updated">Updated hourly</span><span class="chip">Groups under 5 installs hidden</span></div>
+  </div>
+</section>
+
+<div class="wrap">
+  <div class="kpis" id="kpis"></div>
+
+  <section class="block" id="daily">
+    <div class="head"><h2>Every day.</h2><p>Installs that used Plonix on each day. A striped day had fewer than five, so its number is hidden.</p></div>
+    <div class="card"><div id="daily-chart"></div></div>
+  </section>
+
+  <section class="block" id="features">
+    <div class="head"><h2>What people use.</h2><p>The share of active installs that used each feature at least once in the last 30 days.</p></div>
+    <div class="card"><div id="features-chart"></div></div>
+  </section>
+
+  <section class="block" id="time">
+    <div class="head"><h2>Where the time goes.</h2><p>Hours with Plonix in front and in use, by screen. A minute counts only while the window has focus and someone is working in it.</p></div>
+    <div class="card"><div id="time-chart"></div></div>
+  </section>
+
+  <section class="block" id="who">
+    <div class="head"><h2>Who uses it.</h2><p>Each install counted once, as it was on its latest report.</p></div>
+    <div class="grid4" id="who-grid"></div>
+  </section>
+
+  <section class="block" id="projects">
+    <div class="head"><h2>How big projects get.</h2><p>Sizes in ranges, never exact numbers. Each range shows how many installs had a project of that size.</p></div>
+    <div class="grid4" id="size-grid"></div>
+  </section>
+
+  <section class="block" id="scope">
+    <div class="head"><h2>Rejected and filtered.</h2><p>Only well-known third-party services are named. Any other rejected host is counted as "other" and never reported by name. Filters are counted by kind, never by what was typed.</p></div>
+    <div class="grid2">
+      <div class="card"><h3>Most rejected domains</h3><p class="note">Installs that put each domain out of scope</p><div id="rejected-chart"></div></div>
+      <div class="card"><h3>Most used filters</h3><p class="note">Installs that searched Traffic with each kind of term</p><div id="filters-chart"></div></div>
+    </div>
+  </section>
+
+  <section class="block" id="downloads">
+    <div class="head"><h2>Downloads.</h2><p>From the release files on GitHub. Automatic updates on the Mac are counted apart.</p></div>
+    <div class="card"><div id="downloads-chart"></div></div>
+  </section>
+
+  <section class="block" id="how">
+    <div class="head"><h2>How these numbers are made.</h2></div>
+    <div class="how">
+      <div class="card"><i class="s-red" aria-hidden="true"></i><h3>Opt in</h3><p>Plonix asks on first launch, with the box unticked. Settings shows the exact report before it is sent, and turning it off deletes everything kept.</p></div>
+      <div class="card"><i class="s-blue" aria-hidden="true"></i><h3>Counts, not content</h3><p>Feature names, minutes per screen, size ranges and a fixed list of known domains. Never traffic, URLs, hosts, paths, IPs or text.</p></div>
+      <div class="card"><i class="s-yellow" aria-hidden="true" style="height:11px;margin-top:11px"></i><h3>Five or more</h3><p>A number shows only when at least five installs are behind it. Smaller groups fold into "other" or stay hidden.</p></div>
+      <div class="card"><i class="s-green" aria-hidden="true" style="border-left-width:11px;border-right-width:11px;border-bottom-width:22px"></i><h3>Open code</h3><p>The app's report, the endpoint and this page are in the repository. <a href="docs/privacy.html">What is sent</a>.</p></div>
+    </div>
+  </section>
+</div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Plonix. Open source, Apache-2.0.</span>
+    <nav aria-label="Footer"><a href="/">Home</a><a href="docs/privacy.html">Privacy</a><a href="https://github.com/SergeyMalych/plonix">GitHub</a><a href="api/stats">Raw totals (JSON)</a></nav>
+  </div>
+</footer>
+<div id="tip" role="tooltip"></div>
+
+<script>
+(() => {
+  /* ---- theme switch, shared with the home page ---- */
+  const root = document.documentElement, tbtn = document.getElementById('theme');
+  const sys = matchMedia('(prefers-color-scheme: dark)');
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+  const current = () => root.dataset.theme || (sys.matches ? 'dark' : 'light');
+  const paint = () => { const d = current() === 'dark'; tbtn.innerHTML = d ? SUN : MOON; tbtn.setAttribute('aria-label', d ? 'Switch to light mode' : 'Switch to dark mode'); };
+  try { const saved = localStorage.getItem('plonix-theme'); if (saved === 'light' || saved === 'dark') root.dataset.theme = saved; } catch (e) {}
+  paint();
+  sys.addEventListener('change', paint);
+  tbtn.addEventListener('click', () => {
+    const next = current() === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next; paint();
+    try { localStorage.setItem('plonix-theme', next); } catch (e) {}
+  });
+
+  /* ---- names ---- */
+  const FEATURES = {
+    app_launched: 'App launched', web_launcher_opened: 'Start screen in a browser', cli_used: 'Command line', project_opened: 'Project opened',
+    demo_opened: 'Demo project', capture_started: 'Capture browser', intercept_used: 'Intercept', bench_send: 'Bench send', bench_run: 'Bench run',
+    scan_run: 'Scan', crawl_run: 'Crawl', program_applied: 'Program followed', finding_added: 'Finding added', report_exported: 'Report exported',
+    market_install: 'Market install', ask_claude: 'Ask Claude', agent_launch: 'Claude Code opened', mcp_session: 'MCP session',
+    callbacks_start: 'Callbacks', access_check: 'Access check',
+  };
+  const SCREENS = { traffic: 'Traffic', bench: 'Bench', scope: 'Scope', map: 'Map', users: 'Users', access: 'Access', callbacks: 'Callbacks', findings: 'Findings', agents: 'Agents', market: 'Market', scans: 'Scans', programs: 'Programs', rules: 'Rules', settings: 'Settings', start: 'Start screen' };
+  const PROFILES = { 'bug-hunter': 'Bug hunter', 'red-teamer': 'Red teamer', researcher: 'Security researcher', none: 'Not picked', other: 'Other' };
+  const OS = { macos: 'macOS', windows: 'Windows', linux: 'Linux', other: 'Other' };
+  const ARCH = { aarch64: 'Apple silicon / Arm', x86_64: 'Intel / AMD 64-bit', other: 'Other' };
+  const STYLES = { studio: 'Studio', classic: 'Classic', other: 'Other' };
+  const name = (map, id) => map[id] || (id === 'other' ? 'Other' : id);
+  const osVersion = (id) => { if (id === 'other') return 'Other'; const [os, v] = id.split(' '); return `${name(OS, os)} ${v}`; };
+  const filterName = (id) => (id === 'text' ? 'free text' : id === '-text' ? '-free text' : id + ':');
+
+  /* ---- drawing ---- */
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const fmt = (n) => (n == null ? '–' : n >= 10000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1).replace(/\.0$/, '') + 'k' : n.toLocaleString('en-US'));
+  const EMPTY = 'Not enough installs yet. This appears once five or more installs have reported.';
+  const empty = (el, text = EMPTY) => { el.innerHTML = `<div class="empty">${esc(text)}</div>`; };
+
+  function bars(el, items, { color, label, value, tip, mono, compact, fmt: show }) {
+    if (!items || !items.length) return empty(el);
+    const max = Math.max(...items.map(value), 1);
+    el.innerHTML = `<div class="bars ${compact ? 'compact' : ''} c-${color}" role="list">` + items.map((it) =>
+      `<div class="bar" role="listitem" data-tip="${esc(tip(it))}"><span class="name${mono ? ' mono' : ''}" title="${esc(label(it))}">${esc(label(it))}</span>` +
+      `<span class="track"><span class="fill" style="width:${(value(it) / max) * 100}%"></span></span><span class="val">${esc(show ? show(it) : fmtVal(it, value))}</span></div>`).join('') + '</div>';
+  }
+  const fmtVal = (it, value) => (it._pct != null ? it._pct + '%' : fmt(value(it)));
+
+  function kpis(d) {
+    const u = d.usage || {}, i = u.installs || {}, t = u.time, dl = d.downloads;
+    const tile = (shape, label, num, sub) => `<div class="kpi"><i class="shape ${shape}" aria-hidden="true"></i><span class="label">${label}</span><span class="num${num == null ? ' na' : ''}">${num == null ? 'Fewer than 5' : fmt(num)}</span><span class="sub">${sub}</span></div>`;
+    $('kpis').innerHTML =
+      tile('s-red', 'Downloads', dl ? dl.total : null, dl ? `${fmt(dl.macos)} Mac, ${fmt(dl.windows)} Windows` : 'Release counts unavailable') +
+      tile('s-blue', 'Active installs, 30 days', i.active_30d, i.active_7d != null ? `${fmt(i.active_7d)} in the last 7 days` : 'Last 7 days hidden') +
+      tile('s-yellow', 'Hours in Plonix, 30 days', t ? t.hours : null, t ? `Median ${t.median_minutes_per_day} min on a day it was used` : 'Shown from five installs') +
+      tile('s-green', 'New installs, 30 days', i.new_30d, i.ever != null ? `${fmt(i.ever)} have ever reported` : 'Total hidden');
+  }
+
+  function daily(d) {
+    const days = (d.usage && d.usage.daily) || [];
+    if (!days.length) return empty($('daily-chart'));
+    const max = Math.max(...days.map((x) => x.installs || 0), 5);
+    const label = (s) => new Date(s + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    $('daily-chart').innerHTML = '<div class="cols">' + days.map((x) => x.installs == null
+      ? `<div class="c hidden" data-tip="${label(x.day)}: fewer than 5"><span></span></div>`
+      : `<div class="c" data-tip="${label(x.day)}: ${fmt(x.installs)} installs"><span style="height:${(x.installs / max) * 100}%"></span></div>`).join('') +
+      `</div><div class="axis"><span>${label(days[0].day)}</span><span>${label(days[Math.floor(days.length / 2)].day)}</span><span>${label(days[days.length - 1].day)}</span></div>` +
+      `<table class="sr"><caption>Installs per day</caption>${days.map((x) => `<tr><th>${x.day}</th><td>${x.installs == null ? 'fewer than 5' : x.installs}</td></tr>`).join('')}</table>`;
+  }
+
+  function render(d) {
+    const u = d.usage;
+    if (d.generated_at) $('m-updated').textContent = 'Updated ' + new Date(d.generated_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    kpis(d);
+    daily(d);
+    const ready = u && u.ready;
+    const active = ready ? u.installs.active_30d : 0;
+    const pct = (list) => (list || []).map((x) => ({ ...x, _pct: Math.round((x.installs / active) * 100) }));
+    if (!ready) {
+      for (const id of ['features-chart', 'time-chart', 'rejected-chart', 'filters-chart']) empty($(id), d.collecting === false ? 'Statistics are not being collected yet.' : EMPTY);
+    } else {
+      bars($('features-chart'), pct(u.features), { color: 'red', label: (x) => name(FEATURES, x.id), value: (x) => x.installs, tip: (x) => `${name(FEATURES, x.id)}: ${fmt(x.installs)} installs, ${fmt(x.uses)} uses` });
+      if (u.time && u.time.screens.length) bars($('time-chart'), u.time.screens, { color: 'yellow', label: (x) => name(SCREENS, x.id), value: (x) => x.hours, fmt: (x) => (x.hours >= 10 ? fmt(Math.round(x.hours)) : String(x.hours)) + ' h', tip: (x) => `${name(SCREENS, x.id)}: ${x.hours} h across ${fmt(x.installs)} installs` });
+      else empty($('time-chart'));
+      bars($('rejected-chart'), u.rejected, { color: 'red', mono: true, compact: true, label: (x) => (x.id === 'other' ? 'other hosts' : x.id), value: (x) => x.installs, tip: (x) => `${x.id}: ${fmt(x.installs)} installs` });
+      bars($('filters-chart'), u.filters, { color: 'blue', mono: true, compact: true, label: (x) => filterName(x.id), value: (x) => x.installs, tip: (x) => `${filterName(x.id)} ${fmt(x.installs)} installs, ${fmt(x.uses)} searches` });
+    }
+    const small = (title, note, list, color, label, mono) => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `<h3>${esc(title)}</h3><p class="note">${esc(note)}</p><div></div>`;
+      if (ready) bars(card.lastChild, list, { color, compact: true, mono, label, value: (x) => x.installs, tip: (x) => `${label(x)}: ${fmt(x.installs)} installs` });
+      else empty(card.lastChild);
+      return card;
+    };
+    $('who-grid').replaceChildren(
+      small('Kind of work', 'Picked on first launch', u && u.profiles, 'green', (x) => name(PROFILES, x.id)),
+      small('Version', 'Plonix release', u && u.versions, 'blue', (x) => (x.id === 'other' ? 'Other' : x.id), true),
+      small('System', 'Operating system and major release', u && u.os_versions, 'yellow', (x) => osVersion(x.id)),
+      small('Look', 'Window style', u && u.styles, 'red', (x) => name(STYLES, x.id)),
+    );
+    const order = ['0', '1', '2-5', '6-20', '21-100', '101-1k', '1k-10k', '10k-100k', '100k+', 'other'];
+    const sorted = (list) => (list || []).slice().sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+    const range = (x) => (x.id === 'other' ? 'Other' : x.id);
+    $('size-grid').replaceChildren(
+      small('Projects per install', 'Projects Plonix knows about', sorted(u && u.projects), 'green', range, true),
+      small('Requests per project', 'Captured, at last open', sorted(u && u.sizes && u.sizes.requests), 'blue', range, true),
+      small('Hosts per project', 'Distinct hosts seen', sorted(u && u.sizes && u.sizes.hosts), 'yellow', range, true),
+      small('Hosts in scope', 'Per project', sorted(u && u.sizes && u.sizes.in_scope), 'red', range, true),
+    );
+    const dl = d.downloads;
+    if (dl && dl.releases.length) bars($('downloads-chart'), dl.releases.slice(0, 12), { color: 'green', mono: true, label: (x) => 'v' + x.version, value: (x) => x.downloads, tip: (x) => `v${x.version}${x.published ? ' (' + x.published + ')' : ''}: ${fmt(x.downloads)} downloads` });
+    else empty($('downloads-chart'), 'Download counts are unavailable right now.');
+  }
+
+  /* ---- one tooltip for every mark ---- */
+  const tip = $('tip');
+  document.addEventListener('pointermove', (e) => {
+    const t = e.target.closest && e.target.closest('[data-tip]');
+    if (!t) { tip.classList.remove('on'); return; }
+    tip.textContent = t.dataset.tip;
+    const w = tip.offsetWidth, x = Math.min(e.clientX + 14, innerWidth - w - 8);
+    tip.style.left = Math.max(8, x) + 'px';
+    tip.style.top = (e.clientY - 40) + 'px';
+    tip.classList.add('on');
+  });
+
+  if (window.PLONIX_STATS) render(window.PLONIX_STATS);
+  else fetch('api/stats').then((r) => (r.ok ? r.json() : Promise.reject(r.status))).then(render).catch(() => render({ usage: null, downloads: null }));
+})();
+</script>
+</body>
+</html>

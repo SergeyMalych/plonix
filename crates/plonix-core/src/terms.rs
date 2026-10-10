@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::paths::{Home, write_atomic};
 
 /// Bump when TERMS.md changes in a way people should see again.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 /// The terms of use, as shown on the first-launch screen.
 pub const TERMS: &str = include_str!("../../../TERMS.md");

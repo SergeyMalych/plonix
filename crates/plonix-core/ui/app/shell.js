@@ -536,6 +536,18 @@ function updateChrome() {
   }
 }
 
+/* ---------- active minutes ---------- */
+
+// For anonymous usage statistics, when they are on: once a minute, the name of
+// the screen in front, but only while this window has focus and was used in
+// the last two minutes. The engine counts at most one minute per minute.
+let lastInput = Date.now();
+for (const ev of ['pointerdown', 'keydown', 'wheel', 'pointermove']) addEventListener(ev, () => (lastInput = Date.now()), { passive: true, capture: true });
+setInterval(() => {
+  if (!S.token || !VIEWS[S.view] || document.visibilityState !== 'visible' || !document.hasFocus() || Date.now() - lastInput > 120000) return;
+  api('/api/usage', { method: 'POST', body: { event: 'minute_' + S.view } }).catch(() => {});
+}, 60000);
+
 /* ---------- keyboard ---------- */
 
 document.addEventListener('keydown', (e) => {
