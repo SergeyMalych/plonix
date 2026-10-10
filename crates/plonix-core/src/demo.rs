@@ -160,8 +160,37 @@ fn respond(req: &OutboundRequest) -> Option<InboundResponse> {
         return None;
     }
     let (path, query) = req.target.split_once('?').unwrap_or((&req.target, ""));
+    if req.host == WWW {
+        if let Some(page) = www(req, path, query) {
+            return Some(page);
+        }
+    }
     let (status, mime, body) = route(&req.method, &req.host, path, query, &req.headers);
     Some(inbound(req, status, mime, body))
+}
+
+/// The shop's own pages, live: search writes the words back into the page as
+/// typed, and sign-in sends a signed-in visitor wherever `next` says, another
+/// site included. The walkthrough's Bench examples send to these.
+fn www(req: &OutboundRequest, path: &str, query: &str) -> Option<InboundResponse> {
+    let param = |name: &str| query.split('&').find_map(|p| p.strip_prefix(name)?.strip_prefix('=')).map(crate::insight::percent_decode);
+    match path {
+        "/search" => {
+            let q = param("q").unwrap_or_default();
+            Some(inbound(req, 200, "text/html; charset=utf-8", format!("<!doctype html><title>Search · Brightcart</title><h2>Results for {q}</h2><p>Nothing else matches {q}.</p>")))
+        }
+        "/login" if has_session(&req.headers) => {
+            let mut next = param("next").unwrap_or_else(|| "/".into());
+            // The shop's own links encode it twice.
+            if next.starts_with('%') {
+                next = crate::insight::percent_decode(&next);
+            }
+            let mut page = inbound(req, 302, "text/html", String::new());
+            page.headers.push(("Location".into(), next));
+            Some(page)
+        }
+        _ => None,
+    }
 }
 
 /// Routes one demo request to a status and body.
@@ -1134,6 +1163,14 @@ mod tests {
         let unsigned = format!("Bearer {}", unsigned_admin_jwt(now_ms()));
         assert_eq!(respond(&out("GET", "https://api.brightcart.example/v1/admin/orders", &signed)).unwrap().status, 403);
         assert_eq!(respond(&out("GET", "https://api.brightcart.example/v1/admin/orders", &unsigned)).unwrap().status, 401);
+
+        // The shop's pages: search writes the words back, and a signed-in
+        // sign-in follows `next` wherever it points.
+        let page = respond(&out("GET", "https://www.brightcart.example/search?q=plonix-7f3a", "")).unwrap();
+        assert!(String::from_utf8_lossy(&page.body).matches("plonix-7f3a").count() >= 2);
+        let next = respond(&out("GET", "https://www.brightcart.example/login?next=https%3A%2F%2Felsewhere.example%2F", &signed)).unwrap();
+        assert_eq!(next.status, 302);
+        assert!(next.headers.iter().any(|(k, v)| k == "Location" && v == "https://elsewhere.example/"));
 
         // A real host is never answered by the demo responder.
         assert!(respond(&out("GET", "https://api.github.com/", "")).is_none());

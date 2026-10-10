@@ -1514,6 +1514,10 @@ tr.acnote > td { border-bottom: none; }
 .tourspot { position: fixed; z-index: 40; border-radius: 10px; pointer-events: none; box-shadow: 0 0 0 2px var(--accent), 0 0 0 9999px color-mix(in srgb, var(--bg) 45%, transparent); transition: left 0.22s ease, top 0.22s ease, width 0.22s ease, height 0.22s ease; }
 .tourcard { position: fixed; z-index: 45; width: 340px; max-width: calc(100vw - 24px); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 14px 16px 12px; display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 24px); overflow-y: auto; overscroll-behavior: contain; }
 .tourcard.in { animation: tourin 0.18s ease; }
+.tourcard { transition: left 0.28s ease, top 0.28s ease; }
+.tourcard.dragging { transition: none; user-select: none; }
+.tourcard .tourhead { cursor: grab; touch-action: none; }
+.tourcard.dragging .tourhead { cursor: grabbing; }
 @keyframes tourin { from { opacity: 0; transform: translateY(4px); } }
 .tourcard.center { width: 400px; }
 .tourcard .tourhead { display: flex; align-items: center; justify-content: space-between; height: 20px; }
@@ -1675,6 +1679,7 @@ body:has(.tourcard) .toasts { z-index: 44; }
 @keyframes tspin { to { transform: rotate(360deg); } }
 .tourcard .tresult { display: flex; gap: 8px; align-items: flex-start; padding: 9px 11px; border-radius: 9px; background: color-mix(in srgb, var(--accent-soft) 70%, var(--surface)); font-size: 12.5px; line-height: 1.5; color: var(--fg); animation: tourin 0.2s ease; }
 .tourcard .tresult .tok { flex: 0 0 auto; display: inline-grid; place-items: center; width: 16px; height: 16px; margin-top: 2px; border-radius: 50%; background: var(--accent); color: var(--accent-fg); font-size: 9px; font-weight: 700; }
+iframe.tourreport { display: block; width: 100%; height: min(52vh, 440px); border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .tourpress { animation: tourpress 0.38s ease; }
 @keyframes tourpress { 40% { transform: scale(0.94); box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 30%, transparent); } }
 .tourmouse { position: fixed; left: 0; top: 0; z-index: 60; pointer-events: none; transition: transform 0.6s cubic-bezier(0.3, 0.7, 0.2, 1), opacity 0.4s ease; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35)); }

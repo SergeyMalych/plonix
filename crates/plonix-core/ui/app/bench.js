@@ -213,9 +213,10 @@ function renderBench(main) {
     tab.method = method.value.trim().toUpperCase() || 'GET';
     tab.url = url.value.trim();
     tab.raw = editor.value;
-    const { headers, body, bad } = parseRaw(tab.raw);
+    // The • marks only say where Run varies a value; Send sends the request without them.
+    const { headers, body, bad } = parseRaw(withoutMarks(tab.raw));
     if (bad.length) return toast('Not a header line: ' + bad[0] + ' (use "Name: value", then a blank line before the body)', 'err');
-    const req = { method: tab.method, url: tab.url, headers };
+    const req = { method: tab.method, url: withoutMarks(tab.url), headers };
     if (toolOn('saved-users') && tabUser(tab)) req.as_user = tabUser(tab);
     if (tab.bodyB64 && !body) req.body_base64 = tab.bodyB64;
     else if (body) req.body = body;
@@ -998,6 +999,7 @@ function buildQbar(tab, editor, strip, main) {
 /* ----- Bench payload runs ----- */
 
 const MARK = '•'; // •, the position marker, matched to the engine.
+const withoutMarks = (text) => (text || '').split(MARK).join('');
 let LIST_CATALOG = null;
 // Which position cards have their full list picker expanded, per tab. Kept off
 // the tab object so it is never persisted to the project file.
