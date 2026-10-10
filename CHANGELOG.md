@@ -4,6 +4,17 @@ What changed in each Plonix release. The newest release is at the top.
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-10-10
+
+### Changed
+- **Studio is now the default look** for the app and the website. In Studio each kind of Market item has its own flat shape, and the app ships with a red, yellow and blue Studio icon. Classic is one click away in Settings › Appearance › Style, or "Try classic" on the website, and picking a style switches every open window.
+- **Small windows**: Open target, Settings and Collapse stay visible in the sidebar, the Lens shrinks to fit, toolbars wrap instead of cutting off buttons, and Traffic gives the Path column room below 1180px.
+- **Map**: the host list looks like the Users list.
+- **Website**: every app screenshot has a Studio version.
+
+### Fixed
+- The capture browser no longer shows a yellow "unsupported command-line flag" bar. HTTPS capture works as before.
+
 ## [0.1.3] - 2026-10-09
 
 
@@ -136,7 +147,8 @@ The first public release of Plonix for Mac.
 - Crash reports stay on your Mac; Plonix offers to open a prefilled GitHub issue and never sends anything on its own.
 - Documentation at plonix.io/docs.
 
-[Unreleased]: https://github.com/SergeyMalych/plonix/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/SergeyMalych/plonix/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/SergeyMalych/plonix/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/SergeyMalych/plonix/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/SergeyMalych/plonix/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/SergeyMalych/plonix/compare/v0.1.0...v0.1.1

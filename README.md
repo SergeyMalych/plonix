@@ -30,9 +30,9 @@ Plonix is an assistant, not an automatic vulnerability finder. It analyzes what 
   <img src="docs/images/window-light.webp" alt="The Plonix window: live traffic with filter chips and suggestions, a scope decision bar, and the Lens showing a request, its response and one-click suggested next steps">
 </picture>
 
-> **Status: early, and usable today.** [v0.1.3](https://github.com/SergeyMalych/plonix/releases/latest) is out for Mac and Windows. The core engine (proxy, traffic store, search, adaptive scope, local API), the `plonix` CLI, the Plonix app, the Bench with payload runs, the Market, Programs, saved users, Callbacks, scope-gated crawl and scans, and read-only MCP access for AI agents work today and are covered by tests. See [Roadmap](#roadmap).
+> **Status: early, and usable today.** [v0.1.4](https://github.com/SergeyMalych/plonix/releases/latest) is out for Mac and Windows. The core engine (proxy, traffic store, search, adaptive scope, local API), the `plonix` CLI, the Plonix app, the Bench with payload runs, the Market, Programs, saved users, Callbacks, scope-gated crawl and scans, and read-only MCP access for AI agents work today and are covered by tests. See [Roadmap](#roadmap).
 >
-> **New in 0.1.3:** Plonix for Windows, with an installer and in-app updates. 0.1.2 brought **Test now!** on the demo walkthrough, acting as a saved user with a browser window of their own, a community Market, a short-path view in Traffic and scans aimed at a path or a group of paths. Everything is in [CHANGELOG.md](CHANGELOG.md).
+> **New in 0.1.4:** the Studio look is now the default (Classic is one click away in Settings), and the app fits small windows. 0.1.3 brought Plonix for Windows, with an installer and in-app updates, plus passive checks and Quick or Thorough presets in Scans. 0.1.2 brought **Test now!** on the demo walkthrough, acting as a saved user with a browser window of their own, a community Market, a short-path view in Traffic and scans aimed at a path or a group of paths. Everything is in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
