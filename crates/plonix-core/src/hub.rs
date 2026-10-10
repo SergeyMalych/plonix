@@ -626,12 +626,12 @@ fn rename(hub: &Hub, dir: &FsPath, values: &Value) -> Response {
 }
 
 async fn ui_style(State(hub): State<Arc<Hub>>) -> Response {
-    Json(json!({ "style": settings::style(&hub.home) })).into_response()
+    Json(settings::look(&hub.home)).into_response()
 }
 
-async fn put_ui_style(State(hub): State<Arc<Hub>>, Json(b): Json<crate::api::StyleBody>) -> Response {
-    match settings::set_style(&hub.home, &b.style) {
-        Ok(()) => Json(json!({ "style": settings::style(&hub.home) })).into_response(),
+async fn put_ui_style(State(hub): State<Arc<Hub>>, Json(b): Json<Value>) -> Response {
+    match settings::set_look(&hub.home, &b) {
+        Ok(()) => Json(settings::look(&hub.home)).into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, "bad_style", &e.to_string()),
     }
 }

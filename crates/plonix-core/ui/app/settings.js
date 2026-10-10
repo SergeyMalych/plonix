@@ -30,7 +30,7 @@ async function renderSettings(main) {
         store('plonix.density', values.density);
         applyStyle(values.style);
         store('plonix.style', values.style);
-        await api('/api/ui/style', { method: 'PUT', body: { style: values.style } }).catch(() => {});
+        await api('/api/ui/style', { method: 'PUT', body: values }).catch(() => {});
         return { applies: 'now' };
       }
       const r = await api('/api/settings/' + section, { method: 'PUT', body: { values } });
@@ -52,7 +52,7 @@ async function renderSettings(main) {
   });
 }
 
-/** How Plonix looks on this computer. Kept in the window, not the engine. */
+/** How Plonix looks on this computer: every window and the Start screen share it. */
 function appearanceSection() {
   return {
     id: 'appearance',

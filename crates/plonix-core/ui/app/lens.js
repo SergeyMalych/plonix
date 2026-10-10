@@ -801,6 +801,39 @@ function sideBySide(cls, key, left, right) {
   return append(wrap, [left, bar, right]);
 }
 
+/** A handle on the right edge of a side list that drags its width. The width
+ *  goes to `wrap`'s `cssVar` and is remembered under `key`; a double-click
+ *  goes back to the stylesheet's width. */
+function widthGrip(wrap, key, cssVar, { min = 160, max = 0.6 } = {}) {
+  const apply = (px) => (px ? wrap.style.setProperty(cssVar, px + 'px') : wrap.style.removeProperty(cssVar));
+  apply(store(key));
+  return h('div', {
+    class: 'wgrip',
+    title: 'Drag to resize · double-click to reset',
+    ondblclick: () => {
+      store(key, null);
+      apply(null);
+    },
+    onmousedown: (e) => {
+      e.preventDefault();
+      const box = wrap.getBoundingClientRect();
+      document.body.classList.add('colresize');
+      const move = (ev) => {
+        const px = Math.round(Math.max(min, Math.min(box.width * max, ev.clientX - box.left)));
+        apply(px);
+        store(key, px);
+      };
+      const up = () => {
+        document.body.classList.remove('colresize');
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    },
+  });
+}
+
 /** A handle that drags `box`'s height: moving it up makes `box` taller.
  *  `get`/`set` read and apply the height so the caller decides what it
  *  means (a fixed height or a cap); the last size is remembered under `key`
@@ -851,7 +884,26 @@ function startResize(e, insp) {
   window.addEventListener('mouseup', up);
 }
 
+/** A window of its own showing one request: `#/lens/<id>` on this project's
+ *  address. It signs in with the token this window already has. */
+let LENS_WINDOW = (() => {
+  const m = location.hash.match(/^#\/lens\/(\d+)$/);
+  return m ? Number(m[1]) : 0;
+})();
+
+function leaveLensWindow() {
+  LENS_WINDOW = 0;
+  document.documentElement.classList.remove('lenswin');
+  document.title = S.status ? 'Plonix · ' + S.status.project : 'Plonix';
+}
+
+function openLensWindow(id) {
+  const w = window.open(location.origin + '/#/lens/' + id, 'plonix-lens-' + id, 'popup,width=1100,height=760');
+  if (w) w.focus();
+}
+
 function closeInspector() {
+  if (LENS_WINDOW) return window.close();
   T.sel = null;
   const slot = $('#inspslot');
   if (slot) clear(slot);

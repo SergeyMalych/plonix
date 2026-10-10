@@ -23,6 +23,8 @@ function restoreMapScroll() {
 }
 
 function renderMap(main) {
+  const wrap = h('div', { class: 'mapwrap' });
+  append(wrap, [h('div', { class: 'hostlist', id: 'hostlist' }), widthGrip(wrap, 'plonix.mapw', '--mapw'), h('div', { class: 'hostdetail', id: 'hostdetail' })]);
   clear(
     main,
     h(
@@ -35,7 +37,7 @@ function renderMap(main) {
         h('span', { class: 'hint', id: 'rulesinfo', text: 'Hosts, endpoints and parameters learned from traffic, with detected technologies.' }),
         h('button', { class: 'btn sm', text: 'Refresh', onclick: () => loadMap(true) }),
       ),
-      h('div', { class: 'traffic' }, h('div', { class: 'mapwrap' }, h('div', { class: 'hostlist', id: 'hostlist' }), h('div', { class: 'hostdetail', id: 'hostdetail' })), h('div', { id: 'inspslot' })),
+      h('div', { class: 'traffic' }, wrap, h('div', { id: 'inspslot' })),
     ),
   );
   loadMap(true);

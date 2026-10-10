@@ -676,7 +676,7 @@ function renderChips() {
       : null,
     sugg.length ? h('span', { class: 'fsep' }) : null,
     // Labelled so one-click suggestions are not mistaken for active filters.
-    sugg.length ? h('span', { class: 'chipslbl', text: 'Suggested' }) : null,
+    sugg.length ? h('span', { class: 'chipslbl', id: 'sugglbl', text: 'Suggested' }) : null,
     sugg.map((c) =>
       h(
         'button',
@@ -690,7 +690,45 @@ function renderChips() {
       ),
     ),
   );
+  foldSuggestions(box);
 }
+
+/** Suggestions take one row: the ones that would wrap hide behind "More…",
+ *  which shows them all until "Less" folds them away again. */
+function foldSuggestions(box) {
+  const lbl = box.querySelector('#sugglbl');
+  if (!lbl) return;
+  const chips = [...box.querySelectorAll('.chip')];
+  const toggle = h('button', { class: 'linkbtn morebtn', onclick: () => ((T.allSugg = !T.allSugg), renderChips()) });
+  box.append(toggle);
+  if (T.allSugg) {
+    toggle.textContent = 'Less';
+    toggle.title = 'Show one row of suggestions';
+    return;
+  }
+  const row = lbl.offsetTop;
+  if (chips[chips.length - 1].offsetTop <= row && toggle.offsetTop <= row) {
+    toggle.remove();
+    return;
+  }
+  let hidden = 0;
+  for (const c of chips) if (c.offsetTop > row) (c.hidden = true), hidden++;
+  const label = () => {
+    toggle.textContent = 'More… (' + hidden + ')';
+    toggle.title = 'Show all ' + chips.length + ' suggestions';
+  };
+  label();
+  for (let i = chips.length - 1 - hidden; toggle.offsetTop > row && i > 0; i--) {
+    chips[i].hidden = true;
+    hidden++;
+    label();
+  }
+}
+
+window.addEventListener('resize', () => {
+  clearTimeout(T.foldTimer);
+  T.foldTimer = setTimeout(() => $('#chips') && renderChips(), 120);
+});
 
 /* ---------- search autocomplete ----------
  * Suggests filter fields as the person types, then values for the field
@@ -1465,7 +1503,22 @@ async function openInspector(id) {
     return;
   }
   if (T.sel !== id || !$('#inspslot')) return;
-  const insp = h('div', { class: 'inspector', id: 'inspector', 'aria-label': 'Lens' });
+  const insp = h('div', { class: 'inspector' + (T.lensMax || LENS_WINDOW ? ' max' : ''), id: 'inspector', 'aria-label': 'Lens' });
+  if (LENS_WINDOW) document.title = `${ex.method} ${ex.path} — Plonix`;
+  const maxBtn = h('button', {
+    class: 'iconbtn lensmax',
+    onclick: () => {
+      T.lensMax = !T.lensMax;
+      insp.classList.toggle('max', T.lensMax);
+      maxLabel();
+    },
+  });
+  const maxLabel = () => {
+    maxBtn.textContent = T.lensMax ? '⤡' : '⤢';
+    maxBtn.title = T.lensMax ? 'Back to the list (e)' : 'Fill the window (e)';
+    maxBtn.setAttribute('aria-pressed', String(!!T.lensMax));
+  };
+  maxLabel();
   const suggSlot = h('div', { class: 'lenssugg', hidden: true });
   if (T.inspH) insp.style.height = T.inspH + 'px';
   const enc = header(ex.resp_headers, 'content-encoding');
@@ -1553,7 +1606,13 @@ async function openInspector(id) {
       h('button', { class: 'btn sm', text: 'Copy curl', title: 'Copy this request as a curl command', onclick: () => copyCurl(id) }),
       h('button', { class: 'btn sm', text: 'New finding', onclick: () => newFinding([id], `${ex.method} ${ex.path}`) }),
       askButton({ kind: 'request', id }),
-      h('button', { class: 'iconbtn', text: '✕', title: 'Close (Esc)', onclick: closeInspector }),
+      h(
+        'span',
+        { class: 'lensctl' },
+        LENS_WINDOW ? null : maxBtn,
+        LENS_WINDOW ? null : h('button', { class: 'iconbtn', text: '⧉', title: 'Open in a new window', onclick: () => openLensWindow(id) }),
+        h('button', { class: 'iconbtn', text: '✕', title: LENS_WINDOW ? 'Close this window (Esc)' : 'Close (Esc)', onclick: closeInspector }),
+      ),
     ),
     suggSlot,
     sideBySide('split', 'lens', reqCol, respCol),

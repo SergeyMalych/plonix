@@ -5,7 +5,7 @@
 
 const IN_APP = !!window.__PLONIX_APP__;
 
-const L = { token: null, about: {}, projects: [], timer: null, opening: null };
+const L = { token: null, about: {}, projects: [], timer: null, opening: null, look: {} };
 
 async function api(path, { method = 'GET', body } = {}) {
   let resp;
@@ -54,10 +54,60 @@ function slug(name) {
 
 /* ---------- sign-in ---------- */
 
+/* ---------- look: shared with every project window ---------- */
+
+const THEMES = { auto: 'Match system', light: 'Light', dark: 'Dark' };
+
+/** Style, theme and spacing as saved with the engine, so the Start screen
+ *  looks like the project windows. Browser storage only avoids a flash. */
+function applyLook(r) {
+  const root = document.documentElement;
+  if (r.theme === 'light' || r.theme === 'dark') root.setAttribute('data-theme', r.theme);
+  else root.removeAttribute('data-theme');
+  if (r.style === 'classic') root.removeAttribute('data-style');
+  else root.setAttribute('data-style', 'studio');
+  root.setAttribute('data-density', r.density === 'roomy' ? 'roomy' : 'dense');
+  L.look = { theme: r.theme || 'auto', style: r.style || 'studio', density: r.density || 'dense' };
+  for (const [k, v] of Object.entries(L.look)) store('plonix.' + k, v);
+  const btn = $('#themebtn');
+  if (btn) btn.title = 'Theme: ' + THEMES[L.look.theme] + ' (click to change)';
+}
+
+function syncLook() {
+  if (!L.token) return;
+  api('/api/ui/style').then(applyLook).catch(() => {});
+}
+
+async function saveLook(values) {
+  applyLook({ ...L.look, ...values });
+  return api('/api/ui/style', { method: 'PUT', body: values });
+}
+
+function cycleTheme() {
+  const next = { auto: 'light', light: 'dark', dark: 'auto' }[L.look.theme] || 'auto';
+  saveLook({ theme: next }).catch((e) => toast(e.message, 'err'));
+  toast('Theme: ' + THEMES[next]);
+}
+
+/** Appearance, as in a project's Settings: one look for every window. */
+function appearanceSection() {
+  return {
+    id: 'appearance',
+    title: 'Appearance',
+    level: 'global',
+    description: 'How Plonix looks on this computer, in every window.',
+    applies: 'now',
+    fields: [
+      { key: 'theme', label: 'Theme', type: 'choice', options: Object.entries(THEMES).map(([value, label]) => ({ value, label })) },
+      { key: 'density', label: 'Spacing', type: 'choice', help: 'Dense fits more on screen. Roomy gives rows and panels more air.', options: [{ value: 'dense', label: 'Dense' }, { value: 'roomy', label: 'Roomy' }] },
+      { key: 'style', label: 'Style', type: 'choice', help: 'Studio is the standard Plonix look. Classic is the plainer indigo look.', options: [{ value: 'studio', label: 'Studio' }, { value: 'classic', label: 'Classic' }] },
+    ],
+    values: { ...L.look },
+  };
+}
+
 async function boot() {
-  const t = store('plonix.theme');
-  if (t && t !== 'auto') document.documentElement.setAttribute('data-theme', t);
-  if (store('plonix.style') !== 'classic') document.documentElement.setAttribute('data-style', 'studio');
+  applyLook({ theme: store('plonix.theme'), style: store('plonix.style'), density: store('plonix.density') });
   const hash = location.hash;
   if (hash.startsWith('#code=')) {
     history.replaceState(null, '', location.pathname);
@@ -72,13 +122,8 @@ async function boot() {
   }
   L.token = store('plonix.hubtoken');
   if (!L.token) return showLock();
-  api('/api/ui/style')
-    .then((r) => {
-      if (r.style === 'classic') document.documentElement.removeAttribute('data-style');
-      else document.documentElement.setAttribute('data-style', 'studio');
-      store('plonix.style', r.style);
-    })
-    .catch(() => {});
+  syncLook();
+  addEventListener('focus', syncLook);
   let terms;
   try {
     [L.about, terms] = await Promise.all([api('/api/hub'), api('/api/terms')]);
@@ -220,6 +265,7 @@ function renderShell() {
       h(
         'div',
         { class: 'right' },
+        h('button', { class: 'iconbtn', id: 'themebtn', title: 'Theme: ' + THEMES[L.look.theme] + ' (click to change)', onclick: cycleTheme }, h('span', { class: 'themeico' })),
         h('button', { class: 'iconbtn', title: 'Settings for all projects' + (IN_APP ? '  (⌘,)' : ''), onclick: globalSettings, text: '⚙' }),
       ),
     ),
@@ -692,9 +738,14 @@ async function globalSettings() {
   }
   const box = h('div', { class: 'settings-host' });
   modal('Settings for all projects', [box, h('p', { class: 'mnote', text: 'Each project also has its own settings (proxy, storage): open them with ⚙ on its row.' })], [h('button', { class: 'btn', text: 'Done', onclick: closeModal })], true);
+  data.sections = [appearanceSection(), ...(data.sections || [])];
   PlonixSettings.render(box, data, {
     only: ['global'],
     save: async (section, values) => {
+      if (section === 'appearance') {
+        await saveLook(values);
+        return { applies: 'now' };
+      }
       const r = await api(`/api/settings/${section}`, { method: 'PUT', body: { values } });
       L.about = await api('/api/hub');
       return r;

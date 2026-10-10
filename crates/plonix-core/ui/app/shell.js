@@ -454,6 +454,8 @@ function go(view, force) {
   if (!VIEWS[view]) return;
   if (VIEWS[view].tool && !toolOn(VIEWS[view].tool)) return go('traffic', force);
   if (S.view === view && !force) return;
+  // A request window that goes to another screen becomes a whole project window.
+  if (LENS_WINDOW && view !== 'traffic') leaveLensWindow();
   // Going somewhere from the sidebar forgets the way back; leaveTo keeps it.
   if (!S.keepBack) S.back = null;
   S.keepBack = false;
@@ -492,7 +494,7 @@ function updateChrome() {
   if (!st || !$('#engine')) return;
   $('#proj').textContent = '· ' + st.project;
   $('#proj').title = st.project_dir ? 'Project folder: ' + st.project_dir : '';
-  document.title = 'Plonix · ' + st.project;
+  if (!LENS_WINDOW) document.title = 'Plonix · ' + st.project;
   const eng = $('#engine');
   eng.classList.toggle('down', !S.engineUp);
   clear(
@@ -571,6 +573,7 @@ document.addEventListener('keydown', (e) => {
     selectRow(-1);
   } else if (e.key === 'b' && T.sel) sendToBench(T.sel);
   else if (e.key === 'i') setIntercept(!IC.on);
+  else if (e.key === 'e' && $('.lensmax')) $('.lensmax').click();
   else if (e.key === 'f' && IC.sel != null) forwardHeld(IC.sel);
   else if (e.key === 'd' && IC.sel != null) dropHeld(IC.sel);
 });

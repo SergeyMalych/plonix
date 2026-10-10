@@ -283,6 +283,14 @@ code, .mono { font-family: var(--mono); }
 /* the slot is only a mount point: the Lens sizes against the screen, and gives way on a short window */
 #inspslot { display: contents; }
 .inspector { flex: 0 1 auto; height: 48%; min-height: 120px; overflow: hidden; display: flex; flex-direction: column; background: var(--surface-2); }
+/* The Lens filling the window (⤢), and the request window (⧉) that is only a Lens. */
+.inspector.max { position: fixed; inset: 0; z-index: 30; height: auto !important; min-height: 0; }
+.insp-head .lensctl { display: inline-flex; gap: 2px; margin-left: auto; }
+@media (max-width: 1000px) {
+  .insp-head { gap: 8px; }
+  .insp-head .lens, .insp-head .meta > span:not([class]) { display: none; }
+  .insp-head .ip { min-width: 90px; }
+}
 .insp-head { display: flex; align-items: center; gap: 10px; padding: 7px 14px; border-bottom: 1px solid var(--line-2); flex-wrap: wrap; }
 .insp-head .ip { font-family: var(--mono); font-size: 12px; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 .insp-head .meta { display: flex; gap: 12px; color: var(--fg-3); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -489,7 +497,11 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .muted { color: var(--fg-3); }
 
 /* map */
-.mapwrap { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px minmax(0, 1fr); }
+.mapwrap { flex: 1; min-height: 0; display: grid; grid-template-columns: min(var(--mapw, 300px), 60%) 0 minmax(0, 1fr); }
+.wgrip { position: relative; z-index: 3; }
+.wgrip::before { content: ''; position: absolute; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; }
+.wgrip::after { content: ''; position: absolute; top: 0; bottom: 0; left: -1px; width: 3px; background: transparent; transition: background .12s; pointer-events: none; }
+.wgrip:hover::after, .colresize .wgrip::after { background: var(--accent); }
 .hostlist { border-right: 1px solid var(--line); overflow: auto; padding: 8px; display: flex; flex-direction: column; gap: 2px; background: var(--chrome); }
 .hostrow { display: flex; flex-direction: column; gap: 3px; padding: 7px 8px; border-radius: 7px; cursor: pointer; color: var(--fg); }
 .hostrow:hover { background: var(--surface-2); }
@@ -598,6 +610,7 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
   .vsplit + .col { border-top: 1px solid var(--line-2); }
   .col + .col { border-left: 0; border-top: 1px solid var(--line-2); }
   .mapwrap { grid-template-columns: 1fr; grid-template-rows: 35% 1fr; }
+  .mapwrap .wgrip { display: none; }
   .hostlist { border-right: 0; border-bottom: 1px solid var(--line); }
   .ttable .c-host, .ttable .c-ms, .ttable .c-size { display: none; }
   .engine .full { display: none; }
@@ -642,7 +655,7 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .switch:checked::after { transform: translateX(12px); }
 .switch:focus-visible { box-shadow: 0 0 0 3px var(--accent-soft); outline: 0; }
 .seg-ctl { display: inline-flex; border: 1px solid var(--line-2); border-radius: 8px; padding: 2px; background: var(--surface-2); gap: 2px; }
-.segbtn { border: 0; background: transparent; border-radius: 6px; padding: 4px 11px; color: var(--fg-2); font-weight: 550; }
+.segbtn { border: 0; background: transparent; border-radius: 6px; padding: 4px 11px; color: var(--fg-2); font-weight: 550; white-space: nowrap; }
 .segbtn.on { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(17, 22, 36, .12); }
 .sactions { display: flex; align-items: center; gap: 8px; justify-content: flex-end; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line-2); }
 .fstatus { margin-right: auto; font-size: 12px; color: var(--fg-2); }
@@ -732,6 +745,10 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .mcard.wide .mb { max-height: min(70vh, 640px); }
 .settings-host { border: 1px solid var(--line-2); border-radius: 10px; overflow: hidden; display: flex; min-height: 360px; max-height: 52vh; }
 .settings-host .settings { flex: 1; }
+/* The Start screen's settings sit in a narrower sheet: a shorter label column keeps each choice on one line. */
+.settings-host .frow:not(.ftoggle) { grid-template-columns: 140px minmax(0, 1fr); }
+.themeico { display: inline-block; width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid currentColor; background: linear-gradient(90deg, currentColor 50%, transparent 50%); box-sizing: border-box; vertical-align: middle; }
+.settings-host .slist { width: 170px; }
 .inrow { display: flex; gap: 8px; align-items: center; }
 .inrow input { flex: 1; min-width: 0; }
 .nameedit .flabel { font-weight: 600; color: var(--fg-2); font-size: 11.5px; }
@@ -947,7 +964,6 @@ button.agfhit:hover { background: var(--surface-2); color: var(--accent); }
 /* claude code settings */
 .setrow { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line-2); }
 .setrow .mode { margin-left: auto; font-size: 11px; font-weight: 650; color: var(--ok); background: var(--ok-soft); border-radius: 6px; padding: 2px 8px; }
-.switch { display: flex; align-items: center; gap: 9px; font-weight: 600; color: var(--fg); }
 
 /* ---- exclusions: grouped out-of-scope domains ---- */
 .excluded { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
@@ -1001,7 +1017,7 @@ button.agfhit:hover { background: var(--surface-2); color: var(--accent); }
 .mpinc { font-size: 11px; }
 .mpf { display: flex; align-items: center; gap: 8px; font-size: 11px; }
 .mpf .btn { margin-left: auto; }
-.mico { width: 30px; height: 30px; border-radius: 8px; display: inline-grid; place-items: center; font-size: 14px; flex: 0 0 auto; background: var(--surface-2); color: var(--fg-2); }
+.mico { width: 30px; height: 30px; border-radius: 8px; display: inline-grid; place-items: center; line-height: 1; font-size: 14px; flex: 0 0 auto; background: var(--surface-2); color: var(--fg-2); }
 .mico.big { width: 40px; height: 40px; font-size: 18px; border-radius: 10px; }
 .mico.k-skill { background: var(--accent-soft); color: var(--accent); }
 .mico.k-rules { background: var(--info-soft); color: var(--info); }
@@ -1109,7 +1125,8 @@ button.agfhit:hover { background: var(--surface-2); color: var(--accent); }
 .rname { font-weight: 650; font-size: 15px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rcard .ppath { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rfoot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
-.rfoot .pstate { overflow: hidden; text-overflow: ellipsis; }
+.rfoot .pstate { overflow: hidden; text-overflow: ellipsis; padding: 3px 0 3px 3px; }
+.pstate .dot { flex: 0 0 auto; }
 
 /* ---------- Bench payload runs ---------- */
 .seg.benchpanel { flex: 0 0 auto; }

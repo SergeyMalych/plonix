@@ -109,7 +109,7 @@
 [data-style="studio"] .sev.medium { background: var(--st-yellow); color: #1e1c19; }
 
 /* Market: one flat shape per kind of item */
-[data-style="studio"] .mico { font-size: 0; border-radius: 50%; background: var(--surface-2); color: var(--st-ink); }
+[data-style="studio"] .mico { font-size: 0; line-height: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--surface-2); color: var(--st-ink); }
 [data-style="studio"] .mico::before { content: ""; width: 14px; height: 14px; background: var(--st-ink); }
 [data-style="studio"] .mico.big::before { width: 18px; height: 18px; }
 [data-style="studio"] .mico.k-skill::before { background: var(--st-red); clip-path: polygon(50% 0, 63% 37%, 100% 50%, 63% 63%, 50% 100%, 37% 63%, 0 50%, 37% 37%); }
