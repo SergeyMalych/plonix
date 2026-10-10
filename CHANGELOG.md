@@ -10,11 +10,10 @@ What changed in each Plonix release. The newest release is at the top.
 - **Studio is now the default look** for the app and the website. In Studio each kind of Market item has its own flat shape, and the app ships with a red, yellow and blue Studio icon. Classic is one click away in Settings › Appearance › Style, or "Try classic" on the website, and picking a style switches every open window.
 - **Small windows**: Open target, Settings and Collapse stay visible in the sidebar, the Lens shrinks to fit, toolbars wrap instead of cutting off buttons, and Traffic gives the Path column room below 1180px.
 - **Map**: the host list looks like the Users list.
-- **Website**: every app screenshot has a Studio version.
+- **Website**: every app screenshot and the tour video have a Studio version.
 
 ### Fixed
 - The capture browser no longer shows a yellow "unsupported command-line flag" bar. HTTPS capture works as before.
-- Closing the demo strip with ✕ no longer hides "Take the tour" for good: the strip comes back the next time the demo opens.
 
 ## [0.1.3] - 2026-10-09
 
