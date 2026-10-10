@@ -171,10 +171,12 @@ function demoBar() {
     h('span', { class: 'tour' }, h('button', { class: 'btn sm primary', text: 'Take the tour', title: 'A short walk through every part of Plonix  (about two minutes)', onclick: () => startTour() })),
     h('button', {
       class: 'iconbtn x',
-      title: 'Hide the tour',
+      title: 'Hide this strip until the demo opens again',
       text: '✕',
       onclick: () => {
-        pstore('plonix.demoTourClosed', true);
+        // Hidden for this window only: the strip holds the only Take the tour
+        // button, so hiding it for good would leave no way back to the tour.
+        S.demoBarHidden = true;
         bar.remove();
       },
     }),
