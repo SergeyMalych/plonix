@@ -48,6 +48,7 @@ async function renderSettings(main) {
       if (section.id === 'storage') el.append(storagePanel());
       if (section.id === 'replace') el.append(replacePanel());
       if (section.id === 'client-certs') el.append(clientCertPanel());
+      if (section.id === 'usage') el.append(usagePanel());
     },
   });
 }
@@ -100,4 +101,46 @@ function storagePanel() {
     })
     .catch((e) => clear(panel, h('p', { text: e.message })));
   return panel;
+}
+
+/** Usage statistics: the report exactly as it would be sent, and a way to start over. */
+function usagePanel() {
+  const panel = h('div', { class: 'spanel' }, h('h4', { text: 'What is sent' }), h('p', { text: 'Loading…' }));
+  const show = (v) => {
+    const state = v.sharing ? 'On.' : v.disabled_by_env ? 'Off: PLONIX_NO_ANALYTICS or DO_NOT_TRACK is set on this computer.' : 'Off. Nothing is counted or sent.';
+    const last = v.last_sent ? ' Last sent ' + fmtDate(v.last_sent * 1000) + '.' : '';
+    clear(
+      panel,
+      h('h4', { text: 'What is sent' }),
+      h('p', null, state + last + ' The totals from everyone who shares are public at ', h('a', { href: 'https://plonix.io/analytics', target: '_blank', rel: 'noopener', text: 'plonix.io/analytics' }), '.'),
+      h(
+        'div',
+        { class: 'row' },
+        h('button', { class: 'btn', text: 'Show What Is Sent…', onclick: () => showReport(v) }),
+        h('button', {
+          class: 'btn',
+          text: 'Reset Install ID',
+          title: 'Deletes the counts kept so far; the next one starts with a new random id',
+          disabled: !v.sharing,
+          onclick: async () => show(await api('/api/usage/reset', { method: 'POST' })),
+        }),
+      ),
+    );
+  };
+  api('/api/usage')
+    .then(show)
+    .catch((e) => clear(panel, h('p', { text: e.message })));
+  return panel;
+}
+
+function showReport(v) {
+  modal(
+    'The next usage report',
+    [
+      h('p', { class: 'mnote', text: `Sent at most once a day to ${v.endpoint}, exactly as below. Sizes are ranges; rejected hosts outside a fixed list of well-known services are only counted as "other".` }),
+      h('pre', { class: 'mono', style: { maxHeight: '50vh', overflow: 'auto', whiteSpace: 'pre-wrap' }, text: JSON.stringify(v.next_report, null, 2) }),
+    ],
+    [h('button', { class: 'btn primary', text: 'Done', onclick: closeModal })],
+    true,
+  );
 }

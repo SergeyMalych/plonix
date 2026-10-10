@@ -222,7 +222,7 @@ function showTerms(t) {
                 null,
                 off
                   ? 'Off: PLONIX_NO_ANALYTICS or DO_NOT_TRACK is set on this computer. '
-                  : 'Once a day: how often features are used, the Plonix version, OS and CPU type. Never URLs, traffic, project names or anything you type. Change it any time in Settings. ',
+                  : 'Off unless you tick it. Once a day: how often features and screens are used, sizes as ranges, the Plonix version, OS and CPU type. Never URLs, hosts, traffic, project names or anything you type. Totals are public at plonix.io/analytics. ',
                 h('a', { href: t.privacy_url, target: '_blank', rel: 'noopener', text: 'Exactly what is sent' }),
               ),
             ),

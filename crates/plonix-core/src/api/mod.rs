@@ -120,7 +120,8 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/api/ui/launch", post(ui_launch))
         .route("/api/ui/style", get(ui_style).put(put_ui_style))
         .route("/api/status", get(status))
-        .route("/api/usage", post(usage_screen))
+        .route("/api/usage", get(usage_preview).post(usage_screen))
+        .route("/api/usage/reset", post(usage_reset))
         .route("/api/shutdown", post(shutdown))
         .merge(agents::routes())
         .merge(bench::routes())
@@ -408,13 +409,38 @@ struct UsageBody {
     event: String,
 }
 
-/// Counts a screen the window opened, for anonymous usage statistics (see
+/// Counts a screen the window opened (`screen_<name>`) or an active minute
+/// on one (`minute_<name>`), for anonymous usage statistics (see
 /// [`crate::usage`]). Only screen names are taken here.
 async fn usage_screen(caller: MaybeCaller, Json(b): Json<UsageBody>) -> Response {
-    if is_user(&caller) && b.event.starts_with("screen_") {
-        crate::usage::record(&b.event);
+    if is_user(&caller) {
+        if b.event.starts_with("screen_") {
+            crate::usage::record(&b.event);
+        } else if let Some(screen) = b.event.strip_prefix("minute_") {
+            crate::usage::record_minute(screen);
+        }
     }
     StatusCode::NO_CONTENT.into_response()
+}
+
+/// Whether statistics are on, and the next report exactly as it would be sent.
+async fn usage_preview(State(s): State<AppState>, caller: MaybeCaller) -> Response {
+    if !is_user(&caller) {
+        return err(StatusCode::FORBIDDEN, "user_only", "only the person using Plonix can see this");
+    }
+    crate::usage::flush();
+    Json(crate::usage::preview(&s.home)).into_response()
+}
+
+/// Deletes everything kept for statistics; the next count makes a new install id.
+async fn usage_reset(State(s): State<AppState>, caller: MaybeCaller) -> Response {
+    if !is_user(&caller) {
+        return err(StatusCode::FORBIDDEN, "user_only", "only the person using Plonix can do this");
+    }
+    match crate::usage::reset(&s.home) {
+        Ok(()) => Json(crate::usage::preview(&s.home)).into_response(),
+        Err(e) => internal(e),
+    }
 }
 
 async fn shutdown(State(s): State<AppState>) -> Response {

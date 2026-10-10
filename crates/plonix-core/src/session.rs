@@ -114,6 +114,7 @@ pub async fn open(home: &Home, mut project: Project, options: OpenOptions) -> Re
     let session = Session { engine, project, api_addr, token, home: home.clone(), _lock: lock };
     session.announce()?;
     crate::usage::record(if session.project.file.demo { "demo_opened" } else { "project_opened" });
+    session.usage_snapshot();
     tracing::info!("{}: proxy {}, API {}", session.project.name(), session.proxy_addr(), api_addr);
     Ok(session)
 }
@@ -133,6 +134,18 @@ async fn bind_api(preferred: Option<u16>) -> Result<TcpListener> {
 }
 
 impl Session {
+    /// Leaves this project's sizes, as ranges, for anonymous usage statistics
+    /// (see [`crate::usage::project_snapshot`]). Nothing is read when they are off.
+    fn usage_snapshot(&self) {
+        if !crate::usage::sharing(&self.home) {
+            return;
+        }
+        let store = &self.engine.store;
+        let (Ok(requests), Ok(hosts)) = (store.count(), store.distinct_hosts()) else { return };
+        let snapshot = crate::usage::project_snapshot(requests.max(0) as u64, &hosts, &self.engine.rules());
+        crate::usage::snapshot_project(self.project.id(), snapshot);
+    }
+
     pub fn proxy_addr(&self) -> SocketAddr {
         self.engine.proxy_addr().unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 0)))
     }
@@ -168,6 +181,7 @@ impl Session {
     /// Stops the engine, applies "keep only in-scope traffic", withdraws the
     /// announcement and releases the project.
     pub fn close(mut self) -> Result<Option<PruneReport>> {
+        self.usage_snapshot();
         self.engine.request_shutdown();
         let storage = StorageSettings::from_values(&Project::load(&self.project.dir).map(|p| p.settings(settings::STORAGE)).unwrap_or_default());
         let mut report = None;

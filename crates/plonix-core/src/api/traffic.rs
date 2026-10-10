@@ -245,6 +245,10 @@ async fn traffic(State(s): State<AppState>, caller: MaybeCaller, Query(p): Query
         Ok(q) => q,
         Err(e) => return err(StatusCode::BAD_REQUEST, "bad_query", &e.to_string()),
     };
+    // Anonymous usage statistics count the kinds of the terms, never the query.
+    if is_user(&caller) {
+        crate::usage::record_filters(&p.q);
+    }
     // Added as a term, not as text, so nothing in the agent's query can swallow it.
     if agent_in_scope_only(&s, &caller) {
         q.terms.push(crate::query::Term { negate: false, field: crate::query::Field::Scope(true) });

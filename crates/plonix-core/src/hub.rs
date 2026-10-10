@@ -358,7 +358,7 @@ async fn terms(State(hub): State<Arc<Hub>>) -> Response {
         "license": crate::terms::LICENSE,
         "terms_url": crate::terms::TERMS_URL,
         "privacy_url": crate::terms::PRIVACY_URL,
-        "share_usage": crate::usage::sharing(&hub.home) || !crate::terms::accepted(&hub.home),
+        "share_usage": crate::usage::sharing(&hub.home),
         "usage_disabled_by_env": crate::usage::disabled_by_env(),
     }))
     .into_response()

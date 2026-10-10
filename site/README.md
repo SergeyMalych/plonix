@@ -29,7 +29,9 @@ It is hosted on Cloudflare Pages, connected to this repository. Every push to `m
 | Root directory | the repository root (empty) |
 | Custom domain | `plonix.io` |
 
-The Pages project also serves one function, `POST /api/usage`, from [`functions/api/usage.js`](../functions/api/usage.js) at the repository root (Pages looks for `functions/` in the root directory, not in the output directory). It receives the anonymous usage reports Plonix sends at most once a day, described in [docs/privacy.md](../docs/privacy.md). It checks each report's shape and size, keeps only the expected fields and the known feature names, and writes one row per install per day to a D1 database. IP addresses and headers are not stored. Until the database is bound, it answers `204` and stores nothing, so the site works either way.
+The Pages project also serves two functions from `functions/` at the repository root. `POST /api/usage`, from [`functions/api/usage.js`](../functions/api/usage.js) at the repository root (Pages looks for `functions/` in the root directory, not in the output directory). It receives the anonymous usage reports Plonix sends at most once a day, described in [docs/privacy.md](../docs/privacy.md). It checks each report's shape and size, keeps only the expected fields and the known feature names, and writes one row per install per day to a D1 database. IP addresses and headers are not stored. Until the database is bound, it answers `204` and stores nothing, so the site works either way.
+
+`GET /api/stats`, from [`functions/api/stats.js`](../functions/api/stats.js), feeds the public page [plonix.io/analytics](analytics.html). It reads the last 30 days of reports and the download counts of the GitHub releases, and answers totals only: any group of fewer than five installs is folded into "other" or left out. The answer is cached for an hour. Without the database the page still shows downloads. `node scripts/check-functions.mjs` tests both functions (CI runs it).
 
 There is no `wrangler.toml` on purpose: with one, Pages takes its settings from the file instead of the dashboard. The binding below is set in the dashboard.
 
@@ -37,15 +39,15 @@ There is no `wrangler.toml` on purpose: with one, Pages takes its settings from 
 
 1. **Create the database.** Cloudflare dashboard › Storage & Databases › D1 › Create database. Name it `plonix-usage`.
    (Or from a terminal: `npx wrangler d1 create plonix-usage`.)
-2. **Create the table.** Open the database › Console, paste the contents of [`migrations/0001_usage.sql`](../migrations/0001_usage.sql) and run it.
-   (Or: `npx wrangler d1 execute plonix-usage --remote --file migrations/0001_usage.sql`.)
+2. **Create the table.** Open the database › Console, paste the contents of [`migrations/0001_usage.sql`](../migrations/0001_usage.sql) and run it, then the same for [`migrations/0002_usage_extra.sql`](../migrations/0002_usage_extra.sql). On a database made before `0002` existed, run only `0002`.
+   (Or: `npx wrangler d1 execute plonix-usage --remote --file migrations/0001_usage.sql`, then the same with `0002_usage_extra.sql`.)
 3. **Bind it to the site.** Workers & Pages › the plonix.io Pages project › Settings › Bindings › Add › D1 database. Variable name `USAGE`, database `plonix-usage`. Add it for Production. Preview is optional; without it, preview deployments store nothing.
 4. **Redeploy.** Bindings take effect on the next deployment: push to `main`, or Deployments › the latest one › Retry deployment.
 5. **Check it.** This should print `HTTP/2 204`:
 
    ```sh
    curl -si https://plonix.io/api/usage -H 'Content-Type: application/json' \
-     -d '{"schema":1,"install_id":"00000000000000000000000000000000","version":"0.0.0-test","os":"macos","os_version":"15.1","arch":"aarch64","counts":{"app_launched":1}}' | head -1
+     -d '{"schema":2,"install_id":"00000000000000000000000000000000","version":"0.0.0-test","os":"macos","os_version":"15.1","arch":"aarch64","counts":{"app_launched":1},"minutes":{"traffic":1}}' | head -1
    ```
 
    The row shows up in the D1 console. Remove it with `DELETE FROM usage_reports WHERE version = '0.0.0-test';`

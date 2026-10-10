@@ -1,6 +1,6 @@
 # Plonix Terms of Use
 
-Version 1
+Version 2
 
 Plonix is free and open-source software under the [Apache License 2.0](LICENSE). These terms add a few plain rules on top of the license. By using Plonix you agree to both.
 
@@ -22,7 +22,7 @@ Captured traffic, projects, findings and settings are stored only on your comput
 
 ## Anonymous usage statistics
 
-If you allow it, Plonix sends anonymous usage statistics at most once a day: a random install id, the Plonix version, your operating system and CPU type, and how many times features were used (for example "3 projects opened, 12 Bench sends"). Never URLs, hosts, traffic, project names, file paths or anything you type. You can turn it off any time in Settings, or with `PLONIX_NO_ANALYTICS=1` or `DO_NOT_TRACK=1`. [docs/privacy.md](docs/privacy.md) lists exactly what is sent.
+Plonix can send anonymous usage statistics at most once a day, but only if you turn them on. They hold a random install id, the Plonix version, your operating system and CPU type, how many times features were used and for how many minutes each screen was in use, the kinds of search terms used (never what you typed), the kind of work you picked, and the sizes of your projects as ranges. Rejected domains are named only when they belong to a fixed list of well-known services such as analytics or ad networks; any other host is counted as "other". Never URLs, hosts, traffic, project names, file paths or anything you type. You can turn it off any time in Settings, or with `PLONIX_NO_ANALYTICS=1` or `DO_NOT_TRACK=1`. Totals from everyone who shares, never single installs, are public at [plonix.io/analytics](https://plonix.io/analytics). [docs/privacy.md](docs/privacy.md) lists exactly what is sent.
 
 ## Changes
 
