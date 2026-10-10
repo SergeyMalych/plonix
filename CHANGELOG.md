@@ -4,6 +4,9 @@ What changed in each Plonix release. The newest release is at the top.
 
 ## [Unreleased]
 
+### Fixed
+- Closing the demo strip no longer hides the walkthrough for good. The strip, with **Take the tour**, comes back the next time the demo opens.
+
 ## [0.1.4] - 2026-10-10
 
 ### Changed

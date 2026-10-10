@@ -132,7 +132,7 @@ function renderShell() {
         h('button', { class: 'iconbtn', title: 'Theme (auto / light / dark)', onclick: cycleTheme, text: '◐' }),
       ),
     ),
-    S.status.demo && !pstore('plonix.demoTourClosed') ? demoBar() : null,
+    S.status.demo && !S.demoBarHidden ? demoBar() : null,
     h(
       'div',
       { class: 'body' },
