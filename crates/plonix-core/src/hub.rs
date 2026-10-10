@@ -265,6 +265,7 @@ fn router(hub: Arc<Hub>) -> Router {
         .route("/ui/{*file}", get(ui::file))
         .route("/ui/session", post(ui_session))
         .route("/api/ui/launch", post(ui_launch))
+        .route("/api/ui/style", get(ui_style).put(put_ui_style))
         .route("/api/hub", get(about))
         .route("/api/terms", get(terms).post(accept_terms))
         .route("/api/starter", get(starter).post(install_starter))
@@ -621,6 +622,17 @@ fn rename(hub: &Hub, dir: &FsPath, values: &Value) -> Response {
     match r {
         Ok(p) => Json(json!({ "section": "general", "values": { "name": p.name() } })).into_response(),
         Err(e) => internal(e),
+    }
+}
+
+async fn ui_style(State(hub): State<Arc<Hub>>) -> Response {
+    Json(json!({ "style": settings::style(&hub.home) })).into_response()
+}
+
+async fn put_ui_style(State(hub): State<Arc<Hub>>, Json(b): Json<crate::api::StyleBody>) -> Response {
+    match settings::set_style(&hub.home, &b.style) {
+        Ok(()) => Json(json!({ "style": settings::style(&hub.home) })).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, "bad_style", &e.to_string()),
     }
 }
 

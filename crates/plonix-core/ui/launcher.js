@@ -57,7 +57,7 @@ function slug(name) {
 async function boot() {
   const t = store('plonix.theme');
   if (t && t !== 'auto') document.documentElement.setAttribute('data-theme', t);
-  if (store('plonix.style') === 'studio') document.documentElement.setAttribute('data-style', 'studio');
+  if (store('plonix.style') !== 'classic') document.documentElement.setAttribute('data-style', 'studio');
   const hash = location.hash;
   if (hash.startsWith('#code=')) {
     history.replaceState(null, '', location.pathname);
@@ -72,6 +72,13 @@ async function boot() {
   }
   L.token = store('plonix.hubtoken');
   if (!L.token) return showLock();
+  api('/api/ui/style')
+    .then((r) => {
+      if (r.style === 'classic') document.documentElement.removeAttribute('data-style');
+      else document.documentElement.setAttribute('data-style', 'studio');
+      store('plonix.style', r.style);
+    })
+    .catch(() => {});
   let terms;
   try {
     [L.about, terms] = await Promise.all([api('/api/hub'), api('/api/terms')]);

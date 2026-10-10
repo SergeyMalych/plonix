@@ -392,6 +392,33 @@ pub fn save_global(home: &Home, id: &str, values: &Values) -> Result<()> {
     write_atomic(&global_path(home), &serde_json::to_vec_pretty(&file)?)
 }
 
+// ---- window style ---------------------------------------------------------
+
+/// Where the window style is kept in settings.json. Not a registered section:
+/// the windows show it under Appearance, next to theme and spacing.
+const LOOK: &str = "look";
+
+/// The window style every Plonix window shares: "studio" (the default) or
+/// "classic". The desktop app also picks its icon from it.
+pub fn style(home: &Home) -> &'static str {
+    let file = read_global(home);
+    match file.sections.get(LOOK).and_then(|v| v.get("style")).and_then(Value::as_str) {
+        Some("classic") => "classic",
+        _ => "studio",
+    }
+}
+
+pub fn set_style(home: &Home, style: &str) -> Result<()> {
+    if style != "classic" && style != "studio" {
+        anyhow::bail!("style must be classic or studio");
+    }
+    home.ensure()?;
+    crate::paths::set_aside_unreadable::<GlobalFile>(&global_path(home));
+    let mut file = read_global(home);
+    file.sections.insert(LOOK.to_string(), json!({ "style": style }));
+    write_atomic(&global_path(home), &serde_json::to_vec_pretty(&file)?)
+}
+
 // ---- built-in sections ---------------------------------------------------
 
 pub const PROXY: &str = "proxy";
@@ -678,5 +705,18 @@ mod tests {
         let home = Home { root: tempfile::tempdir().unwrap().keep() };
         let i = InterfaceSettings::load(&home);
         assert!(!i.open_in_browser);
+    }
+
+    #[test]
+    fn style_is_studio_until_classic_is_picked() {
+        let home = Home { root: tempfile::tempdir().unwrap().keep() };
+        assert_eq!(style(&home), "studio");
+        save_global(&home, INTERFACE, &section(INTERFACE).unwrap().resolve(None)).unwrap();
+        set_style(&home, "classic").unwrap();
+        assert_eq!(style(&home), "classic");
+        assert!(set_style(&home, "neon").is_err());
+        assert_eq!(style(&home), "classic");
+        assert!(global_values(&home).contains_key(INTERFACE), "the style keeps the other sections");
+        assert!(!describe(&home, None).to_string().contains("\"look\""), "the style is not a section of its own");
     }
 }

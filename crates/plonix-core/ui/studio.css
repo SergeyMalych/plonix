@@ -97,3 +97,15 @@
 [data-style="studio"] .ttable tbody tr.picked td:first-child { box-shadow: inset 4px 0 0 var(--st-yellow); }
 [data-style="studio"] .sev.critical { background: var(--st-red); color: #fff; }
 [data-style="studio"] .sev.medium { background: var(--st-yellow); color: #1e1c19; }
+
+/* Market: one flat shape per kind of item */
+[data-style="studio"] .mico { font-size: 0; border-radius: 50%; background: var(--surface-2); color: var(--st-ink); }
+[data-style="studio"] .mico::before { content: ""; width: 14px; height: 14px; background: var(--st-ink); }
+[data-style="studio"] .mico.big::before { width: 18px; height: 18px; }
+[data-style="studio"] .mico.k-skill::before { background: var(--st-red); clip-path: polygon(50% 0, 63% 37%, 100% 50%, 63% 63%, 50% 100%, 37% 63%, 0 50%, 37% 37%); }
+[data-style="studio"] .mico.k-rules::before { background: transparent; border: 3px solid var(--st-blue); border-radius: 50%; box-sizing: border-box; }
+[data-style="studio"] .mico.k-filters::before { background: var(--st-green); clip-path: polygon(0 8%, 100% 8%, 50% 92%); }
+[data-style="studio"] .mico.k-list::before { background: repeating-linear-gradient(180deg, var(--st-ink) 0 3px, transparent 3px 5.5px); }
+[data-style="studio"] .mico.k-bundle::before { background: conic-gradient(var(--st-red) 0 25%, var(--st-blue) 0 50%, var(--st-yellow) 0 75%, var(--st-green) 0); }
+[data-style="studio"] .mico.k-extension::before { background: var(--st-yellow); }
+[data-style="studio"] .mico.k-platform::before { background: var(--st-pink); border-radius: 100% 0 0 0; }

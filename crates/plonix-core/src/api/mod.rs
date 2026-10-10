@@ -118,6 +118,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/ui/guide/{file}", get(ui::guide_shot))
         .route("/ui/session", post(ui_session))
         .route("/api/ui/launch", post(ui_launch))
+        .route("/api/ui/style", get(ui_style).put(put_ui_style))
         .route("/api/status", get(status))
         .route("/api/usage", post(usage_screen))
         .route("/api/shutdown", post(shutdown))
@@ -228,6 +229,23 @@ async fn ui_launch(State(s): State<AppState>) -> Response {
         }))
         .into_response(),
         Err(e) => internal(e),
+    }
+}
+
+#[derive(Deserialize)]
+pub(crate) struct StyleBody {
+    pub(crate) style: String,
+}
+
+/// The window style all projects share (see `settings::style`).
+async fn ui_style(State(s): State<AppState>) -> Response {
+    Json(json!({ "style": crate::settings::style(&s.home) })).into_response()
+}
+
+async fn put_ui_style(State(s): State<AppState>, Json(b): Json<StyleBody>) -> Response {
+    match crate::settings::set_style(&s.home, &b.style) {
+        Ok(()) => Json(json!({ "style": crate::settings::style(&s.home) })).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, "bad_style", &e.to_string()),
     }
 }
 

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-style="studio">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -8,11 +8,12 @@
 <meta property="og:title" content="Plonix">
 <meta property="og:description" content="Open-source, macOS-native web security workbench: intercept, adaptive scope, fast search, scriptable API, AI-native.">
 <meta property="og:url" content="https://plonix.io/">
-<meta property="og:image" content="https://plonix.io/assets/window-light.webp">
+<meta property="og:image" content="https://plonix.io/assets/studio-window-light.webp">
 <link rel="canonical" href="https://plonix.io/">
 <meta name="theme-color" content="#f5f5fa" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0d0e13" media="(prefers-color-scheme: dark)">
-<link rel="icon" href="assets/plonix-mark.svg" type="image/svg+xml">
+<link rel="icon" id="favicon" href="assets/studio-mark.svg" type="image/svg+xml">
+<script>try { if (localStorage.getItem('plonix-style') === 'classic') document.documentElement.removeAttribute('data-style'); } catch (e) {}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Jost:wght@400..700&display=swap">
@@ -418,7 +419,7 @@ footer a:hover { color: var(--fg); }
 .mr-result[hidden] { display: none; }
 .mr-note { margin-top: 14px; color: var(--faint); font-size: .9rem; text-align: center; }
 
-/* ---------- Studio: the optional style behind the "I like style" button ---------- */
+/* ---------- Studio: the default style; the style button switches to Classic and back ---------- */
 .style-btn { height: 36px; border-radius: 999px; border: 1px solid var(--line); background: var(--ink-2); color: var(--fg); display: inline-flex; align-items: center; gap: 8px; cursor: pointer; margin-left: 4px; padding: 0 14px 0 10px; font: 600 .9rem var(--body); white-space: nowrap; }
 .style-btn:hover { border-color: var(--fg); }
 .style-btn svg { width: 22px; height: 14px; flex: none; }
@@ -451,9 +452,9 @@ footer a:hover { color: var(--fg); }
 [data-style="studio"] body { font-size: 18px; }
 [data-style="studio"] .style-btn { background: var(--st-yellow); border-color: var(--st-yellow); color: #1e1c19; }
 [data-style="studio"] .style-btn path { fill: #1e1c19; }
-[data-style="studio"] .brand svg rect { fill: var(--st-red); }
-[data-style="studio"] .brand svg g { stroke: #1e1c19; }
-[data-style="studio"] .brand svg > circle { fill: #f1b11b; }
+.brand .mark-studio { display: none; }
+[data-style="studio"] .brand svg { display: none; }
+[data-style="studio"] .brand .mark-studio { display: block; }
 [data-style="studio"] h1, [data-style="studio"] h2 { font-weight: 700; letter-spacing: -.02em; }
 [data-style="studio"] h2 { font-size: clamp(2.2rem, 4.6vw, 3.6rem); }
 [data-style="studio"] .eyebrow::before { width: 10px; height: 10px; border: 0; background: var(--st-red); box-shadow: 14px 0 0 var(--st-yellow), 28px 0 0 var(--st-blue); margin-right: 28px; }
@@ -503,6 +504,7 @@ footer a:hover { color: var(--fg); }
   <div class="wrap">
     <a class="brand" href="#top" aria-label="Plonix home">
       <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>
+      <svg class="mark-studio" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#e5401f"/><rect x="7" y="6" width="5" height="20" fill="#1e1c19"/><circle cx="18" cy="13" r="7" fill="#f1b11b"/><path d="M18 6a7 7 0 0 1 0 14z" fill="#1d4fc4"/></svg>
       Plonix
     </a>
     <nav class="nav-links" aria-label="Sections">
@@ -516,7 +518,7 @@ footer a:hover { color: var(--fg); }
       <a href="docs/">Docs</a>
     </nav>
     <button type="button" class="theme-btn" id="theme" aria-label="Switch to dark mode" title="Switch theme"></button>
-    <button type="button" class="style-btn" id="style" aria-pressed="false"><svg viewBox="0 0 22 14" aria-hidden="true"><circle cx="5" cy="7" r="5" fill="#e5401f"/><path d="M8 14a5 5 0 0 1 10 0z" fill="#f1b11b"/><circle cx="17" cy="7" r="5" fill="#1d4fc4"/></svg><span>I like style</span></button>
+    <button type="button" class="style-btn" id="style" aria-pressed="true"><svg viewBox="0 0 22 14" aria-hidden="true"><circle cx="5" cy="7" r="5" fill="#e5401f"/><path d="M8 14a5 5 0 0 1 10 0z" fill="#f1b11b"/><circle cx="17" cy="7" r="5" fill="#1d4fc4"/></svg><span>Try classic</span></button>
     <a class="btn small" href="https://github.com/SergeyMalych/plonix">
       <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
       GitHub
@@ -564,7 +566,7 @@ footer a:hover { color: var(--fg); }
   <div class="wrap">
     <div class="shot">
       <div class="bar"><i></i><i></i><i></i><span>Plonix</span></div>
-      <img class="shot-light" src="assets/window-light.webp" fetchpriority="high" width="1920" height="1200" alt="The Plonix window: live traffic with filter chips, a scope suggestion for a newly seen domain, and the Lens showing a request and its response."><img class="shot-dark" src="assets/window-dark.webp" loading="lazy" width="1920" height="1200" alt="The Plonix window: live traffic with filter chips, a scope suggestion for a newly seen domain, and the Lens showing a request and its response.">
+      <img class="shot-light" src="assets/studio-window-light.webp" fetchpriority="high" width="1920" height="1200" alt="The Plonix window: live traffic with filter chips, a scope suggestion for a newly seen domain, and the Lens showing a request and its response."><img class="shot-dark" src="assets/studio-window-dark.webp" loading="lazy" width="1920" height="1200" alt="The Plonix window: live traffic with filter chips, a scope suggestion for a newly seen domain, and the Lens showing a request and its response.">
     </div>
     <p class="shot-caption">The Plonix window, capturing. A new domain is suggested for scope with the evidence behind it.</p>
   </div>
@@ -645,7 +647,7 @@ footer a:hover { color: var(--fg); }
   returned errors, then read the most interesting
   request and tell me what stands out.</span></pre>
       </div>
-      <div class="light-shot"><img class="shot-light" src="assets/ask-light.webp" loading="lazy" width="1440" height="820" alt="The Ask Claude Code dialog: a question and the request, response, spotted values and technologies it will share, each with a token count."><img class="shot-dark" src="assets/ask-dark.webp" loading="lazy" width="1440" height="820" alt="The Ask Claude Code dialog: a question and the request, response, spotted values and technologies it will share, each with a token count."></div>
+      <div class="light-shot"><img class="shot-light" src="assets/studio-ask-light.webp" loading="lazy" width="1440" height="820" alt="The Ask Claude Code dialog: a question and the request, response, spotted values and technologies it will share, each with a token count."><img class="shot-dark" src="assets/studio-ask-dark.webp" loading="lazy" width="1440" height="820" alt="The Ask Claude Code dialog: a question and the request, response, spotted values and technologies it will share, each with a token count."></div>
     </div>
     <div class="guard reveal">
       <div><b>Read-only by default</b><span>Agents sign in with their own token. Anything but reading is refused by the engine.</span></div>
@@ -671,7 +673,7 @@ footer a:hover { color: var(--fg); }
         </div>
         <p style="font-size:.93rem">Detection runs locally, on traffic you already captured. A token's signature is never claimed valid.</p>
       </div>
-      <div class="light-shot"><img class="shot-light" src="assets/lens-light.webp" loading="lazy" width="1920" height="733" alt="The Lens with a JWT spotted in the authorization header, its header decoded, and the token highlighted in the request."><img class="shot-dark" src="assets/lens-dark.webp" loading="lazy" width="1920" height="733" alt="The Lens with a JWT spotted in the authorization header, its header decoded, and the token highlighted in the request."></div>
+      <div class="light-shot"><img class="shot-light" src="assets/studio-lens-light.webp" loading="lazy" width="1920" height="733" alt="The Lens with a JWT spotted in the authorization header, its header decoded, and the token highlighted in the request."><img class="shot-dark" src="assets/studio-lens-dark.webp" loading="lazy" width="1920" height="733" alt="The Lens with a JWT spotted in the authorization header, its header decoded, and the token highlighted in the request."></div>
     </div>
   </div>
 </section>
@@ -689,7 +691,7 @@ footer a:hover { color: var(--fg); }
           <li><div>Enforced in one place <span>replays, sends and agents can only reach accepted hosts</span></div></li>
         </ul>
       </div>
-      <div class="light-shot"><img class="shot-light" src="assets/scope-light.webp" loading="lazy" width="1920" height="1304" alt="The Scope screen: suggested domains, each with the evidence that links it to the target, and buttons to accept or reject."><img class="shot-dark" src="assets/scope-dark.webp" loading="lazy" width="1920" height="1304" alt="The Scope screen: suggested domains, each with the evidence that links it to the target, and buttons to accept or reject."></div>
+      <div class="light-shot"><img class="shot-light" src="assets/studio-scope-light.webp" loading="lazy" width="1920" height="1304" alt="The Scope screen: suggested domains, each with the evidence that links it to the target, and buttons to accept or reject."><img class="shot-dark" src="assets/studio-scope-dark.webp" loading="lazy" width="1920" height="1304" alt="The Scope screen: suggested domains, each with the evidence that links it to the target, and buttons to accept or reject."></div>
     </div>
   </div>
 </section>
@@ -730,7 +732,7 @@ footer a:hover { color: var(--fg); }
           <li><div>Turn a send into a finding in one click</div></li>
         </ul>
       </div>
-      <div class="light-shot"><img class="shot-light" src="assets/bench-light.webp" loading="lazy" width="1920" height="1304" alt="The Bench: a request on the left, its JSON response on the right, and the send history below with Restore, Branch and Finding buttons."><img class="shot-dark" src="assets/bench-dark.webp" loading="lazy" width="1920" height="1304" alt="The Bench: a request on the left, its JSON response on the right, and the send history below with Restore, Branch and Finding buttons."></div>
+      <div class="light-shot"><img class="shot-light" src="assets/studio-bench-light.webp" loading="lazy" width="1920" height="1304" alt="The Bench: a request on the left, its JSON response on the right, and the send history below with Restore, Branch and Finding buttons."><img class="shot-dark" src="assets/studio-bench-dark.webp" loading="lazy" width="1920" height="1304" alt="The Bench: a request on the left, its JSON response on the right, and the send history below with Restore, Branch and Finding buttons."></div>
     </div>
   </div>
 </section>
@@ -747,7 +749,7 @@ footer a:hover { color: var(--fg); }
           <li><div>Any two sends from the tab's history</div></li>
         </ul>
       </div>
-      <div class="light-shot"><img class="shot-light" src="assets/compare-light.webp" loading="lazy" width="1920" height="912" alt="Compare view on the Bench: two order lookups side by side, with the changed lines highlighted. The second order shows another customer's name, email, card number and total."><img class="shot-dark" src="assets/compare-dark.webp" loading="lazy" width="1920" height="912" alt="Compare view on the Bench: two order lookups side by side, with the changed lines highlighted. The second order shows another customer's name, email, card number and total."></div>
+      <div class="light-shot"><img class="shot-light" src="assets/studio-compare-light.webp" loading="lazy" width="1920" height="912" alt="Compare view on the Bench: two order lookups side by side, with the changed lines highlighted. The second order shows another customer's name, email, card number and total."><img class="shot-dark" src="assets/studio-compare-dark.webp" loading="lazy" width="1920" height="912" alt="Compare view on the Bench: two order lookups side by side, with the changed lines highlighted. The second order shows another customer's name, email, card number and total."></div>
     </div>
   </div>
 </section>
@@ -760,7 +762,7 @@ footer a:hover { color: var(--fg); }
         <p>A project is a folder you choose. It holds its own traffic, scope, findings and settings. Open several at once: each gets its own window, proxy port, API and database. Trust the certificate once and it covers them all.</p>
         <p style="font-size:.93rem">Turn on <b style="color:var(--fg);font-weight:600">Keep only in-scope traffic</b> and out-of-scope requests are deleted from disk when the project closes.</p>
       </div>
-      <div class="light-shot"><img class="shot-light" src="assets/projects-light.webp" loading="lazy" width="1896" height="660" alt="The Projects screen with two open projects, Shop API on proxy port 8081 and the Brightcart demo on port 8080."><img class="shot-dark" src="assets/projects-dark.webp" loading="lazy" width="1896" height="660" alt="The Projects screen with two open projects, Shop API on proxy port 8081 and the Brightcart demo on port 8080."></div>
+      <div class="light-shot"><img class="shot-light" src="assets/studio-projects-light.webp" loading="lazy" width="1896" height="660" alt="The Projects screen with two open projects, Shop API on proxy port 8081 and the Brightcart demo on port 8080."><img class="shot-dark" src="assets/studio-projects-dark.webp" loading="lazy" width="1896" height="660" alt="The Projects screen with two open projects, Shop API on proxy port 8081 and the Brightcart demo on port 8080."></div>
     </div>
   </div>
 </section>
@@ -778,7 +780,7 @@ footer a:hover { color: var(--fg); }
           <li><div>Host your own <span>a team Market with its own signing key</span></div></li>
         </ul>
       </div>
-      <div class="light-shot"><img class="shot-light" src="assets/market-light.webp" loading="lazy" width="1920" height="1304" alt="The Market: skills, extensions and rule packs, each marked Built in or Verified, with Install buttons."><img class="shot-dark" src="assets/market-dark.webp" loading="lazy" width="1920" height="1304" alt="The Market: skills, extensions and rule packs, each marked Built in or Verified, with Install buttons."></div>
+      <div class="light-shot"><img class="shot-light" src="assets/studio-market-light.webp" loading="lazy" width="1920" height="1304" alt="The Market: skills, extensions and rule packs, each marked Built in or Verified, with Install buttons."><img class="shot-dark" src="assets/studio-market-dark.webp" loading="lazy" width="1920" height="1304" alt="The Market: skills, extensions and rule packs, each marked Built in or Verified, with Install buttons."></div>
     </div>
   </div>
 </section>
@@ -859,6 +861,7 @@ footer a:hover { color: var(--fg); }
   <div class="wrap">
     <a class="brand" href="#top" aria-label="Plonix home">
       <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>
+      <svg class="mark-studio" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#e5401f"/><rect x="7" y="6" width="5" height="20" fill="#1e1c19"/><circle cx="18" cy="13" r="7" fill="#f1b11b"/><path d="M18 6a7 7 0 0 1 0 14z" fill="#1d4fc4"/></svg>
       Plonix
     </a>
     <span>Open-source web security workbench for macOS. Apache-2.0.</span>
@@ -897,17 +900,18 @@ footer a:hover { color: var(--fg); }
 
   /* ---- style switch: Classic (default) or Studio, saved per browser ---- */
   const sbtn = document.getElementById('style');
-  // every app screenshot has a Studio twin: assets/studio-<name>-<theme>.webp
-  const shots = [...document.querySelectorAll('img.shot-light, img.shot-dark')].filter((i) => /^assets\/[a-z]+-(light|dark)\.webp$/.test(i.getAttribute('src')));
-  shots.forEach((i) => { i.dataset.classic = i.getAttribute('src'); });
+  // every app screenshot has a Classic twin: assets/<name>-<theme>.webp
+  const shots = [...document.querySelectorAll('img.shot-light, img.shot-dark')].filter((i) => /^assets\/studio-[a-z]+-(light|dark)\.webp$/.test(i.getAttribute('src')));
+  shots.forEach((i) => { i.dataset.studio = i.getAttribute('src'); });
   const setStyle = (on) => {
     if (on) root.dataset.style = 'studio'; else delete root.dataset.style;
     sbtn.setAttribute('aria-pressed', on ? 'true' : 'false');
-    sbtn.querySelector('span').textContent = on ? 'Back to classic' : 'I like style';
-    sbtn.title = on ? 'Back to the standard look' : 'Try the Studio style';
-    shots.forEach((i) => { i.src = on ? i.dataset.classic.replace('assets/', 'assets/studio-') : i.dataset.classic; });
+    sbtn.querySelector('span').textContent = on ? 'Try classic' : 'I like style';
+    sbtn.title = on ? 'Switch to the Classic look' : 'Back to the Studio look';
+    shots.forEach((i) => { const src = on ? i.dataset.studio : i.dataset.studio.replace('assets/studio-', 'assets/'); if (i.getAttribute('src') !== src) i.src = src; });
+    document.getElementById('favicon').href = on ? 'assets/studio-mark.svg' : 'assets/plonix-mark.svg';
   };
-  try { if (localStorage.getItem('plonix-style') === 'studio') setStyle(true); } catch (e) {}
+  setStyle(root.dataset.style === 'studio');
   sbtn.addEventListener('click', () => {
     const on = root.dataset.style !== 'studio';
     setStyle(on);
