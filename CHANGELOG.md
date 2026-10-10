@@ -14,6 +14,7 @@ What changed in each Plonix release. The newest release is at the top.
 
 ### Fixed
 - The capture browser no longer shows a yellow "unsupported command-line flag" bar. HTTPS capture works as before.
+- Closing the demo strip with ✕ no longer hides "Take the tour" for good: the strip comes back the next time the demo opens.
 
 ## [0.1.3] - 2026-10-09
 
