@@ -42,13 +42,14 @@
   --sel: #3a3014; --new: #3a3014;
 }
 
-/* title bar: the logo in the three primaries, and three shapes at the far right */
+/* title bar: the logo, and the four primaries at the far right */
 [data-style="studio"] .titlebar .brand { font-weight: 700; }
 [data-style="studio"] :is(.brand img, img[src="/ui/icon.svg"]) { content: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23e5401f'/%3E%3Crect x='7' y='6' width='5' height='20' fill='%231e1c19'/%3E%3Ccircle cx='18' cy='13' r='7' fill='%23f1b11b'/%3E%3Cpath d='M18 6a7 7 0 0 1 0 14z' fill='%231d4fc4'/%3E%3C/svg%3E"); }
-[data-style="studio"] .titlebar::after { content: ""; order: 99; flex: 0 0 46px; width: 46px; height: 16px; background:
+[data-style="studio"] .titlebar::after { content: ""; order: 99; flex: 0 0 61px; width: 61px; height: 16px; background:
   radial-gradient(circle 8px at 8px 8px, var(--st-red) 98%, transparent) 0 0 / 16px 16px no-repeat,
   radial-gradient(circle 8px at 8px 16px, var(--st-yellow) 98%, transparent) 15px 0 / 16px 16px no-repeat,
-  radial-gradient(circle 8px at 8px 8px, var(--st-blue) 98%, transparent) 30px 0 / 16px 16px no-repeat; }
+  radial-gradient(circle 8px at 8px 8px, var(--st-blue) 98%, transparent) 30px 0 / 16px 16px no-repeat,
+  radial-gradient(circle 8px at 8px 16px, var(--st-green) 98%, transparent) 45px 0 / 16px 16px no-repeat; }
 
 /* the blue sidebar; the open tool is a yellow pill */
 [data-style="studio"] .rail { background: var(--st-rail); color: #fff; border-right: 0; --st-ink: #fff; --st-blue: #fff; }
@@ -67,6 +68,9 @@
 [data-style="studio"] .rail .hostlink:hover, [data-style="studio"] .rail .sugg-row:hover { background: #ffffff1f; color: #fff; }
 [data-style="studio"] .rail .sugg-row .rl { color: #ffc533; }
 [data-style="studio"] .rail .mini { background: transparent; border-color: #ffffff50; color: #fff; border-radius: 50%; }
+[data-style="studio"] .rail .mini.ok { background: #16875a; border-color: #16875a; }
+[data-style="studio"] .rail .mini.ok:hover { background: #3dbb83; border-color: #3dbb83; }
+[data-style="studio"] .rail .hostlink::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: #3dbb83; margin-right: 3px; }
 [data-style="studio"] .railmid::before { background: linear-gradient(var(--st-rail), transparent); }
 [data-style="studio"] .railmid::after { background: linear-gradient(transparent, var(--st-rail) 85%); }
 [data-style="studio"] .railmid.more-below { border-bottom-color: #ffffff30; }
@@ -84,7 +88,7 @@
 [data-style="studio"] .nav button[data-v="findings"] .ico { background: var(--st-red); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
 [data-style="studio"] .nav button[data-v="agents"] .ico { background: radial-gradient(circle, var(--st-yellow) 0 32%, var(--st-blue) 33%); border-radius: 50%; }
 [data-style="studio"] .nav button[data-v="market"] .ico { background: conic-gradient(var(--st-red) 0 25%, var(--st-blue) 0 50%, var(--st-yellow) 0 75%, var(--st-green) 0); }
-[data-style="studio"] .nav button[data-v="scans"] .ico { background: repeating-linear-gradient(0deg, var(--st-yellow) 0 3px, transparent 3px 5.5px); border-radius: 50%; }
+[data-style="studio"] .nav button[data-v="scans"] .ico { background: repeating-linear-gradient(0deg, var(--st-green) 0 3px, transparent 3px 5.5px); border-radius: 50%; }
 [data-style="studio"] .nav button[data-v="programs"] .ico { background: var(--st-ink); clip-path: polygon(0 0, 100% 0, 50% 100%); }
 [data-style="studio"] .nav button[data-v="rules"] .ico { background: linear-gradient(90deg, var(--st-pink) 50%, var(--st-ink) 50%); border-radius: 50% 0 0 50%; }
 [data-style="studio"] .nav button[data-v="settings"] .ico { background: transparent; border: 3px solid var(--st-ink); border-radius: 50%; }
@@ -97,6 +101,8 @@
 [data-style="studio"] .btn.primary { background: var(--st-red); border-color: var(--st-red); color: #fff; }
 [data-style="studio"] .chip.on { background: var(--st-blue); border-color: var(--st-blue); color: #fff; }
 [data-style="studio"] .chip.on .n { color: #ffffffcc; }
+[data-style="studio"] .switch:checked { background: var(--st-green); }
+[data-style="studio"] .scopequeue .qall .btn:first-child { background: var(--st-green); border-color: var(--st-green); color: #fff; }
 [data-style="studio"] .ttable thead th { font-weight: 600; color: var(--fg-2); }
 [data-style="studio"] .ttable tbody tr.picked td:first-child { box-shadow: inset 4px 0 0 var(--st-yellow); }
 [data-style="studio"] .sev.critical { background: var(--st-red); color: #fff; }
