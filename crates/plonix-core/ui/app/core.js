@@ -162,30 +162,13 @@ async function loadDemoBench() {
   } catch (_) {}
 }
 
-/** A strip with a short tour of what the demo shows. */
+/** A strip that says what the demo is, with the walkthrough as its one action. */
 function demoBar() {
-  const lensSample = async () => {
-    try {
-      const r = await api('/api/traffic?limit=1&q=' + encodeURIComponent('path:/v1/orders/1042 mime:json'));
-      if (r.items.length) return showExchange(r.items[0].id);
-    } catch (_) {}
-    go('traffic');
-  };
   const bar = h(
     'div',
     { class: 'demobar' },
-    h('span', null, h('b', { text: 'Demo project. ' }), 'Traffic from Brightcart, a made-up shop, captured ahead of time. Its hosts are not real, so nothing here reaches the internet. Try:'),
-    h(
-      'span',
-      { class: 'tour' },
-      h('button', { class: 'btn sm primary', text: 'Take the tour', title: 'A short walk through every part of Plonix  (about two minutes)', onclick: () => startTour() }),
-      h('button', { class: 'btn sm', text: 'What Lens spots', title: 'An order with a token, an email and a card number in it', onclick: lensSample }),
-      h('button', { class: 'btn sm', text: 'Scope suggestions', title: 'Hosts tied to the shop, with the evidence for each', onclick: () => go('scope') }),
-      h('button', { class: 'btn sm', text: 'Filters', title: 'Ready-made include and exclude filters, and how to write your own', onclick: filterTour }),
-      h('button', { class: 'btn sm', text: 'Bench experiment', title: 'Order lookup: two sends ready to compare', onclick: () => go('bench') }),
-      h('button', { class: 'btn sm', text: 'Findings', onclick: () => go('findings') }),
-      h('button', { class: 'btn sm', text: 'Scans', title: 'Which checks fit this app, and why', onclick: () => go('scans') }),
-    ),
+    h('span', null, h('b', { text: 'Demo project. ' }), 'Brightcart, a made-up shop, captured ahead of time. Nothing here reaches the internet.'),
+    h('span', { class: 'tour' }, h('button', { class: 'btn sm primary', text: 'Take the tour', title: 'A short walk through every part of Plonix  (about two minutes)', onclick: () => startTour() })),
     h('button', {
       class: 'iconbtn x',
       title: 'Hide the tour',
@@ -300,8 +283,8 @@ const TOUR_STEPS = [
     view: 'traffic',
     target: '#pathseg',
     title: 'Short paths',
+    test: 'shortpath',
     text: 'Long paths full of ids and tokens are hard to scan. Short path folds them into {id} and {token}, as the Map does, and keeps the last part of each path in view. Hover a row for the full path.',
-    action: { label: 'Try short paths', run: () => setShortPath(!T.shortPath) },
   },
   {
     view: 'traffic',
@@ -316,6 +299,7 @@ const TOUR_STEPS = [
   },
   {
     view: 'traffic',
+    prep: () => tourLens('path:/v1/orders/1042 mime:json'),
     target: ['.lenssugg:not([hidden])', '#inspector'],
     title: 'Mind Reader',
     test: 'suggestions',
@@ -439,13 +423,15 @@ const TOUR_STEPS = [
     view: 'findings',
     target: ['#findbody > .finding', '#findbody'],
     title: 'Findings',
+    test: 'report',
     text: 'Write up what you found, each finding tied to the requests that prove it, then export the lot as a report.',
   },
   {
     view: 'scans',
     target: ['#scanbody .scansug', '#scanbody'],
     title: 'Scans',
-    text: 'Plonix lists what it sees in an in-scope host and recommends checks that fit it. You pick the checks and press Run; nothing scans on its own. Start on Quick for the fast, low-volume passive and safe checks, and switch to Thorough when you want the active per-endpoint probes too; the bar shows how many requests the current pick will send before you run it. After a run, every request the scan sent is listed here — open any one to see it, or view them all in Traffic. Before the file checks, Plonix asks for a couple of paths that cannot exist, so a host that answers everything with a friendly page does not turn into false findings. A scan also reads the traffic you already captured and flags issues like insecure cookies or a leaky CORS policy, without sending anything.',
+    test: 'scan',
+    text: 'Plonix lists what it sees in an in-scope host and recommends checks that fit it. You pick the checks and press Run; nothing scans on its own. Quick runs the low-volume passive and safe checks, Thorough adds active probes per endpoint, and the bar shows how many requests a pick will send. Afterwards every request the scan sent is listed here, ready to open.',
   },
   {
     view: 'rules',
@@ -640,6 +626,54 @@ async function tourBenchTab(t, before, what) {
   return marked ? `Opened on the Bench with ${what} marked (${marked}). Change it and send, or press Run to try a list of values.` : `Opened on the Bench, ready for you to change ${what} and send.`;
 }
 
+/** Points at a field and fills it in at once, as a paste would. */
+async function tourFill(t, el, value) {
+  await t.press(el);
+  el.value = value;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.classList.add('tourpress');
+  await t.wait(500);
+  el.classList.remove('tourpress');
+}
+
+/** Puts `value` between the Bench tab's • marks, presses Send and returns what came back. */
+async function tourSendMarked(t, tab, value) {
+  const url = await t.until(() => $('#benchurl'));
+  if (!url || !/•[^•]*•/.test(url.value)) return null;
+  await tourFill(t, url, url.value.replace(/•[^•]*•/, MARK + value + MARK));
+  const before = tab.cur;
+  await t.press(await t.until(() => $('.reqbar .btn.primary:not([disabled])')));
+  await t.until(() => tab.cur && tab.cur !== before && !$('.reqbar .btn.primary[disabled]'), 8000);
+  if (!tab.cur || tab.cur === before) return null;
+  await t.wait(250);
+  t.ring(['.rsplit > .rcol:last-child', '#main .view']);
+  return getExchange(tab.cur).catch(() => null);
+}
+
+/** Saves the finding a Mind Reader chip drafted, then shows it in Findings. */
+async function tourSaveDraft(t) {
+  const m = await t.until(() => $('.modal'));
+  if (!m) return null;
+  m.classList.add('tourmodal');
+  t.ring(m.querySelector('.mcard'));
+  const had = new Set((await api('/api/findings').catch(() => [])).map((f) => f.id));
+  await t.wait(1200);
+  const save = [...m.querySelectorAll('button')].find((b) => /^save/i.test(b.textContent.trim()));
+  if (!save) return null;
+  await t.press(save);
+  await t.until(() => !$('.modal'));
+  const made = (await api('/api/findings').catch(() => [])).find((f) => !had.has(f.id));
+  if (!made) return null;
+  TOUR.undo = () => api('/api/findings/' + made.id, { method: 'DELETE' }).then(refreshFindingsCount).catch(() => {});
+  go('findings', true);
+  const card = await t.until(() => [...document.querySelectorAll('#findbody .finding')].find((c) => ((c.querySelector('.fmeta') || {}).textContent || '').startsWith('#' + made.id + ' ')));
+  if (card) {
+    card.scrollIntoView({ block: 'nearest' });
+    t.ring(card);
+  }
+  return made;
+}
+
 const TOUR_TESTS = {
   mrid: mindTest(/across users/, async (t) => {
     const btn = await t.until(() => $('#main .acpane .btn.primary:not([disabled])'));
@@ -688,7 +722,15 @@ const TOUR_TESTS = {
         const chip = await t.until(() => mindChip(/reflected/i));
         if (!chip) return 'That suggestion is not showing; start the demo over to get its request back.';
         await t.press(chip);
-        return tourBenchTab(t, before, 'the search words');
+        const opened = await tourBenchTab(t, before, 'the search words');
+        const tab = R.tabs.length > before ? R.tabs[R.tabs.length - 1] : null;
+        const mark = 'plonix-7f3a';
+        const ex = tab && (await tourSendMarked(t, tab, mark));
+        if (!ex) return opened;
+        const n = (ex.resp_text || '').split(mark).length - 1;
+        return n
+          ? `Sent the search again with ${mark} in place of “trail running”: it came back ${plural(n, 'time')} in the page, written as typed. Whatever goes in q lands in the page, so this is the place to check how it handles special characters.`
+          : `Sent the search again with ${mark} in place of “trail running”, and this time it did not come back in the page.`;
       },
     };
   })(),
@@ -700,16 +742,22 @@ const TOUR_TESTS = {
         const chip = await t.until(() => mindChip(/redirect/i));
         if (!chip) return 'That suggestion is not showing; start the demo over to get its request back.';
         await t.press(chip);
-        return tourBenchTab(t, before, 'where “next” points');
+        const opened = await tourBenchTab(t, before, 'where “next” points');
+        const tab = R.tabs.length > before ? R.tabs[R.tabs.length - 1] : null;
+        const away = 'https://elsewhere.example/';
+        const ex = tab && (await tourSendMarked(t, tab, away));
+        if (!ex) return opened;
+        const loc = header(ex.resp_headers, 'location');
+        return loc === away
+          ? `Sent it with next pointing at ${away}: the shop answered ${ex.status} and sent the browser straight there. It follows next to any site, which is worth a finding.`
+          : `Sent it with next pointing at ${away}: the shop answered ${ex.status}${loc ? ' and sent the browser to ' + loc : ''}, so it keeps visitors on its own pages.`;
       },
     };
   })(),
   mrcors: mindTest(/cors/i, async (t) => {
-    const m = await t.until(() => $('.modal'));
-    if (!m) return 'The finding did not open.';
-    m.classList.add('tourmodal');
-    t.ring(m.querySelector('.mcard'));
-    return 'A finding, drafted: title, severity, why it matters and this request as evidence. Save it as is, or let Claude write it up.';
+    const made = await tourSaveDraft(t);
+    if (!made) return 'The finding did not open.';
+    return `Mind Reader drafted it, Save recorded it: finding #${made.id}, “${made.title}”, ${made.severity}, with why it matters and this request as evidence. Edit it here any time, or let Claude write it up.`;
   }),
   mrothers: (() => {
     let saved = null;
@@ -829,11 +877,9 @@ const TOUR_TESTS = {
       if (!chip) return 'No suggestions for this request.';
       const label = chip.textContent.trim();
       await t.press(chip);
-      const m = await t.until(() => $('.modal'));
-      if (!m) return label;
-      m.classList.add('tourmodal');
-      t.ring(m.querySelector('.mcard'));
-      return `“${label}” turned into a ready finding: title, severity and this request as evidence, filled in for you. Save it as is, or let Claude write it up.`;
+      const made = await tourSaveDraft(t);
+      if (!made) return label;
+      return `Pressed “${label}”: Mind Reader filled in the finding, title, severity and this request as evidence, and Save recorded it as #${made.id}. From spotting it to writing it down in two clicks.`;
     },
   },
   scope: {
@@ -863,8 +909,32 @@ const TOUR_TESTS = {
       t.ring(sec);
       const spec = await api('/api/hosts/' + encodeURIComponent(host) + '/spec').catch(() => null);
       const todo = spec ? spec.endpoints.filter((e) => !e.visited) : [];
-      const pick = todo.find((e) => /admin|role/.test(e.path)) || todo[0];
-      return `Plonix found the API’s own description in the traffic: ${plural(spec ? spec.endpoints.length : 0, 'endpoint')}, ${todo.length} never visited${pick ? `, such as ${pick.method} ${pick.path}` : ''}. Each one is a click from the Bench.`;
+      const pick = todo.find((e) => e.method === 'GET' && /admin/.test(e.path)) || todo.find((e) => e.method === 'GET') || todo[0];
+      const found = `Plonix found the API’s own description in the traffic: ${plural(spec ? spec.endpoints.length : 0, 'endpoint')}, ${todo.length} never visited.`;
+      const row = pick && [...sec.querySelectorAll('tbody tr')].find((tr) => tr.textContent.includes(pick.path) && tr.textContent.includes(pick.method));
+      if (!row) return found;
+      row.scrollIntoView({ block: 'center' });
+      t.ring(row);
+      await t.wait(700);
+      const before = R.tabs.length;
+      await t.press(row.querySelector('button'));
+      const tab = await t.until(() => R.tabs.length > before && R.tabs[R.tabs.length - 1]);
+      if (!tab) return found;
+      TOUR.undo = dropTourTab(before);
+      await t.until(() => S.view === 'bench' && $('.reqbar .btn.primary:not([disabled])'));
+      await t.wait(300);
+      t.ring('.reqbar');
+      await t.press($('.reqbar .btn.primary'));
+      await t.until(() => tab.cur && !$('.reqbar .btn.primary[disabled]'), 8000);
+      if (!tab.cur) return found;
+      await t.wait(250);
+      t.ring(['.rsplit > .rcol:last-child', '#main .view']);
+      const ex = await getExchange(tab.cur).catch(() => null);
+      let said = '';
+      try {
+        said = JSON.parse(ex.resp_text).message || '';
+      } catch (_) {}
+      return `${found} Opened one of them, ${pick.method} ${pick.path}, on the Bench and sent it: ${ex ? ex.status : 'no answer'}${said ? ', “' + said + '”' : ''}. The endpoint is real and was never in your traffic.`;
     },
   },
   sameuser: {
@@ -1048,22 +1118,147 @@ const TOUR_TESTS = {
       return `Sent ${plural(rep.rows.length, 'request')} in a moment and got ${ok.length} orders back, belonging to ${plural(names.size, 'different customer')}, including ${andList([...names].slice(0, 3))}. That’s the flaw, found with one click.`;
     },
   },
-  market: {
+  market: (() => {
+    const name = 'security-headers';
+    let added = false;
+    return {
+      run: async (t) => {
+        await t.until(() => MK.data);
+        if (!MK.data) return 'The Market list is still loading; try again in a moment.';
+        const card = await t.until(() => [...document.querySelectorAll('.mpkg')].find((c) => (c.querySelector('b') || {}).textContent === name));
+        if (card) await t.press(card);
+        else showPackage(name);
+        const page = await t.until(() => $('#mdetail .mpage .msec'));
+        if (!page) return 'The package did not open.';
+        await t.wait(300);
+        t.ring(['#mdetail', '#main .view']);
+        if (!MK.ext[name]) {
+          const install = await t.until(() => [...document.querySelectorAll('#mdetail button.primary')].find((b) => /^install/i.test(b.textContent.trim())));
+          if (!install) return 'Every package has a page: what it does, who made it, its checksum and how to use it.';
+          await t.press(install);
+          const m = await t.until(() => $('.modal'));
+          if (m) {
+            m.classList.add('tourmodal');
+            t.ring(m.querySelector('.mcard'));
+            await t.wait(1400);
+            await t.press([...m.querySelectorAll('button.primary')].pop());
+          }
+          await t.until(() => MK.ext[name], 10000);
+          if (!MK.ext[name]) return 'It did not install; the Market says why.';
+          added = true;
+          t.ring(['#mdetail', '#main .view']);
+        }
+        const run = await t.until(() => $('#mdetail .extstate button.primary:not([disabled])'));
+        if (!run) return `Installed ${name}. Open its page to run it.`;
+        run.scrollIntoView({ block: 'center' });
+        await t.press(run);
+        const out = await t.until(() => $('#mdetail .extresult:not([hidden])'), 15000);
+        if (out) t.ring(out.closest('.extstate') || out);
+        const said = out ? out.firstChild.textContent : '';
+        return `Installed ${name}, a signed extension from the Market, after showing what it may do, and ran it over the captured traffic. ${said}`;
+      },
+      undo: () => {
+        if (!added) return;
+        added = false;
+        api('/api/market/remove', { method: 'POST', body: { name } })
+          .then(() => (S.view === 'market' ? loadMarket(false) : null))
+          .catch(() => {});
+      },
+    };
+  })(),
+  shortpath: (() => {
+    let was = null;
+    return {
+      run: async (t) => {
+        const seg = await t.until(() => $('#pathseg'));
+        if (!seg) return 'Short paths live in Traffic.';
+        was = T.shortPath;
+        if (T.shortPath) setShortPath(false);
+        await t.wait(300);
+        await t.press([...$('#pathseg').querySelectorAll('button')].find((b) => /short/i.test(b.textContent)));
+        await t.wait(400);
+        const cells = [...document.querySelectorAll('#rows td.url.short')].filter((c) => /\{(id|token)\}/.test(c.textContent));
+        t.ring(cells[0] ? cells[0].closest('tr') : '#tablewrap');
+        await t.wait(500);
+        t.ring('#tablewrap');
+        const eg = cells[0] ? (cells[0].textContent.match(/\/\S*?\{(?:id|token)\}[^\s?…]*/) || [''])[0] : '';
+        return `Short path is on: ${plural(cells.length, 'row')} on screen now read by their shape${eg ? `, such as ${eg}` : ''}, so the same endpoint lines up row after row. Hover a row for its full path.`;
+      },
+      undo: () => {
+        if (was === null) return;
+        if (T.shortPath !== was) setShortPath(was);
+        was = null;
+      },
+    };
+  })(),
+  report: {
     run: async (t) => {
-      const card = await t.until(() => [...document.querySelectorAll('.mpkg')].find((c) => (c.querySelector('b') || {}).textContent === 'access-check'));
-      if (card) await t.press(card);
-      else if (MK.data) showPackage('access-check');
-      else return 'The Market list is still loading; try again in a moment.';
-      const page = await t.until(() => $('#mdetail .mpage .msec'));
-      if (!page) return 'The package did not open.';
-      await t.wait(250);
-      t.ring(['#mdetail', '#main .view']);
-      return 'Every package has a page: what it does, who made it, its checksum, and a How to use it guide. In your own projects, a Mind Reader chip that needs a tool such as the Access check offers to switch it on right there.';
+      const btn = await t.until(() => [...document.querySelectorAll('#main .toolbar button')].find((b) => /export/i.test(b.textContent)));
+      if (!btn) return 'Findings are still loading; try again in a moment.';
+      await t.press(btn);
+      const item = await t.until(() => [...document.querySelectorAll('.ctxmenu button')].find((b) => /html/i.test(b.textContent)));
+      if (item) {
+        item.classList.add('tourpress');
+        await t.point(item);
+        await t.wait(400);
+      }
+      closePopover();
+      let page;
+      try {
+        page = await (await fetchReport('html')).blob.text();
+      } catch (e) {
+        return e.message;
+      }
+      const frame = h('iframe', { class: 'tourreport', sandbox: '', title: 'The report' });
+      frame.srcdoc = page;
+      modal('Findings report', [h('p', { class: 'mnote', text: 'The HTML report as you would send it, each finding with its evidence requests. Export saves it as .md, .html or .json.' }), frame], [h('button', { class: 'btn', text: 'Close', onclick: closeModal })]);
+      const m = $('.modal');
+      m.classList.add('tourmodal');
+      t.ring(m.querySelector('.mcard'));
+      const n = (await api('/api/findings').catch(() => [])).filter((f) => f.status !== 'false_positive').length;
+      return `Exported the report: ${plural(n, 'finding')}, each with its severity, write-up and the requests that prove it, ready to send. False positives are left out.`;
     },
+    undo: () => $('.modal.tourmodal') && closeModal(),
   },
+  scan: (() => {
+    let made = [];
+    return {
+      run: async (t) => {
+        const run = await t.until(() => [...document.querySelectorAll('#scanbody button.btn.primary')].find((b) => /run scan/i.test(b.textContent) && !b.disabled), 8000);
+        if (!run) return 'Nothing to scan yet: accept a host in Scope first.';
+        const depth = [...document.querySelectorAll('#scanbody .segbtn')].find((b) => b.textContent === 'Quick');
+        if (depth) {
+          await t.press(depth);
+          await t.wait(300);
+        }
+        const go2 = [...document.querySelectorAll('#scanbody button.btn.primary')].find((b) => /run scan/i.test(b.textContent) && !b.disabled);
+        go2.scrollIntoView({ block: 'center' });
+        await t.press(go2);
+        await t.until(() => !SC.running && SC.report, 30000);
+        const r = SC.report;
+        if (!r) return 'The scan did not finish.';
+        made = (r.findings || []).map((f) => f.id);
+        const card = await t.until(() => $('#scanbody .scanreport'));
+        if (card) {
+          card.scrollIntoView({ block: 'start' });
+          await t.wait(200);
+          t.ring([card.querySelector('.sechead + .stack'), card]);
+        }
+        const what = (r.findings || []).slice(0, 2).map((f) => f.title);
+        return `Ran a Quick scan of ${r.host}: ${plural(r.tactics_run.length, 'check')}, ${plural(r.requests_sent, 'request')} sent, ${r.findings.length ? plural(r.findings.length, 'finding') + ' recorded, such as ' + andList(what) : 'nothing to report'}. Open any request it sent to see exactly what it did.`;
+      },
+      undo: () => {
+        const ids = made;
+        made = [];
+        if (!ids.length) return;
+        Promise.all(ids.map((id) => api('/api/findings/' + id, { method: 'DELETE' }).catch(() => {}))).then(refreshFindingsCount);
+        SC.report = null;
+      },
+    };
+  })(),
 };
 
-const TOUR = { i: -1, el: null, spot: null, timer: null, keys: null, focus: null, undo: null, saved: null };
+const TOUR = { i: -1, el: null, spot: null, timer: null, keys: null, focus: null, undo: null, saved: null, pos: null, drag: null };
 
 /** Starts the walk at the first step, or at `at`. */
 function startTour(at = 0) {
@@ -1096,7 +1291,7 @@ function endTour() {
   if (TOUR.el) TOUR.el.remove();
   if (TOUR.spot) TOUR.spot.remove();
   tourUndo();
-  Object.assign(TOUR, { i: -1, el: null, spot: null, timer: null, keys: null, focus: null, saved: null });
+  Object.assign(TOUR, { i: -1, el: null, spot: null, timer: null, keys: null, focus: null, saved: null, pos: null, drag: null });
 }
 
 async function tourStep(i) {
@@ -1105,6 +1300,7 @@ async function tourStep(i) {
   tourUndo();
   TOUR.i = i;
   TOUR.focus = null;
+  TOUR.drag = null;
   const s = TOUR_STEPS[i];
   const last = i === TOUR_STEPS.length - 1;
   closeModal();
@@ -1115,7 +1311,7 @@ async function tourStep(i) {
   const dots = TOUR_STEPS.map((_, n) => h('span', { class: 'tdot' + (n === i ? ' on' : n < i ? ' done' : '') }));
   clear(
     TOUR.el,
-    h('div', { class: 'tourhead' }, h('span', { class: 'tcount', text: i && !last ? `${i} of ${TOUR_STEPS.length - 2}` : 'Demo walkthrough' }), h('button', { class: 'iconbtn', title: 'End the walkthrough  (Esc)', text: '✕', onclick: endTour })),
+    h('div', { class: 'tourhead', title: 'Drag to move', onpointerdown: tourDrag }, h('span', { class: 'tcount', text: i && !last ? `${i} of ${TOUR_STEPS.length - 2}` : 'Demo walkthrough' }), h('button', { class: 'iconbtn', title: 'End the walkthrough  (Esc)', text: '✕', onclick: endTour })),
     h('h4', { text: s.title }),
     h('p', { text: s.text }),
     s.action ? h('button', { class: 'linkbtn taction', text: s.action.label + ' →', onclick: s.action.run }) : null,
@@ -1200,54 +1396,137 @@ function tourTarget(s) {
   return null;
 }
 
-/** Rings the step's part of the screen and sets the card beside it: right,
- * left, below or above, whichever has room, else inside its lower corner. */
+/** Rings the step's part of the screen and sets the card beside it, never
+ * on it: right, left, below or above, narrower if that is what fits, else
+ * wherever it covers the least. The card stays put while its part stays put,
+ * glides when the part moves, and stays where the user dragged it. */
 function placeTour() {
   if (!TOUR.el || TOUR.i < 0) return;
   const s = TOUR_STEPS[TOUR.i];
   const el = tourTarget(s);
   const vw = innerWidth;
   const vh = innerHeight;
-  const cw = TOUR.el.offsetWidth;
-  const ch = TOUR.el.offsetHeight;
-  const gap = 14;
   const pad = 6;
-  let x;
-  let y;
+  let r = null;
   if (!el) {
     // A step about the whole app dims it; one whose part isn't on screen doesn't.
     TOUR.spot.hidden = !!s.target;
     TOUR.spot.classList.add('none');
     TOUR.el.classList.toggle('center', !s.target);
-    if (!s.target) {
-      x = (vw - cw) / 2;
-      y = (vh - ch) / 2;
-    } else {
-      x = vw - cw - 24;
-      y = vh - ch - 48;
-    }
   } else {
     TOUR.el.classList.remove('center');
     TOUR.spot.classList.remove('none');
+    // A dialog the walk opened moves aside, so the card fits next to it.
+    const dialog = el.closest('.modal.tourmodal');
+    if (dialog && !dialog.dataset.tourroom) {
+      dialog.dataset.tourroom = '1';
+      const room = (vw >= 1000 ? 340 : 290) + 28;
+      if (vw - room >= 440) dialog.style.paddingRight = room + 'px';
+    }
     // Keep the ring inside the window, even around a part that fills it.
     const r0 = el.getBoundingClientRect();
     const edge = pad + 3;
-    const r = { left: Math.max(r0.left, edge), top: Math.max(r0.top, edge), right: Math.min(r0.right, vw - edge), bottom: Math.min(r0.bottom, vh - edge) };
-    Object.assign(TOUR.spot.style, { left: r.left - pad + 'px', top: r.top - pad + 'px', width: r.right - r.left + pad * 2 + 'px', height: r.bottom - r.top + pad * 2 + 'px' });
+    const c = { left: Math.max(r0.left, edge), top: Math.max(r0.top, edge), right: Math.min(r0.right, vw - edge), bottom: Math.min(r0.bottom, vh - edge) };
+    r = { left: c.left - pad, top: c.top - pad, right: c.right + pad, bottom: c.bottom + pad };
+    Object.assign(TOUR.spot.style, { left: r.left + 'px', top: r.top + 'px', width: r.right - r.left + 'px', height: r.bottom - r.top + 'px' });
     TOUR.spot.hidden = false;
-    const clampY = (v) => Math.min(Math.max(v, 12), vh - ch - 12);
-    const clampX = (v) => Math.min(Math.max(v, 12), vw - cw - 12);
-    if (vw - r.right - pad >= cw + gap + 12) [x, y] = [r.right + pad + gap, clampY(r.top)];
-    else if (r.left - pad >= cw + gap + 12) [x, y] = [r.left - pad - gap - cw, clampY(r.top)];
-    else if (vh - r.bottom - pad >= ch + gap * 2) [x, y] = [clampX(r.left), r.bottom + pad + gap];
-    else if (r.top - pad >= ch + gap * 2) [x, y] = [clampX(r.left), r.top - pad - gap - ch];
-    else [x, y] = [clampX(r.right - cw - 20), clampY(r.bottom - ch - 20)];
   }
-  // Whatever the placement, the whole card stays inside the window.
-  x = Math.max(12, Math.min(x, vw - cw - 12));
-  y = Math.max(12, Math.min(y, vh - ch - 12));
-  TOUR.el.style.left = Math.round(x) + 'px';
-  TOUR.el.style.top = Math.round(y) + 'px';
+  const key = [TOUR.i, vw, vh, !!el, !el && s.target ? 1 : 0].join();
+  const was = TOUR.pos;
+  // Small shifts (a scrollbar, a line of text) are not worth moving the card for.
+  const moved = !was || was.key !== key || (r && was.r && ['left', 'top', 'right', 'bottom'].some((k) => Math.abs(r[k] - was.r[k]) > 8)) || (!r) !== !was.r;
+  if (TOUR.drag && TOUR.drag.i === TOUR.i) return setTourPos(TOUR.drag.x, TOUR.drag.y, vw, vh);
+  if (!moved && Math.abs(TOUR.el.offsetHeight - was.h) < 4) return setTourPos(was.x, was.y, vw, vh);
+  const spot = tourSpot(r, vw, vh, was && was.key === key ? was : null);
+  TOUR.pos = { key, r, x: spot.x, y: spot.y, w: spot.w, h: TOUR.el.offsetHeight };
+  setTourPos(spot.x, spot.y, vw, vh);
+}
+
+/** Where the card goes for a ring `r` (null: no part to point at). */
+function tourSpot(r, vw, vh, prev) {
+  const gap = 14;
+  const m = 12;
+  const card = TOUR.el;
+  if (!r) {
+    card.style.width = '';
+    const s = TOUR_STEPS[TOUR.i];
+    if (!s.target) return { x: (vw - card.offsetWidth) / 2, y: (vh - card.offsetHeight) / 2 };
+    return { x: vw - card.offsetWidth - 24, y: vh - card.offsetHeight - 48 };
+  }
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+  const cover = (x, y, w, hh) => Math.max(0, Math.min(x + w, r.right) - Math.max(x, r.left)) * Math.max(0, Math.min(y + hh, r.bottom) - Math.max(y, r.top));
+  const sides = (w, hh) => {
+    const cx = (v) => clamp(v, m, vw - w - m);
+    const cy = (v) => clamp(v, m, vh - hh - m);
+    return [
+      [r.right + gap, cy(r.top)],
+      [r.left - gap - w, cy(r.top)],
+      [cx(r.left), r.bottom + gap],
+      [cx(r.left), r.top - gap - hh],
+    ].filter(([x, y]) => x >= m && y >= m && x + w <= vw - m && y + hh <= vh - m);
+  };
+  // Beside the ring at full width, then narrower.
+  for (const w of [null, 290, 250]) {
+    card.style.width = w ? w + 'px' : '';
+    const cw = card.offsetWidth;
+    const ch = card.offsetHeight;
+    const free = sides(cw, ch).filter(([x, y]) => !cover(x, y, cw, ch));
+    if (free.length) {
+      // The side it was on, if that still works, so it does not hop around.
+      const keep = prev && prev.w === w && free.find(([x, y]) => Math.abs(x - prev.x) < 2 || Math.abs(y - prev.y) < 2);
+      const [x, y] = keep || free[0];
+      return { x, y, w };
+    }
+  }
+  // No room beside it: the corner or edge where the card hides the least.
+  let best = null;
+  for (const w of [null, 290]) {
+    card.style.width = w ? w + 'px' : '';
+    const cw = card.offsetWidth;
+    const ch = card.offsetHeight;
+    const xs = [m, (vw - cw) / 2, vw - cw - m];
+    const ys = [m, (vh - ch) / 2, vh - ch - m];
+    for (const y of ys.slice().reverse()) {
+      for (const x of xs.slice().reverse()) {
+        // Ties go to where the card already is, so it does not hop.
+        const c = cover(x, y, cw, ch) + (prev ? Math.hypot(x - prev.x, y - prev.y) / 100 : 0);
+        if (!best || c < best.c * 0.9 - 1) best = { x, y, w, c };
+      }
+    }
+  }
+  card.style.width = best.w ? best.w + 'px' : '';
+  return { x: best.x, y: best.y, w: best.w };
+}
+
+/** Puts the card at x, y, whole inside the window. */
+function setTourPos(x, y, vw, vh) {
+  const card = TOUR.el;
+  x = Math.max(12, Math.min(x, vw - card.offsetWidth - 12));
+  y = Math.max(12, Math.min(y, vh - card.offsetHeight - 12));
+  card.style.left = Math.round(x) + 'px';
+  card.style.top = Math.round(y) + 'px';
+}
+
+/** The card's header is a handle: drag the card anywhere, and it stays there for this stop. */
+function tourDrag(e) {
+  if (e.button !== 0 || e.target.closest('button')) return;
+  const card = TOUR.el;
+  const r = card.getBoundingClientRect();
+  const dx = e.clientX - r.left;
+  const dy = e.clientY - r.top;
+  e.preventDefault();
+  card.classList.add('dragging');
+  const move = (ev) => {
+    TOUR.drag = { i: TOUR.i, x: ev.clientX - dx, y: ev.clientY - dy };
+    setTourPos(TOUR.drag.x, TOUR.drag.y, innerWidth, innerHeight);
+  };
+  const up = () => {
+    card.classList.remove('dragging');
+    removeEventListener('pointermove', move);
+    removeEventListener('pointerup', up);
+  };
+  addEventListener('pointermove', move);
+  addEventListener('pointerup', up);
 }
 
 /* ---------- theme ---------- */
