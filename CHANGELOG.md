@@ -4,6 +4,12 @@ What changed in each Plonix release. The newest release is at the top.
 
 ## [Unreleased]
 
+### Changed
+- **Demo walkthrough**: the card sits beside the part it explains instead of on top of it, stays put unless that part moves, and can be dragged by its header. **Test now!** does the work for real on every stop that has one: it saves the finding, sends the changed request, opens and sends an endpoint from the Map, runs a Quick scan, previews the report, or installs and runs an extension, then says what came back. The demo strip keeps only **Take the tour**.
+
+### Fixed
+- **Bench**: Send no longer sends the • position marks along with the request.
+
 ## [0.1.4] - 2026-10-10
 
 ### Changed
