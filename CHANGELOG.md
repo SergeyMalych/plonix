@@ -4,12 +4,6 @@ What changed in each Plonix release. The newest release is at the top.
 
 ## [Unreleased]
 
-### Changed
-- **Demo walkthrough**: the card sits beside the part it explains instead of on top of it, stays put unless that part moves, and can be dragged by its header. **Test now!** does the work for real on every stop that has one: it saves the finding, sends the changed request, opens and sends an endpoint from the Map, runs a Quick scan, previews the report, or installs and runs an extension, then says what came back. The demo strip keeps only **Take the tour**.
-
-### Fixed
-- **Bench**: Send no longer sends the • position marks along with the request.
-
 ## [0.1.4] - 2026-10-10
 
 ### Changed
@@ -17,9 +11,11 @@ What changed in each Plonix release. The newest release is at the top.
 - **Small windows**: Open target, Settings and Collapse stay visible in the sidebar, the Lens shrinks to fit, toolbars wrap instead of cutting off buttons, and Traffic gives the Path column room below 1180px.
 - **Map**: the host list looks like the Users list.
 - **Website**: every app screenshot and the tour video have a Studio version.
+- **Demo walkthrough**: the card sits beside the part it explains instead of on top of it, stays put unless that part moves, and can be dragged by its header. **Test now!** does the work for real on every stop that has one: it saves the finding, sends the changed request, opens and sends an endpoint from the Map, runs a Quick scan, previews the report, or installs and runs an extension, then says what came back. The demo strip keeps only **Take the tour**.
 
 ### Fixed
 - The capture browser no longer shows a yellow "unsupported command-line flag" bar. HTTPS capture works as before.
+- **Bench**: Send no longer sends the • position marks along with the request.
 
 ## [0.1.3] - 2026-10-09
 
