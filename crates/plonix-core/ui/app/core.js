@@ -69,7 +69,7 @@ async function api(path, { method = 'GET', body } = {}) {
 async function boot() {
   applyTheme(store('plonix.theme') || 'auto');
   applyDensity(store('plonix.density') || 'dense');
-  applyStyle(store('plonix.style') || 'classic');
+  applyStyle(store('plonix.style') || 'studio');
   const hash = location.hash;
   const code = hash.startsWith('#code=') ? hash.slice(6) : null;
   if (code) {
@@ -1276,11 +1276,11 @@ async function syncStyle() {
   } catch (_) {}
 }
 
-/** Classic (the default) or Studio, the optional geometric style in studio.css. */
+/** Studio (the default, the geometric style in studio.css) or Classic. */
 function applyStyle(v) {
-  if (v === 'studio') document.documentElement.setAttribute('data-style', 'studio');
-  else document.documentElement.removeAttribute('data-style');
-  S.style = v === 'studio' ? 'studio' : 'classic';
+  if (v === 'classic') document.documentElement.removeAttribute('data-style');
+  else document.documentElement.setAttribute('data-style', 'studio');
+  S.style = v === 'classic' ? 'classic' : 'studio';
 }
 
 function cycleTheme() {

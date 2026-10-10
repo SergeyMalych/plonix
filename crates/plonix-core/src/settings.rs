@@ -398,13 +398,13 @@ pub fn save_global(home: &Home, id: &str, values: &Values) -> Result<()> {
 /// the windows show it under Appearance, next to theme and spacing.
 const LOOK: &str = "look";
 
-/// The window style every Plonix window shares: "classic" (the default) or
-/// "studio". The desktop app also picks its icon from it.
+/// The window style every Plonix window shares: "studio" (the default) or
+/// "classic". The desktop app also picks its icon from it.
 pub fn style(home: &Home) -> &'static str {
     let file = read_global(home);
     match file.sections.get(LOOK).and_then(|v| v.get("style")).and_then(Value::as_str) {
-        Some("studio") => "studio",
-        _ => "classic",
+        Some("classic") => "classic",
+        _ => "studio",
     }
 }
 
@@ -708,14 +708,14 @@ mod tests {
     }
 
     #[test]
-    fn style_is_classic_until_studio_is_picked() {
+    fn style_is_studio_until_classic_is_picked() {
         let home = Home { root: tempfile::tempdir().unwrap().keep() };
-        assert_eq!(style(&home), "classic");
+        assert_eq!(style(&home), "studio");
         save_global(&home, INTERFACE, &section(INTERFACE).unwrap().resolve(None)).unwrap();
-        set_style(&home, "studio").unwrap();
-        assert_eq!(style(&home), "studio");
+        set_style(&home, "classic").unwrap();
+        assert_eq!(style(&home), "classic");
         assert!(set_style(&home, "neon").is_err());
-        assert_eq!(style(&home), "studio");
+        assert_eq!(style(&home), "classic");
         assert!(global_values(&home).contains_key(INTERFACE), "the style keeps the other sections");
         assert!(!describe(&home, None).to_string().contains("\"look\""), "the style is not a section of its own");
     }
