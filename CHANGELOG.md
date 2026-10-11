@@ -4,12 +4,27 @@ What changed in each Plonix release. The newest release is at the top.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-10-11
+
 ### Added
 - **Text size.** ⌘+ and ⌘− (Ctrl+ and Ctrl− on Windows) make text bigger or smaller, from 80% to 150%, and ⌘0 puts it back to 100%. The same size applies to every window, the Start screen included, and stays for next time. It is also in View and in Settings › Appearance › Text size.
+- **Lens in a window of its own**: the Lens can fill the window (press `e`) or open in a separate window.
+- **Usage statistics, if you want them**: statistics are now off until you tick them, Settings shows the next report before it is sent and can reset the install id, and the totals everyone shares are public at [plonix.io/analytics](https://plonix.io/analytics).
+
+### Changed
+- **Agents**: a lead opens in place on the left, and the right column switches between **Claude** (ask and earlier conversations) and **Traffic** (what agents read). Lead rows show a solid kind tag, the request as a chip, and Unread and Earlier groups, and the token meter fills its row.
+- **Map** lists only hosts in scope, with a link to Scope for the rest. Any host can be hidden with ✕ (its traffic is kept, and hidden hosts can be shown again), and the list can be ordered by Recent, Requests or A–Z. Both are saved per project.
+- **One look for every window**: theme and spacing are shared by the Start screen and every project window, and the Start screen has its own theme button and Appearance settings.
+- **Studio** uses green as a full fourth colour, in the app and on the website.
+- **Market** shows a chip for every kind in the catalog, Tools included, and tools and detectors have their own icons.
+- Filter suggestions take one row, with **More…** and **Less**. The Map's host list can be resized by dragging (double-click resets).
 
 ### Fixed
+- **Ask Claude on a fresh Mac install**: when Plonix is opened from the Finder or the Dock it now finds Claude Code installed in `~/.local/bin`, Homebrew or an npm folder, and says why the button is grayed out when Claude Code is missing, with a way to check again.
 - **Mac: local network targets.** On macOS 15 and later Plonix now asks for Local Network access when it starts, so routers, LAN servers and devices load through Plonix. If access was turned off, connections to them say where to allow it: System Settings › Privacy & Security › Local Network.
+- **Servers that never finish the TLS handshake** fail fast with a message that says where it stalled, instead of waiting out the whole request timeout. Every address a host resolves to is tried in turn, alternating IPv6 and IPv4, and a request timeout names the host and the setting to raise.
 - Closing the demo strip no longer hides the walkthrough for good. The strip, with **Take the tour**, comes back the next time the demo opens.
+- Market kind shapes sit in the middle of their circles, and the open-project dot on the Start screen is no longer clipped.
 
 ## [0.1.4] - 2026-10-10
 
