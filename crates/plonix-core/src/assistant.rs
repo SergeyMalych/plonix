@@ -182,6 +182,9 @@ pub struct Conversations {
 
 impl Conversations {
     pub fn new() -> Self {
+        // Finding `claude` can mean asking the login shell for its PATH; do
+        // that now so the first look at the Agents screen does not wait on it.
+        std::thread::spawn(search_path);
         Self::default()
     }
 
@@ -308,6 +311,9 @@ fn end(run: &mut Run, status: Status, step: &str) {
 /// Runs `claude -p` and streams its output into `run` until it exits.
 async fn drive(bin: PathBuf, mcp: Value, cwd: PathBuf, prompt: String, resume: Option<String>, run: std::sync::Arc<Mutex<Run>>) {
     let mut cmd = Command::new(&bin);
+    if let Some(path) = run_path(&bin) {
+        cmd.env("PATH", path);
+    }
     cmd.arg("-p")
         .arg(&prompt)
         .args(["--output-format", "stream-json", "--verbose"])
@@ -590,24 +596,136 @@ async fn partial_messages(bin: &PathBuf) -> bool {
     static SUPPORTED: tokio::sync::OnceCell<bool> = tokio::sync::OnceCell::const_new();
     *SUPPORTED
         .get_or_init(|| async {
-            let out = Command::new(bin).arg("--help").stdin(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true).output();
+            let mut cmd = Command::new(bin);
+            if let Some(path) = run_path(bin) {
+                cmd.env("PATH", path);
+            }
+            let out = cmd.arg("--help").stdin(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true).output();
             matches!(tokio::time::timeout(tokio::time::Duration::from_secs(15), out).await, Ok(Ok(o)) if String::from_utf8_lossy(&o.stdout).contains("--include-partial-messages"))
         })
         .await
 }
 
-/// `$PLONIX_CLAUDE` (for tests), else `claude` on the PATH.
+/// `$PLONIX_CLAUDE` (for tests), else `claude` on the [search path](search_path).
 fn claude_bin() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("PLONIX_CLAUDE") {
         return Some(p.into());
     }
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).map(|d| d.join("claude")).find(|p| p.is_file())
+    find_in(&search_path(), "claude")
+}
+
+/// The first `name` in `dirs`; on Windows also `name.exe` and `name.cmd`.
+fn find_in(dirs: &[PathBuf], name: &str) -> Option<PathBuf> {
+    let names: &[&str] = if cfg!(windows) { &[".exe", ".cmd", ""] } else { &[""] };
+    dirs.iter().flat_map(|d| names.iter().map(move |ext| d.join(format!("{name}{ext}")))).find(|p| p.is_file())
+}
+
+/// Where to look for `claude` and what it needs (it is often a `node`
+/// script). An app opened from the Finder or Dock gets a bare PATH without
+/// the user's shell setup, so this adds the PATH their login shell sets up
+/// and the folders the installers use, after the inherited PATH.
+fn search_path() -> Vec<PathBuf> {
+    static DIRS: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
+    DIRS.get_or_init(|| {
+        let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+        dirs.extend(login_shell_path());
+        dirs.extend(install_dirs());
+        let mut seen = std::collections::HashSet::new();
+        dirs.retain(|d| !d.as_os_str().is_empty() && seen.insert(d.clone()));
+        dirs
+    })
+    .clone()
+}
+
+/// The PATH for `claude`'s own run: its folder (and, for a link, the real
+/// one) first, so a `node` installed next to it is found, then the
+/// [search path](search_path).
+fn run_path(bin: &std::path::Path) -> Option<std::ffi::OsString> {
+    let real = std::fs::canonicalize(bin).ok().and_then(|p| p.parent().map(PathBuf::from));
+    let dirs = bin.parent().map(PathBuf::from).into_iter().chain(real).chain(search_path());
+    std::env::join_paths(dirs).ok()
+}
+
+/// The folders Claude Code and Node are usually installed in.
+fn install_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(home) = crate::paths::user_home() {
+        for d in [".local/bin", ".claude/local", ".npm-global/bin", ".bun/bin", ".volta/bin", ".yarn/bin", "bin", "Library/pnpm", ".local/share/pnpm"] {
+            dirs.push(home.join(d));
+        }
+        // Node version managers keep one folder per version; take the newest.
+        for root in [".nvm/versions/node", ".local/share/fnm/node-versions", "Library/Application Support/fnm/node-versions"] {
+            let Ok(entries) = std::fs::read_dir(home.join(root)) else { continue };
+            let mut versions: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+            versions.sort();
+            for v in versions.into_iter().rev() {
+                dirs.push(v.join("bin"));
+                dirs.push(v.join("installation/bin"));
+            }
+        }
+    }
+    if cfg!(windows) {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            dirs.push(PathBuf::from(appdata).join("npm"));
+        }
+    } else {
+        dirs.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
+    }
+    dirs
+}
+
+/// The PATH the user's login shell sets up, on macOS, where apps opened from
+/// the Finder do not inherit it. Gives up after a few seconds rather than
+/// hang on an unusual shell setup.
+fn login_shell_path() -> Vec<PathBuf> {
+    if !cfg!(target_os = "macos") {
+        return vec![];
+    }
+    let shell = std::env::var_os("SHELL").filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/zsh".into());
+    const MARK: &str = "__PLONIX_PATH__";
+    let Ok(mut child) = std::process::Command::new(shell)
+        .args(["-ilc", &format!("printf '{MARK}%s{MARK}' \"$PATH\"")])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return vec![];
+    };
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(25)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return vec![];
+            }
+        }
+    }
+    let mut out = String::new();
+    if let Some(mut stdout) = child.stdout.take() {
+        let _ = std::io::Read::read_to_string(&mut stdout, &mut out);
+    }
+    out.split(MARK).nth(1).map(|p| std::env::split_paths(p).collect()).unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn claude_is_found_outside_the_inherited_path() {
+        let dir = std::env::temp_dir().join(format!("plonix-find-{}", std::process::id()));
+        let bin = dir.join(if cfg!(windows) { "claude.cmd" } else { "claude" });
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&bin, "").unwrap();
+        assert_eq!(find_in(&[dir.join("missing"), dir.clone()], "claude"), Some(bin.clone()));
+        assert_eq!(find_in(&[dir.join("missing")], "claude"), None);
+        assert!(std::env::split_paths(&run_path(&bin).unwrap()).next() == Some(dir.clone()));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn friendly_tool_names_read_nicely() {
