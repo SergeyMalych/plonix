@@ -913,6 +913,9 @@ button.agfhit:hover { background: var(--surface-2); color: var(--accent); }
 .agviews button:hover { color: var(--fg); }
 .agviews button.on { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
 .agclaude .agstarters .chip { text-align: left; }
+/* the column is narrow: the Ask button sits under the box, so the box keeps its width */
+.agclaude .agqrow { flex-direction: column; align-items: stretch; }
+.agclaude .agqrow .btn { align-self: flex-end; }
 .agclaude { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .agclaude[hidden], .agfeed[hidden] { display: none; }
 .agfhit .sc { margin-left: auto; flex: 0 0 auto; font-size: 11px; }
