@@ -5,6 +5,7 @@ What changed in each Plonix release. The newest release is at the top.
 ## [Unreleased]
 
 ### Fixed
+- **Mac: local network targets.** On macOS 15 and later Plonix now asks for Local Network access when it starts, so routers, LAN servers and devices load through Plonix. If access was turned off, connections to them say where to allow it: System Settings › Privacy & Security › Local Network.
 - Closing the demo strip no longer hides the walkthrough for good. The strip, with **Take the tour**, comes back the next time the demo opens.
 
 ## [0.1.4] - 2026-10-10
