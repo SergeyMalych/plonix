@@ -364,16 +364,15 @@ function drawAgentInbox() {
           title: open ? '' : 'Show more',
           onclick: (e) => !e.target.closest('button') && selectItem(it),
         },
-        h('span', { class: 'agkind ' + k.cls, title: k.label }, h('i'), h('em', { text: k.label })),
+        h('span', { class: 'agkind ' + k.cls, text: k.label }),
         h(
           'div',
           { class: 'agimain' },
-          h('div', { class: 'agititle' }, h('span', { class: 'agtag', text: k.label }), it.title),
+          h('div', { class: 'agititle', text: it.title }),
           it.detail ? h('div', { class: 'agidetail', text: it.detail }) : null,
           h(
             'div',
             { class: 'agimeta' },
-            h('span', { class: 'agklabel', text: k.label }),
             it.request && !open
               ? h(
                   'button',

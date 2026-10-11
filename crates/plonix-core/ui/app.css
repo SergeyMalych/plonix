@@ -872,30 +872,9 @@ button.agfhit:hover { background: var(--surface-2); color: var(--accent); }
 .agitem.lead { --k: var(--crit); --ks: var(--crit-soft); }
 .agitem.digest { --k: var(--ok); --ks: var(--ok-soft); }
 .agitem.unread::before { content: ''; position: absolute; left: 6px; top: 26px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-/* each kind is a flat shape on its tint: a lead is a circle, a note a diamond, news a triangle */
-.agkind { flex: 0 0 34px; height: 34px; border-radius: 10px; background: var(--ks); display: grid; place-items: center; margin-top: 1px; }
-.agkind i { width: 13px; height: 13px; background: var(--k); border-radius: 50%; }
-.agkind.note i { border-radius: 2px; width: 11px; height: 11px; transform: rotate(45deg); }
-.agkind.digest i { border-radius: 0; width: 14px; height: 12px; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
-.agitem:not(.unread):not(.sel) .agkind { filter: saturate(.55); opacity: .8; }
-.agkind em, .agtag { display: none; }
-/* OPTIONS (temporary, for picking) */
-.v1 .agkind { flex: 0 0 52px; height: auto; padding: 3px 0; border-radius: 6px; background: var(--k); }
-.v1 .agkind i { display: none; }
-.v1 .agkind em { display: block; font-style: normal; font-size: 10.5px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: #fff; }
-.v1 .agitem:not(.unread):not(.sel) .agkind { filter: none; opacity: .75; }
-.v2 .agkind { flex: 0 0 52px; height: auto; background: none; display: flex; flex-direction: column; align-items: center; gap: 5px; }
-.v2 .agkind i { width: 30px; height: 30px; }
-.v2 .agkind.note i { width: 24px; height: 24px; margin: 3px 0; }
-.v2 .agkind.digest i { width: 32px; height: 28px; }
-.v2 .agkind em { display: block; font-style: normal; font-size: 10.5px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: var(--k); }
-.v3 .agitem { box-shadow: inset 4px 0 0 var(--k); }
-.v3 .agitem:not(.unread):not(.sel) { box-shadow: inset 4px 0 0 var(--line); }
-.v3 .agkind { display: none; }
-.v3 .agtag { display: inline-block; vertical-align: 1px; margin-right: 8px; padding: 1px 8px; border-radius: 99px; background: var(--k); color: #fff; font-size: 10.5px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
-.v1 .agklabel, .v2 .agklabel, .v3 .agklabel { display: none; }
-.v3 .agitem.unread::before { left: -10px; }
-.agklabel { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--k); }
+/* each kind is a solid tag in its colour, easy to spot down the list */
+.agkind { flex: 0 0 52px; text-align: center; padding: 3px 0; margin-top: 1px; border-radius: 6px; background: var(--k); color: #fff; font-size: 10.5px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+.agitem:not(.unread):not(.sel) .agkind { opacity: .75; }
 .agireq { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; max-width: 360px; border: 1px solid var(--line-2); background: var(--surface); border-radius: 6px; padding: 1px 7px; font-size: 11px; color: var(--fg-2); cursor: pointer; }
 .agireq:hover { border-color: var(--accent); color: var(--fg); }
 .agireq b { font-family: var(--mono); font-size: 10.5px; font-weight: 650; color: var(--fg); }
