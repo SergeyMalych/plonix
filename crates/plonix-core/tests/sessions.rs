@@ -551,7 +551,8 @@ async fn http2_servers_are_reached_through_upstream_proxies() {
     // and says the handshake is where it stalled.
     let options = UpstreamOptions { connect_timeout: Duration::from_millis(300), total_timeout: Duration::from_secs(30), ..Default::default() };
     let started = std::time::Instant::now();
-    let err = Upstream::with_options(options).unwrap().send(get(port)).await.unwrap_err();
+    // By address: on Windows a refused connection to ::1 alone takes longer than this timeout.
+    let err = Upstream::with_options(options).unwrap().send(OutboundRequest { host: "127.0.0.1".into(), ..get(port) }).await.unwrap_err();
     assert!(started.elapsed() < Duration::from_secs(5), "took {:?}", started.elapsed());
-    assert!(format!("{err:#}").contains("TLS handshake with localhost"), "{err:#}");
+    assert!(format!("{err:#}").contains("TLS handshake with 127.0.0.1"), "{err:#}");
 }
