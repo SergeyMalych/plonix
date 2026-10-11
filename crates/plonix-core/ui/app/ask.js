@@ -586,15 +586,26 @@ async function askClaude(subject, opts = {}) {
   const m = modal('Ask Claude Code', [composeView, convoView], [h('button', { class: 'btn', text: 'Close', onclick: closeModal }), newBtn, stopBtn, copyBtn, termBtn, askBtn]);
   m.el.querySelector('.mcard').classList.add('wide');
 
-  // Is the Claude Code CLI installed here? If not, keep Terminal/Copy only.
-  try {
-    const pol = await api('/api/agents');
-    askInApp = pol.ask_in_app !== false;
-  } catch (_) {}
-  if (!askInApp) {
-    cliHint.hidden = false;
-    cliHint.textContent = 'Claude Code is not installed on this machine, so the answer cannot run inside Plonix yet. Install it from claude.com/claude-code, or use Open in Terminal.';
-  }
+  // Is the Claude Code CLI installed here? If not, say so next to the
+  // grayed-out button, with a way to look again once it is installed.
+  const checkCli = async () => {
+    try {
+      const pol = await api('/api/agents');
+      askInApp = pol.ask_in_app !== false;
+    } catch (_) {}
+    askBtn.title = askInApp ? '' : `Claude Code was not found on ${THIS_COMPUTER}`;
+    cliHint.hidden = askInApp;
+    if (!askInApp) {
+      clear(
+        cliHint,
+        `Claude Code was not found on ${THIS_COMPUTER}, so the answer cannot run inside Plonix yet. Install it from claude.com/claude-code and sign in once in Terminal, then `,
+        h('button', { class: 'link', text: 'check again', onclick: checkCli }),
+        '. Open in Terminal and Copy prompt work meanwhile.',
+      );
+    }
+    sync();
+  };
+  await checkCli();
   await rebuild();
 }
 
