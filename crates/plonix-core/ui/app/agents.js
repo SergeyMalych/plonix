@@ -29,10 +29,11 @@ const STARTER_QUESTIONS = [
 // sel: the inbox item opened in place; side: what the right column shows ('claude':
 // asking and conversations, 'traffic': what agents read); ex: request summaries, so
 // leads and the feed can name requests by method and path.
-const AG = { chat: null, cv: null, setup: null, chats: [], policy: null, hits: [], skills: [], watch: null, inboxAll: false, lookAsked: 0, sel: null, side: 'claude', ex: {} };
+const AG = { chat: null, cv: null, setup: null, chats: [], policy: null, hits: [], skills: [], watch: null, inboxAll: false, lookAsked: 0, sel: null, side: 'claude', ex: {}, opened: new Set() };
 
 function renderAgents(main) {
   AG.cv = null;
+  AG.opened = new Set();
   const setupBtn = h('button', { class: 'btn sm', id: 'agsetupbtn', text: 'Setup', onclick: () => toggleAgentSetup() });
   clear(
     main,
@@ -259,6 +260,7 @@ function selectItem(it) {
   AG.sel = AG.sel === it.id ? null : it.id;
   if (!it.read) {
     it.read = true;
+    AG.opened.add(it.id);
     AG.watch.unread = Math.max(0, (AG.watch.unread || 0) - 1);
     markItems([it.id], false);
   }
@@ -347,44 +349,67 @@ function drawAgentInbox() {
     body = h('div', { class: 'ab muted', text: w.state.last_error || 'Nothing yet. Browse the target; when you pause, Claude looks at what is new. Or press Look now.' });
   } else {
     const shown = AG.inboxAll ? items : items.slice(0, INBOX_SHOW);
-    body = h(
-      'div',
-      { class: 'aglist' },
-      shown.map((it) => {
-        const k = ITEM_KIND[it.kind] || ITEM_KIND.note;
-        // Access needs its Market tool; without it the lead opens the request.
-        const next = it.next === 'access' && !toolOn('access-check') ? 'lens' : it.next || 'lens';
-        const act = it.kind === 'digest' ? null : NEXT_ACTION[next];
-        return h(
+    loadAgentRequests(shown.map((it) => it.request));
+    const row = (it) => {
+      const k = ITEM_KIND[it.kind] || ITEM_KIND.note;
+      // Access needs its Market tool; without it the lead opens the request.
+      const next = it.next === 'access' && !toolOn('access-check') ? 'lens' : it.next || 'lens';
+      const act = it.kind === 'digest' ? null : NEXT_ACTION[next];
+      const open = it.id === AG.sel;
+      const ex = it.request && AG.ex[it.request];
+      return h(
+        'div',
+        {
+          class: 'agitem ' + k.cls + (it.read ? '' : ' unread') + (open ? ' sel' : ''),
+          title: open ? '' : 'Show more',
+          onclick: (e) => !e.target.closest('button') && selectItem(it),
+        },
+        h('span', { class: 'agkind ' + k.cls, title: k.label }, h('i')),
+        h(
           'div',
-          {
-            class: 'agitem' + (it.read ? '' : ' unread') + (it.id === AG.sel ? ' sel' : ''),
-            title: it.id === AG.sel ? '' : 'Show more',
-            onclick: (e) => !e.target.closest('button') && selectItem(it),
-          },
-          h('span', { class: 'agkind ' + k.cls, text: k.label }),
+          { class: 'agimain' },
+          h('div', { class: 'agititle', text: it.title }),
+          it.detail ? h('div', { class: 'agidetail', text: it.detail }) : null,
           h(
             'div',
-            { class: 'agimain' },
-            h('div', { class: 'agititle', text: it.title }),
-            it.detail ? h('div', { class: 'agidetail', text: it.detail }) : null,
-            h(
-              'div',
-              { class: 'agimeta' },
-              it.request && it.id !== AG.sel ? h('button', { class: 'link', text: 'Request #' + it.request, onclick: () => (markItems([it.id], false), showExchange(it.request)) }) : null,
-              h('span', { text: agoText(it.at) }),
-            ),
-            it.id === AG.sel ? leadMore(it, act) : null,
+            { class: 'agimeta' },
+            h('span', { class: 'agklabel', text: k.label }),
+            it.request && !open
+              ? h(
+                  'button',
+                  { class: 'agireq', title: 'Open request #' + it.request, onclick: () => (markItems([it.id], false), showExchange(it.request)) },
+                  ex ? [h('b', { text: ex.method }), h('span', { class: 'p', text: ex.path }), ex.status != null ? h('span', { class: statusClass(ex.status), text: ex.status }) : null] : h('span', { class: 'p', text: 'Request #' + it.request }),
+                )
+              : null,
+            h('span', { class: 'ago', text: agoText(it.at) }),
           ),
+          open ? leadMore(it, act) : null,
+        ),
+        h(
+          'div',
+          { class: 'agiacts' },
+          !open && act && (it.request || it.next === 'map' || it.next === 'scope') ? h('button', { class: 'btn sm go', text: act, onclick: () => actOnItem(it) }) : null,
           h(
-            'div',
-            { class: 'agiacts' },
-            it.id !== AG.sel && act && (it.request || it.next === 'map' || it.next === 'scope') ? h('button', { class: 'btn sm' + (it.kind === 'lead' ? ' primary' : ''), text: act, onclick: () => actOnItem(it) }) : null,
+            'span',
+            { class: 'agiquiet' },
             !it.read ? h('button', { class: 'mini', text: '✓', title: 'Mark read', onclick: () => markItems([it.id], false) }) : null,
             h('button', { class: 'mini', text: '✕', title: it.kind === 'digest' ? 'Remove' : 'Dismiss: not useful. Claude will suggest fewer like it.', onclick: () => markItems([it.id], true) }),
           ),
-        );
-      }),
+        ),
+      );
+    };
+    // Unread first, then what you have seen; each keeps its newest-first order.
+    // One you opened on this visit stays where it was, so the list does not jump.
+    const isFresh = (it) => !it.read || AG.opened.has(it.id);
+    const fresh = shown.filter(isFresh);
+    const seen = shown.filter((it) => !isFresh(it));
+    body = h(
+      'div',
+      { class: 'aglist' },
+      fresh.length && seen.length ? h('div', { class: 'aggroup', text: 'Unread' }) : null,
+      fresh.map(row),
+      fresh.length && seen.length ? h('div', { class: 'aggroup', text: 'Earlier' }) : null,
+      seen.map(row),
       items.length > INBOX_SHOW
         ? h('button', { class: 'link agmore', text: AG.inboxAll ? 'Show fewer' : `Show all ${items.length}`, onclick: () => ((AG.inboxAll = !AG.inboxAll), drawAgentInbox()) })
         : null,
