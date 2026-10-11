@@ -3,7 +3,7 @@
 'use strict';
 
 /* ======================================================================
-   Market: skills, rules, filters, bundles and extensions from a signed catalog
+   Market: skills, rules, filters, bundles, extensions and tools from a signed catalog
    ====================================================================== */
 
 const KIND_INFO = {
@@ -14,7 +14,10 @@ const KIND_INFO = {
   bundle: { label: 'Bundles', one: 'Bundle', ico: '❖' },
   extension: { label: 'Extensions', one: 'Extension', ico: '⬡' },
   platform: { label: 'Platforms', one: 'Platform', ico: '⚐' },
+  tool: { label: 'Tools', one: 'Tool', ico: '⚒' },
+  detectors: { label: 'Detectors', one: 'Detector pack', ico: '◉' },
 };
+const kindInfo = (k) => KIND_INFO[k] || { label: k.charAt(0).toUpperCase() + k.slice(1) + 's', one: k.charAt(0).toUpperCase() + k.slice(1), ico: '•' };
 
 const GROUP_LABELS = { traffic: 'Traffic', insights: 'Insights', map: 'Map', scope: 'Scope', findings: 'Findings', scan: 'Scans' };
 const groupLabel = (g) => GROUP_LABELS[g] || g;
@@ -24,7 +27,7 @@ const MK = { data: null, kind: 'all', q: '', sel: null, busy: null, ext: {}, rec
 function renderMarket(main) {
   const q = h('input', {
     id: 'mq',
-    placeholder: 'Search skills, rules, filters, platforms, bundles and extensions',
+    placeholder: 'Search skills, rules, filters, tools, platforms, bundles and extensions',
     spellcheck: 'false',
     autocomplete: 'off',
     value: MK.q,
@@ -134,10 +137,13 @@ function drawMarket() {
   counts.unverified = d.packages.filter(isUnverified).length;
   counts.community = d.packages.filter(isCommunity).length;
   const kinds = $('#mkinds');
+  const order = (k) => (k in KIND_INFO ? Object.keys(KIND_INFO).indexOf(k) : 99);
   if (kinds) {
     const chip = (key, label) =>
       h('button', { class: 'chip' + (MK.kind === key ? ' on' : ''), onclick: () => ((MK.kind = key), drawMarket()) }, h('span', { text: label }), h('span', { class: 'n', text: counts[key] || 0 }));
-    clear(kinds, chip('all', 'All'), Object.entries(KIND_INFO).map(([k, v]) => chip(k, v.label)), h('span', { class: 'fsep' }), chip('installed', 'Installed'), counts.community ? chip('community', 'Community') : null, counts.unverified ? chip('unverified', 'Your own') : null);
+    // One chip per kind the catalog actually has, known kinds first, so a new kind shows up on its own.
+    const present = [...new Set(d.packages.map((p) => p.kind))].sort((a, b) => order(a) - order(b) || a.localeCompare(b));
+    clear(kinds, chip('all', 'All'), present.map((k) => chip(k, kindInfo(k).label)), h('span', { class: 'fsep' }), chip('installed', 'Installed'), counts.community ? chip('community', 'Community') : null, counts.unverified ? chip('unverified', 'Your own') : null);
   }
   drawRecommended();
   const updates = d.packages.filter((p) => p.status.state === 'update');
@@ -150,7 +156,7 @@ function drawMarket() {
   const list = d.packages.filter(
     (p) =>
       (MK.kind === 'all' || p.kind === MK.kind || (MK.kind === 'installed' && ['installed', 'update'].includes(p.status.state)) || (MK.kind === 'unverified' && isUnverified(p)) || (MK.kind === 'community' && isCommunity(p))) &&
-      (!q || p.name.includes(q) || p.description.toLowerCase().includes(q) || (KIND_INFO[p.kind] || {}).one.toLowerCase().includes(q)),
+      (!q || p.name.includes(q) || p.description.toLowerCase().includes(q) || kindInfo(p.kind).one.toLowerCase().includes(q)),
   );
   const grid = $('#mgrid');
   if (!grid) return;
@@ -159,7 +165,7 @@ function drawMarket() {
     grid,
     list.map((p) => {
       const st = marketStatus(p);
-      const k = KIND_INFO[p.kind] || { one: p.kind, ico: '•' };
+      const k = kindInfo(p.kind);
       return h(
         'div',
         { class: 'mpkg' + (MK.sel === p.name ? ' sel' : '') + (isUnverified(p) ? ' unv' : ''), tabindex: 0, onclick: () => showPackage(p.name), onkeydown: (e) => e.key === 'Enter' && showPackage(p.name) },
@@ -217,7 +223,7 @@ function drawRecommended() {
     const p = byName[k.name];
     if (!p) return null;
     const st = marketStatus(p);
-    const ki = KIND_INFO[p.kind] || { one: p.kind, ico: '•' };
+    const ki = kindInfo(p.kind);
     return h(
       'div',
       { class: 'mpkg mrecpkg', tabindex: 0, onclick: () => showPackage(p.name), onkeydown: (e) => e.key === 'Enter' && showPackage(p.name) },
@@ -612,7 +618,7 @@ function addExternal(prefill) {
       boxes = caps.boxes;
       clear(
         preview,
-        h('div', { class: 'xhead' }, h('b', { class: 'mono', text: f.name }), h('span', { class: 'muted', text: ` ${KIND_INFO[f.kind].one} · ${f.version} · ${f.author}` })),
+        h('div', { class: 'xhead' }, h('b', { class: 'mono', text: f.name }), h('span', { class: 'muted', text: ` ${kindInfo(f.kind).one} · ${f.version} · ${f.author}` })),
         h('p', { text: f.description }),
         h('p', { class: 'muted fine', text: 'From ' + f.source }),
         f.kind === 'extension' ? [caps.rows, h('div', { class: 'mhow' }, h('div', { class: 'mcaph', text: 'How it runs' }), h('p', { text: f.effects[f.effects.length - 1] }))] : f.effects.map((e) => h('div', { class: 'mcap' }, h('span', { class: 'mdot', text: '•' }), h('span', { text: e }))),
@@ -696,7 +702,7 @@ async function showPackage(name) {
     return clear(panel, h('div', { class: 'perr', text: e.message }));
   }
   if (MK.sel !== name) return;
-  const k = KIND_INFO[p.kind] || { one: p.kind, ico: '•' };
+  const k = kindInfo(p.kind);
   const st = marketStatus(p);
   const det = d.detail || {};
   const sec = (title, ...kids) => h('div', { class: 'msec' }, h('h4', { text: title }), kids);

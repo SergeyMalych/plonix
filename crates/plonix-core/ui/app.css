@@ -1043,6 +1043,7 @@ button.agfhit:hover { background: var(--surface-2); color: var(--accent); }
 .mico.k-filters { background: var(--ok-soft); color: var(--ok); }
 .mico.k-bundle { background: var(--violet-soft); color: var(--violet); }
 .mico.k-extension { background: var(--warn-soft); color: var(--warn); }
+.mico.k-tool { background: var(--crit-soft); color: var(--crit); }
 .tag.upd { background: var(--warn-soft); color: var(--warn); }
 .tag.bad { background: var(--crit-soft); color: var(--crit); }
 .mside { width: 400px; flex: 0 0 auto; border-left: 1px solid var(--line); background: var(--surface); overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; height: 100%; }
