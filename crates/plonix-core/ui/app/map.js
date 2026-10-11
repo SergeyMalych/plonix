@@ -6,7 +6,43 @@
    Map: hosts, endpoints, technologies
    ====================================================================== */
 
-const M = { hosts: [], tech: {}, sel: null, dirty: true, scroll: null };
+const M = { hosts: [], tech: {}, sel: null, dirty: true, scroll: null, hidden: [], order: 'recent', showHidden: false };
+
+/** How the host list can be ordered. Name sorts by the site's own domain first, so a site's hosts sit together. */
+const MORDER = [
+  { key: 'recent', label: 'Recent', title: 'Hosts with the newest traffic first', cmp: (a, b) => b.last_seen - a.last_seen },
+  { key: 'requests', label: 'Requests', title: 'Hosts with the most requests first', cmp: (a, b) => b.requests - a.requests },
+  { key: 'name', label: 'A–Z', title: 'By domain, then by host name', cmp: (a, b) => hostSortKey(a.host).localeCompare(hostSortKey(b.host)) },
+];
+
+/** `api.shop.example` sorts as `example.shop.api`, so subdomains follow their parent. */
+function hostSortKey(host) {
+  return host.split('.').reverse().join('.');
+}
+
+/** In-scope hosts the list shows (or, with the hidden ones open, those too), in the chosen order. */
+function mapHosts() {
+  const o = MORDER.find((x) => x.key === M.order) || MORDER[0];
+  return M.hosts
+    .filter((x) => x.scope === 'accepted' && (M.showHidden || !M.hidden.includes(x.host)))
+    .sort((a, b) => o.cmp(a, b) || a.host.localeCompare(b.host));
+}
+
+function saveMapView() {
+  api('/api/views/map', { method: 'PUT', body: { hidden: M.hidden, order: M.order } }).catch(() => {});
+}
+
+/** Hide a host from the Map, or bring it back. Its traffic stays where it is. */
+function setHostHidden(host, hide) {
+  M.hidden = M.hidden.filter((x) => x !== host);
+  if (hide) M.hidden.push(host);
+  if (!M.hidden.length) M.showHidden = false;
+  if (hide && M.sel === host && !M.showHidden) M.sel = (mapHosts()[0] || {}).host || null;
+  saveMapView();
+  drawHostList();
+  drawHostDetail();
+  if (hide) toast(host + ' is hidden from the Map. Its traffic is kept.');
+}
 
 function saveMapScroll() {
   const list = $('#hostlist');
@@ -45,12 +81,15 @@ function renderMap(main) {
 
 async function loadMap(withTech) {
   try {
-    M.hosts = await api('/api/hosts');
+    const [hosts, view] = await Promise.all([api('/api/hosts'), api('/api/views/map').catch(() => null)]);
+    M.hosts = hosts;
+    if (view && Array.isArray(view.hidden)) M.hidden = view.hidden.filter((x) => typeof x === 'string');
+    if (view && MORDER.some((x) => x.key === view.order)) M.order = view.order;
   } catch (e) {
     return toast(e.message, 'err');
   }
   M.dirty = false;
-  if (!M.sel && M.hosts.length) M.sel = (M.hosts.find((x) => x.scope === 'accepted') || M.hosts[0]).host;
+  if (!M.sel) M.sel = (mapHosts()[0] || {}).host || null;
   drawHostList();
   await drawHostDetail();
   restoreMapScroll();
@@ -73,23 +112,46 @@ async function loadMap(withTech) {
 function drawHostList() {
   const box = $('#hostlist');
   if (!box) return;
-  if (!M.hosts.length) return clear(box, h('div', { class: 'empty', text: 'No hosts yet.' }));
-  clear(
-    box,
-    M.hosts.map((x) =>
+  const list = mapHosts();
+  const inScope = M.hosts.filter((x) => x.scope === 'accepted');
+  const hiddenN = inScope.filter((x) => M.hidden.includes(x.host)).length;
+  const outN = M.hosts.length - inScope.length;
+  const head = h(
+    'div',
+    { class: 'hosthead' },
+    h('span', { class: 'lbl', text: `Hosts (${list.length})` }),
+    h(
+      'div',
+      { class: 'seg hostorder', title: 'Order the hosts' },
+      MORDER.map((o) => h('button', { class: o.key === M.order ? 'on' : '', text: o.label, title: o.title, onclick: () => ((M.order = o.key), saveMapView(), drawHostList()) })),
+    ),
+  );
+  const rows = list.map((x) => {
+    const hidden = M.hidden.includes(x.host);
+    return h(
+      'div',
+      { class: 'hostrow' + (x.host === M.sel ? ' on' : '') + (hidden ? ' hidden' : ''), onclick: () => ((M.sel = x.host), drawHostList(), drawHostDetail()) },
       h(
         'div',
-        { class: 'hostrow' + (x.host === M.sel ? ' on' : ''), onclick: () => ((M.sel = x.host), drawHostList(), drawHostDetail()) },
-        h('div', { class: 'hn' }, h('span', { text: x.host, title: x.host })),
-        h(
-          'div',
-          { class: 'hm' },
-          h('span', { class: 'tag ' + scopeTag(x.scope), text: x.scope === 'unknown' ? 'out' : x.scope === 'accepted' ? 'in' : 'rejected' }),
-          `${x.requests} req`,
-          (M.tech[x.host] || []).slice(0, 3).map((t) => h('span', { class: 'techchip', text: t.name })),
-        ),
+        { class: 'hn' },
+        h('span', { text: x.host, title: x.host }),
+        hidden
+          ? h('button', { class: 'btn xs', text: 'Show', title: 'Show this host on the Map again', onclick: (e) => (e.stopPropagation(), setHostHidden(x.host, false)) })
+          : h('button', { class: 'iconbtn hostx', text: '✕', title: 'Hide this host from the Map (its traffic is kept)', onclick: (e) => (e.stopPropagation(), setHostHidden(x.host, true)) }),
       ),
-    ),
+      h('div', { class: 'hm' }, `${x.requests} req`, (M.tech[x.host] || []).slice(0, 3).map((t) => h('span', { class: 'techchip', text: t.name }))),
+    );
+  });
+  const foot = [];
+  if (hiddenN) foot.push(h('button', { class: 'link', text: M.showHidden ? 'Hide hidden' : `${hiddenN} hidden`, title: M.showHidden ? 'Leave the hidden hosts off the list again' : 'List the hosts you hid, to bring any back', onclick: () => ((M.showHidden = !M.showHidden), drawHostList()) }));
+  if (outN) foot.push(h('button', { class: 'link', text: `${outN} not in scope`, title: 'Hosts you haven’t accepted are left off the Map. Open Scope to accept them.', onclick: () => go('scope') }));
+  clear(
+    box,
+    head,
+    rows.length
+      ? rows
+      : h('div', { class: 'empty', text: inScope.length ? 'Every in-scope host is hidden.' : M.hosts.length ? 'No hosts in scope yet. Accept the ones you are testing on Scope and they appear here.' : 'No hosts yet.' }),
+    foot.length ? h('div', { class: 'hostfoot' }, foot.flatMap((b, i) => (i ? [' · ', b] : [b]))) : null,
   );
 }
 
@@ -123,6 +185,7 @@ async function drawHostDetail() {
       h('span', { class: 'count', text: `${hs.requests || 0} requests · ${eps.length} endpoints` }),
       h('span', { class: 'hint' }),
       d !== 'accepted' ? h('button', { class: 'btn sm', text: 'Accept into scope', onclick: async () => (await decideDomain('accept', host)) && (await loadMap()) }) : null,
+      M.hidden.includes(host) ? h('button', { class: 'btn sm', text: 'Show on Map', onclick: () => setHostHidden(host, false) }) : null,
       h('button', { class: 'btn sm', text: 'Show traffic', onclick: () => setQuery('host:' + host) }),
       toolOn('access-check') && d === 'accepted'
         ? h('button', { class: 'btn sm', text: 'Check access', title: 'Replay this host\'s endpoints as each saved user, and once signed out', onclick: () => startAccessCheck({ host, prefix: '/', sourceLabel: host }) })

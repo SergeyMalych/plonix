@@ -381,7 +381,7 @@ const TOUR_STEPS = [
     target: ['#hostlist', '#main .view'],
     title: 'Map',
     test: 'map',
-    text: 'Hosts, endpoints and parameters learned from the traffic, with the technologies Plonix detected. Click any endpoint to see its requests in place.',
+    text: 'Every in-scope host, with the endpoints, parameters and technologies Plonix learned from the traffic. Order the list as you like and hide hosts you are done with. Click any endpoint to see its requests in place.',
   },
   {
     view: 'bench',
