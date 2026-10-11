@@ -92,7 +92,7 @@ The counted features are a fixed list:
 
 ## On the server
 
-The endpoint is a small function on the Plonix website (`functions/api/usage.js` in this repository). It accepts only the fields above, keeps only names from the fixed lists above (any other feature, screen, kind, range or domain is dropped), caps every number, and stores one row per install per day: the date, the fields above, and nothing else. It does not store your IP address or request headers. A failed send is silent: Plonix never waits on it or retries more than once a day.
+The endpoint is a small function on the Plonix website (`functions/api/usage.js` in this repository). It accepts only the fields above and treats every one of them as untrusted: names must come from the fixed lists above (any other feature, screen, kind, range or domain is dropped), the version must look like `1.2.3`, the OS and CPU type must be known ones (anything else is stored as `other`), the OS release keeps digits only, and every number is a capped whole number. Nothing is stored as free text, and stores one row per install per day: the date, the fields above, and nothing else. It never reads or stores your IP address or request headers, the User-Agent included. A failed send is silent: Plonix never waits on it or retries more than once a day.
 
 ## The public totals
 

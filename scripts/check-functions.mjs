@@ -42,6 +42,19 @@ const stats = await load('stats');
   assert.deepEqual(v2.extra.rejected, { 'google-analytics.com': 2, other: 3 });
   assert.ok(!JSON.stringify(v2).includes('secret'));
   assert.equal(usage.clean({ schema: 3, ...base }), null);
+  // Nothing a client sends gets through as free text.
+  for (const version of ['<script>alert(1)</script>', '0.1.4"; DROP TABLE usage_reports;--', '1.2.3\n', '1.2', ' 1.2.3', '1.2.3-' + 'x'.repeat(30), ['1.2.3'], { toString: () => '1.2.3' }]) {
+    assert.equal(usage.clean({ schema: 2, ...base, version }), null, JSON.stringify(version));
+  }
+  const odd = usage.clean({ schema: 2, ...base, os: '<img src=x onerror=alert(1)>', arch: 'x86_64\u0000', os_version: '15.1<b>', counts: { __proto__: 5, constructor: 1, bench_send: 2 }, profile: { toString: () => 'bug-hunter' }, look: { style: ['studio'] } });
+  assert.equal(odd.os, 'other');
+  assert.equal(odd.arch, 'other');
+  assert.equal(odd.osVersion, '');
+  assert.deepEqual(odd.counts, { bench_send: 2 });
+  assert.equal(odd.extra.profile, 'none');
+  assert.deepEqual(odd.extra.look, {});
+  assert.equal(usage.clean({ schema: 2, ...base, os_version: '10.0.22631.4317' }).osVersion, '10.0');
+  assert.equal(usage.clean({ schema: 2, ...base, version: '0.0.0-test' }).version, '0.0.0-test');
   assert.equal(usage.clean({ schema: 2, ...base, install_id: 'x' }), null);
 }
 
@@ -71,6 +84,12 @@ const stats = await load('stats');
   assert.equal(s.daily.length, 30);
   assert.equal(s.daily[29].installs, 6);
   assert.equal(s.daily[0].installs, null);
+  // A bad name in a row never reaches the page: it is counted as "other" at most.
+  const bad = [];
+  for (let i = 0; i < 6; i++) bad.push({ ...row(i, today, {}), version: '<b>x</b>' });
+  assert.ok(!JSON.stringify(stats.summarize(bad, { ever: 6, new30: 6 }, today)).includes('<'));
+  assert.ok(stats.safeId('-host') && stats.safeId('macos 15') && stats.safeId('0.1.4-beta.1') && !stats.safeId('a"b') && !stats.safeId(''));
+  assert.deepEqual(stats.downloads([{ tag_name: '<img>', assets: [{ name: 'a.dmg', download_count: '9' }] }]).releases, []);
   const dl = stats.downloads([{ tag_name: 'v0.1.4', assets: [{ name: 'Plonix-macOS.dmg', download_count: 3 }, { name: 'Plonix-Windows-setup.exe', download_count: 2 }, { name: 'Plonix-macOS.app.tar.gz', download_count: 9 }, { name: 'latest.json', download_count: 50 }] }]);
   assert.deepEqual([dl.total, dl.macos, dl.windows, dl.updates], [5, 3, 2, 9]);
 }

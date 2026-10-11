@@ -277,29 +277,33 @@ footer a:hover { color: var(--fg); }
   const OS = { macos: 'macOS', windows: 'Windows', linux: 'Linux', other: 'Other' };
   const ARCH = { aarch64: 'Apple silicon / Arm', x86_64: 'Intel / AMD 64-bit', other: 'Other' };
   const STYLES = { studio: 'Studio', classic: 'Classic', other: 'Other' };
-  const name = (map, id) => map[id] || (id === 'other' ? 'Other' : id);
+  const name = (map, id) => (Object.prototype.hasOwnProperty.call(map, id) ? map[id] : id === 'other' ? 'Other' : String(id));
   const osVersion = (id) => { if (id === 'other') return 'Other'; const [os, v] = id.split(' '); return `${name(OS, os)} ${v}`; };
   const filterName = (id) => (id === 'text' ? 'free text' : id === '-text' ? '-free text' : id + ':');
 
   /* ---- drawing ---- */
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-  const fmt = (n) => (n == null ? '–' : n >= 10000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1).replace(/\.0$/, '') + 'k' : n.toLocaleString('en-US'));
+  // Everything from the server goes through esc() or num() before it reaches the page.
+  const num = (n) => (typeof n === 'number' && Number.isFinite(n) ? n : null);
+  const fmt = (n) => ((n = num(n)) == null ? '–' : n >= 10000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1).replace(/\.0$/, '') + 'k' : n.toLocaleString('en-US'));
   const EMPTY = 'Not enough installs yet. This appears once five or more installs have reported.';
   const empty = (el, text = EMPTY) => { el.innerHTML = `<div class="empty">${esc(text)}</div>`; };
 
   function bars(el, items, { color, label, value, tip, mono, compact, fmt: show }) {
     if (!items || !items.length) return empty(el);
-    const max = Math.max(...items.map(value), 1);
+    items = items.filter((it) => it && typeof it.id === 'string');
+    if (!items.length) return empty(el);
+    const max = Math.max(...items.map((it) => num(value(it)) || 0), 1);
     el.innerHTML = `<div class="bars ${compact ? 'compact' : ''} c-${color}" role="list">` + items.map((it) =>
       `<div class="bar" role="listitem" data-tip="${esc(tip(it))}"><span class="name${mono ? ' mono' : ''}" title="${esc(label(it))}">${esc(label(it))}</span>` +
-      `<span class="track"><span class="fill" style="width:${(value(it) / max) * 100}%"></span></span><span class="val">${esc(show ? show(it) : fmtVal(it, value))}</span></div>`).join('') + '</div>';
+      `<span class="track"><span class="fill" style="width:${((num(value(it)) || 0) / max) * 100}%"></span></span><span class="val">${esc(show ? show(it) : fmtVal(it, value))}</span></div>`).join('') + '</div>';
   }
   const fmtVal = (it, value) => (it._pct != null ? it._pct + '%' : fmt(value(it)));
 
   function kpis(d) {
     const u = d.usage || {}, i = u.installs || {}, t = u.time, dl = d.downloads;
-    const tile = (shape, label, num, sub) => `<div class="kpi"><i class="shape ${shape}" aria-hidden="true"></i><span class="label">${label}</span><span class="num${num == null ? ' na' : ''}">${num == null ? 'Fewer than 5' : fmt(num)}</span><span class="sub">${sub}</span></div>`;
+    const tile = (shape, label, n, sub) => ((n = num(n)), `<div class="kpi"><i class="shape ${shape}" aria-hidden="true"></i><span class="label">${esc(label)}</span><span class="num${n == null ? ' na' : ''}">${n == null ? 'Fewer than 5' : fmt(n)}</span><span class="sub">${esc(sub)}</span></div>`);
     $('kpis').innerHTML =
       tile('s-red', 'Downloads', dl ? dl.total : null, dl ? `${fmt(dl.macos)} Mac, ${fmt(dl.windows)} Windows` : 'Release counts unavailable') +
       tile('s-blue', 'Active installs, 30 days', i.active_30d, i.active_7d != null ? `${fmt(i.active_7d)} in the last 7 days` : 'Last 7 days hidden') +
@@ -310,13 +314,13 @@ footer a:hover { color: var(--fg); }
   function daily(d) {
     const days = (d.usage && d.usage.daily) || [];
     if (!days.length) return empty($('daily-chart'));
-    const max = Math.max(...days.map((x) => x.installs || 0), 5);
-    const label = (s) => new Date(s + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-    $('daily-chart').innerHTML = '<div class="cols">' + days.map((x) => x.installs == null
-      ? `<div class="c hidden" data-tip="${label(x.day)}: fewer than 5"><span></span></div>`
-      : `<div class="c" data-tip="${label(x.day)}: ${fmt(x.installs)} installs"><span style="height:${(x.installs / max) * 100}%"></span></div>`).join('') +
-      `</div><div class="axis"><span>${label(days[0].day)}</span><span>${label(days[Math.floor(days.length / 2)].day)}</span><span>${label(days[days.length - 1].day)}</span></div>` +
-      `<table class="sr"><caption>Installs per day</caption>${days.map((x) => `<tr><th>${x.day}</th><td>${x.installs == null ? 'fewer than 5' : x.installs}</td></tr>`).join('')}</table>`;
+    const max = Math.max(...days.map((x) => num(x.installs) || 0), 5);
+    const label = (s) => !/^\d{4}-\d{2}-\d{2}$/.test(s) ? '' : new Date(s + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    $('daily-chart').innerHTML = '<div class="cols">' + days.map((x) => num(x.installs) == null
+      ? `<div class="c hidden" data-tip="${esc(label(x.day))}: fewer than 5"><span></span></div>`
+      : `<div class="c" data-tip="${esc(label(x.day))}: ${fmt(x.installs)} installs"><span style="height:${(num(x.installs) / max) * 100}%"></span></div>`).join('') +
+      `</div><div class="axis"><span>${esc(label(days[0].day))}</span><span>${esc(label(days[Math.floor(days.length / 2)].day))}</span><span>${esc(label(days[days.length - 1].day))}</span></div>` +
+      `<table class="sr"><caption>Installs per day</caption>${days.map((x) => `<tr><th>${esc(x.day)}</th><td>${num(x.installs) == null ? 'fewer than 5' : fmt(x.installs)}</td></tr>`).join('')}</table>`;
   }
 
   function render(d) {
@@ -360,7 +364,7 @@ footer a:hover { color: var(--fg); }
       small('Hosts in scope', 'Per project', sorted(u && u.sizes && u.sizes.in_scope), 'red', range, true),
     );
     const dl = d.downloads;
-    if (dl && dl.releases.length) bars($('downloads-chart'), dl.releases.slice(0, 12), { color: 'green', mono: true, label: (x) => 'v' + x.version, value: (x) => x.downloads, tip: (x) => `v${x.version}${x.published ? ' (' + x.published + ')' : ''}: ${fmt(x.downloads)} downloads` });
+    if (dl && dl.releases.length) bars($('downloads-chart'), dl.releases.slice(0, 12).map((x) => ({ ...x, id: String(x.version) })), { color: 'green', mono: true, label: (x) => 'v' + x.version, value: (x) => x.downloads, tip: (x) => `v${x.version}${x.published ? ' (' + x.published + ')' : ''}: ${fmt(x.downloads)} downloads` });
     else empty($('downloads-chart'), 'Download counts are unavailable right now.');
   }
 

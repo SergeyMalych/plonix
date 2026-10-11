@@ -78,6 +78,10 @@ const DOMAINS = new Set([
   'other',
 ]);
 
+// Systems and CPU types Plonix is built for; anything else is stored as 'other'.
+const OSES = new Set(['macos', 'windows', 'linux']);
+const ARCHES = new Set(['aarch64', 'x86_64', 'x86', 'arm']);
+
 const LOOK = { style: ['studio', 'classic'], theme: ['auto', 'light', 'dark'], density: ['dense', 'roomy'] };
 
 const MAX_BYTES = 8192;
@@ -119,24 +123,29 @@ function extra(r) {
 /** The report with only the expected fields, or null when it is not one. */
 export function clean(r) {
   if (!isObject(r) || (r.schema !== 1 && r.schema !== 2)) return null;
+  // Every string kept is either matched in full by a strict pattern or replaced by a fixed word, so nothing
+  // a client sends can reach the database or the public page as free text. Headers (the User-Agent too)
+  // and the IP address are never read.
   const install = text(r.install_id, /^[0-9a-f]{32}$/);
-  const version = text(r.version, /^[0-9A-Za-z.+-]{1,32}$/);
+  const version = text(r.version, /^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}(?:-[0-9A-Za-z.]{1,20})?$/);
   if (!install || !version) return null;
   if (!isObject(r.counts)) return null;
   const counts = tally(r.counts, (k) => EVENTS.has(k));
+  // Major and minor release only, digits only.
+  const osVersion = (text(r.os_version, /^[0-9.]{1,24}$/) || '').split('.').slice(0, 2).filter((p) => /^[0-9]{1,4}$/.test(p)).join('.');
   return {
     install,
     version,
-    os: text(r.os, /^[a-z0-9_]{1,16}$/) || 'unknown',
-    // Major and minor release only.
-    osVersion: (text(r.os_version, /^[0-9A-Za-z.]{0,24}$/) || '').split('.').slice(0, 2).join('.'),
-    arch: text(r.arch, /^[a-z0-9_]{1,16}$/) || 'unknown',
+    os: OSES.has(r.os) ? r.os : 'other',
+    osVersion,
+    arch: ARCHES.has(r.arch) ? r.arch : 'other',
     counts,
     extra: r.schema === 2 ? extra(r) : null,
   };
 }
 
 export async function onRequestPost({ request, env }) {
+  if (!/^application\/json\b/i.test(request.headers.get('content-type') || '')) return new Response(null, { status: 415 });
   const declared = Number(request.headers.get('content-length') || 0);
   if (declared > MAX_BYTES) return new Response(null, { status: 413 });
   let report;
