@@ -26,10 +26,14 @@ const STARTER_QUESTIONS = [
   'Summarize what this application does from its traffic.',
 ];
 
-const AG = { chat: null, cv: null, setup: null, chats: [], policy: null, hits: [], skills: [], watch: null, inboxAll: false, lookAsked: 0 };
+// sel: the inbox item opened in place; side: what the right column shows ('claude':
+// asking and conversations, 'traffic': what agents read); ex: request summaries, so
+// leads and the feed can name requests by method and path.
+const AG = { chat: null, cv: null, setup: null, chats: [], policy: null, hits: [], skills: [], watch: null, inboxAll: false, lookAsked: 0, sel: null, side: 'claude', ex: {}, opened: new Set() };
 
 function renderAgents(main) {
   AG.cv = null;
+  AG.opened = new Set();
   const setupBtn = h('button', { class: 'btn sm', id: 'agsetupbtn', text: 'Setup', onclick: () => toggleAgentSetup() });
   clear(
     main,
@@ -43,8 +47,14 @@ function renderAgents(main) {
         h(
           'div',
           { class: 'agws' },
-          h('div', { class: 'agmain' }, h('div', { class: 'card aginbox', id: 'aginbox' }), h('div', { class: 'card agask', id: 'agask' }), h('div', { id: 'agbody' })),
-          h('aside', { class: 'agside' }, h('div', { class: 'card agfeed', id: 'agfeed' }, h('div', { class: 'ab muted', text: 'Loading…' }))),
+          h('div', { class: 'agmain' }, h('div', { class: 'card aginbox', id: 'aginbox' })),
+          h(
+            'aside',
+            { class: 'agside' },
+            h('div', { class: 'agviews', id: 'agviews' }),
+            h('div', { class: 'agclaude', id: 'agclaude' }, h('div', { class: 'card agask', id: 'agask' }), h('div', { id: 'agbody' })),
+            h('div', { class: 'card agfeed', id: 'agfeed', hidden: true }, h('div', { class: 'ab muted', text: 'Loading…' })),
+          ),
         ),
         h('div', { class: 'stack agsetup', id: 'agentsbody', hidden: true }),
       ),
@@ -52,6 +62,7 @@ function renderAgents(main) {
   );
   drawAgentAsk();
   drawAgentBody();
+  drawAgentSide();
   loadAgents(true);
 }
 
@@ -90,7 +101,7 @@ async function loadAgents(first) {
     loadAgentStarters();
   } else if (AG.setup) drawAgentSetup();
   drawAgentInbox();
-  drawAgentFeed();
+  drawAgentSide();
   if (!AG.chat) drawAgentBody();
 }
 
@@ -116,7 +127,7 @@ function drawAgentAsk() {
       ),
     );
   }
-  const q = h('textarea', { class: 'agq', id: 'agq', rows: 2, placeholder: 'Ask Claude about this project: what to look at next, what an endpoint does, which hosts belong to the target…' });
+  const q = h('textarea', { class: 'agq', id: 'agq', rows: 3, placeholder: 'Ask Claude about this project: what to look at next, what an endpoint does, which hosts belong to the target…' });
   const go = h('button', { class: 'btn primary ai', text: '✦ Ask', disabled: true });
   const send = () => {
     const t = q.value.trim();
@@ -138,7 +149,6 @@ function drawAgentAsk() {
     h('div', { class: 'agqrow' }, q, go),
     h('div', { class: 'agstarters', id: 'agstarters' }),
     h('div', { id: 'agarg' }),
-    h('p', { class: 'muted fine agnote', text: 'Claude reads this project through Plonix, read-only. It can suggest; it cannot send requests or change anything.' }),
   );
   drawAgentStarters();
 }
@@ -245,6 +255,18 @@ async function actOnItem(it) {
   showExchange(id);
 }
 
+/** Opens an inbox item in place (or closes it), and counts it as read. */
+function selectItem(it) {
+  AG.sel = AG.sel === it.id ? null : it.id;
+  if (!it.read) {
+    it.read = true;
+    AG.opened.add(it.id);
+    AG.watch.unread = Math.max(0, (AG.watch.unread || 0) - 1);
+    markItems([it.id], false);
+  }
+  drawAgentInbox();
+}
+
 async function markItems(ids, dismiss) {
   try {
     const r = await api('/api/agents/watch/items', { method: 'POST', body: { ids, dismiss } });
@@ -327,39 +349,66 @@ function drawAgentInbox() {
     body = h('div', { class: 'ab muted', text: w.state.last_error || 'Nothing yet. Browse the target; when you pause, Claude looks at what is new. Or press Look now.' });
   } else {
     const shown = AG.inboxAll ? items : items.slice(0, INBOX_SHOW);
-    body = h(
-      'div',
-      { class: 'aglist' },
-      shown.map((it) => {
-        const k = ITEM_KIND[it.kind] || ITEM_KIND.note;
-        // Access needs its Market tool; without it the lead opens the request.
-        const next = it.next === 'access' && !toolOn('access-check') ? 'lens' : it.next || 'lens';
-        const act = it.kind === 'digest' ? null : NEXT_ACTION[next];
-        return h(
+    loadAgentRequests(shown.map((it) => it.request));
+    const row = (it) => {
+      const k = ITEM_KIND[it.kind] || ITEM_KIND.note;
+      // Access needs its Market tool; without it the lead opens the request.
+      const next = it.next === 'access' && !toolOn('access-check') ? 'lens' : it.next || 'lens';
+      const act = it.kind === 'digest' ? null : NEXT_ACTION[next];
+      const open = it.id === AG.sel;
+      const ex = it.request && AG.ex[it.request];
+      return h(
+        'div',
+        {
+          class: 'agitem ' + k.cls + (it.read ? '' : ' unread') + (open ? ' sel' : ''),
+          title: open ? '' : 'Show more',
+          onclick: (e) => !e.target.closest('button') && selectItem(it),
+        },
+        h('span', { class: 'agkind ' + k.cls, text: k.label }),
+        h(
           'div',
-          { class: 'agitem' + (it.read ? '' : ' unread') },
-          h('span', { class: 'agkind ' + k.cls, text: k.label }),
+          { class: 'agimain' },
+          h('div', { class: 'agititle', text: it.title }),
+          it.detail ? h('div', { class: 'agidetail', text: it.detail }) : null,
           h(
             'div',
-            { class: 'agimain' },
-            h('div', { class: 'agititle', text: it.title }),
-            it.detail ? h('div', { class: 'agidetail', text: it.detail }) : null,
-            h(
-              'div',
-              { class: 'agimeta' },
-              it.request ? h('button', { class: 'link', text: 'Request #' + it.request, onclick: () => (markItems([it.id], false), showExchange(it.request)) }) : null,
-              h('span', { text: agoText(it.at) }),
-            ),
+            { class: 'agimeta' },
+            it.request && !open
+              ? h(
+                  'button',
+                  { class: 'agireq', title: 'Open request #' + it.request, onclick: () => (markItems([it.id], false), showExchange(it.request)) },
+                  ex ? [h('b', { text: ex.method }), h('span', { class: 'p', text: ex.path }), ex.status != null ? h('span', { class: statusClass(ex.status), text: ex.status }) : null] : h('span', { class: 'p', text: 'Request #' + it.request }),
+                )
+              : null,
+            h('span', { class: 'ago', text: agoText(it.at) }),
           ),
+          open ? leadMore(it, act) : null,
+        ),
+        h(
+          'div',
+          { class: 'agiacts' },
+          !open && act && (it.request || it.next === 'map' || it.next === 'scope') ? h('button', { class: 'btn sm go', text: act, onclick: () => actOnItem(it) }) : null,
           h(
-            'div',
-            { class: 'agiacts' },
-            act && (it.request || it.next === 'map' || it.next === 'scope') ? h('button', { class: 'btn sm' + (it.kind === 'lead' ? ' primary' : ''), text: act, onclick: () => actOnItem(it) }) : null,
+            'span',
+            { class: 'agiquiet' },
             !it.read ? h('button', { class: 'mini', text: '✓', title: 'Mark read', onclick: () => markItems([it.id], false) }) : null,
             h('button', { class: 'mini', text: '✕', title: it.kind === 'digest' ? 'Remove' : 'Dismiss: not useful. Claude will suggest fewer like it.', onclick: () => markItems([it.id], true) }),
           ),
-        );
-      }),
+        ),
+      );
+    };
+    // Unread first, then what you have seen; each keeps its newest-first order.
+    // One you opened on this visit stays where it was, so the list does not jump.
+    const isFresh = (it) => !it.read || AG.opened.has(it.id);
+    const fresh = shown.filter(isFresh);
+    const seen = shown.filter((it) => !isFresh(it));
+    body = h(
+      'div',
+      { class: 'aglist' },
+      fresh.length && seen.length ? h('div', { class: 'aggroup', text: 'Unread' }) : null,
+      fresh.map(row),
+      fresh.length && seen.length ? h('div', { class: 'aggroup', text: 'Earlier' }) : null,
+      seen.map(row),
       items.length > INBOX_SHOW
         ? h('button', { class: 'link agmore', text: AG.inboxAll ? 'Show fewer' : `Show all ${items.length}`, onclick: () => ((AG.inboxAll = !AG.inboxAll), drawAgentInbox()) })
         : null,
@@ -373,8 +422,12 @@ function drawAgentInbox() {
       ? h(
           'div',
           { class: 'agfoot' },
-          h('div', { class: 'askmeter' }, h('div', { class: 'bar' + (w.capped ? ' over' : '') }, h('i', { style: { width: pct + '%' } })), h('span', { text: `${fmtTok(used)} of ${fmtTok(st.daily_tokens)} tokens today` + (w.state.looks_today ? ` · ${w.state.looks_today} look${w.state.looks_today === 1 ? '' : 's'}` : '') })),
-          h('span', { class: 'sp' }),
+          h(
+            'div',
+            { class: 'askmeter agmeter' },
+            h('span', { text: `${fmtTok(used)} of ${fmtTok(st.daily_tokens)} tokens today` + (w.state.looks_today ? ` · ${w.state.looks_today} look${w.state.looks_today === 1 ? '' : 's'}` : '') }),
+            h('div', { class: 'bar' + (w.capped ? ' over' : ''), title: pct + '% of today’s tokens used' }, h('i', { style: { width: pct + '%' } })),
+          ),
           budget,
         )
       : null,
@@ -505,8 +558,10 @@ function hitInfo(x) {
     return { ico: '⌕', text: t ? 'Searched traffic for ' + t : 'Listed recent traffic', go: () => setQuery(t) };
   }
   if ((m = p.match(/^\/api\/traffic\/(\d+)(?:\/(insights|messages))?$/))) {
-    const what = m[2] === 'insights' ? 'Spotted values in request #' : m[2] === 'messages' ? 'WebSocket messages of request #' : 'Request #';
-    return { ico: '⇅', text: what + m[1], go: () => showExchange(Number(m[1])) };
+    const id = Number(m[1]);
+    const ex = AG.ex[id];
+    const what = m[2] === 'insights' ? 'Spotted values in ' : m[2] === 'messages' ? 'WebSocket messages of ' : '';
+    return { ico: '⇅', text: what + (ex ? ex.method + ' ' + ex.path : (what ? 'request #' : 'Request #') + id), status: ex && ex.status, id, go: () => showExchange(id) };
   }
   if (p === '/api/hosts') return { ico: '⊞', text: 'Hosts seen', go: toMap() };
   if ((m = p.match(/^\/api\/hosts\/([^/]+)\/endpoints$/))) return { ico: '⊞', text: 'Endpoints on ' + host(m[1]), go: toMap(host(m[1])) };
@@ -532,12 +587,115 @@ function hitWho(client) {
   return chat ? { label: chat.title, chat: chat.id, ask: true } : { label: 'Ask Claude', ask: true };
 }
 
+/** Short summaries of requests, so the panel and the feed can say "GET /v1/orders" and not "#41". */
+async function loadAgentRequests(ids) {
+  const want = [...new Set(ids)].filter((id) => id && !(id in AG.ex)).slice(0, 40);
+  if (!want.length) return;
+  for (const id of want) AG.ex[id] = null;
+  await Promise.all(
+    want.map(async (id) => {
+      try {
+        const ex = await api('/api/traffic/' + id);
+        AG.ex[id] = { method: ex.method, host: ex.host, path: ex.path + (ex.query ? '?' + ex.query : ''), status: ex.status };
+      } catch (_) {}
+    }),
+  );
+  if (S.view !== 'agents') return;
+  drawAgentInbox();
+  drawAgentFeed();
+}
+
+/** The request ids a list of agent reads looked at. */
+function hitRequests(hits) {
+  return hits.map((x) => (x.path.match(/^\/api\/traffic\/(\d+)/) || [])[1]).filter(Boolean).map(Number);
+}
+
+/** One agent read as a row: what it was, and a click to open it. */
+function hitRow(x) {
+  const info = hitInfo(x);
+  return h(
+    info.go ? 'button' : 'div',
+    { class: 'agfhit' + (x.refused ? ' refused' : ''), title: x.method + ' ' + x.path + (x.query ? '?' + x.query : ''), onclick: info.go || null },
+    h('span', { class: 'ico', text: info.ico }),
+    h('span', { class: 'tx', text: (x.refused ? 'Refused: ' : '') + info.text }),
+    info.status != null ? h('span', { class: statusClass(info.status), text: info.status }) : null,
+  );
+}
+
+/** The right column: asking Claude and your conversations, or what agents read of your traffic. */
+function drawAgentSide() {
+  const box = $('#agviews');
+  if (!box) return;
+  const a = AG.policy;
+  const now = Date.now();
+  const live = ((a && a.clients) || []).filter((c) => now - c.last_seen < AGENT_LIVE_MS && !c.name.startsWith('plonix-'));
+  const view = (key, label, title, extra) =>
+    h('button', { class: AG.side === key ? 'on' : '', title, onclick: () => ((AG.side = key), drawAgentSide()) }, label, extra || null);
+  clear(
+    box,
+    view('claude', '✦ Claude', 'Ask Claude about this project and pick up your conversations'),
+    view('traffic', 'Traffic', 'What Claude and other agents read of your traffic', live.length ? h('span', { class: 'adot on', title: live.length === 1 ? live[0].name + ' connected' : live.length + ' agents connected' }) : null),
+  );
+  $('#agclaude').hidden = AG.side !== 'claude';
+  $('#agfeed').hidden = AG.side !== 'traffic';
+  drawAgentFeed();
+}
+
+/** An open inbox item: the request it is about, what to do, and what Claude read to get there. */
+function leadMore(it, act) {
+  const k = ITEM_KIND[it.kind] || ITEM_KIND.note;
+  // What the look that wrote this item read, oldest first.
+  const reads = AG.hits.filter((x) => x.client === 'plonix-watch/' + it.run).reverse();
+  loadAgentRequests([it.request, ...hitRequests(reads)]);
+  const ex = it.request && AG.ex[it.request];
+  const ask = () => {
+    AG.side = 'claude';
+    drawAgentSide();
+    startAgentChat(
+      `Claude left me this ${k.label.toLowerCase()} while watching my traffic: "${it.title}". ${it.detail || ''}${it.request ? ` It is about request #${it.request}.` : ''} Help me check it: what should I try, and what would confirm it or rule it out?`,
+      it.title,
+    );
+    $('#agclaude').scrollIntoView({ block: 'start', behavior: 'smooth' });
+  };
+  const canAsk = AG.policy && AG.policy.enabled && AG.policy.ask_in_app !== false;
+  return h(
+    'div',
+    { class: 'agiopen' },
+    it.request
+      ? h(
+          'button',
+          { class: 'agdreq', title: 'Open this request', onclick: () => showExchange(it.request) },
+          h('span', { class: 'agdreqtop' }, h('b', { text: ex ? ex.method : 'Request' }), h('span', { class: 'host', text: ex ? ex.host : '#' + it.request }), ex && ex.status != null ? h('span', { class: statusClass(ex.status), text: ex.status }) : null),
+          ex ? h('span', { class: 'path', text: ex.path }) : null,
+        )
+      : null,
+    act || canAsk
+      ? h(
+          'div',
+          { class: 'agdacts' },
+          act && (it.request || it.next === 'map' || it.next === 'scope') ? h('button', { class: 'btn sm primary', text: act, onclick: () => actOnItem(it) }) : null,
+          canAsk ? h('button', { class: 'btn sm ai', text: '✦ Ask Claude about this', onclick: ask }) : null,
+        )
+      : null,
+    reads.length ? h('div', { class: 'agdreads' }, h('div', { class: 'agdsub', text: `Claude read ${reads.length} thing${reads.length === 1 ? '' : 's'} on this look` }), reads.slice(0, 12).map(hitRow)) : null,
+  );
+}
+
+/** What agents have been reading, newest first, in bursts per agent. */
 function drawAgentFeed() {
   const box = $('#agfeed');
   const a = AG.policy;
-  if (!box || !a) return;
+  if (!box || !a || box.hidden) return;
   const now = Date.now();
   const live = (a.clients || []).filter((c) => now - c.last_seen < AGENT_LIVE_MS && !c.name.startsWith('plonix-'));
+  clear(
+    box,
+    h('div', { class: 'agfhead' }, h('span', { class: 'adot' + (live.length ? ' on' : '') }), h('b', { text: 'What agents read' }), h('span', { class: 'muted fine', text: live.length ? (live.length === 1 ? live[0].name + ' connected' : live.length + ' agents connected') : '' })),
+    agentFeedBody(),
+  );
+}
+
+function agentFeedBody() {
   // Consecutive requests from one agent, close together, form one burst.
   const bursts = [];
   for (const x of AG.hits) {
@@ -548,59 +706,40 @@ function drawAgentFeed() {
     } else bursts.push({ client: x.client, at: x.at, last: x.at, hits: [x] });
   }
   const SHOW = 6;
-  clear(
-    box,
-    h(
-      'div',
-      { class: 'agfhead' },
-      h('span', { class: 'adot' + (live.length ? ' on' : '') }),
-      h('b', { text: 'Activity' }),
-      h('span', { class: 'muted fine', text: live.length ? (live.length === 1 ? live[0].name + ' connected' : live.length + ' agents connected') : '' }),
-      h('span', { class: 'mode', text: 'Read-only', title: 'Agents can look, never send or change. See Setup.' }),
-    ),
-    bursts.length
-      ? h(
+  loadAgentRequests(hitRequests(bursts.slice(0, 30).flatMap((b) => b.hits.slice(0, SHOW))));
+  if (!bursts.length) return h('div', { class: 'ab muted', text: 'When Claude or another agent reads this project, each thing it looks at shows up here, so you can follow along and open it yourself.' });
+  return h(
+    'div',
+    { class: 'agfbody' },
+    bursts.slice(0, 30).map((b) => {
+      const who = hitWho(b.client);
+      const items = b.hits.map(hitRow);
+      const more = items.length - SHOW;
+      const rest = more > 0 ? items.slice(SHOW) : [];
+      for (const r of rest) r.hidden = true;
+      return h(
+        'div',
+        { class: 'agfburst' },
+        h(
           'div',
-          { class: 'agfbody' },
-          bursts.slice(0, 30).map((b) => {
-            const who = hitWho(b.client);
-            const items = b.hits.map((x) => {
-              const info = hitInfo(x);
-              return h(
-                info.go ? 'button' : 'div',
-                { class: 'agfhit' + (x.refused ? ' refused' : ''), title: x.method + ' ' + x.path + (x.query ? '?' + x.query : ''), onclick: info.go || null },
-                h('span', { class: 'ico', text: info.ico }),
-                h('span', { class: 'tx', text: (x.refused ? 'Refused: ' : '') + info.text }),
-              );
-            });
-            const more = items.length - SHOW;
-            const rest = more > 0 ? items.slice(SHOW) : [];
-            for (const r of rest) r.hidden = true;
-            return h(
-              'div',
-              { class: 'agfburst' },
-              h(
-                'div',
-                { class: 'agfwho' },
-                who.chat ? h('button', { class: 'link', text: '✦ ' + who.label, title: 'Open this conversation', onclick: () => showAgentChat(who.chat) }) : h('b', { text: (who.ask ? '✦ ' : '') + who.label }),
-                h('span', { class: 'muted', text: agoText(b.at) }),
-              ),
-              items.slice(0, SHOW),
-              rest,
-              more > 0
-                ? h('button', {
-                    class: 'link agfmore',
-                    text: `+${more} more`,
-                    onclick: (e) => {
-                      for (const r of rest) r.hidden = false;
-                      e.target.remove();
-                    },
-                  })
-                : null,
-            );
-          }),
-        )
-      : h('div', { class: 'ab muted', text: 'When Claude or another agent reads this project, each thing it looks at shows up here, so you can follow along and open it yourself.' }),
+          { class: 'agfwho' },
+          who.chat ? h('button', { class: 'link', text: '✦ ' + who.label, title: 'Open this conversation', onclick: () => showAgentChat(who.chat) }) : h('b', { text: (who.ask ? '✦ ' : '') + who.label }),
+          h('span', { class: 'muted', text: agoText(b.at) }),
+        ),
+        items.slice(0, SHOW),
+        rest,
+        more > 0
+          ? h('button', {
+              class: 'link agfmore',
+              text: `+${more} more`,
+              onclick: (e) => {
+                for (const r of rest) r.hidden = false;
+                e.target.remove();
+              },
+            })
+          : null,
+      );
+    }),
   );
 }
 

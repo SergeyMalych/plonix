@@ -798,9 +798,9 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 @media (max-width: 640px) { .capgrid { grid-template-columns: 1fr; } .capgrid > div + div { border-left: 0; border-top: 1px solid var(--line-2); } }
 
 /* agents: ask, conversations, activity */
-.agws { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 340px); gap: 14px; padding: 14px; align-items: start; }
+.agws { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); gap: 14px; padding: 14px; align-items: start; }
 .agmain { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.agside { position: sticky; top: 14px; min-width: 0; }
+.agside { min-width: 0; }
 .agask { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; overflow: visible; }
 .agask > .ab { padding: 0; }
 .agqrow { display: flex; gap: 8px; align-items: flex-end; }
@@ -814,7 +814,6 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .agargrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface-2); font-size: 12.5px; }
 .agargrow label { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 200px; color: var(--fg-3); font-size: 11.5px; }
 .agargrow input { padding: 5px 9px; font-size: 12.5px; background: var(--surface); }
-.agnote { color: var(--fg-3); }
 .aglist .agrow { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line-2); cursor: pointer; }
 .aglist .agrow:last-child { border-bottom: 0; }
 .aglist .agrow:hover, .aglist .agrow:focus-visible { background: var(--surface-2); outline: 0; }
@@ -837,7 +836,6 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .agws .cfollowrow { margin-top: 12px; }
 .agfeed .agfhead { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line-2); font-size: 13px; }
 .agfeed .agfhead .fine { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.agfeed .mode { margin-left: auto; flex: 0 0 auto; font-size: 11px; font-weight: 650; color: var(--ok); background: var(--ok-soft); border-radius: 6px; padding: 2px 8px; }
 .agfbody { max-height: calc(100vh - 190px); overflow: auto; padding: 4px 0 6px; }
 .agfburst { padding: 8px 12px 6px; }
 .agfburst + .agfburst { border-top: 1px solid var(--line-2); }
@@ -870,24 +868,70 @@ button.agfhit:hover { background: var(--surface-2); color: var(--accent); }
 .agempty .agbig { font-size: 15px; font-weight: 650; margin-bottom: 6px; }
 .agempty p { margin: 0 0 12px; font-size: 12.5px; line-height: 1.55; color: var(--fg-2); max-width: 680px; }
 .agrowbtns { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.agitem { display: flex; align-items: flex-start; gap: 12px; padding: 11px 14px; border-bottom: 1px solid var(--line-2); position: relative; }
-.agitem.unread::before { content: ''; position: absolute; left: 5px; top: 17px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-.agkind { flex: 0 0 46px; text-align: center; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; border-radius: 5px; padding: 2px 0; margin-top: 1px; }
-.agkind.lead { background: var(--violet-soft); color: var(--violet); }
-.agkind.note { background: var(--info-soft); color: var(--info); }
-.agkind.digest { background: var(--ok-soft); color: var(--ok); }
+.agitem { display: flex; align-items: flex-start; gap: 14px; padding: 14px 16px 13px; border-bottom: 1px solid var(--line-2); position: relative; --k: var(--info); --ks: var(--info-soft); }
+.agitem.lead { --k: var(--crit); --ks: var(--crit-soft); }
+.agitem.digest { --k: var(--ok); --ks: var(--ok-soft); }
+.agitem.unread::before { content: ''; position: absolute; left: 6px; top: 26px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+/* each kind is a solid tag in its colour, easy to spot down the list */
+.agkind { flex: 0 0 52px; text-align: center; padding: 3px 0; margin-top: 1px; border-radius: 6px; background: var(--k); color: #fff; font-size: 10.5px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+.agitem:not(.unread):not(.sel) .agkind { opacity: .75; }
+.agireq { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; max-width: 360px; border: 1px solid var(--line-2); background: var(--surface); border-radius: 6px; padding: 1px 7px; font-size: 11px; color: var(--fg-2); cursor: pointer; }
+.agireq:hover { border-color: var(--accent); color: var(--fg); }
+.agireq b { font-family: var(--mono); font-size: 10.5px; font-weight: 650; color: var(--fg); }
+.agireq .p { font-family: var(--mono); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.agireq .sc { font-size: 10.5px; }
+.aggroup { padding: 10px 16px 6px; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3); background: var(--surface-2); border-bottom: 1px solid var(--line-2); }
 .agimain { flex: 1; min-width: 0; }
-.agititle { font-size: 13px; font-weight: 600; line-height: 1.4; }
+.agititle { font-size: 13.5px; font-weight: 650; line-height: 1.4; }
 .agitem:not(.unread) .agititle { font-weight: 500; color: var(--fg-2); }
 .agidetail { margin-top: 3px; font-size: 12.5px; line-height: 1.5; color: var(--fg-2); }
-.agimeta { display: flex; gap: 10px; align-items: baseline; margin-top: 5px; font-size: 11px; color: var(--fg-3); }
-.agiacts { flex: 0 0 auto; display: flex; gap: 6px; align-items: center; }
-.agitem .agiacts .mini { opacity: .55; }
-.agitem:hover .agiacts .mini { opacity: 1; }
+.agimeta { display: flex; gap: 10px; align-items: center; margin-top: 8px; font-size: 11px; color: var(--fg-3); min-width: 0; }
+.agiacts { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+/* quiet until you point at the row: the next step, then read and dismiss */
+.agiquiet { display: flex; gap: 4px; opacity: 0; transition: opacity .12s; }
+.agitem:hover .agiquiet, .agitem.sel .agiquiet, .agiquiet:focus-within { opacity: 1; }
+.agiacts .btn.go { background: var(--surface); }
+.agitem:hover .agiacts .btn.go { border-color: var(--k); color: var(--k); }
 .agmore { display: block; padding: 8px 14px; font-family: var(--ui); font-size: 12px; }
 .agfoot { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-top: 1px solid var(--line-2); background: var(--surface-2); }
+/* the meter spans the footer: words, then a bar that takes the rest of the row */
+.agfoot .agmeter { flex: 1; min-width: 0; gap: 12px; }
+.agfoot .agmeter span { flex: 0 0 auto; white-space: nowrap; }
+.agfoot .agmeter .bar { flex: 1 1 auto; min-width: 60px; }
 .agfoot select { font-size: 11.5px; border: 1px solid var(--line-2); background: var(--surface); border-radius: 6px; padding: 2px 6px; }
 .aglist .agitem:last-of-type { border-bottom: 0; }
+.agitem { cursor: pointer; }
+.agitem:hover { background: var(--surface-2); }
+.agitem.sel { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); cursor: default; }
+/* a closed item stays a quick scan; the open one shows everything */
+.agitem:not(.sel) .agidetail { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.agiopen { max-width: 640px; }
+.agdreq { display: flex; flex-direction: column; gap: 3px; width: 100%; margin-top: 10px; padding: 8px 10px; border: 1px solid var(--line-2); background: var(--surface); border-radius: 8px; text-align: left; cursor: pointer; min-width: 0; }
+.agdreq:hover { border-color: var(--accent); }
+.agdreqtop { display: flex; align-items: center; gap: 8px; font-size: 12px; min-width: 0; }
+.agdreqtop b { font-family: var(--mono); font-size: 11.5px; }
+.agdreqtop .host { color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.agdreq .path { font-family: var(--mono); font-size: 11.5px; color: var(--fg); overflow-wrap: anywhere; line-height: 1.45; }
+.agdacts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.agdreads { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--line-2); }
+.agdsub { font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--fg-3); margin-bottom: 4px; }
+
+/* agents: the right column, Claude (ask and conversations) or Traffic (what agents read) */
+.agside { display: flex; flex-direction: column; gap: 12px; }
+.agviews { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line-2); background: var(--surface-2); border-radius: 9px; }
+.agviews button { flex: 1; justify-content: center; display: flex; align-items: center; gap: 6px; border: 0; background: transparent; border-radius: 7px; padding: 4px 12px; font-size: 12.5px; font-weight: 600; color: var(--fg-2); cursor: pointer; }
+.agviews button:hover { color: var(--fg); }
+.agviews button.on { background: var(--accent-soft); color: var(--accent); }
+.agclaude .agstarters .chip { text-align: left; }
+/* the column is narrow: the Ask button sits under the box, so the box keeps its width */
+.agclaude .agqrow { flex-direction: column; align-items: stretch; }
+.agclaude .agqrow .btn { align-self: flex-end; }
+.agclaude { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.agclaude[hidden], .agfeed[hidden] { display: none; }
+.agfhit .sc { margin-left: auto; flex: 0 0 auto; font-size: 11px; }
+.agimeta { white-space: nowrap; }
+/* a tight window: the right column narrows, and rows keep their width for the text */
+@media (max-width: 1180px) and (min-width: 901px) { .agws { grid-template-columns: minmax(0, 1fr) minmax(280px, 320px); } .agitem:not(.sel) .agiacts .btn { display: none; } }
 
 /* pending scope decisions above Traffic */
 .scopequeue { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; margin: 8px 14px 0; padding: 6px 8px 6px 6px; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 10px; flex-wrap: wrap; min-width: 0; }
