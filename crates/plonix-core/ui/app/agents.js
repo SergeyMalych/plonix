@@ -26,9 +26,10 @@ const STARTER_QUESTIONS = [
   'Summarize what this application does from its traffic.',
 ];
 
-// sel: the inbox item shown in the side panel; side: which side tab is open
-// ('lead' or 'activity'); ex: request summaries the panel and feed name requests by.
-const AG = { chat: null, cv: null, setup: null, chats: [], policy: null, hits: [], skills: [], watch: null, inboxAll: false, lookAsked: 0, sel: null, side: null, ex: {} };
+// sel: the inbox item opened in place; side: what the right column shows ('claude':
+// asking and conversations, 'traffic': what agents read); ex: request summaries, so
+// leads and the feed can name requests by method and path.
+const AG = { chat: null, cv: null, setup: null, chats: [], policy: null, hits: [], skills: [], watch: null, inboxAll: false, lookAsked: 0, sel: null, side: 'claude', ex: {} };
 
 function renderAgents(main) {
   AG.cv = null;
@@ -45,8 +46,14 @@ function renderAgents(main) {
         h(
           'div',
           { class: 'agws' },
-          h('div', { class: 'agmain' }, h('div', { class: 'card aginbox', id: 'aginbox' }), h('div', { class: 'card agask', id: 'agask' }), h('div', { id: 'agbody' })),
-          h('aside', { class: 'agside' }, h('div', { class: 'card agfeed', id: 'agfeed' }, h('div', { class: 'ab muted', text: 'Loading…' }))),
+          h('div', { class: 'agmain' }, h('div', { class: 'card aginbox', id: 'aginbox' })),
+          h(
+            'aside',
+            { class: 'agside' },
+            h('div', { class: 'agviews', id: 'agviews' }),
+            h('div', { class: 'agclaude', id: 'agclaude' }, h('div', { class: 'card agask', id: 'agask' }), h('div', { id: 'agbody' })),
+            h('div', { class: 'card agfeed', id: 'agfeed', hidden: true }, h('div', { class: 'ab muted', text: 'Loading…' })),
+          ),
         ),
         h('div', { class: 'stack agsetup', id: 'agentsbody', hidden: true }),
       ),
@@ -54,6 +61,7 @@ function renderAgents(main) {
   );
   drawAgentAsk();
   drawAgentBody();
+  drawAgentSide();
   loadAgents(true);
 }
 
@@ -118,7 +126,7 @@ function drawAgentAsk() {
       ),
     );
   }
-  const q = h('textarea', { class: 'agq', id: 'agq', rows: 2, placeholder: 'Ask Claude about this project: what to look at next, what an endpoint does, which hosts belong to the target…' });
+  const q = h('textarea', { class: 'agq', id: 'agq', rows: 3, placeholder: 'Ask Claude about this project: what to look at next, what an endpoint does, which hosts belong to the target…' });
   const go = h('button', { class: 'btn primary ai', text: '✦ Ask', disabled: true });
   const send = () => {
     const t = q.value.trim();
@@ -246,17 +254,15 @@ async function actOnItem(it) {
   showExchange(id);
 }
 
-/** Shows an inbox item in the side panel, and counts it as read. */
+/** Opens an inbox item in place (or closes it), and counts it as read. */
 function selectItem(it) {
-  AG.sel = it.id;
-  AG.side = 'lead';
+  AG.sel = AG.sel === it.id ? null : it.id;
   if (!it.read) {
     it.read = true;
     AG.watch.unread = Math.max(0, (AG.watch.unread || 0) - 1);
     markItems([it.id], false);
   }
   drawAgentInbox();
-  drawAgentSide();
 }
 
 async function markItems(ids, dismiss) {
@@ -353,7 +359,7 @@ function drawAgentInbox() {
           'div',
           {
             class: 'agitem' + (it.read ? '' : ' unread') + (it.id === AG.sel ? ' sel' : ''),
-            title: 'Show the details',
+            title: it.id === AG.sel ? '' : 'Show more',
             onclick: (e) => !e.target.closest('button') && selectItem(it),
           },
           h('span', { class: 'agkind ' + k.cls, text: k.label }),
@@ -365,14 +371,15 @@ function drawAgentInbox() {
             h(
               'div',
               { class: 'agimeta' },
-              it.request ? h('button', { class: 'link', text: 'Request #' + it.request, onclick: () => (markItems([it.id], false), showExchange(it.request)) }) : null,
+              it.request && it.id !== AG.sel ? h('button', { class: 'link', text: 'Request #' + it.request, onclick: () => (markItems([it.id], false), showExchange(it.request)) }) : null,
               h('span', { text: agoText(it.at) }),
             ),
+            it.id === AG.sel ? leadMore(it, act) : null,
           ),
           h(
             'div',
             { class: 'agiacts' },
-            act && (it.request || it.next === 'map' || it.next === 'scope') ? h('button', { class: 'btn sm' + (it.kind === 'lead' ? ' primary' : ''), text: act, onclick: () => actOnItem(it) }) : null,
+            it.id !== AG.sel && act && (it.request || it.next === 'map' || it.next === 'scope') ? h('button', { class: 'btn sm' + (it.kind === 'lead' ? ' primary' : ''), text: act, onclick: () => actOnItem(it) }) : null,
             !it.read ? h('button', { class: 'mini', text: '✓', title: 'Mark read', onclick: () => markItems([it.id], false) }) : null,
             h('button', { class: 'mini', text: '✕', title: it.kind === 'digest' ? 'Remove' : 'Dismiss: not useful. Claude will suggest fewer like it.', onclick: () => markItems([it.id], true) }),
           ),
@@ -569,7 +576,9 @@ async function loadAgentRequests(ids) {
       } catch (_) {}
     }),
   );
-  if (S.view === 'agents') drawAgentSide();
+  if (S.view !== 'agents') return;
+  drawAgentInbox();
+  drawAgentFeed();
 }
 
 /** The request ids a list of agent reads looked at. */
@@ -589,62 +598,45 @@ function hitRow(x) {
   );
 }
 
-/** The side panel: the selected lead in full, or what agents have been reading. */
+/** The right column: asking Claude and your conversations, or what agents read of your traffic. */
 function drawAgentSide() {
-  const box = $('#agfeed');
+  const box = $('#agviews');
+  if (!box) return;
   const a = AG.policy;
-  if (!box || !a) return;
-  const items = (AG.watch && AG.watch.items) || [];
-  if (!items.some((it) => it.id === AG.sel)) AG.sel = (items.find((it) => !it.read && it.kind !== 'digest') || items.find((it) => it.kind !== 'digest') || items[0] || {}).id || null;
-  const side = items.length ? AG.side || 'lead' : 'activity';
   const now = Date.now();
-  const live = (a.clients || []).filter((c) => now - c.last_seen < AGENT_LIVE_MS && !c.name.startsWith('plonix-'));
-  const tab = (key, label, extra) =>
-    h('button', { class: 'tab-' + key + (side === key ? ' on' : ''), onclick: () => ((AG.side = key), drawAgentSide()) }, label, extra || null);
-  const dot = h('span', { class: 'adot' + (live.length ? ' on' : ''), title: live.length ? (live.length === 1 ? live[0].name + ' connected' : live.length + ' agents connected') : 'No outside agent connected' });
+  const live = ((a && a.clients) || []).filter((c) => now - c.last_seen < AGENT_LIVE_MS && !c.name.startsWith('plonix-'));
+  const view = (key, label, title, extra) =>
+    h('button', { class: AG.side === key ? 'on' : '', title, onclick: () => ((AG.side = key), drawAgentSide()) }, label, extra || null);
   clear(
     box,
-    items.length
-      ? h('div', { class: 'agtabs' }, tab('lead', 'Details'), tab('activity', 'Activity', dot))
-      : h('div', { class: 'agfhead' }, dot, h('b', { text: 'Activity' }), h('span', { class: 'muted fine', text: live.length ? (live.length === 1 ? live[0].name + ' connected' : live.length + ' agents connected') : '' })),
-    // Both are drawn: a narrow window stacks this panel under the list, where it shows only the activity.
-    items.length ? h('div', { class: 'agpane-lead' }, drawLeadDetail(items.find((it) => it.id === AG.sel))) : null,
-    h('div', { class: 'agpane-activity' }, drawAgentFeed()),
+    view('claude', '✦ Claude', 'Ask Claude about this project and pick up your conversations'),
+    view('traffic', 'Traffic', 'What Claude and other agents read of your traffic', live.length ? h('span', { class: 'adot on', title: live.length === 1 ? live[0].name + ' connected' : live.length + ' agents connected' }) : null),
   );
-  box.classList.toggle('side-lead', side === 'lead');
+  $('#agclaude').hidden = AG.side !== 'claude';
+  $('#agfeed').hidden = AG.side !== 'traffic';
+  drawAgentFeed();
 }
 
-/** One inbox item in full: what Claude saw, the request, what to do, and what it read to get there. */
-function drawLeadDetail(it) {
-  if (!it) return h('div', { class: 'ab muted', text: 'Pick a lead on the left to see it here.' });
+/** An open inbox item: the request it is about, what to do, and what Claude read to get there. */
+function leadMore(it, act) {
   const k = ITEM_KIND[it.kind] || ITEM_KIND.note;
-  const next = it.next === 'access' && !toolOn('access-check') ? 'lens' : it.next || 'lens';
-  const act = it.kind === 'digest' ? null : NEXT_ACTION[next];
   // What the look that wrote this item read, oldest first.
   const reads = AG.hits.filter((x) => x.client === 'plonix-watch/' + it.run).reverse();
   loadAgentRequests([it.request, ...hitRequests(reads)]);
   const ex = it.request && AG.ex[it.request];
   const ask = () => {
+    AG.side = 'claude';
+    drawAgentSide();
     startAgentChat(
       `Claude left me this ${k.label.toLowerCase()} while watching my traffic: "${it.title}". ${it.detail || ''}${it.request ? ` It is about request #${it.request}.` : ''} Help me check it: what should I try, and what would confirm it or rule it out?`,
       it.title,
     );
-    // The conversation opens under the list; bring it into view.
-    $('#agbody').scrollIntoView({ block: 'start', behavior: 'smooth' });
+    $('#agclaude').scrollIntoView({ block: 'start', behavior: 'smooth' });
   };
+  const canAsk = AG.policy && AG.policy.enabled && AG.policy.ask_in_app !== false;
   return h(
     'div',
-    { class: 'agdetail' },
-    h(
-      'div',
-      { class: 'agdtop' },
-      h('span', { class: 'agkind ' + k.cls, text: k.label }),
-      h('span', { class: 'muted fine', text: agoText(it.at) }),
-      h('span', { class: 'sp' }),
-      h('button', { class: 'mini', text: '✕', title: it.kind === 'digest' ? 'Remove' : 'Dismiss: not useful. Claude will suggest fewer like it.', onclick: () => markItems([it.id], true) }),
-    ),
-    h('div', { class: 'agdtitle', text: it.title }),
-    it.detail ? h('div', { class: 'agdtext', text: it.detail }) : null,
+    { class: 'agiopen' },
     it.request
       ? h(
           'button',
@@ -652,28 +644,34 @@ function drawLeadDetail(it) {
           h('span', { class: 'agdreqtop' }, h('b', { text: ex ? ex.method : 'Request' }), h('span', { class: 'host', text: ex ? ex.host : '#' + it.request }), ex && ex.status != null ? h('span', { class: statusClass(ex.status), text: ex.status }) : null),
           ex ? h('span', { class: 'path', text: ex.path }) : null,
         )
-      : it.host
-        ? h('div', { class: 'agdhost mono', text: it.host })
-        : null,
-    h(
-      'div',
-      { class: 'agdacts' },
-      act && (it.request || it.next === 'map' || it.next === 'scope') ? h('button', { class: 'btn sm primary', text: act, onclick: () => actOnItem(it) }) : null,
-      AG.policy && AG.policy.enabled && AG.policy.ask_in_app !== false ? h('button', { class: 'btn sm ai', text: '✦ Ask Claude about this', onclick: ask }) : null,
-    ),
-    reads.length
+      : null,
+    act || canAsk
       ? h(
           'div',
-          { class: 'agdreads' },
-          h('div', { class: 'agdsub', text: `Claude read ${reads.length} thing${reads.length === 1 ? '' : 's'} on this look` }),
-          reads.slice(0, 12).map(hitRow),
+          { class: 'agdacts' },
+          act && (it.request || it.next === 'map' || it.next === 'scope') ? h('button', { class: 'btn sm primary', text: act, onclick: () => actOnItem(it) }) : null,
+          canAsk ? h('button', { class: 'btn sm ai', text: '✦ Ask Claude about this', onclick: ask }) : null,
         )
       : null,
+    reads.length ? h('div', { class: 'agdreads' }, h('div', { class: 'agdsub', text: `Claude read ${reads.length} thing${reads.length === 1 ? '' : 's'} on this look` }), reads.slice(0, 12).map(hitRow)) : null,
   );
 }
 
 /** What agents have been reading, newest first, in bursts per agent. */
 function drawAgentFeed() {
+  const box = $('#agfeed');
+  const a = AG.policy;
+  if (!box || !a || box.hidden) return;
+  const now = Date.now();
+  const live = (a.clients || []).filter((c) => now - c.last_seen < AGENT_LIVE_MS && !c.name.startsWith('plonix-'));
+  clear(
+    box,
+    h('div', { class: 'agfhead' }, h('span', { class: 'adot' + (live.length ? ' on' : '') }), h('b', { text: 'What agents read' }), h('span', { class: 'muted fine', text: live.length ? (live.length === 1 ? live[0].name + ' connected' : live.length + ' agents connected') : '' })),
+    agentFeedBody(),
+  );
+}
+
+function agentFeedBody() {
   // Consecutive requests from one agent, close together, form one burst.
   const bursts = [];
   for (const x of AG.hits) {

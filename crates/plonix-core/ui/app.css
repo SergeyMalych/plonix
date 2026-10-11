@@ -798,9 +798,9 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 @media (max-width: 640px) { .capgrid { grid-template-columns: 1fr; } .capgrid > div + div { border-left: 0; border-top: 1px solid var(--line-2); } }
 
 /* agents: ask, conversations, activity */
-.agws { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 340px); gap: 14px; padding: 14px; align-items: start; }
+.agws { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); gap: 14px; padding: 14px; align-items: start; }
 .agmain { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.agside { position: sticky; top: 14px; min-width: 0; }
+.agside { min-width: 0; }
 .agask { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; overflow: visible; }
 .agask > .ab { padding: 0; }
 .agqrow { display: flex; gap: 8px; align-items: flex-end; }
@@ -892,39 +892,33 @@ button.agfhit:hover { background: var(--surface-2); color: var(--accent); }
 .aglist .agitem:last-of-type { border-bottom: 0; }
 .agitem { cursor: pointer; }
 .agitem:hover { background: var(--surface-2); }
-.agitem.sel { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
-/* the full text is in the side panel; the list stays a quick scan */
-.agitem .agidetail { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-@media (max-width: 900px) { .agitem .agidetail { display: block; -webkit-line-clamp: none; } }
-
-/* agents: the side panel, the selected lead in full or the activity feed */
-.agtabs { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--line-2); }
-.agtabs button { display: flex; align-items: center; gap: 6px; border: 0; background: none; padding: 6px 10px 8px; font-size: 13px; font-weight: 600; color: var(--fg-3); border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; }
-.agtabs button:hover { color: var(--fg); }
-.agtabs button.on { color: var(--fg); border-bottom-color: var(--accent); }
-.agdetail { padding: 12px 14px 14px; max-height: calc(100vh - 190px); overflow: auto; }
-.agdtop { display: flex; align-items: center; gap: 8px; }
-.agdtop .agkind { flex: 0 0 auto; padding: 2px 7px; margin: 0; }
-.agdtop .sp { flex: 1; }
-.agdtitle { margin-top: 8px; font-size: 14px; font-weight: 650; line-height: 1.4; }
-.agdtext { margin-top: 6px; font-size: 12.5px; line-height: 1.55; color: var(--fg-2); }
-.agdreq { display: flex; flex-direction: column; gap: 3px; width: 100%; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--line-2); background: var(--surface-2); border-radius: 8px; text-align: left; cursor: pointer; min-width: 0; }
+.agitem.sel { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); cursor: default; }
+/* a closed item stays a quick scan; the open one shows everything */
+.agitem:not(.sel) .agidetail { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.agiopen { max-width: 640px; }
+.agdreq { display: flex; flex-direction: column; gap: 3px; width: 100%; margin-top: 10px; padding: 8px 10px; border: 1px solid var(--line-2); background: var(--surface); border-radius: 8px; text-align: left; cursor: pointer; min-width: 0; }
 .agdreq:hover { border-color: var(--accent); }
 .agdreqtop { display: flex; align-items: center; gap: 8px; font-size: 12px; min-width: 0; }
 .agdreqtop b { font-family: var(--mono); font-size: 11.5px; }
 .agdreqtop .host { color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 .agdreq .path { font-family: var(--mono); font-size: 11.5px; color: var(--fg); overflow-wrap: anywhere; line-height: 1.45; }
-.agdhost { margin-top: 10px; font-size: 12px; color: var(--fg-2); }
-.agdacts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-.agdreads { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line-2); }
+.agdacts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.agdreads { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--line-2); }
 .agdsub { font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--fg-3); margin-bottom: 4px; }
+
+/* agents: the right column, Claude (ask and conversations) or Traffic (what agents read) */
+.agside { display: flex; flex-direction: column; gap: 12px; }
+.agviews { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line-2); background: var(--surface-2); border-radius: 9px; }
+.agviews button { flex: 1; justify-content: center; display: flex; align-items: center; gap: 6px; border: 0; background: transparent; border-radius: 7px; padding: 4px 12px; font-size: 12.5px; font-weight: 600; color: var(--fg-2); cursor: pointer; }
+.agviews button:hover { color: var(--fg); }
+.agviews button.on { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
+.agclaude .agstarters .chip { text-align: left; }
+.agclaude { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.agclaude[hidden], .agfeed[hidden] { display: none; }
 .agfhit .sc { margin-left: auto; flex: 0 0 auto; font-size: 11px; }
-.agfeed.side-lead .agpane-activity, .agfeed:not(.side-lead) .agpane-lead { display: none; }
 .agimeta { white-space: nowrap; }
-/* a tight window: the side panel has the lead's action, so rows keep their width for the text */
-@media (max-width: 1180px) and (min-width: 901px) { .agws { grid-template-columns: minmax(0, 1fr) minmax(260px, 300px); } .agitem .agiacts .btn { display: none; } }
-/* stacked under everything else, the side panel only shows the activity; rows carry the full text and actions */
-@media (max-width: 900px) { .agfeed .agpane-lead, .agtabs .tab-lead { display: none !important; } .agfeed .agpane-activity { display: block !important; } .agtabs .tab-activity { border-bottom-color: transparent; color: var(--fg); cursor: default; } }
+/* a tight window: the right column narrows, and rows keep their width for the text */
+@media (max-width: 1180px) and (min-width: 901px) { .agws { grid-template-columns: minmax(0, 1fr) minmax(280px, 320px); } .agitem:not(.sel) .agiacts .btn { display: none; } }
 
 /* pending scope decisions above Traffic */
 .scopequeue { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; margin: 8px 14px 0; padding: 6px 8px 6px 6px; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 10px; flex-wrap: wrap; min-width: 0; }
