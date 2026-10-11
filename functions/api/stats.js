@@ -23,12 +23,18 @@ const parse = (s) => {
   }
 };
 
+// Names the page may show: the ingest endpoint only stores names from fixed lists and strict patterns, and this
+// checks again on the way out, so a bad row can never put markup or free text on the public page.
+const SAFE_ID = /^-?[a-z0-9][a-z0-9 .:_-]{0,63}$/i;
+export const safeId = (id) => typeof id === 'string' && SAFE_ID.test(id);
+
 /** Map of name -> Set of installs, as a list of { id, installs } with small groups folded or dropped. */
 export function fold(groups, k = K, other = 'other') {
   const out = [];
   const rest = new Set();
   for (const [id, set] of groups) {
-    if (set.size >= k) out.push({ id, installs: set.size });
+    if (!safeId(id)) for (const i of set) rest.add(i);
+    else if (set.size >= k) out.push({ id, installs: set.size });
     else for (const i of set) rest.add(i);
   }
   out.sort((a, b) => b.installs - a.installs || String(a.id).localeCompare(String(b.id)));
@@ -166,17 +172,21 @@ export function summarize(rows, totals, today, k = K) {
 /** Download counts of the release files, by OS and by release. Updates are counted apart. */
 export function downloads(releases) {
   const out = { total: 0, macos: 0, windows: 0, updates: 0, releases: [] };
-  for (const r of releases || []) {
-    if (r.draft) continue;
+  for (const r of Array.isArray(releases) ? releases : []) {
+    if (!r || r.draft) continue;
     let n = 0;
-    for (const a of r.assets || []) {
-      const c = a.download_count || 0;
+    for (const a of Array.isArray(r.assets) ? r.assets : []) {
+      const c = Number.isInteger(a?.download_count) && a.download_count > 0 ? a.download_count : 0;
+      if (typeof a?.name !== 'string') continue;
       if (/\.app\.tar\.gz$/.test(a.name)) out.updates += c;
       else if (/\.(dmg|zip)$/.test(a.name)) (out.macos += c), (n += c);
       else if (/\.(exe|msi)$/.test(a.name)) (out.windows += c), (n += c);
     }
     out.total += n;
-    out.releases.push({ version: String(r.tag_name || '').replace(/^v/, ''), downloads: n, published: String(r.published_at || '').slice(0, 10) });
+    const version = String(r.tag_name || '').replace(/^v/, '');
+    const published = String(r.published_at || '').slice(0, 10);
+    if (!safeId(version)) continue;
+    out.releases.push({ version, downloads: n, published: /^\d{4}-\d{2}-\d{2}$/.test(published) ? published : '' });
   }
   return out;
 }
@@ -218,7 +228,12 @@ export async function onRequestGet({ request, env, waitUntil }) {
   }
   const body = { generated_at: new Date().toISOString(), collecting: !!env.USAGE, usage, downloads: await fetchDownloads() };
   const res = new Response(JSON.stringify(body), {
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': `public, max-age=${CACHE_S}`, 'Access-Control-Allow-Origin': '*' },
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': `public, max-age=${CACHE_S}`,
+      'Access-Control-Allow-Origin': '*',
+    },
   });
   if (cache) waitUntil(cache.put(key, res.clone()));
   return res;
