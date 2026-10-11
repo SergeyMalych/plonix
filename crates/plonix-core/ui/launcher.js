@@ -67,6 +67,7 @@ function applyLook(r) {
   if (r.style === 'classic') root.removeAttribute('data-style');
   else root.setAttribute('data-style', 'studio');
   root.setAttribute('data-density', r.density === 'roomy' ? 'roomy' : 'dense');
+  if (r.text != null) showTextSize(r.text);
   L.look = { theme: r.theme || 'auto', style: r.style || 'studio', density: r.density || 'dense' };
   for (const [k, v] of Object.entries(L.look)) store('plonix.' + k, v);
   const btn = $('#themebtn');
@@ -101,13 +102,14 @@ function appearanceSection() {
       { key: 'theme', label: 'Theme', type: 'choice', options: Object.entries(THEMES).map(([value, label]) => ({ value, label })) },
       { key: 'density', label: 'Spacing', type: 'choice', help: 'Dense fits more on screen. Roomy gives rows and panels more air.', options: [{ value: 'dense', label: 'Dense' }, { value: 'roomy', label: 'Roomy' }] },
       { key: 'style', label: 'Style', type: 'choice', help: 'Studio is the standard Plonix look. Classic is the plainer indigo look.', options: [{ value: 'studio', label: 'Studio' }, { value: 'classic', label: 'Classic' }] },
+      textSizeField(),
     ],
     values: { ...L.look },
   };
 }
 
 async function boot() {
-  applyLook({ theme: store('plonix.theme'), style: store('plonix.style'), density: store('plonix.density') });
+  applyLook({ theme: store('plonix.theme'), style: store('plonix.style'), density: store('plonix.density'), text: store('plonix.text') });
   const hash = location.hash;
   if (hash.startsWith('#code=')) {
     history.replaceState(null, '', location.pathname);

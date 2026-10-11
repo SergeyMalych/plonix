@@ -70,6 +70,7 @@ async function boot() {
   applyTheme(store('plonix.theme') || 'auto');
   applyDensity(store('plonix.density') || 'dense');
   applyStyle(store('plonix.style') || 'studio');
+  showTextSize(store('plonix.text'));
   const hash = location.hash;
   const code = hash.startsWith('#code=') ? hash.slice(6) : null;
   if (code) {
@@ -1551,9 +1552,9 @@ function applyDensity(d) {
   S.density = d === 'roomy' ? 'roomy' : 'dense';
 }
 
-/** Takes the look (style, theme, spacing) chosen in any Plonix window: it is
- * kept with the engine, so every project, the Start screen and the desktop
- * app's icon follow it. Each window's own storage only avoids a flash. */
+/** Takes the look (style, theme, spacing, text size) chosen in any Plonix
+ * window: it is kept with the engine, so every project, the Start screen and
+ * the desktop app's icon and zoom follow it. Each window's own storage only avoids a flash. */
 async function syncLook() {
   try {
     applyLook(await api('/api/ui/style'));
@@ -1574,6 +1575,7 @@ function applyLook(r) {
     applyStyle(r.style);
     store('plonix.style', r.style);
   }
+  if (r.text != null) showTextSize(r.text);
 }
 
 /** Studio (the default, the geometric style in studio.css) or Classic. */

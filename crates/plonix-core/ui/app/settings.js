@@ -65,6 +65,7 @@ function appearanceSection() {
       { key: 'theme', label: 'Theme', type: 'choice', options: [{ value: 'auto', label: 'Match system' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }] },
       { key: 'density', label: 'Spacing', type: 'choice', help: 'Dense fits more on screen. Roomy gives rows and panels more air.', options: [{ value: 'dense', label: 'Dense' }, { value: 'roomy', label: 'Roomy' }] },
       { key: 'style', label: 'Style', type: 'choice', help: 'Studio is the standard Plonix look: cream paper, a blue sidebar, round controls and a shape for every tool. Classic is the plainer indigo look. Both work with light, dark and both spacings.', options: [{ value: 'studio', label: 'Studio' }, { value: 'classic', label: 'Classic' }] },
+      textSizeField(),
     ],
     values: { theme: S.theme || 'auto', density: S.density || 'dense', style: S.style || 'studio' },
   };

@@ -657,6 +657,14 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .seg-ctl { display: inline-flex; border: 1px solid var(--line-2); border-radius: 8px; padding: 2px; background: var(--surface-2); gap: 2px; }
 .segbtn { border: 0; background: transparent; border-radius: 6px; padding: 4px 11px; color: var(--fg-2); font-weight: 550; white-space: nowrap; }
 .segbtn.on { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(17, 22, 36, .12); }
+.tsize { display: flex; align-items: center; gap: 8px; }
+.tsize .seg-ctl { align-items: center; }
+.tsize .segbtn { width: 30px; padding: 4px 0; display: inline-flex; align-items: center; justify-content: center; }
+.tsize .segbtn:not(:disabled):hover { background: var(--surface); color: var(--fg); }
+.tsize .segbtn:disabled { opacity: .35; cursor: default; }
+.ts-a { font-size: 15px; font-weight: 600; line-height: 1; }
+.ts-a.sm { font-size: 11px; }
+.ts-val { min-width: 44px; text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--fg); }
 .sactions { display: flex; align-items: center; gap: 8px; justify-content: flex-end; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line-2); }
 .fstatus { margin-right: auto; font-size: 12px; color: var(--fg-2); }
 .fstatus.ok { color: var(--ok); }
