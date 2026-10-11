@@ -5,5 +5,8 @@
 	<!-- Merged by Tauri into Plonix.app's Info.plist. Shown when macOS asks whether Plonix may control Terminal. -->
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Plonix opens Terminal to start Claude Code with the context you chose to share.</string>
+	<!-- Shown when macOS 15+ asks whether Plonix may connect to devices and servers on the local network. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Plonix connects to the sites you test. Allow this to test servers, routers and devices on your local network.</string>
 </dict>
 </plist>

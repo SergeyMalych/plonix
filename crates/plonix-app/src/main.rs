@@ -17,6 +17,8 @@ mod app_icon;
 #[cfg(unix)]
 mod cli_tool;
 mod crashes;
+#[cfg(target_os = "macos")]
+mod local_network;
 mod updates;
 
 use std::collections::HashMap;
@@ -238,6 +240,10 @@ fn start(app: AppHandle) {
             .build()
             .context("starting the engine runtime")?;
         let hub = runtime.block_on(hub::start(&home, None)).context("starting the Start screen")?;
+        // Ask for Local Network access now, not when the first local target
+        // fails to load.
+        #[cfg(target_os = "macos")]
+        std::thread::Builder::new().name("plonix-local-network".into()).spawn(local_network::ask)?;
         plonix_core::usage::record("app_launched");
         hub.announce()?;
         let url = hub.launch_url()?;

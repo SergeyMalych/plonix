@@ -327,7 +327,10 @@ impl Upstream {
     pub async fn connect(&self, host: &str, port: u16) -> Result<TcpStream> {
         let fut = async {
             match self.proxy_for(host) {
-                None => TcpStream::connect((host, port)).await.with_context(|| format!("connecting to {host}:{port}")),
+                None => TcpStream::connect((host, port))
+                    .await
+                    .map_err(local_network_hint)
+                    .with_context(|| format!("connecting to {host}:{port}")),
                 Some(p) => {
                     let mut tcp = TcpStream::connect((p.host.as_str(), p.port))
                         .await
@@ -919,5 +922,15 @@ impl ServerCertVerifier for NoVerify {
     }
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
         self.0.signature_verification_algorithms.supported_schemes()
+    }
+}
+
+/// On macOS 15+, a connection to the local network fails with "no route to
+/// host" while Plonix is not allowed Local Network access; say where to allow it.
+fn local_network_hint(e: std::io::Error) -> anyhow::Error {
+    if cfg!(target_os = "macos") && e.kind() == std::io::ErrorKind::HostUnreachable {
+        anyhow!("{e}. If this host is on your local network, allow Plonix in System Settings › Privacy & Security › Local Network")
+    } else {
+        anyhow!(e)
     }
 }
