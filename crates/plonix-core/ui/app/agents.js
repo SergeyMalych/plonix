@@ -391,8 +391,12 @@ function drawAgentInbox() {
       ? h(
           'div',
           { class: 'agfoot' },
-          h('div', { class: 'askmeter' }, h('div', { class: 'bar' + (w.capped ? ' over' : '') }, h('i', { style: { width: pct + '%' } })), h('span', { text: `${fmtTok(used)} of ${fmtTok(st.daily_tokens)} tokens today` + (w.state.looks_today ? ` · ${w.state.looks_today} look${w.state.looks_today === 1 ? '' : 's'}` : '') })),
-          h('span', { class: 'sp' }),
+          h(
+            'div',
+            { class: 'askmeter agmeter' },
+            h('span', { text: `${fmtTok(used)} of ${fmtTok(st.daily_tokens)} tokens today` + (w.state.looks_today ? ` · ${w.state.looks_today} look${w.state.looks_today === 1 ? '' : 's'}` : '') }),
+            h('div', { class: 'bar' + (w.capped ? ' over' : ''), title: pct + '% of today’s tokens used' }, h('i', { style: { width: pct + '%' } })),
+          ),
           budget,
         )
       : null,
