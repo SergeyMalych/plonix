@@ -119,3 +119,5 @@
 [data-style="studio"] .mico.k-bundle::before { background: conic-gradient(var(--st-red) 0 25%, var(--st-blue) 0 50%, var(--st-yellow) 0 75%, var(--st-green) 0); }
 [data-style="studio"] .mico.k-extension::before { background: var(--st-yellow); }
 [data-style="studio"] .mico.k-platform::before { background: var(--st-pink); border-radius: 100% 0 0 0; }
+[data-style="studio"] .mico.k-tool::before { background: var(--st-blue); clip-path: polygon(0 0, 100% 0, 100% 34%, 66% 34%, 66% 100%, 34% 100%, 34% 34%, 0 34%); }
+[data-style="studio"] .mico.k-detectors::before { background: var(--st-red); border-radius: 50%; }
