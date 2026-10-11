@@ -11,6 +11,7 @@
 // docs become links between pages, and links to other files in the
 // repository go to GitHub.
 
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -355,7 +356,7 @@ const THEME_SCRIPT = `<script>
     sbtn.querySelector('span').textContent = on ? 'Try classic' : 'I like style';
     sbtn.title = on ? 'Switch to the Classic look' : 'Back to the Studio look';
     shots.forEach((i) => { const src = on ? i.dataset.studio : i.dataset.studio.replace('/assets/studio-', '/assets/'); if (i.getAttribute('src') !== src) i.src = src; });
-    document.getElementById('favicon').href = on ? '../assets/studio-mark.svg' : '../assets/plonix-mark.svg';
+    document.getElementById('favicon').href = on ? '../assets/studio-mark.svg?v=2' : '../assets/plonix-mark.svg?v=2';
   };
   setStyle(root.dataset.style === 'studio');
   sbtn.addEventListener('click', () => {
@@ -384,11 +385,11 @@ function page({ file, title, description, sidebar, main, source }) {
 <link rel="canonical" href="${canonical}">
 <meta name="theme-color" content="#ece5d6" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#13120f" media="(prefers-color-scheme: dark)">
-<link rel="icon" id="favicon" href="../assets/studio-mark.svg" type="image/svg+xml">
+<link rel="icon" id="favicon" href="../assets/studio-mark.svg?v=2" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Jost:wght@400..700&display=swap">
-<link rel="stylesheet" href="docs.css">
+<link rel="stylesheet" href="docs.css?v=${CSS_VERSION}">
 ${THEME_HEAD}
 </head>
 <body>
@@ -396,10 +397,10 @@ ${THEME_HEAD}
   <div class="wrap">
     <a class="brand" href="../" aria-label="Plonix home">${MARK}Plonix</a>
     <nav class="nav-links" aria-label="Site">
-      <a href="../#features">Features</a>
-      <a href="../#agents">AI</a>
-      <a href="../#market">Market</a>
+      <a href="../">Home</a>
       <a href="./" aria-current="page">Docs</a>
+      <a href="../analytics">Analytics</a>
+      <a href="privacy.html">Privacy</a>
     </nav>
     <button type="button" class="theme-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button>
     <button type="button" class="style-btn" id="style" aria-pressed="true">${STYLE_ICON}<span>Try classic</span></button>
@@ -653,6 +654,10 @@ footer nav { display: flex; flex-wrap: wrap; gap: 22px; margin-left: auto; }
 footer a { text-decoration: none; color: var(--muted); }
 footer a:hover { color: var(--fg); }
 `;
+
+// Pages ask for docs.css by its content hash, so a browser never keeps an old
+// stylesheet under new pages.
+const CSS_VERSION = crypto.createHash('sha256').update(CSS).digest('hex').slice(0, 10);
 
 // ------------------------------------------------------------------- main
 

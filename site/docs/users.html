@@ -13,11 +13,11 @@
 <link rel="canonical" href="https://plonix.io/docs/users">
 <meta name="theme-color" content="#ece5d6" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#13120f" media="(prefers-color-scheme: dark)">
-<link rel="icon" id="favicon" href="../assets/studio-mark.svg" type="image/svg+xml">
+<link rel="icon" id="favicon" href="../assets/studio-mark.svg?v=2" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Jost:wght@400..700&display=swap">
-<link rel="stylesheet" href="docs.css">
+<link rel="stylesheet" href="docs.css?v=b00661acfd">
 <script>try{const r=document.documentElement,t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')r.dataset.theme=t;if(localStorage.getItem('plonix-style')==='classic')r.removeAttribute('data-style')}catch(e){}</script>
 </head>
 <body>
@@ -25,10 +25,10 @@
   <div class="wrap">
     <a class="brand" href="../" aria-label="Plonix home"><svg class="mark-classic" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg><svg class="mark-studio" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#e5401f"/><rect x="7" y="6" width="5" height="20" fill="#1e1c19"/><circle cx="18" cy="13" r="7" fill="#f1b11b"/><path d="M18 6a7 7 0 0 1 0 14z" fill="#1d4fc4"/></svg>Plonix</a>
     <nav class="nav-links" aria-label="Site">
-      <a href="../#features">Features</a>
-      <a href="../#agents">AI</a>
-      <a href="../#market">Market</a>
+      <a href="../">Home</a>
       <a href="./" aria-current="page">Docs</a>
+      <a href="../analytics">Analytics</a>
+      <a href="privacy.html">Privacy</a>
     </nav>
     <button type="button" class="theme-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button>
     <button type="button" class="style-btn" id="style" aria-pressed="true"><svg viewBox="0 0 22 14" aria-hidden="true"><circle cx="5" cy="7" r="5" fill="#e5401f"/><path d="M8 14a5 5 0 0 1 10 0z" fill="#f1b11b"/><circle cx="17" cy="7" r="5" fill="#1d4fc4"/></svg><span>Try classic</span></button>
@@ -108,7 +108,7 @@
     sbtn.querySelector('span').textContent = on ? 'Try classic' : 'I like style';
     sbtn.title = on ? 'Switch to the Classic look' : 'Back to the Studio look';
     shots.forEach((i) => { const src = on ? i.dataset.studio : i.dataset.studio.replace('/assets/studio-', '/assets/'); if (i.getAttribute('src') !== src) i.src = src; });
-    document.getElementById('favicon').href = on ? '../assets/studio-mark.svg' : '../assets/plonix-mark.svg';
+    document.getElementById('favicon').href = on ? '../assets/studio-mark.svg?v=2' : '../assets/plonix-mark.svg?v=2';
   };
   setStyle(root.dataset.style === 'studio');
   sbtn.addEventListener('click', () => {
