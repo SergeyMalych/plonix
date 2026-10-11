@@ -21,8 +21,16 @@ const OUT = path.join(ROOT, 'site', 'docs');
 const REPO = 'https://github.com/SergeyMalych/plonix';
 const RAW = 'https://raw.githubusercontent.com/SergeyMalych/plonix/main';
 
-// Sidebar order; docs not listed here follow, by name.
-const ORDER = ['projects', 'bench', 'filters', 'scanning', 'programs', 'agents', 'market', 'detection-rules', 'extensions', 'updates', 'privacy', 'crash-reports', 'releasing'];
+// Sidebar sections, in order; docs not listed here go under "More", by name.
+const GROUPS = [
+  ['Get started', ['getting-started', 'app', 'projects', 'setup']],
+  ['Capture and explore', ['traffic', 'filters', 'scope', 'map', 'rules']],
+  ['Experiment and prove', ['bench', 'users', 'callbacks', 'scanning', 'findings', 'programs']],
+  ['AI and the Market', ['agents', 'market', 'detection-rules', 'extensions']],
+  ['Your data', ['updates', 'privacy', 'crash-reports']],
+  ['Contributing', ['releasing']],
+];
+const ORDER = GROUPS.flatMap(([, names]) => names);
 
 // ---------------------------------------------------------------- markdown
 
@@ -77,7 +85,12 @@ function inline(src, link) {
         const href = link(m.href, image);
         const title = m.title ? ` title="${esc(m.title)}"` : '';
         if (image) {
-          out += hold(`<img src="${esc(href)}" alt="${esc(stripTags(inline(m.text, link)))}"${title} loading="lazy">`);
+          const alt = esc(stripTags(inline(m.text, link)));
+          // A site screenshot with a dark twin shows the one that fits the theme.
+          const pair = /^\.\.\/assets\/[\w-]+-light\.webp$/.test(href);
+          out += pair
+            ? hold(`<img class="pic-light" src="${esc(href)}" alt="${alt}"${title} loading="lazy"><img class="pic-dark" src="${esc(href.replace(/-light\.webp$/, '-dark.webp'))}" alt="${alt}"${title} loading="lazy">`)
+            : hold(`<img src="${esc(href)}" alt="${alt}"${title} loading="lazy">`);
         } else {
           const ext = /^https?:/.test(href) ? ' rel="noopener"' : '';
           out += hold(`<a href="${esc(href)}"${title}${ext}>${inline(m.text, link)}</a>`);
@@ -285,6 +298,8 @@ function rewrite(href, image, names) {
   if (resolved.startsWith('..')) return href;
   const doc = /^docs\/([^/]+)\.md$/.exec(resolved);
   if (doc && names.includes(doc[1])) return `${doc[1]}.html${hash}`;
+  // Pictures that are part of the site load from the site itself.
+  if (image && resolved.startsWith('site/')) return `../${resolved.slice(5)}`;
   if (image) return `${RAW}/${resolved}`;
   const full = path.join(ROOT, resolved);
   const kind = fs.existsSync(full) && fs.statSync(full).isDirectory() ? 'tree' : 'blob';
@@ -293,18 +308,23 @@ function rewrite(href, image, names) {
 
 /** The first paragraph, as plain text, for descriptions. */
 function summary(body) {
-  const p = /<p>([\s\S]*?)<\/p>/.exec(body);
-  const text = p ? stripTags(p[1]).replace(/\s+/g, ' ').trim() : '';
+  // The first paragraph with words in it: a picture alone does not count.
+  const paras = [...body.matchAll(/<p>([\s\S]*?)<\/p>/g)].map((m) => stripTags(m[1]).replace(/\s+/g, ' ').trim());
+  const text = paras.find(Boolean) || '';
   return text.length > 180 ? `${text.slice(0, 177).replace(/\s+\S*$/, '')}…` : text;
 }
 
 // ------------------------------------------------------------------ pages
 
-const MARK = '<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>';
+// Both marks, as on the home page: CSS shows the one for the current style.
+const MARK = '<svg class="mark-classic" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>' +
+  '<svg class="mark-studio" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#e5401f"/><rect x="7" y="6" width="5" height="20" fill="#1e1c19"/><circle cx="18" cy="13" r="7" fill="#f1b11b"/><path d="M18 6a7 7 0 0 1 0 14z" fill="#1d4fc4"/></svg>';
+const STYLE_ICON = '<svg viewBox="0 0 22 14" aria-hidden="true"><circle cx="5" cy="7" r="5" fill="#e5401f"/><path d="M8 14a5 5 0 0 1 10 0z" fill="#f1b11b"/><circle cx="17" cy="7" r="5" fill="#1d4fc4"/></svg>';
 const GITHUB = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>';
 
-// Applies the saved theme before the page paints, then wires the switch.
-const THEME_HEAD = `<script>try{const t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>`;
+// Applies the saved theme and style before the page paints, then wires the
+// switches. Both are shared with the home page (the same localStorage keys).
+const THEME_HEAD = `<script>try{const r=document.documentElement,t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')r.dataset.theme=t;if(localStorage.getItem('plonix-style')==='classic')r.removeAttribute('data-style')}catch(e){}</script>`;
 const THEME_SCRIPT = `<script>
 (() => {
   const root = document.documentElement, btn = document.getElementById('theme');
@@ -320,6 +340,29 @@ const THEME_SCRIPT = `<script>
     root.dataset.theme = next; paint();
     try { localStorage.setItem('plonix-theme', next); } catch (e) {}
   });
+
+  // On a phone the list of docs starts folded, so the page comes first.
+  const menu = document.querySelector('.side-menu');
+  if (menu && matchMedia('(max-width: 900px)').matches) menu.open = false;
+
+  // Studio is the default; Classic is the plainer look. Screenshots and the icon follow.
+  const sbtn = document.getElementById('style');
+  const shots = [...document.querySelectorAll('.doc img')].filter((i) => i.getAttribute('src').startsWith('../assets/studio-'));
+  shots.forEach((i) => { i.dataset.studio = i.getAttribute('src'); });
+  const setStyle = (on) => {
+    if (on) root.dataset.style = 'studio'; else delete root.dataset.style;
+    sbtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    sbtn.querySelector('span').textContent = on ? 'Try classic' : 'I like style';
+    sbtn.title = on ? 'Switch to the Classic look' : 'Back to the Studio look';
+    shots.forEach((i) => { const src = on ? i.dataset.studio : i.dataset.studio.replace('/assets/studio-', '/assets/'); if (i.getAttribute('src') !== src) i.src = src; });
+    document.getElementById('favicon').href = on ? '../assets/studio-mark.svg' : '../assets/plonix-mark.svg';
+  };
+  setStyle(root.dataset.style === 'studio');
+  sbtn.addEventListener('click', () => {
+    const on = root.dataset.style !== 'studio';
+    setStyle(on);
+    try { localStorage.setItem('plonix-style', on ? 'studio' : 'classic'); } catch (e) {}
+  });
 })();
 </script>`;
 
@@ -328,7 +371,7 @@ function page({ file, title, description, sidebar, main, source }) {
   const generated = source ? `Generated from ${source} by scripts/build-docs.mjs. Edit the Markdown, not this file.` : 'Generated by scripts/build-docs.mjs. Do not edit.';
   return `<!doctype html>
 <!-- ${generated} -->
-<html lang="en">
+<html lang="en" data-style="studio">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -337,14 +380,14 @@ function page({ file, title, description, sidebar, main, source }) {
 <meta property="og:title" content="${esc(title)}">
 <meta property="og:description" content="${esc(description)}">
 <meta property="og:url" content="${canonical}">
-<meta property="og:image" content="https://plonix.io/assets/window-light.webp">
+<meta property="og:image" content="https://plonix.io/assets/studio-window-light.webp">
 <link rel="canonical" href="${canonical}">
-<meta name="theme-color" content="#f5f5fa" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0d0e13" media="(prefers-color-scheme: dark)">
-<link rel="icon" href="../assets/studio-mark.svg" type="image/svg+xml">
+<meta name="theme-color" content="#ece5d6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#13120f" media="(prefers-color-scheme: dark)">
+<link rel="icon" id="favicon" href="../assets/studio-mark.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Jost:wght@400..700&display=swap">
 <link rel="stylesheet" href="docs.css">
 ${THEME_HEAD}
 </head>
@@ -354,11 +397,12 @@ ${THEME_HEAD}
     <a class="brand" href="../" aria-label="Plonix home">${MARK}Plonix</a>
     <nav class="nav-links" aria-label="Site">
       <a href="../#features">Features</a>
-      <a href="../#scope">Scope</a>
       <a href="../#agents">AI</a>
+      <a href="../#market">Market</a>
       <a href="./" aria-current="page">Docs</a>
     </nav>
     <button type="button" class="theme-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button>
+    <button type="button" class="style-btn" id="style" aria-pressed="true">${STYLE_ICON}<span>Try classic</span></button>
     <a class="btn small" href="${REPO}">${GITHUB}GitHub</a>
   </div>
 </header>
@@ -382,6 +426,7 @@ ${main}
       <a href="./">Docs</a>
       <a href="${REPO}/releases">Releases</a>
       <a href="${REPO}/issues">Issues</a>
+      <a href="privacy.html">Privacy</a>
     </nav>
   </div>
 </footer>
@@ -391,17 +436,26 @@ ${THEME_SCRIPT}
 `;
 }
 
+/** The docs in their sidebar sections: [[heading, docs], …]. */
+function grouped(docs) {
+  const sections = GROUPS.map(([heading, names]) => [heading, names.map((n) => docs.find((d) => d.name === n)).filter(Boolean)]);
+  const rest = docs.filter((d) => !ORDER.includes(d.name));
+  if (rest.length) sections.push(['More', rest]);
+  return sections.filter(([, list]) => list.length);
+}
+
 function sidebar(docs, current) {
-  const items = docs.map((d) => {
+  const item = (d) => {
     const here = d.name === current;
     const toc = here && d.toc.length ? `<ul class="toc">${d.toc.map((t) => `<li><a href="#${t.id}">${esc(t.text)}</a></li>`).join('')}</ul>` : '';
     return `<li${here ? ' class="here"' : ''}><a href="${d.name}.html"${here ? ' aria-current="page"' : ''}>${esc(d.title)}</a>${toc}</li>`;
-  });
+  };
   const overview = current === null ? ' class="here"' : '';
-  return `<nav aria-label="Documentation"><ul class="side-list"><li${overview}><a href="./"${current === null ? ' aria-current="page"' : ''}>Overview</a></li>${items.join('')}</ul></nav>`;
+  const sections = grouped(docs).map(([heading, list]) => `<li class="side-head">${esc(heading)}</li>${list.map(item).join('')}`);
+  return `<nav aria-label="Documentation"><ul class="side-list"><li${overview}><a href="./"${current === null ? ' aria-current="page"' : ''}>Overview</a></li>${sections.join('')}</ul></nav>`;
 }
 
-const CSS = `/* Generated by scripts/build-docs.mjs. Do not edit. The tokens match site/index.html. */
+const CSS = `/* Generated by scripts/build-docs.mjs. Do not edit. The tokens match site/index.html: Studio is the default style, Classic the alternative. */
 :root {
   --ink: #f5f5fa; --ink-2: #ffffff; --ink-3: #eceef6; --line: #e0e2ee;
   --fg: #15162b; --muted: #565a78; --faint: #8b8ea8;
@@ -455,13 +509,19 @@ a { color: inherit; }
 .theme-btn { width: 38px; height: 36px; border-radius: 10px; border: 1px solid var(--line); background: var(--ink-2); color: var(--fg); display: grid; place-items: center; cursor: pointer; margin-left: 4px; }
 .theme-btn:hover { border-color: var(--indigo); }
 .theme-btn svg { width: 18px; height: 18px; }
-@media (max-width: 760px) { .nav-links a:not([aria-current]) { display: none; } .nav .wrap { gap: 14px; } }
+.style-btn { height: 36px; border-radius: 999px; border: 1px solid var(--line); background: var(--ink-2); color: var(--fg); display: inline-flex; align-items: center; gap: 8px; cursor: pointer; margin-left: 4px; padding: 0 14px 0 10px; font: 600 .9rem var(--body); white-space: nowrap; }
+.style-btn:hover { border-color: var(--fg); }
+.style-btn svg { width: 22px; height: 14px; flex: none; }
+.brand .mark-studio { display: none; }
+@media (max-width: 760px) { .nav-links a:not([aria-current]) { display: none; } .nav .wrap { gap: 14px; } .style-btn span { display: none; } .style-btn { padding: 0 9px; } }
+@media (max-width: 420px) { .nav .btn.small { display: none; } }
 
 /* layout: a sidebar of docs beside the page */
 .docs { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 56px; padding-top: 44px; }
 .side-menu > summary { display: none; }
 .side nav { position: sticky; top: 92px; max-height: calc(100vh - 110px); overflow: auto; padding-bottom: 24px; }
 .side-list, .toc { list-style: none; margin: 0; padding: 0; }
+.side-list > .side-head { margin: 18px 0 4px; padding: 0 12px; font-size: .74rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
 .side-list > li > a { display: block; padding: 6px 12px; border-radius: 9px; text-decoration: none; color: var(--muted); font-size: .95rem; }
 .side-list > li > a:hover { color: var(--fg); background: var(--ink-3); }
 .side-list > li.here > a { color: var(--fg); background: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line); font-weight: 600; }
@@ -500,6 +560,14 @@ a { color: inherit; }
 .doc blockquote p { margin: 10px 0; }
 .doc hr { border: 0; border-top: 1px solid var(--line); margin: 36px 0; }
 .doc img { max-width: 100%; height: auto; border-radius: 10px; }
+.doc img.pic-light, .doc img.pic-dark { display: block; border: 1px solid var(--line); margin: 6px 0 16px; }
+.doc img.pic-dark { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .doc img.pic-light { display: none; }
+  :root:not([data-theme="light"]) .doc img.pic-dark { display: block; }
+}
+:root[data-theme="dark"] .doc img.pic-light { display: none; }
+:root[data-theme="dark"] .doc img.pic-dark { display: block; }
 .doc .table { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--ink-2); }
 .doc table { border-collapse: collapse; width: 100%; font-size: .93rem; }
 .doc th, .doc td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -515,6 +583,69 @@ a { color: inherit; }
 .cards b { font: 600 1.08rem var(--display); letter-spacing: -0.01em; }
 .cards span { color: var(--muted); font-size: .9rem; line-height: 1.5; }
 @media (max-width: 640px) { .cards { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- Studio: flat red, yellow, blue and green shapes on cream paper, round controls, Jost ---------- */
+:root[data-style="studio"] {
+  --st-red: #e5401f; --st-blue: #1d4fc4; --st-yellow: #f1b11b; --st-green: #16875a; --st-on: #1e1c19;
+  --ink: #ece5d6; --ink-2: #faf6ee; --ink-3: #e4dccb; --line: #d6ccb8; --fg: #1e1c19; --muted: #4f493f; --faint: #6f675a;
+  --indigo: #1d4fc4; --indigo-deep: #1d4fc4; --amber: #f1b11b;
+  --code-bg: #e4dccb; --code-fg: #3d3830; --pre-bg: #1e1c19; --pre-fg: #f1eadd;
+  --display: "Jost", "Avenir Next", system-ui, sans-serif; --body: "Jost", -apple-system, "Helvetica Neue", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-style="studio"]:not([data-theme="light"]) {
+    --st-red: #ff5a36; --st-blue: #5a86ff; --st-yellow: #ffc533; --st-green: #3dbb83;
+    --ink: #13120f; --ink-2: #1c1a17; --ink-3: #25221e; --line: #36312a; --fg: #f1eadd; --muted: #c0b7a6; --faint: #8d8576;
+    --indigo: #7da0ff; --indigo-deep: #1d4fc4; --amber: #ffc533;
+    --code-bg: #25221e; --code-fg: #ddd5c4; --pre-bg: #0c0b09; --pre-fg: #e6dfd0;
+  }
+}
+:root[data-style="studio"][data-theme="dark"] {
+  --st-red: #ff5a36; --st-blue: #5a86ff; --st-yellow: #ffc533; --st-green: #3dbb83;
+  --ink: #13120f; --ink-2: #1c1a17; --ink-3: #25221e; --line: #36312a; --fg: #f1eadd; --muted: #c0b7a6; --faint: #8d8576;
+  --indigo: #7da0ff; --indigo-deep: #1d4fc4; --amber: #ffc533;
+  --code-bg: #25221e; --code-fg: #ddd5c4; --pre-bg: #0c0b09; --pre-fg: #e6dfd0;
+}
+[data-style="studio"] body { font-size: 18px; }
+[data-style="studio"] .brand svg.mark-classic { display: none; }
+[data-style="studio"] .brand .mark-studio { display: block; }
+[data-style="studio"] .style-btn { background: var(--st-yellow); border-color: var(--st-yellow); color: var(--st-on); }
+[data-style="studio"] .style-btn path { fill: var(--st-on); }
+[data-style="studio"] .btn, [data-style="studio"] .theme-btn { border-radius: 999px; }
+[data-style="studio"] .btn:hover, [data-style="studio"] .theme-btn:hover { border-color: var(--fg); }
+[data-style="studio"] .side-list > li > a { border-radius: 999px; }
+[data-style="studio"] .side-list > li.here > a { background: var(--st-yellow); color: var(--st-on); box-shadow: none; }
+[data-style="studio"] .side-list > .side-head { color: var(--muted); }
+[data-style="studio"] .toc { border-left: 2px solid var(--st-yellow); }
+[data-style="studio"] .toc a:hover { color: var(--st-red); }
+[data-style="studio"] .side-menu { border-radius: 22px; }
+[data-style="studio"] .doc h1, [data-style="studio"] .doc h2, [data-style="studio"] .doc h3 { font-weight: 700; }
+[data-style="studio"] .doc h1 { font-size: clamp(2.4rem, 5vw, 3.6rem); line-height: 1.02; }
+[data-style="studio"] .doc h1::before { content: ""; display: block; width: 12px; height: 12px; margin: 6px 0 22px; border-radius: 50%; background: var(--st-red); box-shadow: 18px 0 0 var(--st-yellow), 36px 0 0 var(--st-blue), 54px 0 0 var(--st-green); }
+[data-style="studio"] .doc h2 { border-top: 0; padding-top: 0; font-size: 1.85rem; }
+[data-style="studio"] .doc h2::before { content: ""; display: inline-block; width: .55em; height: .55em; margin-right: .45em; border-radius: 50%; background: var(--band, var(--st-red)); vertical-align: .08em; }
+[data-style="studio"] .doc h2:nth-of-type(4n+2) { --band: var(--st-yellow); }
+[data-style="studio"] .doc h2:nth-of-type(4n+3) { --band: var(--st-blue); }
+[data-style="studio"] .doc h2:nth-of-type(4n+4) { --band: var(--st-green); }
+[data-style="studio"] .doc .anchor { color: var(--st-red); }
+[data-style="studio"] .doc li::marker { color: var(--st-red); }
+[data-style="studio"] .doc code { border-radius: 8px; }
+[data-style="studio"] .doc pre { border-radius: 20px; border: 0; padding: 18px 22px; }
+[data-style="studio"] .doc blockquote { border-left: 0; border-radius: 20px; padding: 6px 22px 6px 52px; position: relative; color: var(--fg); }
+[data-style="studio"] .doc blockquote::before { content: ""; position: absolute; left: 20px; top: 20px; width: 14px; height: 14px; border-radius: 50%; background: var(--st-blue); }
+[data-style="studio"] .doc .table { border: 0; border-radius: 20px; }
+[data-style="studio"] .doc th { background: var(--ink-3); }
+[data-style="studio"] .doc img { border-radius: 18px; }
+[data-style="studio"] .doc img.pic-light, [data-style="studio"] .doc img.pic-dark { border: 0; box-shadow: 0 24px 50px -30px #3a2e1a88; }
+[data-style="studio"] .lede { color: var(--muted); }
+[data-style="studio"] .cards a { border: 0; border-radius: 22px; padding: 18px 20px; }
+[data-style="studio"] .cards a:hover { transform: translateY(-2px); box-shadow: inset 0 0 0 2px var(--fg); }
+[data-style="studio"] .cards b::before { content: ""; display: inline-block; width: .62em; height: .62em; margin-right: .45em; border-radius: 50%; background: var(--band, var(--st-red)); }
+[data-style="studio"] .cards li:nth-child(4n+2) { --band: var(--st-yellow); }
+[data-style="studio"] .cards li:nth-child(4n+3) { --band: var(--st-blue); }
+[data-style="studio"] .cards li:nth-child(4n+4) { --band: var(--st-green); }
+[data-style="studio"] .doc .edit { border-top: 0; }
+[data-style="studio"] footer { border-top: 0; background: var(--ink-3); }
 
 footer { border-top: 1px solid var(--line); margin-top: 80px; padding-block: 40px 56px; color: var(--faint); font-size: .9rem; }
 footer .wrap { display: flex; flex-wrap: wrap; gap: 18px 32px; align-items: center; }
@@ -541,13 +672,12 @@ function build() {
     const main = `<article>\n${d.body}\n</article>\n<p class="edit">This page is <a href="${REPO}/blob/main/${source}">${source}</a> in the Plonix repository. Spotted something wrong? <a href="${REPO}/edit/main/${source}">Suggest a change</a>.</p>`;
     out.set(`${d.name}.html`, page({ file: `${d.name}.html`, title: `${d.title} · Plonix docs`, description: d.description, sidebar: sidebar(docs, d.name), main, source }));
   }
-  const cards = docs.map((d) => `<li><a href="${d.name}.html"><b>${esc(d.title)}</b><span>${esc(d.description)}</span></a></li>`).join('\n');
+  const card = (d) => `<li><a href="${d.name}.html"><b>${esc(d.title)}</b><span>${esc(d.description)}</span></a></li>`;
+  const sections = grouped(docs).map(([heading, list]) => `<h2 id="${slug(heading)}">${esc(heading)}</h2>\n<ul class="cards">\n${list.map(card).join('\n')}\n</ul>`).join('\n');
   const overview = `<h1>Plonix documentation</h1>
-<p class="lede">How to use Plonix: projects and sessions, the Bench, filters, scans, AI agents, the Market and detection rules, plus how it keeps your data and updates on your terms.</p>
-<p>New to Plonix? The <a href="${REPO}#readme">README</a> covers installing it and the first steps. The <code>plonix</code> command explains itself too: run <code>plonix --help</code>.</p>
-<ul class="cards">
-${cards}
-</ul>`;
+<p class="lede">How to use Plonix, tool by tool: capture traffic, explore it, experiment on the Bench, prove what you find, and work with Claude. Plus how Plonix keeps your data and updates on your terms.</p>
+<p>New to Plonix? Start with <a href="getting-started.html">Getting started</a>, or open the demo project from the Start screen and take the tour. The <code>plonix</code> command explains itself too: run <code>plonix --help</code>.</p>
+${sections}`;
   out.set('index.html', page({ file: 'index.html', title: 'Plonix docs', description: 'Documentation for Plonix, the open-source web security workbench for macOS.', sidebar: sidebar(docs, null), main: overview }));
   return out;
 }

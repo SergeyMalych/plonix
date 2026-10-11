@@ -1,6 +1,6 @@
 <!doctype html>
 <!-- Generated from docs/projects.md by scripts/build-docs.mjs. Edit the Markdown, not this file. -->
-<html lang="en">
+<html lang="en" data-style="studio">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -9,28 +9,29 @@
 <meta property="og:title" content="Projects, sessions and settings · Plonix docs">
 <meta property="og:description" content="A project is a folder. Plonix creates new ones in ~/Plonix/&lt;name&gt; unless you choose another place (on the Start screen, or plonix projects new &lt;name&gt; --location &lt;dir&gt;).">
 <meta property="og:url" content="https://plonix.io/docs/projects">
-<meta property="og:image" content="https://plonix.io/assets/window-light.webp">
+<meta property="og:image" content="https://plonix.io/assets/studio-window-light.webp">
 <link rel="canonical" href="https://plonix.io/docs/projects">
-<meta name="theme-color" content="#f5f5fa" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0d0e13" media="(prefers-color-scheme: dark)">
-<link rel="icon" href="../assets/studio-mark.svg" type="image/svg+xml">
+<meta name="theme-color" content="#ece5d6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#13120f" media="(prefers-color-scheme: dark)">
+<link rel="icon" id="favicon" href="../assets/studio-mark.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Jost:wght@400..700&display=swap">
 <link rel="stylesheet" href="docs.css">
-<script>try{const t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+<script>try{const r=document.documentElement,t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')r.dataset.theme=t;if(localStorage.getItem('plonix-style')==='classic')r.removeAttribute('data-style')}catch(e){}</script>
 </head>
 <body>
 <header class="nav">
   <div class="wrap">
-    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <a class="brand" href="../" aria-label="Plonix home"><svg class="mark-classic" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg><svg class="mark-studio" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#e5401f"/><rect x="7" y="6" width="5" height="20" fill="#1e1c19"/><circle cx="18" cy="13" r="7" fill="#f1b11b"/><path d="M18 6a7 7 0 0 1 0 14z" fill="#1d4fc4"/></svg>Plonix</a>
     <nav class="nav-links" aria-label="Site">
       <a href="../#features">Features</a>
-      <a href="../#scope">Scope</a>
       <a href="../#agents">AI</a>
+      <a href="../#market">Market</a>
       <a href="./" aria-current="page">Docs</a>
     </nav>
     <button type="button" class="theme-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button>
+    <button type="button" class="style-btn" id="style" aria-pressed="true"><svg viewBox="0 0 22 14" aria-hidden="true"><circle cx="5" cy="7" r="5" fill="#e5401f"/><path d="M8 14a5 5 0 0 1 10 0z" fill="#f1b11b"/><circle cx="17" cy="7" r="5" fill="#1d4fc4"/></svg><span>Try classic</span></button>
     <a class="btn small" href="https://github.com/SergeyMalych/plonix"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
   </div>
 </header>
@@ -38,13 +39,14 @@
 <aside class="side">
 <details class="side-menu" open>
 <summary>Documentation</summary>
-<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li class="here"><a href="projects.html" aria-current="page">Projects, sessions and settings</a><ul class="toc"><li><a href="#projects">Projects</a></li><li><a href="#the-demo-project">The demo project</a></li><li><a href="#sessions">Sessions</a></li><li><a href="#keep-only-in-scope-traffic">Keep only in-scope traffic</a></li><li><a href="#settings">Settings</a></li><li><a href="#har-files">HAR files</a></li><li><a href="#client-certificates">Client certificates</a></li><li><a href="#the-start-screen-api">The Start screen API</a></li></ul></li><li><a href="bench.html">The Bench</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="programs.html">Programs</a></li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li><a href="updates.html">Updates</a></li><li><a href="privacy.html">Privacy and usage statistics</a></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="releasing.html">Releasing Plonix</a></li><li><a href="setup.html">Setting up capture on any Mac</a></li></ul></nav>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li class="side-head">Get started</li><li><a href="getting-started.html">Getting started</a></li><li><a href="app.html">The Plonix window</a></li><li class="here"><a href="projects.html" aria-current="page">Projects, sessions and settings</a><ul class="toc"><li><a href="#projects">Projects</a></li><li><a href="#the-demo-project">The demo project</a></li><li><a href="#sessions">Sessions</a></li><li><a href="#keep-only-in-scope-traffic">Keep only in-scope traffic</a></li><li><a href="#settings">Settings</a></li><li><a href="#har-files">HAR files</a></li><li><a href="#client-certificates">Client certificates</a></li><li><a href="#the-start-screen-api">The Start screen API</a></li></ul></li><li><a href="setup.html">Setting up capture on any Mac</a></li><li class="side-head">Capture and explore</li><li><a href="traffic.html">Traffic and the Lens</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scope.html">Scope</a></li><li><a href="map.html">The Map</a></li><li><a href="rules.html">Rules</a></li><li class="side-head">Experiment and prove</li><li><a href="bench.html">The Bench</a></li><li><a href="users.html">Saved users and the Access check</a></li><li><a href="callbacks.html">Callbacks</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="findings.html">Findings</a></li><li><a href="programs.html">Programs</a></li><li class="side-head">AI and the Market</li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li class="side-head">Your data</li><li><a href="updates.html">Updates</a></li><li><a href="privacy.html">Privacy and usage statistics</a></li><li><a href="crash-reports.html">Crash reports</a></li><li class="side-head">Contributing</li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
 </details>
 </aside>
 <main class="doc">
 <article>
 <h1 id="projects-sessions-and-settings">Projects, sessions and settings</h1>
 <h2 id="projects">Projects<a class="anchor" href="#projects" aria-label="Link to this section">#</a></h2>
+<p><img class="pic-light" src="../assets/studio-projects-light.webp" alt="The Projects screen with two open projects, each on its own proxy port" loading="lazy"><img class="pic-dark" src="../assets/studio-projects-dark.webp" alt="The Projects screen with two open projects, each on its own proxy port" loading="lazy"></p>
 <p>A project is a folder. Plonix creates new ones in <code>~/Plonix/&lt;name&gt;</code> unless you choose another place (on the Start screen, or <code>plonix projects new &lt;name&gt; --location &lt;dir&gt;</code>).</p>
 <pre><code class="language-text">&lt;project folder&gt;/
 ├── plonix-project.json   name, id and the project's own settings
@@ -131,13 +133,14 @@ let values = settings::global(&amp;home, &quot;my-feature&quot;);</code></pre>
 </div>
 <footer>
   <div class="wrap">
-    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <a class="brand" href="../" aria-label="Plonix home"><svg class="mark-classic" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg><svg class="mark-studio" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#e5401f"/><rect x="7" y="6" width="5" height="20" fill="#1e1c19"/><circle cx="18" cy="13" r="7" fill="#f1b11b"/><path d="M18 6a7 7 0 0 1 0 14z" fill="#1d4fc4"/></svg>Plonix</a>
     <span>Open-source web security workbench for macOS. Apache-2.0.</span>
     <nav aria-label="Footer">
       <a href="https://github.com/SergeyMalych/plonix">GitHub</a>
       <a href="./">Docs</a>
       <a href="https://github.com/SergeyMalych/plonix/releases">Releases</a>
       <a href="https://github.com/SergeyMalych/plonix/issues">Issues</a>
+      <a href="privacy.html">Privacy</a>
     </nav>
   </div>
 </footer>
@@ -155,6 +158,29 @@ let values = settings::global(&amp;home, &quot;my-feature&quot;);</code></pre>
     const next = current() === 'dark' ? 'light' : 'dark';
     root.dataset.theme = next; paint();
     try { localStorage.setItem('plonix-theme', next); } catch (e) {}
+  });
+
+  // On a phone the list of docs starts folded, so the page comes first.
+  const menu = document.querySelector('.side-menu');
+  if (menu && matchMedia('(max-width: 900px)').matches) menu.open = false;
+
+  // Studio is the default; Classic is the plainer look. Screenshots and the icon follow.
+  const sbtn = document.getElementById('style');
+  const shots = [...document.querySelectorAll('.doc img')].filter((i) => i.getAttribute('src').startsWith('../assets/studio-'));
+  shots.forEach((i) => { i.dataset.studio = i.getAttribute('src'); });
+  const setStyle = (on) => {
+    if (on) root.dataset.style = 'studio'; else delete root.dataset.style;
+    sbtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    sbtn.querySelector('span').textContent = on ? 'Try classic' : 'I like style';
+    sbtn.title = on ? 'Switch to the Classic look' : 'Back to the Studio look';
+    shots.forEach((i) => { const src = on ? i.dataset.studio : i.dataset.studio.replace('/assets/studio-', '/assets/'); if (i.getAttribute('src') !== src) i.src = src; });
+    document.getElementById('favicon').href = on ? '../assets/studio-mark.svg' : '../assets/plonix-mark.svg';
+  };
+  setStyle(root.dataset.style === 'studio');
+  sbtn.addEventListener('click', () => {
+    const on = root.dataset.style !== 'studio';
+    setStyle(on);
+    try { localStorage.setItem('plonix-style', on ? 'studio' : 'classic'); } catch (e) {}
   });
 })();
 </script>

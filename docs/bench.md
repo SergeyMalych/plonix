@@ -11,6 +11,8 @@ only ever reach a host that is **accepted into scope**, exactly like a manual
 send. When the host has a [client certificate](projects.md#client-certificates),
 the Bench presents it and marks the response **cert · CN=…**.
 
+![The Bench: a request on the left, its JSON response on the right, and the send history below with Restore, Branch and Finding buttons](../site/assets/studio-bench-light.webp)
+
 ## Comparing sends
 
 Every send in a tab is kept in its **History**. Tick two sends and press
@@ -23,6 +25,8 @@ and **Request** switch what is compared, and **Close** hides it.
 Typical uses: the same record read by two users, ids one apart, a header added
 or removed, or a send before and after a change. **Branch** opens any earlier
 send in a new tab, and **Restore** puts it back in the editor.
+
+![Compare view on the Bench: two order lookups side by side, with the changed lines highlighted](../site/assets/studio-compare-light.webp)
 
 ## Claude's suggested edits
 

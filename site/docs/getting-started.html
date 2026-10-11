@@ -1,0 +1,126 @@
+<!doctype html>
+<!-- Generated from docs/getting-started.md by scripts/build-docs.mjs. Edit the Markdown, not this file. -->
+<html lang="en" data-style="studio">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Getting started · Plonix docs</title>
+<meta name="description" content="Plonix captures the traffic between your browser and the application you are testing, maps the target as you browse, and helps you experiment and prove what you find. This page…">
+<meta property="og:title" content="Getting started · Plonix docs">
+<meta property="og:description" content="Plonix captures the traffic between your browser and the application you are testing, maps the target as you browse, and helps you experiment and prove what you find. This page…">
+<meta property="og:url" content="https://plonix.io/docs/getting-started">
+<meta property="og:image" content="https://plonix.io/assets/studio-window-light.webp">
+<link rel="canonical" href="https://plonix.io/docs/getting-started">
+<meta name="theme-color" content="#ece5d6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#13120f" media="(prefers-color-scheme: dark)">
+<link rel="icon" id="favicon" href="../assets/studio-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Jost:wght@400..700&display=swap">
+<link rel="stylesheet" href="docs.css">
+<script>try{const r=document.documentElement,t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')r.dataset.theme=t;if(localStorage.getItem('plonix-style')==='classic')r.removeAttribute('data-style')}catch(e){}</script>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg class="mark-classic" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg><svg class="mark-studio" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#e5401f"/><rect x="7" y="6" width="5" height="20" fill="#1e1c19"/><circle cx="18" cy="13" r="7" fill="#f1b11b"/><path d="M18 6a7 7 0 0 1 0 14z" fill="#1d4fc4"/></svg>Plonix</a>
+    <nav class="nav-links" aria-label="Site">
+      <a href="../#features">Features</a>
+      <a href="../#agents">AI</a>
+      <a href="../#market">Market</a>
+      <a href="./" aria-current="page">Docs</a>
+    </nav>
+    <button type="button" class="theme-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button>
+    <button type="button" class="style-btn" id="style" aria-pressed="true"><svg viewBox="0 0 22 14" aria-hidden="true"><circle cx="5" cy="7" r="5" fill="#e5401f"/><path d="M8 14a5 5 0 0 1 10 0z" fill="#f1b11b"/><circle cx="17" cy="7" r="5" fill="#1d4fc4"/></svg><span>Try classic</span></button>
+    <a class="btn small" href="https://github.com/SergeyMalych/plonix"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+  </div>
+</header>
+<div class="wrap docs">
+<aside class="side">
+<details class="side-menu" open>
+<summary>Documentation</summary>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li class="side-head">Get started</li><li class="here"><a href="getting-started.html" aria-current="page">Getting started</a><ul class="toc"><li><a href="#install">Install</a></li><li><a href="#try-the-demo-first">Try the demo first</a></li><li><a href="#capture-your-first-target">Capture your first target</a></li><li><a href="#from-a-terminal">From a terminal</a></li><li><a href="#where-to-go-next">Where to go next</a></li></ul></li><li><a href="app.html">The Plonix window</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="setup.html">Setting up capture on any Mac</a></li><li class="side-head">Capture and explore</li><li><a href="traffic.html">Traffic and the Lens</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scope.html">Scope</a></li><li><a href="map.html">The Map</a></li><li><a href="rules.html">Rules</a></li><li class="side-head">Experiment and prove</li><li><a href="bench.html">The Bench</a></li><li><a href="users.html">Saved users and the Access check</a></li><li><a href="callbacks.html">Callbacks</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="findings.html">Findings</a></li><li><a href="programs.html">Programs</a></li><li class="side-head">AI and the Market</li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li class="side-head">Your data</li><li><a href="updates.html">Updates</a></li><li><a href="privacy.html">Privacy and usage statistics</a></li><li><a href="crash-reports.html">Crash reports</a></li><li class="side-head">Contributing</li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
+</details>
+</aside>
+<main class="doc">
+<article>
+<h1 id="getting-started">Getting started</h1>
+<p>Plonix captures the traffic between your browser and the application you are testing, maps the target as you browse, and helps you experiment and prove what you find. This page takes you from download to captured traffic in about a minute.</p>
+<p><img class="pic-light" src="../assets/studio-window-light.webp" alt="The Plonix window: live traffic with filter chips, a scope suggestion for a newly seen domain, and the Lens showing a request and its response" loading="lazy"><img class="pic-dark" src="../assets/studio-window-dark.webp" alt="The Plonix window: live traffic with filter chips, a scope suggestion for a newly seen domain, and the Lens showing a request and its response" loading="lazy"></p>
+<h2 id="install">Install<a class="anchor" href="#install" aria-label="Link to this section">#</a></h2>
+<p><strong>Mac.</strong> Download <a href="https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-macOS.dmg" rel="noopener">Plonix for Mac</a> (Apple silicon and Intel, macOS 11 or later), open it and drag Plonix to Applications. Releases are not notarized by Apple yet, so macOS asks before opening Plonix the first time: open it, click <strong>Done</strong>, then go to <strong>System Settings › Privacy &amp; Security</strong> and click <strong>Open Anyway</strong> next to Plonix. Or run <code>xattr -dr com.apple.quarantine /Applications/Plonix.app</code> once.</p>
+<p><strong>Windows.</strong> Download <a href="https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-Windows-setup.exe" rel="noopener">Plonix for Windows</a> (64-bit Windows 10 or 11) and run it. The installer is not code-signed yet, so SmartScreen may say it protected your PC: click <strong>More info</strong>, then <strong>Run anyway</strong>. Plonix keeps its data in <code>%USERPROFILE%\.plonix</code>.</p>
+<p>Every release is on the <a href="https://github.com/SergeyMalych/plonix/releases" rel="noopener">releases page</a>, with what changed in <a href="https://github.com/SergeyMalych/plonix/blob/main/CHANGELOG.md" rel="noopener">CHANGELOG.md</a>. To build Plonix yourself, see <a href="https://github.com/SergeyMalych/plonix/blob/main/README.md#build-from-source" rel="noopener">Build from source</a> in the README.</p>
+<h2 id="try-the-demo-first">Try the demo first<a class="anchor" href="#try-the-demo-first" aria-label="Link to this section">#</a></h2>
+<p>The Start screen opens when you launch Plonix. <strong>Try the Demo</strong> opens a made-up shop's traffic with scope, findings and Bench experiments ready, and offers a short walkthrough. <strong>Test now!</strong> on a stop shows that part of Plonix working for real on the demo's data. Nothing in the demo reaches the internet. See <a href="projects.html#the-demo-project">The demo project</a>.</p>
+<h2 id="capture-your-first-target">Capture your first target<a class="anchor" href="#capture-your-first-target" aria-label="Link to this section">#</a></h2>
+<ol><li>On the Start screen, create a project. It is a folder (in <code>~/Plonix</code> unless you pick another) that holds everything you capture.</li><li>Press <strong>Open target</strong> (⌘O, or the button at the top of the sidebar) and type the site you are testing. Plonix opens it in the <strong>capture browser</strong>, a separate browser with its own profile that routes through Plonix and trusts its certificate, so HTTPS works with nothing to install. The domain and its subdomains go into <a href="scope.html">scope</a>.</li><li>Browse the site. Requests appear in <a href="traffic.html">Traffic</a> as they happen.</li></ol>
+<p>The capture browser is Chrome, Brave, Edge or Chromium. On a Mac with only Safari, Open target offers <strong>Get the Plonix browser</strong>, a one-time download. Firefox works too, after one click to trust the Plonix certificate. See <a href="setup.html">Setting up capture on any Mac</a>.</p>
+<h2 id="from-a-terminal">From a terminal<a class="anchor" href="#from-a-terminal" aria-label="Link to this section">#</a></h2>
+<p>The same in one command:</p>
+<pre><code class="language-sh">plonix open example.com</code></pre>
+<p>It creates the certificate authority (first run only), starts the engine, puts <code>example.com</code> and its subdomains in scope, opens a capture browser at the target and opens the Plonix window next to it. <strong>Plonix › Install Command Line Tool…</strong> in the app puts the <code>plonix</code> command on your PATH. Every command takes <code>--json</code>, and <code>plonix --help</code> lists them all.</p>
+<pre><code class="language-sh">plonix search host:example.com status:5xx   # newest first
+plonix show 42                              # one request and its response
+plonix watch scope:in                       # new traffic as it arrives</code></pre>
+<h2 id="where-to-go-next">Where to go next<a class="anchor" href="#where-to-go-next" aria-label="Link to this section">#</a></h2>
+<ul><li><a href="traffic.html">Traffic and the Lens</a>: search, filter and read what you captured.</li><li><a href="scope.html">Scope</a>: let scope grow with the evidence, and decide what belongs.</li><li><a href="bench.html">The Bench</a>: edit a request, send it, branch and compare.</li><li><a href="agents.html">Agents and MCP</a>: connect Claude Code with <code>plonix connect claude</code>.</li><li><a href="app.html">The Plonix window</a>: shortcuts, appearance and text size.</li></ul>
+</article>
+<p class="edit">This page is <a href="https://github.com/SergeyMalych/plonix/blob/main/docs/getting-started.md">docs/getting-started.md</a> in the Plonix repository. Spotted something wrong? <a href="https://github.com/SergeyMalych/plonix/edit/main/docs/getting-started.md">Suggest a change</a>.</p>
+</main>
+</div>
+<footer>
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg class="mark-classic" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg><svg class="mark-studio" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#e5401f"/><rect x="7" y="6" width="5" height="20" fill="#1e1c19"/><circle cx="18" cy="13" r="7" fill="#f1b11b"/><path d="M18 6a7 7 0 0 1 0 14z" fill="#1d4fc4"/></svg>Plonix</a>
+    <span>Open-source web security workbench for macOS. Apache-2.0.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/SergeyMalych/plonix">GitHub</a>
+      <a href="./">Docs</a>
+      <a href="https://github.com/SergeyMalych/plonix/releases">Releases</a>
+      <a href="https://github.com/SergeyMalych/plonix/issues">Issues</a>
+      <a href="privacy.html">Privacy</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(() => {
+  const root = document.documentElement, btn = document.getElementById('theme');
+  const sys = matchMedia('(prefers-color-scheme: dark)');
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+  const current = () => root.dataset.theme || (sys.matches ? 'dark' : 'light');
+  const paint = () => { const d = current() === 'dark'; btn.innerHTML = d ? SUN : MOON; btn.setAttribute('aria-label', d ? 'Switch to light mode' : 'Switch to dark mode'); };
+  paint();
+  sys.addEventListener('change', paint);
+  btn.addEventListener('click', () => {
+    const next = current() === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next; paint();
+    try { localStorage.setItem('plonix-theme', next); } catch (e) {}
+  });
+
+  // On a phone the list of docs starts folded, so the page comes first.
+  const menu = document.querySelector('.side-menu');
+  if (menu && matchMedia('(max-width: 900px)').matches) menu.open = false;
+
+  // Studio is the default; Classic is the plainer look. Screenshots and the icon follow.
+  const sbtn = document.getElementById('style');
+  const shots = [...document.querySelectorAll('.doc img')].filter((i) => i.getAttribute('src').startsWith('../assets/studio-'));
+  shots.forEach((i) => { i.dataset.studio = i.getAttribute('src'); });
+  const setStyle = (on) => {
+    if (on) root.dataset.style = 'studio'; else delete root.dataset.style;
+    sbtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    sbtn.querySelector('span').textContent = on ? 'Try classic' : 'I like style';
+    sbtn.title = on ? 'Switch to the Classic look' : 'Back to the Studio look';
+    shots.forEach((i) => { const src = on ? i.dataset.studio : i.dataset.studio.replace('/assets/studio-', '/assets/'); if (i.getAttribute('src') !== src) i.src = src; });
+    document.getElementById('favicon').href = on ? '../assets/studio-mark.svg' : '../assets/plonix-mark.svg';
+  };
+  setStyle(root.dataset.style === 'studio');
+  sbtn.addEventListener('click', () => {
+    const on = root.dataset.style !== 'studio';
+    setStyle(on);
+    try { localStorage.setItem('plonix-style', on ? 'studio' : 'classic'); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>
