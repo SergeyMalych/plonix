@@ -1,6 +1,6 @@
 <!doctype html>
 <!-- Generated from docs/market.md by scripts/build-docs.mjs. Edit the Markdown, not this file. -->
-<html lang="en">
+<html lang="en" data-style="studio">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -9,28 +9,29 @@
 <meta property="og:title" content="The Market and skills · Plonix docs">
 <meta property="og:description" content="The Market is where Plonix gets everything modular, in one catalog:">
 <meta property="og:url" content="https://plonix.io/docs/market">
-<meta property="og:image" content="https://plonix.io/assets/window-light.webp">
+<meta property="og:image" content="https://plonix.io/assets/studio-window-light.webp">
 <link rel="canonical" href="https://plonix.io/docs/market">
-<meta name="theme-color" content="#f5f5fa" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0d0e13" media="(prefers-color-scheme: dark)">
-<link rel="icon" href="../assets/studio-mark.svg" type="image/svg+xml">
+<meta name="theme-color" content="#ece5d6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#13120f" media="(prefers-color-scheme: dark)">
+<link rel="icon" id="favicon" href="../assets/studio-mark.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Jost:wght@400..700&display=swap">
 <link rel="stylesheet" href="docs.css">
-<script>try{const t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+<script>try{const r=document.documentElement,t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')r.dataset.theme=t;if(localStorage.getItem('plonix-style')==='classic')r.removeAttribute('data-style')}catch(e){}</script>
 </head>
 <body>
 <header class="nav">
   <div class="wrap">
-    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <a class="brand" href="../" aria-label="Plonix home"><svg class="mark-classic" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg><svg class="mark-studio" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#e5401f"/><rect x="7" y="6" width="5" height="20" fill="#1e1c19"/><circle cx="18" cy="13" r="7" fill="#f1b11b"/><path d="M18 6a7 7 0 0 1 0 14z" fill="#1d4fc4"/></svg>Plonix</a>
     <nav class="nav-links" aria-label="Site">
       <a href="../#features">Features</a>
-      <a href="../#scope">Scope</a>
       <a href="../#agents">AI</a>
+      <a href="../#market">Market</a>
       <a href="./" aria-current="page">Docs</a>
     </nav>
     <button type="button" class="theme-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button>
+    <button type="button" class="style-btn" id="style" aria-pressed="true"><svg viewBox="0 0 22 14" aria-hidden="true"><circle cx="5" cy="7" r="5" fill="#e5401f"/><path d="M8 14a5 5 0 0 1 10 0z" fill="#f1b11b"/><circle cx="17" cy="7" r="5" fill="#1d4fc4"/></svg><span>Try classic</span></button>
     <a class="btn small" href="https://github.com/SergeyMalych/plonix"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
   </div>
 </header>
@@ -38,14 +39,14 @@
 <aside class="side">
 <details class="side-menu" open>
 <summary>Documentation</summary>
-<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="bench.html">The Bench</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="programs.html">Programs</a></li><li><a href="agents.html">Agents and MCP</a></li><li class="here"><a href="market.html" aria-current="page">The Market and skills</a><ul class="toc"><li><a href="#suggestions-for-your-work">Suggestions for your work</a></li><li><a href="#three-shelves">Three shelves</a></li><li><a href="#validated-packages">Validated packages</a></li><li><a href="#other-markets">Other Markets</a></li><li><a href="#skills">Skills</a></li><li><a href="#adding-your-own">Adding your own</a></li><li><a href="#the-community-market">The community Market</a></li><li><a href="#the-block-list">The block list</a></li><li><a href="#how-the-markets-are-signed">How the Markets are signed</a></li><li><a href="#item-pages">Item pages</a></li></ul></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li><a href="updates.html">Updates</a></li><li><a href="privacy.html">Privacy and usage statistics</a></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="releasing.html">Releasing Plonix</a></li><li><a href="setup.html">Setting up capture on any Mac</a></li></ul></nav>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li class="side-head">Get started</li><li><a href="getting-started.html">Getting started</a></li><li><a href="app.html">The Plonix window</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="setup.html">Setting up capture on any Mac</a></li><li class="side-head">Capture and explore</li><li><a href="traffic.html">Traffic and the Lens</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scope.html">Scope</a></li><li><a href="map.html">The Map</a></li><li><a href="rules.html">Rules</a></li><li class="side-head">Experiment and prove</li><li><a href="bench.html">The Bench</a></li><li><a href="users.html">Saved users and the Access check</a></li><li><a href="callbacks.html">Callbacks</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="findings.html">Findings</a></li><li><a href="programs.html">Programs</a></li><li class="side-head">AI and the Market</li><li><a href="agents.html">Agents and MCP</a></li><li class="here"><a href="market.html" aria-current="page">The Market and skills</a><ul class="toc"><li><a href="#suggestions-for-your-work">Suggestions for your work</a></li><li><a href="#three-shelves">Three shelves</a></li><li><a href="#validated-packages">Validated packages</a></li><li><a href="#other-markets">Other Markets</a></li><li><a href="#skills">Skills</a></li><li><a href="#adding-your-own">Adding your own</a></li><li><a href="#the-community-market">The community Market</a></li><li><a href="#the-block-list">The block list</a></li><li><a href="#how-the-markets-are-signed">How the Markets are signed</a></li><li><a href="#item-pages">Item pages</a></li></ul></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li class="side-head">Your data</li><li><a href="updates.html">Updates</a></li><li><a href="privacy.html">Privacy and usage statistics</a></li><li><a href="crash-reports.html">Crash reports</a></li><li class="side-head">Contributing</li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
 </details>
 </aside>
 <main class="doc">
 <article>
 <h1 id="the-market-and-skills">The Market and skills</h1>
 <p>The Market is where Plonix gets everything modular, in one catalog:</p>
-<div class="table"><table><thead><tr><th>Kind</th><th>What it is</th><th>Installs into</th></tr></thead><tbody><tr><td><strong>Skill</strong></td><td>A playbook an AI agent follows for one job in Plonix</td><td><code>$PLONIX_HOME/skills</code></td></tr><tr><td><strong>Rule pack</strong></td><td>Technology detection rules (<a href="detection-rules.html">format</a>)</td><td><code>$PLONIX_HOME/rules</code></td></tr><tr><td><strong>Filter pack</strong></td><td>Named Traffic filters such as <code>is:auth</code> (<a href="filters.html">format</a>)</td><td><code>$PLONIX_HOME/filters</code></td></tr><tr><td><strong>List pack</strong></td><td>Named payload lists for the Bench (<a href="bench.html">format</a>)</td><td><code>$PLONIX_HOME/lists</code></td></tr><tr><td><strong>Platform</strong></td><td>Where bug bounty programs come from: a platform's API address, sign-in and data shape (<a href="programs.html#platform-packs">format</a>)</td><td><code>$PLONIX_HOME/platforms</code></td></tr><tr><td><strong>Bundle</strong></td><td>A set of other packages, installed and removed together</td><td><code>$PLONIX_HOME/market/bundles.json</code></td></tr><tr><td><strong>Extension</strong></td><td>Code that runs in the Plonix sandbox: today, passive analyzers (<a href="extensions.html">extensions.md</a>)</td><td><code>$PLONIX_HOME/extensions</code></td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Kind</th><th>What it is</th><th>Installs into</th></tr></thead><tbody><tr><td><strong>Skill</strong></td><td>A playbook an AI agent follows for one job in Plonix</td><td><code>$PLONIX_HOME/skills</code></td></tr><tr><td><strong>Rule pack</strong></td><td>Technology detection rules (<a href="detection-rules.html">format</a>)</td><td><code>$PLONIX_HOME/rules</code></td></tr><tr><td><strong>Filter pack</strong></td><td>Named Traffic filters such as <code>is:auth</code> (<a href="filters.html">format</a>)</td><td><code>$PLONIX_HOME/filters</code></td></tr><tr><td><strong>List pack</strong></td><td>Named payload lists for the Bench (<a href="bench.html">format</a>)</td><td><code>$PLONIX_HOME/lists</code></td></tr><tr><td><strong>Platform</strong></td><td>Where bug bounty programs come from: a platform's API address, sign-in and data shape (<a href="programs.html#platform-packs">format</a>)</td><td><code>$PLONIX_HOME/platforms</code></td></tr><tr><td><strong>Tool</strong></td><td>Switches on a capability built into Plonix that ships off, such as <a href="users.html">Saved users and the Access check</a>, <a href="callbacks.html">Callbacks</a> and <a href="programs.html">Programs</a>. Its screen appears as soon as it is installed</td><td><code>$PLONIX_HOME/tools</code></td></tr><tr><td><strong>Bundle</strong></td><td>A set of other packages, installed and removed together</td><td><code>$PLONIX_HOME/market/bundles.json</code></td></tr><tr><td><strong>Extension</strong></td><td>Code that runs in the Plonix sandbox: today, passive analyzers (<a href="extensions.html">extensions.md</a>)</td><td><code>$PLONIX_HOME/extensions</code></td></tr></tbody></table></div>
 <p>Open it from the sidebar (⌘7 in the app), or use the CLI:</p>
 <pre><code class="language-sh">plonix market                         # everything, with what is installed
 plonix market --kind skill            # one kind
@@ -53,6 +54,7 @@ plonix market show api-kit            # what a package is and what it includes
 plonix market install api-kit         # installs the bundle and everything in it
 plonix market update                  # newer versions of what you installed
 plonix market remove api-kit          # removes the bundle and what it added</code></pre>
+<p><img class="pic-light" src="../assets/studio-market-light.webp" alt="The Market: skills, extensions and rule packs, each marked Built in or Verified, with Install buttons" loading="lazy"><img class="pic-dark" src="../assets/studio-market-dark.webp" alt="The Market: skills, extensions and rule packs, each marked Built in or Verified, with Install buttons" loading="lazy"></p>
 <h2 id="suggestions-for-your-work">Suggestions for your work<a class="anchor" href="#suggestions-for-your-work" aria-label="Link to this section">#</a></h2>
 <p>Pick the kind of work you do and the Market suggests a short starter set, with one line on why each item is there:</p>
 <ul><li><strong>Bug hunter</strong>: public programs for rewards. Access checks, leaked secrets, APIs and clear write-ups. Items that send many requests are suggested but never pre-picked.</li><li><strong>Red teamer</strong>: an engagement against one organization. Recon, things left open, identities and cloud services. Only items that read captured traffic are pre-picked.</li><li><strong>Security researcher</strong>: one app, its cloud setup or a protocol, taken apart. Analysis across traffic, cloud services and decoding.</li></ul>
@@ -141,13 +143,14 @@ plonix extensions add github:jsmith/graphql-notes --grant scoped-requests   # an
 </div>
 <footer>
   <div class="wrap">
-    <a class="brand" href="../" aria-label="Plonix home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg>Plonix</a>
+    <a class="brand" href="../" aria-label="Plonix home"><svg class="mark-classic" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg><svg class="mark-studio" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#e5401f"/><rect x="7" y="6" width="5" height="20" fill="#1e1c19"/><circle cx="18" cy="13" r="7" fill="#f1b11b"/><path d="M18 6a7 7 0 0 1 0 14z" fill="#1d4fc4"/></svg>Plonix</a>
     <span>Open-source web security workbench for macOS. Apache-2.0.</span>
     <nav aria-label="Footer">
       <a href="https://github.com/SergeyMalych/plonix">GitHub</a>
       <a href="./">Docs</a>
       <a href="https://github.com/SergeyMalych/plonix/releases">Releases</a>
       <a href="https://github.com/SergeyMalych/plonix/issues">Issues</a>
+      <a href="privacy.html">Privacy</a>
     </nav>
   </div>
 </footer>
@@ -165,6 +168,29 @@ plonix extensions add github:jsmith/graphql-notes --grant scoped-requests   # an
     const next = current() === 'dark' ? 'light' : 'dark';
     root.dataset.theme = next; paint();
     try { localStorage.setItem('plonix-theme', next); } catch (e) {}
+  });
+
+  // On a phone the list of docs starts folded, so the page comes first.
+  const menu = document.querySelector('.side-menu');
+  if (menu && matchMedia('(max-width: 900px)').matches) menu.open = false;
+
+  // Studio is the default; Classic is the plainer look. Screenshots and the icon follow.
+  const sbtn = document.getElementById('style');
+  const shots = [...document.querySelectorAll('.doc img')].filter((i) => i.getAttribute('src').startsWith('../assets/studio-'));
+  shots.forEach((i) => { i.dataset.studio = i.getAttribute('src'); });
+  const setStyle = (on) => {
+    if (on) root.dataset.style = 'studio'; else delete root.dataset.style;
+    sbtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    sbtn.querySelector('span').textContent = on ? 'Try classic' : 'I like style';
+    sbtn.title = on ? 'Switch to the Classic look' : 'Back to the Studio look';
+    shots.forEach((i) => { const src = on ? i.dataset.studio : i.dataset.studio.replace('/assets/studio-', '/assets/'); if (i.getAttribute('src') !== src) i.src = src; });
+    document.getElementById('favicon').href = on ? '../assets/studio-mark.svg' : '../assets/plonix-mark.svg';
+  };
+  setStyle(root.dataset.style === 'studio');
+  sbtn.addEventListener('click', () => {
+    const on = root.dataset.style !== 'studio';
+    setStyle(on);
+    try { localStorage.setItem('plonix-style', on ? 'studio' : 'classic'); } catch (e) {}
   });
 })();
 </script>

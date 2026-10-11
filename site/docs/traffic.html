@@ -1,0 +1,144 @@
+<!doctype html>
+<!-- Generated from docs/traffic.md by scripts/build-docs.mjs. Edit the Markdown, not this file. -->
+<html lang="en" data-style="studio">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Traffic and the Lens · Plonix docs</title>
+<meta name="description" content="Traffic lists every request and response that passes through the project's proxy, live. The Lens shows the selected one, decoded and pretty-printed. Everything is recorded into…">
+<meta property="og:title" content="Traffic and the Lens · Plonix docs">
+<meta property="og:description" content="Traffic lists every request and response that passes through the project's proxy, live. The Lens shows the selected one, decoded and pretty-printed. Everything is recorded into…">
+<meta property="og:url" content="https://plonix.io/docs/traffic">
+<meta property="og:image" content="https://plonix.io/assets/studio-window-light.webp">
+<link rel="canonical" href="https://plonix.io/docs/traffic">
+<meta name="theme-color" content="#ece5d6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#13120f" media="(prefers-color-scheme: dark)">
+<link rel="icon" id="favicon" href="../assets/studio-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Jost:wght@400..700&display=swap">
+<link rel="stylesheet" href="docs.css">
+<script>try{const r=document.documentElement,t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')r.dataset.theme=t;if(localStorage.getItem('plonix-style')==='classic')r.removeAttribute('data-style')}catch(e){}</script>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg class="mark-classic" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg><svg class="mark-studio" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#e5401f"/><rect x="7" y="6" width="5" height="20" fill="#1e1c19"/><circle cx="18" cy="13" r="7" fill="#f1b11b"/><path d="M18 6a7 7 0 0 1 0 14z" fill="#1d4fc4"/></svg>Plonix</a>
+    <nav class="nav-links" aria-label="Site">
+      <a href="../#features">Features</a>
+      <a href="../#agents">AI</a>
+      <a href="../#market">Market</a>
+      <a href="./" aria-current="page">Docs</a>
+    </nav>
+    <button type="button" class="theme-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button>
+    <button type="button" class="style-btn" id="style" aria-pressed="true"><svg viewBox="0 0 22 14" aria-hidden="true"><circle cx="5" cy="7" r="5" fill="#e5401f"/><path d="M8 14a5 5 0 0 1 10 0z" fill="#f1b11b"/><circle cx="17" cy="7" r="5" fill="#1d4fc4"/></svg><span>Try classic</span></button>
+    <a class="btn small" href="https://github.com/SergeyMalych/plonix"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+  </div>
+</header>
+<div class="wrap docs">
+<aside class="side">
+<details class="side-menu" open>
+<summary>Documentation</summary>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li class="side-head">Get started</li><li><a href="getting-started.html">Getting started</a></li><li><a href="app.html">The Plonix window</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="setup.html">Setting up capture on any Mac</a></li><li class="side-head">Capture and explore</li><li class="here"><a href="traffic.html" aria-current="page">Traffic and the Lens</a><ul class="toc"><li><a href="#search">Search</a></li><li><a href="#filter-chips">Filter chips</a></li><li><a href="#reading-the-list">Reading the list</a></li><li><a href="#the-lens">The Lens</a></li><li><a href="#intercept">Intercept</a></li><li><a href="#export-and-import">Export and import</a></li><li><a href="#from-the-terminal">From the terminal</a></li></ul></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scope.html">Scope</a></li><li><a href="map.html">The Map</a></li><li><a href="rules.html">Rules</a></li><li class="side-head">Experiment and prove</li><li><a href="bench.html">The Bench</a></li><li><a href="users.html">Saved users and the Access check</a></li><li><a href="callbacks.html">Callbacks</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="findings.html">Findings</a></li><li><a href="programs.html">Programs</a></li><li class="side-head">AI and the Market</li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li class="side-head">Your data</li><li><a href="updates.html">Updates</a></li><li><a href="privacy.html">Privacy and usage statistics</a></li><li><a href="crash-reports.html">Crash reports</a></li><li class="side-head">Contributing</li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
+</details>
+</aside>
+<main class="doc">
+<article>
+<h1 id="traffic-and-the-lens">Traffic and the Lens</h1>
+<p><strong>Traffic</strong> lists every request and response that passes through the project's proxy, live. The <strong>Lens</strong> shows the selected one, decoded and pretty-printed. Everything is recorded into the project, in scope or not, so nothing you browsed is lost.</p>
+<p><img class="pic-light" src="../assets/studio-lens-light.webp" alt="The Lens with a JWT spotted in the authorization header, its header decoded, and the token highlighted in the request" loading="lazy"><img class="pic-dark" src="../assets/studio-lens-dark.webp" alt="The Lens with a JWT spotted in the authorization header, its header decoded, and the token highlighted in the request" loading="lazy"></p>
+<h2 id="search">Search<a class="anchor" href="#search" aria-label="Link to this section">#</a></h2>
+<p>Type in the search box to narrow the list. Field filters narrow by metadata, and anything else is matched as full text against URLs, headers and decoded bodies. A leading <code>-</code> hides what matches instead, and commas match any of several values: <code>status:4xx,5xx -kind:static</code>.</p>
+<pre><code class="language-text">host:example.com          host or any subdomain (globs: host:*.cdn.*)
+method:POST               HTTP method
+status:404  status:5xx    exact code, class, or status:none for no response
+path:/api                 path prefix (globs: path:*admin*)
+ext:js                    file extension of the path
+kind:static               images, fonts, stylesheets, scripts and media
+mime:json                 substring of the response content type
+scope:in  scope:out       in or out of the current scope
+source:proxy              captured traffic; source:replay for sent requests, source:import for HAR imports
+is:auth                   a named filter (see Named filters)
+&quot;set-cookie: sid&quot;         quoted phrase
+passw -logout             plain full-text terms</code></pre>
+<p>You don't have to remember any of it. As you type, a list under the box offers the fields first, then the values this project actually has (hosts, status codes, paths, content types, named filters), each with how many requests match. ↑↓ picks, Tab completes, Enter adds it. The same search works in <code>plonix search</code>, <code>plonix watch</code> and the API. Named filters such as <code>is:graphql</code> come from <a href="filters.html">filter packs</a>.</p>
+<h2 id="filter-chips">Filter chips<a class="anchor" href="#filter-chips" aria-label="Link to this section">#</a></h2>
+<p>Filters sit as chips above the list, under <strong>Show only</strong> and <strong>Hide</strong>. Add one with <strong>+ Filter</strong>, from the <strong>suggested filters</strong> drawn from your traffic (hide static files, hide the busiest third-party hosts, show only errors), or right-click any row to show only or hide its host, path, status class, content type, extension or method. Click a chip to flip it between show and hide, and × to remove it. <strong>Copy query</strong> gives the same filters as a query for the CLI or the API. Active filters are saved with the project.</p>
+<h2 id="reading-the-list">Reading the list<a class="anchor" href="#reading-the-list" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Look-alike grouping</strong> folds requests to the same path with different ids into one row. Click a group to see every request in it, or turn grouping off.</li><li><strong>Repeats</strong> of the same request in a row show as one row with a count (×N). Click it to see each one, or pick <strong>Every request</strong> in the toolbar.</li><li><strong>Full path or Short path:</strong> the toolbar switches between the whole path and a short one where ids and tokens fold into <code>{id}</code> and <code>{token}</code> and the query hides behind <code>?…</code>, so long URLs stay readable.</li><li><strong>New domains:</strong> a banner shows each domain <a href="scope.html">adaptive scope</a> suggests, with its evidence and one-click accept or reject.</li></ul>
+<h2 id="the-lens">The Lens<a class="anchor" href="#the-lens" aria-label="Link to this section">#</a></h2>
+<p>The Lens decodes compressed bodies, pretty-prints JSON and lists WebSocket messages under their handshake. Above the request it points out what stands out:</p>
+<ul><li>JWTs (header and payload decoded, algorithm and expiry; the signature is never claimed valid), Base64, hex and double URL-encoding that decode to readable text, and Basic auth credentials;</li><li>personal data (email addresses, card numbers that pass the Luhn check), leaked secrets (cloud, code-hosting, chat and payment keys, private keys) and internal IP addresses;</li><li>stack traces in responses.</li></ul>
+<p>Click one to highlight it in place and see the decoded value, then copy it or find it across all captured traffic. Select any text yourself to decode it, find it across traffic or ask Claude about it. Detection runs locally on traffic you already captured; nothing is flagged unless it is there.</p>
+<p><strong>Suggested</strong> in the Lens offers the one next step that fits what is on screen: a response that sets a session offers <strong>Save login as a user</strong>, an id in the path offers <strong>Check this id across users</strong>, a signed-in request offers <strong>Replay signed out</strong>, a reflected value or a redirect opens on the <a href="bench.html">Bench</a> ready to vary, and an endpoint with inputs offers <a href="scanning.html">Scans</a> focused on it. When something stands out, the Lens offers to record a <a href="findings.html">finding</a>, and <strong>Ideas for this endpoint</strong> asks Claude what to try. <strong>Copy as curl</strong> works from the Lens, the right-click menu and the Bench. Nothing is sent until you click.</p>
+<h2 id="intercept">Intercept<a class="anchor" href="#intercept" aria-label="Link to this section">#</a></h2>
+<p><strong>Intercept</strong> in the Traffic toolbar (or <code>i</code>, or <code>plonix intercept on</code>) holds requests in the proxy so you can look at each one before it goes on. Held items wait in a panel above the list: edit the request as text and <strong>Forward</strong> it (⌘↵ or <code>f</code>), <strong>Drop</strong> it (<code>d</code>; the browser gets an error page) or <strong>Forward all</strong>. A count on the button and on Traffic in the sidebar says how many are waiting.</p>
+<ul><li>By default only in-scope hosts are held. <strong>Settings › Intercept</strong> switches to everything, narrows what is held with a Traffic search such as <code>method:POST path:/api</code>, and holds <strong>responses</strong> too.</li><li>Nothing waits forever: an unanswered item goes on unchanged after 5 minutes (configurable), and turning Intercept off sends everything held on. Intercept is off whenever a project opens.</li><li>The record shows what was actually sent, marked <strong>edited</strong>, and the Lens shows the original on click.</li><li>WebSocket messages, hosts that are never decrypted and Plonix's own requests (Bench, scans, crawls without a browser) are never held. Agents cannot see or touch the queue.</li></ul>
+<p>To change traffic automatically instead of by hand, use <a href="rules.html">Rules</a>.</p>
+<h2 id="export-and-import">Export and import<a class="anchor" href="#export-and-import" aria-label="Link to this section">#</a></h2>
+<p><strong>HAR ▾</strong> in the toolbar exports all traffic, the filtered view or the rows you pick to a HAR file, and <strong>File › Import HAR…</strong> adds a HAR file's requests to the project. See <a href="projects.html#har-files">HAR files</a>.</p>
+<h2 id="from-the-terminal">From the terminal<a class="anchor" href="#from-the-terminal" aria-label="Link to this section">#</a></h2>
+<pre><code class="language-sh">plonix search host:example.com status:5xx   # newest first
+plonix watch scope:in                       # print new traffic as it arrives
+plonix show 42                              # one request and its response
+plonix intercept on --responses             # hold requests and responses
+plonix intercept forward 3 --edit           # edit in $EDITOR, then send on</code></pre>
+</article>
+<p class="edit">This page is <a href="https://github.com/SergeyMalych/plonix/blob/main/docs/traffic.md">docs/traffic.md</a> in the Plonix repository. Spotted something wrong? <a href="https://github.com/SergeyMalych/plonix/edit/main/docs/traffic.md">Suggest a change</a>.</p>
+</main>
+</div>
+<footer>
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg class="mark-classic" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg><svg class="mark-studio" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#e5401f"/><rect x="7" y="6" width="5" height="20" fill="#1e1c19"/><circle cx="18" cy="13" r="7" fill="#f1b11b"/><path d="M18 6a7 7 0 0 1 0 14z" fill="#1d4fc4"/></svg>Plonix</a>
+    <span>Open-source web security workbench for macOS. Apache-2.0.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/SergeyMalych/plonix">GitHub</a>
+      <a href="./">Docs</a>
+      <a href="https://github.com/SergeyMalych/plonix/releases">Releases</a>
+      <a href="https://github.com/SergeyMalych/plonix/issues">Issues</a>
+      <a href="privacy.html">Privacy</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(() => {
+  const root = document.documentElement, btn = document.getElementById('theme');
+  const sys = matchMedia('(prefers-color-scheme: dark)');
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+  const current = () => root.dataset.theme || (sys.matches ? 'dark' : 'light');
+  const paint = () => { const d = current() === 'dark'; btn.innerHTML = d ? SUN : MOON; btn.setAttribute('aria-label', d ? 'Switch to light mode' : 'Switch to dark mode'); };
+  paint();
+  sys.addEventListener('change', paint);
+  btn.addEventListener('click', () => {
+    const next = current() === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next; paint();
+    try { localStorage.setItem('plonix-theme', next); } catch (e) {}
+  });
+
+  // On a phone the list of docs starts folded, so the page comes first.
+  const menu = document.querySelector('.side-menu');
+  if (menu && matchMedia('(max-width: 900px)').matches) menu.open = false;
+
+  // Studio is the default; Classic is the plainer look. Screenshots and the icon follow.
+  const sbtn = document.getElementById('style');
+  const shots = [...document.querySelectorAll('.doc img')].filter((i) => i.getAttribute('src').startsWith('../assets/studio-'));
+  shots.forEach((i) => { i.dataset.studio = i.getAttribute('src'); });
+  const setStyle = (on) => {
+    if (on) root.dataset.style = 'studio'; else delete root.dataset.style;
+    sbtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    sbtn.querySelector('span').textContent = on ? 'Try classic' : 'I like style';
+    sbtn.title = on ? 'Switch to the Classic look' : 'Back to the Studio look';
+    shots.forEach((i) => { const src = on ? i.dataset.studio : i.dataset.studio.replace('/assets/studio-', '/assets/'); if (i.getAttribute('src') !== src) i.src = src; });
+    document.getElementById('favicon').href = on ? '../assets/studio-mark.svg' : '../assets/plonix-mark.svg';
+  };
+  setStyle(root.dataset.style === 'studio');
+  sbtn.addEventListener('click', () => {
+    const on = root.dataset.style !== 'studio';
+    setStyle(on);
+    try { localStorage.setItem('plonix-style', on ? 'studio' : 'classic'); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>

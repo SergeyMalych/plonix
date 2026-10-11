@@ -9,6 +9,7 @@ The Market is where Plonix gets everything modular, in one catalog:
 | **Filter pack** | Named Traffic filters such as `is:auth` ([format](filters.md)) | `$PLONIX_HOME/filters` |
 | **List pack** | Named payload lists for the Bench ([format](bench.md)) | `$PLONIX_HOME/lists` |
 | **Platform** | Where bug bounty programs come from: a platform's API address, sign-in and data shape ([format](programs.md#platform-packs)) | `$PLONIX_HOME/platforms` |
+| **Tool** | Switches on a capability built into Plonix that ships off, such as [Saved users and the Access check](users.md), [Callbacks](callbacks.md) and [Programs](programs.md). Its screen appears as soon as it is installed | `$PLONIX_HOME/tools` |
 | **Bundle** | A set of other packages, installed and removed together | `$PLONIX_HOME/market/bundles.json` |
 | **Extension** | Code that runs in the Plonix sandbox: today, passive analyzers ([extensions.md](extensions.md)) | `$PLONIX_HOME/extensions` |
 
@@ -22,6 +23,8 @@ plonix market install api-kit         # installs the bundle and everything in it
 plonix market update                  # newer versions of what you installed
 plonix market remove api-kit          # removes the bundle and what it added
 ```
+
+![The Market: skills, extensions and rule packs, each marked Built in or Verified, with Install buttons](../site/assets/studio-market-light.webp)
 
 ## Suggestions for your work
 

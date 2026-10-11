@@ -2,6 +2,8 @@
 
 ## Projects
 
+![The Projects screen with two open projects, each on its own proxy port](../site/assets/studio-projects-light.webp)
+
 A project is a folder. Plonix creates new ones in `~/Plonix/<name>` unless you choose another place (on the Start screen, or `plonix projects new <name> --location <dir>`).
 
 ```text

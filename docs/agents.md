@@ -93,6 +93,8 @@ In the in-app conversation, Claude's proposal shows up as *Suggested an edit to 
 
 ## Ask Claude Code from the app
 
+![The Ask Claude dialog: a question and the request, response, spotted values and technologies it will share, each with a token count](../site/assets/studio-ask-light.webp)
+
 The Plonix window has an **Ask Claude** button on a request (the Lens), a finding, a host (the Map), a scope suggestion and a request you are editing on the Bench (where Claude can also [suggest an edit](#suggested-bench-edits)). It opens a sheet that:
 
 - writes a question suited to that spot, which you can edit;
