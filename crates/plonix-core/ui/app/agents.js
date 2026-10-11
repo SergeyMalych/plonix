@@ -109,8 +109,8 @@ function drawAgentAsk() {
       h(
         'div',
         { class: 'ab' },
-        h('b', { text: `Claude Code is not installed on ${THIS_COMPUTER}.` }),
-        ' Install it from claude.com/claude-code to ask about this project right here. Other agents can still connect: ',
+        h('b', { text: `Claude Code was not found on ${THIS_COMPUTER}.` }),
+        ' Install it from claude.com/claude-code and sign in once in Terminal to ask about this project right here. Other agents can still connect: ',
         h('button', { class: 'link', text: 'see Setup', onclick: () => toggleAgentSetup(true) }),
         '.',
       ),

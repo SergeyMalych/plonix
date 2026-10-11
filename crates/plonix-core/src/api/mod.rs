@@ -86,7 +86,7 @@ pub struct Tokens {
 }
 
 pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: Home) -> Router {
-    let conversations: Arc<Conversations> = Arc::default();
+    let conversations = Arc::new(Conversations::new());
     let watch = crate::watch::Watch::new(engine.clone(), home.clone(), conversations.clone());
     let state = AppState {
         engine,
