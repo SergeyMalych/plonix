@@ -411,9 +411,12 @@ pub fn set_style(home: &Home, style: &str) -> Result<()> {
     set_look(home, &json!({ "style": style }))
 }
 
-/// Style, theme and spacing, shared by the Start screen and every project
-/// window. Each window has a browser storage of its own, so the look is kept
-/// here for all of them to read.
+/// Text sizes, in percent, that ⌘+ and ⌘− step through. 100 is the default.
+pub const TEXT_SIZES: [u32; 7] = [80, 90, 100, 110, 120, 135, 150];
+
+/// Style, theme, spacing and text size, shared by the Start screen and every
+/// project window. Each window has a browser storage of its own, so the look
+/// is kept here for all of them to read.
 pub fn look(home: &Home) -> Value {
     let file = read_global(home);
     let saved = file.sections.get(LOOK);
@@ -425,7 +428,27 @@ pub fn look(home: &Home) -> Value {
         "style": pick("style", &["studio", "classic"]),
         "theme": pick("theme", &["auto", "light", "dark"]),
         "density": pick("density", &["dense", "roomy"]),
+        "text": saved.and_then(|v| v.get("text")).and_then(Value::as_u64).and_then(text_size).unwrap_or(100),
     })
+}
+
+/// A text size from [`TEXT_SIZES`], or None.
+fn text_size(v: u64) -> Option<u32> {
+    TEXT_SIZES.iter().copied().find(|s| u64::from(*s) == v)
+}
+
+/// The saved text size in percent; the desktop app zooms every window to it.
+pub fn text(home: &Home) -> u32 {
+    look(home)["text"].as_u64().and_then(text_size).unwrap_or(100)
+}
+
+/// The next text size up (`step` 1), down (-1), or back to 100% (0).
+pub fn step_text(current: u32, step: i32) -> u32 {
+    let i = TEXT_SIZES.iter().position(|s| *s == current).unwrap_or(2) as i32;
+    match step {
+        0 => 100,
+        _ => TEXT_SIZES[(i + step.signum()).clamp(0, TEXT_SIZES.len() as i32 - 1) as usize],
+    }
 }
 
 /// Saves the parts of the look that `changes` names and keeps the rest.
@@ -437,6 +460,12 @@ pub fn set_look(home: &Home, changes: &Value) -> Result<()> {
         match v.as_str().filter(|v| values.contains(v)) {
             Some(v) => next[key] = json!(v),
             None => anyhow::bail!("{key} must be one of {}", values.join(", ")),
+        }
+    }
+    if let Some(v) = changes.get("text").filter(|v| !v.is_null()) {
+        match v.as_u64().and_then(text_size) {
+            Some(v) => next["text"] = json!(v),
+            None => anyhow::bail!("text must be one of {}", TEXT_SIZES.map(|s| s.to_string()).join(", ")),
         }
     }
     home.ensure()?;
@@ -744,9 +773,25 @@ mod tests {
         assert!(set_style(&home, "neon").is_err());
         assert_eq!(style(&home), "classic");
         set_look(&home, &json!({ "theme": "dark" })).unwrap();
-        assert_eq!(look(&home), json!({ "style": "classic", "theme": "dark", "density": "dense" }), "the theme keeps the style");
+        assert_eq!(look(&home), json!({ "style": "classic", "theme": "dark", "density": "dense", "text": 100 }), "the theme keeps the style");
         assert!(set_look(&home, &json!({ "density": "huge" })).is_err());
+        set_look(&home, &json!({ "text": 135 })).unwrap();
+        assert_eq!(text(&home), 135);
+        assert_eq!(look(&home)["theme"], "dark", "the text size keeps the theme");
+        assert!(set_look(&home, &json!({ "text": 133 })).is_err());
+        assert!(set_look(&home, &json!({ "text": "big" })).is_err());
+        assert_eq!(text(&home), 135);
         assert!(global_values(&home).contains_key(INTERFACE), "the style keeps the other sections");
         assert!(!describe(&home, None).to_string().contains("\"look\""), "the style is not a section of its own");
+    }
+
+    #[test]
+    fn text_steps_stop_at_the_ends() {
+        assert_eq!(step_text(100, 1), 110);
+        assert_eq!(step_text(100, -1), 90);
+        assert_eq!(step_text(150, 1), 150);
+        assert_eq!(step_text(80, -1), 80);
+        assert_eq!(step_text(135, 0), 100);
+        assert_eq!(step_text(42, 1), 110, "an unknown size steps from 100%");
     }
 }

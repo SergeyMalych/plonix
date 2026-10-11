@@ -19,6 +19,7 @@ mod cli_tool;
 mod crashes;
 #[cfg(target_os = "macos")]
 mod local_network;
+mod text_size;
 mod updates;
 
 use std::collections::HashMap;
@@ -120,7 +121,9 @@ fn main() {
             std::thread::Builder::new().name("plonix-start".into()).spawn(move || start(handle))?;
             if let Ok(home) = Home::resolve(None) {
                 let handle = app.handle().clone();
+                let (text_handle, text_home) = (app.handle().clone(), home.clone());
                 std::thread::Builder::new().name("plonix-icon".into()).spawn(move || app_icon::follow(handle, home))?;
+                std::thread::Builder::new().name("plonix-text".into()).spawn(move || text_size::follow(text_handle, text_home))?;
             }
             // A report from last time is asked about first, then updates.
             let handle = app.handle().clone();
@@ -158,12 +161,15 @@ fn launcher_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .title("Plonix")
         .additional_browser_args(&browser_args())
         .inner_size(880.0, 620.0)
-        .min_inner_size(640.0, 460.0)
+        .min_inner_size(text_size::LAUNCHER_MIN.0, text_size::LAUNCHER_MIN.1)
         .initialization_script(INIT_SCRIPT)
         .on_navigation(move |url| launcher_navigation(&handle, url))
-        .on_page_load(|_, payload| {
-            if payload.event() == PageLoadEvent::Finished && !is_hub_page(payload.url()) {
-                START_PAGE_READY.store(true, Ordering::SeqCst);
+        .on_page_load(|w, payload| {
+            if payload.event() == PageLoadEvent::Finished {
+                text_size::fit(&w);
+                if !is_hub_page(payload.url()) {
+                    START_PAGE_READY.store(true, Ordering::SeqCst);
+                }
             }
         })
         .build()?;
@@ -354,8 +360,9 @@ fn open_project_url(app: &AppHandle, link: &str) {
         .title(&title)
         .additional_browser_args(&browser_args())
         .inner_size(1320.0, 840.0)
-        .min_inner_size(900.0, 560.0)
+        .min_inner_size(text_size::PROJECT_MIN.0, text_size::PROJECT_MIN.1)
         .initialization_script(INIT_SCRIPT)
+        .on_page_load(fit_text)
         .on_navigation(move |u| {
             if is_loopback(u) && origin(u) == own_origin {
                 return true;
@@ -405,8 +412,9 @@ fn open_lens_window(app: &AppHandle, url: Url) {
         .title(format!("Request #{id} — Plonix"))
         .additional_browser_args(&browser_args())
         .inner_size(1100.0, 760.0)
-        .min_inner_size(480.0, 360.0)
+        .min_inner_size(text_size::LENS_MIN.0, text_size::LENS_MIN.1)
         .initialization_script(INIT_SCRIPT)
+        .on_page_load(fit_text)
         .on_document_title_changed(|w, title| {
             let _ = w.set_title(&title);
         })
@@ -422,6 +430,12 @@ fn open_lens_window(app: &AppHandle, url: Url) {
         .build();
     if let Err(e) = built {
         tracing::error!("could not open the request window: {e}");
+    }
+}
+
+fn fit_text(w: WebviewWindow, payload: tauri::webview::PageLoadPayload<'_>) {
+    if payload.event() == PageLoadEvent::Finished {
+        text_size::fit(&w);
     }
 }
 
@@ -468,6 +482,9 @@ fn on_menu(app: &AppHandle, id: &str) {
         return;
     }
     let win = focused(app);
+    if text_size::on_menu_event(app, id, win.as_ref()) {
+        return;
+    }
     let in_project = win.as_ref().is_some_and(|w| w.label() != LAUNCHER);
     match id {
         "new-project" => {
@@ -533,7 +550,8 @@ fn open_in_browser(w: &WebviewWindow) {
 
 /// The platform's standard menu, plus File › New Project…, Projects and
 /// Open Target…, Import HAR… and Export Traffic as HAR…, Settings…, Install
-/// Command Line Tool… (macOS), the update items, and the Plonix screens in View.
+/// Command Line Tool… (macOS), the update items, and the Plonix screens and
+/// text sizes in View.
 fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let menu = Menu::default(app)?;
     let new_project = MenuItem::with_id(app, "new-project", "New Project…", true, Some("CmdOrCtrl+N"))?;
@@ -574,14 +592,22 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     for (id, label, accel, _) in VIEW_ITEMS {
         items.push(MenuItem::with_id(app, id, label, true, Some(accel))?);
     }
+    let bigger = MenuItem::with_id(app, text_size::BIGGER_ID, "Bigger Text", true, Some("CmdOrCtrl+="))?;
+    let smaller = MenuItem::with_id(app, text_size::SMALLER_ID, "Smaller Text", true, Some("CmdOrCtrl+-"))?;
+    let actual = MenuItem::with_id(app, text_size::ACTUAL_ID, "Actual Text Size", true, Some("CmdOrCtrl+0"))?;
     let toggle = MenuItem::with_id(app, "toggle-sidebar", "Toggle Sidebar", true, Some(TOGGLE_SIDEBAR_KEY))?;
     let in_browser = MenuItem::with_id(app, "open-in-browser", "Open in Browser", true, Some("CmdOrCtrl+Shift+B"))?;
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
+    let sep3 = PredefinedMenuItem::separator(app)?;
     let mut refs: Vec<&dyn tauri::menu::IsMenuItem<Wry>> = items.iter().map(|i| i as &dyn tauri::menu::IsMenuItem<Wry>).collect();
     refs.push(&sep);
     refs.push(&toggle);
     refs.push(&in_browser);
+    refs.push(&sep3);
+    refs.push(&bigger);
+    refs.push(&smaller);
+    refs.push(&actual);
     if !view.items()?.is_empty() {
         refs.push(&sep2);
     }

@@ -4,6 +4,9 @@ What changed in each Plonix release. The newest release is at the top.
 
 ## [Unreleased]
 
+### Added
+- **Text size.** ⌘+ and ⌘− (Ctrl+ and Ctrl− on Windows) make text bigger or smaller, from 80% to 150%, and ⌘0 puts it back to 100%. The same size applies to every window, the Start screen included, and stays for next time. It is also in View and in Settings › Appearance › Text size.
+
 ### Fixed
 - **Mac: local network targets.** On macOS 15 and later Plonix now asks for Local Network access when it starts, so routers, LAN servers and devices load through Plonix. If access was turned off, connections to them say where to allow it: System Settings › Privacy & Security › Local Network.
 - Closing the demo strip no longer hides the walkthrough for good. The strip, with **Take the tour**, comes back the next time the demo opens.

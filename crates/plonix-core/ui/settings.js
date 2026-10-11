@@ -118,6 +118,11 @@
         group = f.group || '';
         if (group) body.append(h('div', { class: 'sgroup', text: group }));
       }
+      if (f.type === 'custom') {
+        // Draws itself and applies right away, outside Save and Revert.
+        body.append(h('div', { class: 'frow' }, h('span', { class: 'flabel', text: f.label }), h('div', { class: 'finput' }, f.render()), f.help ? h('div', { class: 'fhelp', text: f.help }) : null));
+        continue;
+      }
       const c = control(f, section.values[f.key], changed);
       controls[f.key] = c;
       body.append(c.el);
