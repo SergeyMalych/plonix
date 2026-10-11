@@ -311,7 +311,12 @@ impl Upstream {
             }
         };
         let offered = label.is_some();
-        let tls = TlsConnector::from(Arc::new(config)).connect(name, tcp).await.map_err(|e| tls_error(host, port, e, offered))?;
+        // A handshake that gets no reply would otherwise wait out the whole
+        // request timeout and be reported as a slow server.
+        let tls = tokio::time::timeout(self.connect_timeout, TlsConnector::from(Arc::new(config)).connect(name, tcp))
+            .await
+            .map_err(|_| tls_silent(host, port, self.connect_timeout))?
+            .map_err(|e| tls_error(host, port, e, offered))?;
         let sans = tls.get_ref().1.peer_certificates().and_then(|c| c.first()).map(cert_dns_names).unwrap_or_default();
         let asked = asked.load(Ordering::SeqCst);
         Ok((tls, Handshake { host: host.to_string(), sans, presented: label.filter(|_| asked), offered, asked }))
@@ -327,10 +332,7 @@ impl Upstream {
     pub async fn connect(&self, host: &str, port: u16) -> Result<TcpStream> {
         let fut = async {
             match self.proxy_for(host) {
-                None => TcpStream::connect((host, port))
-                    .await
-                    .map_err(local_network_hint)
-                    .with_context(|| format!("connecting to {host}:{port}")),
+                None => connect_any(host, port, self.connect_timeout).await.with_context(|| format!("connecting to {host}:{port}")),
                 Some(p) => {
                     let mut tcp = TcpStream::connect((p.host.as_str(), p.port))
                         .await
@@ -358,6 +360,7 @@ impl Upstream {
     /// Like [`Upstream::send`], keeping only the first `limit` bytes of the
     /// response body; the rest is read and counted, not kept.
     pub async fn send_capped(&self, req: OutboundRequest, limit: usize) -> Result<InboundResponse> {
+        let req_host = req.host.clone();
         let fut = async {
             let mut r = self.open_inner(req, None).await?;
             let (mut body, mut seen) = (Vec::new(), 0u64);
@@ -370,9 +373,8 @@ impl Upstream {
             let truncated_from = (seen > body.len() as u64).then_some(seen);
             Ok(InboundResponse { status: r.status, headers: r.headers, body: body.into(), tls_sans: r.tls_sans, version: r.version, client_cert: r.client_cert, truncated_from })
         };
-        tokio::time::timeout(self.total_timeout, fut)
-            .await
-            .map_err(|_| anyhow!("upstream timed out after {:?}", self.total_timeout))?
+        let host = req_host.clone();
+        tokio::time::timeout(self.total_timeout, fut).await.map_err(|_| no_answer(&host, self.total_timeout))?
     }
 
     /// Sends a request and returns once the response head arrives; the
@@ -381,7 +383,8 @@ impl Upstream {
     /// and the request's own `Content-Length` (if any) is kept; the timeout
     /// then counts from the last part of the body sent, so long uploads are not cut either.
     pub async fn open(&self, req: OutboundRequest, body: Option<StreamBody>) -> Result<StreamingResponse> {
-        let timed_out = || anyhow!("upstream timed out after {:?}", self.total_timeout);
+        let host = req.host.clone();
+        let timed_out = || no_answer(&host, self.total_timeout);
         let Some(body) = body else {
             return tokio::time::timeout(self.total_timeout, self.open_inner(req, None)).await.map_err(|_| timed_out())?;
         };
@@ -408,6 +411,7 @@ impl Upstream {
     pub async fn upgrade(&self, mut req: OutboundRequest, protocol: &str) -> Result<UpgradeResponse> {
         req.extra_headers.push(("Connection".into(), "Upgrade".into()));
         req.extra_headers.push(("Upgrade".into(), protocol.into()));
+        let host = req.host.clone();
         let fut = async {
             let tcp = self.connect(&req.host, req.port).await?;
             let (resp, tls_sans, client_cert) = if req.scheme == "https" {
@@ -424,9 +428,7 @@ impl Upstream {
             };
             Ok(UpgradeResponse { status, headers, tls_sans, client_cert, outcome })
         };
-        tokio::time::timeout(self.total_timeout, fut)
-            .await
-            .map_err(|_| anyhow!("upstream timed out after {:?}", self.total_timeout))?
+        tokio::time::timeout(self.total_timeout, fut).await.map_err(|_| no_answer(&host, self.total_timeout))?
     }
 
     async fn open_inner(&self, mut req: OutboundRequest, body: Option<StreamBody>) -> Result<StreamingResponse> {
@@ -494,6 +496,64 @@ impl hyper::body::Body for Progress {
     fn size_hint(&self) -> hyper::body::SizeHint {
         self.inner.size_hint()
     }
+}
+
+/// Opens TCP to one of `host`'s addresses. Addresses alternate between
+/// IPv6 and IPv4, and each but the last gets a share of `timeout`, so an
+/// address that never answers (a broken IPv6 route) does not use up the
+/// time the next one needs. The caller bounds the whole attempt.
+async fn connect_any(host: &str, port: u16, timeout: Duration) -> Result<TcpStream> {
+    let addrs = interleave(tokio::net::lookup_host((host, port)).await.context("looking up the address")?.collect());
+    if addrs.is_empty() {
+        bail!("{host} has no addresses");
+    }
+    connect_addrs(&addrs, timeout).await
+}
+
+async fn connect_addrs(addrs: &[std::net::SocketAddr], timeout: Duration) -> Result<TcpStream> {
+    let share = (timeout / addrs.len().clamp(1, 3) as u32).max(Duration::from_secs(1));
+    let mut last = None;
+    for (i, addr) in addrs.iter().enumerate() {
+        let attempt = TcpStream::connect(addr);
+        let result = if i + 1 == addrs.len() {
+            attempt.await
+        } else {
+            match tokio::time::timeout(share, attempt).await {
+                Ok(r) => r,
+                Err(_) => Err(std::io::Error::new(std::io::ErrorKind::TimedOut, format!("{addr} did not answer"))),
+            }
+        };
+        match result {
+            Ok(tcp) => return Ok(tcp),
+            Err(e) => last = Some(e),
+        }
+    }
+    Err(local_network_hint(last.unwrap_or_else(|| std::io::ErrorKind::NotFound.into())))
+}
+
+/// Orders addresses IPv6, IPv4, IPv6, … starting with the family listed first.
+fn interleave(addrs: Vec<std::net::SocketAddr>) -> Vec<std::net::SocketAddr> {
+    let first_v6 = addrs.first().is_some_and(|a| a.is_ipv6());
+    let (mut a, mut b): (std::collections::VecDeque<_>, std::collections::VecDeque<_>) = addrs.into_iter().partition(|x| x.is_ipv6() == first_v6);
+    let mut out = Vec::with_capacity(a.len() + b.len());
+    while !a.is_empty() || !b.is_empty() {
+        out.extend(a.pop_front());
+        out.extend(b.pop_front());
+    }
+    out
+}
+
+/// A TLS handshake that got no reply at all: the connection opened, so
+/// something answers on the port, but it never speaks TLS back.
+fn tls_silent(host: &str, port: u16, after: Duration) -> anyhow::Error {
+    anyhow!(
+        "TLS handshake with {host}:{port} timed out after {after:?} with no reply (the connection opened but the server never answered; a VPN, firewall or the site's bot protection may be holding it. Check that the site opens in your usual browser)"
+    )
+}
+
+/// A server that took the request but sent no response within the request timeout.
+fn no_answer(host: &str, after: Duration) -> anyhow::Error {
+    anyhow!("{host} sent no response: timed out after {after:?} (raise Settings › Proxy › Request timeout if the server is just slow)")
 }
 
 /// Describes a failed TLS handshake. A server that drops the connection as
@@ -878,6 +938,25 @@ mod tests {
         let (_tx, rx) = tokio::sync::mpsc::channel(1);
         let err = up.open(get(port, "POST"), Some(Chan(rx).boxed())).await.unwrap_err();
         assert!(err.to_string().contains("timed out"), "{err}");
+    }
+
+    #[test]
+    fn addresses_alternate_families() {
+        let a = |s: &str| s.parse::<std::net::SocketAddr>().unwrap();
+        let got = interleave(vec![a("[::1]:1"), a("[::2]:1"), a("[::3]:1"), a("1.1.1.1:1"), a("2.2.2.2:1")]);
+        assert_eq!(got, vec![a("[::1]:1"), a("1.1.1.1:1"), a("[::2]:1"), a("2.2.2.2:1"), a("[::3]:1")]);
+        assert_eq!(interleave(vec![a("1.1.1.1:1"), a("[::1]:1")]), vec![a("1.1.1.1:1"), a("[::1]:1")]);
+    }
+
+    #[tokio::test]
+    async fn an_address_that_never_answers_falls_back_to_the_next() {
+        let port = echo_len_server(b"").await;
+        // 10.255.255.1 is not routed, so connecting to it hangs (or fails at once).
+        let addrs = [format!("10.255.255.1:{port}").parse().unwrap(), format!("127.0.0.1:{port}").parse().unwrap()];
+        let started = std::time::Instant::now();
+        let tcp = connect_addrs(&addrs, Duration::from_secs(2)).await.unwrap();
+        assert_eq!(tcp.peer_addr().unwrap(), addrs[1]);
+        assert!(started.elapsed() < Duration::from_secs(5), "took {:?}", started.elapsed());
     }
 
     #[test]
