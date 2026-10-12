@@ -166,6 +166,30 @@ function cells(row) {
   return out;
 }
 
+/**
+ * Sizes table columns from their text. A column whose cells are all short
+ * keeps to one line ("nw"); the rest share the width by how much they hold,
+ * so a column of terse labels never takes half the table from a column of
+ * sentences, and no column is squeezed until its words break apart.
+ */
+const text = (html) => html.replace(/<[^>]*>/g, '').replace(/&[a-z]+;|&#\d+;/g, 'x').trim();
+
+function columns(rows) {
+  const n = rows[0].length;
+  const cols = [];
+  for (let c = 0; c < n; c++) {
+    const lens = rows.map((r) => text(r[c] ?? '').length);
+    const longest = Math.max(...lens);
+    const body = lens.slice(1);
+    const avg = body.length ? body.reduce((a, b) => a + b, 0) / body.length : longest;
+    const short = longest <= 24;
+    cols.push({ short, weight: short ? Math.max(longest, 6) : Math.max(avg, 16) });
+  }
+  const total = cols.reduce((a, c) => a + c.weight, 0);
+  for (const c of cols) c.width = Math.round((c.weight / total) * 1000) / 10;
+  return cols;
+}
+
 function startsBlock(line, next) {
   return FENCE.test(line) || HEADING.test(line) || RULE.test(line) || /^ {0,3}>/.test(line) || ITEM.test(line) || (line.includes('|') && next !== undefined && TABLE_SEP.test(next) && next.includes('-'));
 }
@@ -230,9 +254,14 @@ function blocks(lines, ctx) {
       i += 2;
       const rows = [];
       while (i < lines.length && !blank(lines[i]) && lines[i].includes('|')) rows.push(cells(lines[i++]));
+      const body = rows.map((r) => head.map((_, n) => inline(r[n] ?? '', ctx.link)));
+      const cols = columns([head.map((c) => inline(c, ctx.link)), ...body]);
+      const label = head.map((c) => inline(c, ctx.link).replace(/<[^>]*>/g, '').trim());
+      const cell = (tag, n, c) => `<${tag}${cols[n].short ? ' class="nw"' : ''}${tag === 'td' ? ` data-label="${label[n]}"` : ''}${style(n)}>${c}</${tag}>`;
       html.push(
-        `<div class="table"><table><thead><tr>${head.map((c, n) => `<th${style(n)}>${inline(c, ctx.link)}</th>`).join('')}</tr></thead>` +
-          `<tbody>${rows.map((r) => `<tr>${head.map((_, n) => `<td${style(n)}>${inline(r[n] ?? '', ctx.link)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`,
+        `<div class="table"><table><colgroup>${cols.map((c) => `<col style="width:${c.width}%">`).join('')}</colgroup>` +
+          `<thead><tr>${head.map((c, n) => cell('th', n, inline(c, ctx.link))).join('')}</tr></thead>` +
+          `<tbody>${body.map((r) => `<tr>${r.map((c, n) => cell('td', n, c)).join('')}</tr>`).join('')}</tbody></table></div>`,
       );
       continue;
     }
@@ -520,7 +549,7 @@ a { color: inherit; }
 /* layout: a sidebar of docs beside the page */
 .docs { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 56px; padding-top: 44px; }
 .side-menu > summary { display: none; }
-.side nav { position: sticky; top: 92px; max-height: calc(100vh - 110px); overflow: auto; padding-bottom: 24px; }
+.side nav { padding-bottom: 24px; }
 .side-list, .toc { list-style: none; margin: 0; padding: 0; }
 .side-list > .side-head { margin: 18px 0 4px; padding: 0 12px; font-size: .74rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
 .side-list > li > a { display: block; padding: 6px 12px; border-radius: 9px; text-decoration: none; color: var(--muted); font-size: .95rem; }
@@ -534,7 +563,7 @@ a { color: inherit; }
   .side-menu { border: 1px solid var(--line); border-radius: 12px; background: var(--ink-2); }
   .side-menu > summary { display: block; cursor: pointer; padding: 10px 14px; font: 600 .95rem var(--body); }
   .side-menu:not([open]) > summary { color: var(--muted); }
-  .side nav { position: static; max-height: none; padding: 0 8px 10px; }
+  .side nav { padding: 0 8px 10px; }
 }
 
 /* the page */
@@ -571,7 +600,21 @@ a { color: inherit; }
 :root[data-theme="dark"] .doc img.pic-dark { display: block; }
 .doc .table { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--ink-2); }
 .doc table { border-collapse: collapse; width: 100%; font-size: .93rem; }
-.doc th, .doc td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.doc th, .doc td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: normal; }
+.doc td code, .doc th code { overflow-wrap: normal; }
+@media (min-width: 641px) { .doc th.nw, .doc td.nw { white-space: nowrap; } }
+@media (max-width: 640px) {
+  .doc table, .doc tbody, .doc tr, .doc td { display: block; width: auto !important; }
+  .doc colgroup, .doc thead { display: none; }
+  .doc tr { padding: 10px 16px; border-bottom: 1px solid var(--line); }
+  .doc tr:last-child { border-bottom: 0; }
+  .doc td { padding: 3px 0; border: 0; overflow-wrap: anywhere; text-align: left !important; }
+  .doc td::before { content: attr(data-label); display: block; font-size: .78rem; font-weight: 600; color: var(--faint); }
+  .doc td:first-child { font-weight: 600; }
+  .doc td:first-child::before { display: none; }
+  .doc td:empty { display: none; }
+  .doc td code { overflow-wrap: anywhere; }
+}
 .doc th { font-weight: 600; background: var(--ink-3); }
 .doc tr:last-child td { border-bottom: 0; }
 .doc .edit { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--line); font-size: .9rem; color: var(--faint); }
