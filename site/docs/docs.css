@@ -62,7 +62,7 @@ a { color: inherit; }
 /* layout: a sidebar of docs beside the page */
 .docs { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 56px; padding-top: 44px; }
 .side-menu > summary { display: none; }
-.side nav { position: sticky; top: 92px; max-height: calc(100vh - 110px); overflow: auto; padding-bottom: 24px; }
+.side nav { padding-bottom: 24px; }
 .side-list, .toc { list-style: none; margin: 0; padding: 0; }
 .side-list > .side-head { margin: 18px 0 4px; padding: 0 12px; font-size: .74rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
 .side-list > li > a { display: block; padding: 6px 12px; border-radius: 9px; text-decoration: none; color: var(--muted); font-size: .95rem; }
@@ -76,7 +76,7 @@ a { color: inherit; }
   .side-menu { border: 1px solid var(--line); border-radius: 12px; background: var(--ink-2); }
   .side-menu > summary { display: block; cursor: pointer; padding: 10px 14px; font: 600 .95rem var(--body); }
   .side-menu:not([open]) > summary { color: var(--muted); }
-  .side nav { position: static; max-height: none; padding: 0 8px 10px; }
+  .side nav { padding: 0 8px 10px; }
 }
 
 /* the page */
