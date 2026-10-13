@@ -12,10 +12,22 @@ The release after 0.1.5. The version jumps to 0.4.1; nothing is skipped in betwe
 
 ### Changed
 - **Users, Access check and Callbacks are on from the start.** Their screens are in the sidebar on a new install and after updating, with no trip to the Market. Each is still a Market tool: remove it there and it stays off. Callbacks still asks you to install its helper once before it can listen; nothing is downloaded on its own.
-- **Pretty | Raw for requests too.** One switch lays out requests and responses alike: the Lens shows it on both sides (JSON indented, forms one field per line), and the Bench response, run results and Compare follow it. The Bench request has its own Pretty | Raw that lays out its JSON or form body in the editor.
+- **Pretty | Raw for requests too.** One switch lays out requests and responses alike: the Lens shows it on both sides (JSON indented, forms one field per line), and the Bench response, run results and Compare follow it. The Bench request has its own Pretty | Raw that lays out a JSON body in the editor.
 - **Resizable sidebar.** Drag its right edge to set its width (double-click resets). Dragged narrower than its names, it folds to icons; drag it back out to see them again.
 - **Spotted and decoded values** keep their header and buttons (Copy decoded, Copy value, Find in traffic) in view while only the value scrolls, with a handle underneath to drag its height. The same goes for value cards in the Bench Lens.
 - **Bench History and Compare** each have a handle underneath to drag their height.
+
+### Fixed
+- **Pretty on the Bench** only re-spaces JSON, so numbers such as `12345678901234567890` or `1.0` stay exactly as written. Form bodies no longer get the switch, since it put line breaks into the values sent. The Lens and Compare keep numbers exactly as captured in Pretty too.
+- **Agents** limited to in-scope traffic no longer see other hosts in the Traffic filter counts.
+- **Saved users** ignore a Set-Cookie for a domain other than the site that sent it, and accept hosts with `_` in scoped headers and cookie domains. Keeping a session found in traffic no longer fails on a long name or many tokens, and a header row with a path but no host waits for the host instead of showing an error.
+- The Lens no longer reads all traffic again to find sessions each time it opens a request.
+- **Scans**: a `%` before an accented character in a query no longer stops a scan, and check names are no longer squeezed by the "needs" column.
+- **Bench**: sending to `https://user:pw@host:8443/` uses port 8443.
+- Saving extension state or settings at the same moment no longer loses one of the changes.
+- Saved panel heights (spotted values, Bench History and Compare) shrink to fit a smaller window.
+- In small windows, finding titles and your note get room, and the tour's progress dots stay on one line. The walkthrough's report preview is styled.
+- Links in text use the accent colour, the Callbacks install command is left-aligned, and the MCP search help shows filter values that work as typed.
 
 ## [0.1.5] - 2026-10-11
 
