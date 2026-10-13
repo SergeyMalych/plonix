@@ -176,7 +176,7 @@ The Windows installer is signed for free by SignPath Foundation, which signs ope
 3. Create a CI user in SignPath with submitter rights on the project and copy its API token.
 4. In GitHub, **Settings › Secrets and variables › Actions**: add the secret `SIGNPATH_API_TOKEN`, and the variable `SIGNPATH_ORGANIZATION_ID`. Set `SIGNPATH_PROJECT_SLUG` or `SIGNPATH_SIGNING_POLICY_SLUG` only if you named them differently.
 
-From then on every release sends the installer to SignPath, waits for the request to be approved (up to 10 minutes), checks the Authenticode signature, and only then signs the update package, so updates carry the signed installer. A new certificate can still meet a SmartScreen warning for a while, until enough people have downloaded the signed installer.
+From then on every release sends the installer to SignPath, waits up to an hour for the request to be approved, checks the Authenticode signature, and only then signs the update package, so updates carry the signed installer. A new certificate can still meet a SmartScreen warning for a while, until enough people have downloaded the signed installer.
 
 ## Signing by hand
 

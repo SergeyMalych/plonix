@@ -111,7 +111,7 @@ git push origin v0.2.0</code></pre></li><li><p>The <strong>Release</strong> work
     &lt;/pe-file&gt;
   &lt;/zip-file&gt;
 &lt;/artifact-configuration&gt;</code></pre></li><li><p>Create a CI user in SignPath with submitter rights on the project and copy its API token.</p></li><li><p>In GitHub, <strong>Settings › Secrets and variables › Actions</strong>: add the secret <code>SIGNPATH_API_TOKEN</code>, and the variable <code>SIGNPATH_ORGANIZATION_ID</code>. Set <code>SIGNPATH_PROJECT_SLUG</code> or <code>SIGNPATH_SIGNING_POLICY_SLUG</code> only if you named them differently.</p></li></ol>
-<p>From then on every release sends the installer to SignPath, waits for the request to be approved (up to 10 minutes), checks the Authenticode signature, and only then signs the update package, so updates carry the signed installer. A new certificate can still meet a SmartScreen warning for a while, until enough people have downloaded the signed installer.</p>
+<p>From then on every release sends the installer to SignPath, waits up to an hour for the request to be approved, checks the Authenticode signature, and only then signs the update package, so updates carry the signed installer. A new certificate can still meet a SmartScreen warning for a while, until enough people have downloaded the signed installer.</p>
 <h2 id="signing-by-hand">Signing by hand<a class="anchor" href="#signing-by-hand" aria-label="Link to this section">#</a></h2>
 <p>To sign a build on your own Mac, for example to test the entitlements:</p>
 <pre><code class="language-sh">cd crates/plonix-app
