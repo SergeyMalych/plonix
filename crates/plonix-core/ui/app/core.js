@@ -1765,13 +1765,46 @@ function bodyOf(text, b64, pretty, contentType) {
     const n = b64len(b64);
     return n ? { note: `[binary body, ${fmtSize(n)}]` } : { text: '' };
   }
-  if (pretty && /json/.test(contentType || '')) {
-    try {
-      return { text: JSON.stringify(JSON.parse(text), null, 2) };
-    } catch (_) {}
+  if (pretty) {
+    const p = prettyBody(text, contentType);
+    if (p != null) return { text: p };
   }
   return { text };
 }
+
+/** A body laid out for reading: JSON indented, a form one field per line.
+ *  Null when it is neither, so the view stays as captured. */
+function prettyBody(text, contentType) {
+  if (!text) return null;
+  const ct = contentType || '';
+  const t = text.trim();
+  if (/json/.test(ct) || /^[[{]/.test(t)) {
+    try {
+      return JSON.stringify(JSON.parse(t), null, 2);
+    } catch (_) {}
+  }
+  if (/x-www-form-urlencoded/.test(ct) && t.includes('&') && !/\s/.test(t)) return t.split('&').join('\n&');
+  return null;
+}
+
+/** The view everywhere a request or response is shown: laid out (true) or as captured. */
+const PRETTY = { on: store('plonix.pretty') !== false };
+function setPretty(on) {
+  PRETTY.on = on;
+  store('plonix.pretty', on ? null : false);
+}
+
+/** The Pretty | Raw switch for a request or response label; `redraw` runs after a change. */
+function prettySeg(redraw) {
+  return h(
+    'span',
+    { class: 'seg prettyseg', title: 'Pretty lays out JSON and form bodies for reading; Raw shows them as captured. Applies to requests and responses everywhere.' },
+    h('button', { class: PRETTY.on ? 'on' : '', text: 'Pretty', onclick: () => (setPretty(true), redraw()) }),
+    h('button', { class: PRETTY.on ? '' : 'on', text: 'Raw', onclick: () => (setPretty(false), redraw()) }),
+  );
+}
+const reqPrettyable = (ex) => ex.req_text != null && prettyBody(ex.req_text, header(ex.req_headers, 'content-type')) != null;
+const respPrettyable = (ex) => ex.resp_text != null && prettyBody(ex.resp_text, header(ex.resp_headers, 'content-type')) != null;
 
 /** Says how much of a body was kept, when it was longer than the recording limit. */
 function cutTag(truncated, size, b64) {
@@ -1784,9 +1817,9 @@ function cutTag(truncated, size, b64) {
   });
 }
 
-function requestText(ex) {
+function requestText(ex, pretty = false) {
   const lines = [`${ex.method} ${target(ex)} ${ex.http_version || 'HTTP/1.1'}`, ...ex.req_headers.map(([k, v]) => `${k}: ${v}`)];
-  const b = bodyOf(ex.req_text, ex.req_body, false);
+  const b = bodyOf(ex.req_text, ex.req_body, pretty, header(ex.req_headers, 'content-type'));
   return { lines, body: b };
 }
 

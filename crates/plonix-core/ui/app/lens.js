@@ -847,11 +847,12 @@ function widthGrip(wrap, key, cssVar, { min = 160, max = 0.6 } = {}) {
   });
 }
 
-/** A handle that drags `box`'s height: moving it up makes `box` taller.
+/** A handle that drags `box`'s height: moving it up makes `box` taller
+ *  (with `down`, a handle under the box: moving it down does).
  *  `get`/`set` read and apply the height so the caller decides what it
  *  means (a fixed height or a cap); the last size is remembered under `key`
  *  and a double-click forgets it so the box fits its content again. */
-function heightGrip(key, { get, set, fit, min = 80, max }) {
+function heightGrip(key, { get, set, fit, min = 80, max, down = false }) {
   return h('div', {
     class: 'hgrip',
     title: 'Drag to resize · double-click to fit',
@@ -865,7 +866,8 @@ function heightGrip(key, { get, set, fit, min = 80, max }) {
       const startH = get();
       document.body.classList.add('rowresize');
       const move = (ev) => {
-        const px = Math.round(Math.max(min, Math.min(max(), startH - (ev.clientY - startY))));
+        const dy = ev.clientY - startY;
+        const px = Math.round(Math.max(min, Math.min(max(), startH + (down ? dy : -dy))));
         set(px);
         store(key, px);
       };

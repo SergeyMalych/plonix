@@ -195,7 +195,7 @@ function renderBench(main) {
     value: tab.raw,
     spellcheck: 'false',
     onfocus: () => (R.cbField = 'editor'),
-    oninput: () => ((tab.raw = editor.value), saveBench(), refreshRun(), proposalEdited(tab, main), editor._onedit && editor._onedit()),
+    oninput: () => ((tab.raw = editor.value), saveBench(), refreshRun(), proposalEdited(tab, main), editor._onedit && editor._onedit(), editor._onbody && editor._onbody()),
     onkeydown: (e) => {
       if (e.key === 'Tab') {
         e.preventDefault();
@@ -307,7 +307,7 @@ function renderBench(main) {
   const reqCol = h(
     'div',
     { class: 'rcol' },
-    h('div', { class: 'lbl' }, 'Request', binaryNote),
+    h('div', { class: 'lbl' }, 'Request', binaryNote, runMode || tab.bodyB64 ? null : bodyLayoutSeg(tab, editor)),
     editWrap,
     lensStrip ? lensGrip(lensStrip) : null,
     lensStrip,
@@ -359,6 +359,7 @@ function renderBench(main) {
     renderRunPanel(tab, main, runCol);
     drawRunResults(tab, main);
   } else {
+    R.redrawResp = () => drawBenchResponse(tab, respCol);
     drawBenchResponse(tab, respCol);
     drawCompare(tab);
     drawProposal(tab, main);
@@ -592,6 +593,48 @@ function lensGrip(strip) {
     max: () => lensRoom(strip),
   });
 }
+/** Pretty | Raw for the request being edited. The editor holds exactly what
+ *  is sent, so this lays the body out (or packs it back) in the editor; the
+ *  switch shows only while the body is JSON or a form. */
+function bodyLayoutSeg(tab, editor) {
+  const seg = h('span', { class: 'seg prettyseg', hidden: true, title: 'Lay the JSON or form body out for reading (Pretty) or pack it onto one line (Raw). The body is sent as you see it.' });
+  const split = () => {
+    const text = editor.value.replace(/\r\n/g, '\n');
+    const cut = text.indexOf('\n\n');
+    return cut < 0 ? null : { head: text.slice(0, cut + 2), body: text.slice(cut + 2) };
+  };
+  const packed = (body, ct) => {
+    try {
+      return JSON.stringify(JSON.parse(body.trim()));
+    } catch (_) {}
+    return /x-www-form-urlencoded/.test(ct) ? body.trim().replace(/\n&/g, '&') : null;
+  };
+  const ctOf = (head) => (head.match(/^content-type:\s*(.*)$/im) || [])[1] || '';
+  const draw = () => {
+    const p = split();
+    const ct = p ? ctOf(p.head) : '';
+    const raw = p && p.body.trim() ? packed(p.body, ct) : null;
+    const pretty = raw != null ? prettyBody(raw, ct) || raw : null;
+    seg.hidden = raw == null || raw === pretty;
+    if (seg.hidden) return;
+    const set = (text) => {
+      editor.value = p.head + text;
+      editor.dispatchEvent(new Event('input'));
+    };
+    clear(
+      seg,
+      h('button', { class: p.body === pretty ? 'on' : '', text: 'Pretty', onclick: () => set(pretty) }),
+      h('button', { class: p.body === raw ? 'on' : '', text: 'Raw', onclick: () => set(raw) }),
+    );
+  };
+  editor._onbody = () => {
+    clearTimeout(seg._t);
+    seg._t = setTimeout(draw, 150);
+  };
+  draw();
+  return seg;
+}
+
 /** Grow a textarea to show all of its text, so it never scrolls on its own. */
 function fitText(ta) {
   ta.style.height = 'auto';
@@ -664,7 +707,8 @@ function buildValueCard(it, span, editor, tab, strip, main, editable) {
     }),
   );
   const notes = it.notes && it.notes.length ? h('div', { class: 'sdnotes' }, it.notes.map((n) => h('span', { class: 'sdnote' + (/^(unsigned|expired)/.test(n) ? ' warn' : ''), text: n }))) : null;
-  if (it.kind === 'jwt') return h('div', { class: 'spotdetail' }, head, notes, jwtEditor(it, span, editor, tab));
+  // The header and its buttons stay in view; only .sdbody scrolls.
+  if (it.kind === 'jwt') return h('div', { class: 'spotdetail' }, head, h('div', { class: 'sdbody' }, notes, jwtEditor(it, span, editor, tab)));
   const live = h('span', { class: 'bllive', text: '✓ re-encoded' });
   const ta = h('textarea', { class: 'sdv blv', spellcheck: 'false', value: it.decode() });
   if (!editable) ta.readOnly = true;
@@ -677,7 +721,12 @@ function buildValueCard(it, span, editor, tab, strip, main, editable) {
       /* invalid mid-edit (e.g. half-typed JSON); wait for a valid value */
     }
   });
-  return h('div', { class: 'spotdetail' }, head, h('div', { class: 'sdk' }, editable ? 'Decoded — edit to rewrite the request' : 'Decoded', live), ta, editable ? null : h('div', { class: 'dnote blnote', text: 'Read-only preview.' }));
+  return h(
+    'div',
+    { class: 'spotdetail' },
+    head,
+    h('div', { class: 'sdbody' }, h('div', { class: 'sdk' }, editable ? 'Decoded — edit to rewrite the request' : 'Decoded', live), ta, editable ? null : h('div', { class: 'dnote blnote', text: 'Read-only preview.' })),
+  );
 }
 
 /** The JWT editor: edit the claims (or header) as JSON; the token in the
@@ -1706,8 +1755,22 @@ async function drawRunSelection(tab) {
   if (!slot.isConnected) return;
   clear(
     slot,
-    h('div', { class: 'lbl' }, 'Response', h('span', { class: 'r' }, h('span', { class: statusClass(ex.status), text: ex.status == null ? 'no response' : ex.status }), ` · ${ex.duration_ms} ms · ${fmtSize(b64len(ex.resp_body))} · #${ex.id}`, ex.client_cert ? ' ' : null, clientCertTag(ex))),
-    rawPre(responseText(ex, true)),
+    h(
+      'div',
+      { class: 'lbl' },
+      'Response',
+      h(
+        'span',
+        { class: 'r' },
+        respPrettyable(ex) ? prettySeg(() => drawRunSelection(tab)) : null,
+        ' ',
+        h('span', { class: statusClass(ex.status), text: ex.status == null ? 'no response' : ex.status }),
+        ` · ${ex.duration_ms} ms · ${fmtSize(b64len(ex.resp_body))} · #${ex.id}`,
+        ex.client_cert ? ' ' : null,
+        clientCertTag(ex),
+      ),
+    ),
+    rawPre(responseText(ex, PRETTY.on)),
   );
 }
 
@@ -1759,8 +1822,6 @@ async function drawBenchResponse(tab, col) {
   } catch (e) {
     return clear(col, label(), h('div', { class: 'rerr', text: e.message }));
   }
-  const pretty = tab.pretty !== false;
-  const isJson = /json/.test(header(ex.resp_headers, 'content-type') || '');
   const enc = header(ex.resp_headers, 'content-encoding');
   clear(
     col,
@@ -1770,7 +1831,7 @@ async function drawBenchResponse(tab, col) {
         { class: 'r' },
         enc ? h('span', { class: 'decodetag', text: 'decoded · ' + enc }) : null,
         ' ',
-        isJson ? h('button', { class: 'link', text: pretty ? 'raw' : 'pretty', onclick: () => ((tab.pretty = !pretty), drawBenchResponse(tab, col)) }) : null,
+        respPrettyable(ex) ? prettySeg(() => (drawBenchResponse(tab, col), drawCompare(tab))) : null,
         ' ',
         h('span', { class: statusClass(ex.status), text: ex.status == null ? 'no response' : ex.status }),
         ` · ${ex.duration_ms} ms · ${fmtSize(b64len(ex.resp_body))} · #${ex.id}`,
@@ -1780,7 +1841,7 @@ async function drawBenchResponse(tab, col) {
     ),
     h('div', { class: 'authslot' }),
     h('div', { class: 'spotslot' }),
-    rawPre(responseText(ex, pretty)),
+    rawPre(responseText(ex, PRETTY.on)),
   );
   checkLoggedOut(tab, ex, col.querySelector('.authslot'));
   const list = await loadInsights(ex);
@@ -1946,21 +2007,21 @@ function historyPanel(tab, main) {
     ),
   );
   const picks = tab.picks || [];
-  // Shows up to a dozen sends at once; drag the top edge for more or fewer.
+  // Shows up to a dozen sends at once; drag the bottom edge for more or fewer.
   const list = h('div', { class: 'histrows' }, rows.length ? rows : h('div', { class: 'histrow muted', text: 'No sends yet.' }));
   const saved = store(HIST_H);
-  if (saved) list.style.maxHeight = saved + 'px';
+  if (saved) list.style.maxHeight = list.style.height = saved + 'px';
   const grip = heightGrip(HIST_H, {
     get: () => list.getBoundingClientRect().height,
-    set: (px) => (list.style.maxHeight = px + 'px'),
-    fit: () => (list.style.maxHeight = ''),
+    set: (px) => (list.style.maxHeight = list.style.height = px + 'px'),
+    fit: () => (list.style.maxHeight = list.style.height = ''),
     min: 40,
-    max: () => Math.max(120, window.innerHeight - 260),
+    max: () => Math.max(120, window.innerHeight - 200),
+    down: true,
   });
   return h(
     'div',
     { class: 'hist' },
-    rows.length > 1 ? grip : null,
     h(
       'div',
       { class: 'histhead' },
@@ -1973,9 +2034,11 @@ function historyPanel(tab, main) {
       ),
     ),
     list,
+    rows.length > 1 ? grip : null,
   );
 }
 const HIST_H = 'plonix.bench.histH';
+const CMP_H = 'plonix.bench.cmpH';
 
 function compareLatest(tab, main) {
   if ((tab.picks || []).length !== 2) tab.picks = tab.history.slice(0, 2).map((e) => e.id).reverse();
@@ -1995,7 +2058,7 @@ async function drawCompare(tab) {
     return toast(e.message, 'err');
   }
   if (a.id > b.id) [a, b] = [b, a];
-  const textOf = (ex) => (R.mode === 'request' ? asPlain({ lines: [`${ex.method} ${target(ex)} HTTP/1.1`, ...ex.req_headers.map(([k, v]) => `${k}: ${v}`)], body: bodyOf(ex.req_text, ex.req_body, true, header(ex.req_headers, 'content-type')) }) : asPlain(responseText(ex, true)));
+  const textOf = (ex) => (R.mode === 'request' ? asPlain({ lines: [`${ex.method} ${target(ex)} HTTP/1.1`, ...ex.req_headers.map(([k, v]) => `${k}: ${v}`)], body: bodyOf(ex.req_text, ex.req_body, PRETTY.on, header(ex.req_headers, 'content-type')) }) : asPlain(responseText(ex, PRETTY.on)));
   const rows = diffRows(textOf(a).split('\n'), textOf(b).split('\n'));
   const changed = rows.filter((r) => r.t !== 'eq' && r.t !== 'gap').length;
   const left = h('pre');
@@ -2015,20 +2078,31 @@ async function drawCompare(tab) {
     ['response', 'request'].map((m) => h('button', { class: R.mode === m ? 'on' : '', text: m[0].toUpperCase() + m.slice(1), onclick: () => ((R.mode = m), drawCompare(tab)) })),
   );
   const head = (ex) => h('div', { class: 'cch' }, h('b', { text: '#' + ex.id }), h('span', { class: statusClass(ex.status), text: ex.status == null ? 'ERR' : ex.status }), `${ex.duration_ms} ms · ${fmtSize(b64len(ex.resp_body))}`);
+  // The compared texts are as tall as the handle under them was dragged.
+  const view = h('div', { class: 'cmpview' });
+  const sized = (px) => (px ? view.style.setProperty('--cmph', px + 'px') : view.style.removeProperty('--cmph'));
+  sized(store(CMP_H));
+  const grip = heightGrip(CMP_H, {
+    get: () => left.getBoundingClientRect().height,
+    set: sized,
+    fit: () => sized(null),
+    min: 80,
+    max: () => Math.max(160, window.innerHeight - 160),
+    down: true,
+  });
   clear(
     slot,
-    h(
-      'div',
-      { class: 'cmpview' },
+    append(view, [
       h(
         'div',
         { class: 'cvh' },
         `Compare #${a.id} ↔ #${b.id}`,
-        h('span', { class: 'r' }, seg, h('button', { class: 'btn sm', text: 'Close', onclick: () => ((tab.picks = []), renderBench($('#main'))) })),
+        h('span', { class: 'r' }, [a, b].some(R.mode === 'request' ? reqPrettyable : respPrettyable) ? prettySeg(() => (drawCompare(tab), R.redrawResp && R.redrawResp())) : null, seg, h('button', { class: 'btn sm', text: 'Close', onclick: () => ((tab.picks = []), renderBench($('#main'))) })),
       ),
       h('div', { class: 'cmpsum', text: changed ? `${changed} line${changed === 1 ? '' : 's'} differ in the ${R.mode}.` : `The ${R.mode}s are identical.` }),
       h('div', { class: 'cmpcols' }, h('div', { class: 'cc' }, head(a), left), h('div', { class: 'cc' }, head(b), right)),
-    ),
+      grip,
+    ]),
   );
   if (R.scrollToCompare) {
     R.scrollToCompare = false;

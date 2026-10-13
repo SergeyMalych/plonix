@@ -6,7 +6,7 @@
    Traffic
    ====================================================================== */
 
-const T = { text: '', filters: [], items: [], total: 0, sel: null, live: true, maxId: 0, pretty: true, inspH: store('plonix.inspH'), picked: new Set(), pickAnchor: null, group: store('plonix.groupAlike') !== false, shortPath: store('plonix.shortPath') === true, open: new Set(), visible: null };
+const T = { text: '', filters: [], items: [], total: 0, sel: null, live: true, maxId: 0, inspH: store('plonix.inspH'), picked: new Set(), pickAnchor: null, group: store('plonix.groupAlike') !== false, shortPath: store('plonix.shortPath') === true, open: new Set(), visible: null };
 
 const sameKey = (ex) => `${ex.method} ${ex.host}:${ex.port} ${target(ex)}`;
 
@@ -1525,39 +1525,37 @@ async function openInspector(id) {
   const suggSlot = h('div', { class: 'lenssugg', hidden: true });
   if (T.inspH) insp.style.height = T.inspH + 'px';
   const enc = header(ex.resp_headers, 'content-encoding');
-  const isJson = /json/.test(header(ex.resp_headers, 'content-type') || '');
   const respCol = h('div', { class: 'col' });
+  // Pretty | Raw is one switch for both sides: flipping it on either redraws both.
+  const redrawBoth = () => (drawReq(), drawResp());
   // A WebSocket handshake: its messages go under the response.
   const msgBox = ex.status === 101 ? h('div', { class: 'wsbox' }) : null;
   const drawResp = () => {
-    const seg = isJson
-      ? h(
-          'span',
-          { class: 'seg r' },
-          h('button', { class: T.pretty ? 'on' : '', text: 'Pretty', onclick: () => ((T.pretty = true), drawResp()) }),
-          h('button', { class: T.pretty ? '' : 'on', text: 'Raw', onclick: () => ((T.pretty = false), drawResp()) }),
-        )
-      : null;
+    // Keep what is spotted and decoded while the body redraws.
+    const keep = respCol.querySelector('.spotslot');
+    const keepSel = respCol.querySelector('.selslot');
     clear(
       respCol,
-      h('div', { class: 'lbl' }, 'Response', enc ? h('span', { class: 'decodetag', text: 'decoded · ' + enc }) : null, cutTag(ex.resp_truncated, ex.resp_size, ex.resp_body), seg),
-      h('div', { class: 'spotslot' }),
-      h('div', { class: 'selslot' }),
-      rawPre(responseText(ex, T.pretty)),
+      h('div', { class: 'lbl' }, 'Response', enc ? h('span', { class: 'decodetag', text: 'decoded · ' + enc }) : null, cutTag(ex.resp_truncated, ex.resp_size, ex.resp_body), respPrettyable(ex) ? prettySeg(redrawBoth) : null),
+      keep || h('div', { class: 'spotslot' }),
+      keepSel || h('div', { class: 'selslot' }),
+      rawPre(responseText(ex, PRETTY.on)),
       msgBox,
     );
     wireLensSelection(respCol, ex, 'response');
-    if (ex.insights) drawInsights(respCol, ex.insights.filter((i) => i.side === 'response'));
+    if (keep) rehighlight(respCol);
+    else if (ex.insights) drawInsights(respCol, ex.insights.filter((i) => i.side === 'response'));
   };
-  drawResp();
-  if (msgBox) drawMessages(msgBox, ex);
   // Changed by rules on the way out: the Lens can show it as sent, as it was, or both.
   const ruled = !ex.edited && ex.original_request && ex.replaced && ex.replaced.length;
   const reqBody = h('div', { class: 'reqbody' });
   const drawReq = () => {
     const view = ruled ? T.ruleView || 'sent' : 'sent';
-    clear(reqBody, view === 'sent' ? rawPre(requestText(ex)) : ruleCompare(ex, view));
+    clear(reqBody, view === 'sent' ? rawPre(requestText(ex, PRETTY.on)) : ruleCompare(ex, view));
     if (ruleSeg) for (const b of ruleSeg.children) b.classList.toggle('on', b.dataset.v === view);
+    const seg = reqCol.querySelector('.prettyseg');
+    if (seg) seg.replaceWith(prettySeg(redrawBoth));
+    rehighlight(reqCol);
   };
   const ruleSeg = ruled
     ? h(
@@ -1569,12 +1567,22 @@ async function openInspector(id) {
   const reqCol = h(
     'div',
     { class: 'col' },
-    h('div', { class: 'lbl' }, 'Request', cutTag(ex.req_truncated, ex.req_size, ex.req_body), ruleSeg, h('span', { class: 'r', text: '#' + ex.id + ' · ' + fmtTime(ex.ts) + ' · ' + (ex.initiator || ex.source || 'proxy') })),
+    h(
+      'div',
+      { class: 'lbl' },
+      'Request',
+      cutTag(ex.req_truncated, ex.req_size, ex.req_body),
+      ruleSeg,
+      h('span', { class: 'r', text: '#' + ex.id + ' · ' + fmtTime(ex.ts) + ' · ' + (ex.initiator || ex.source || 'proxy') }),
+      reqPrettyable(ex) ? prettySeg(redrawBoth) : null,
+    ),
     h('div', { class: 'spotslot' }),
     h('div', { class: 'selslot' }),
     reqBody,
   );
   drawReq();
+  drawResp();
+  if (msgBox) drawMessages(msgBox, ex);
   reqCol.addEventListener('contextmenu', (e) => {
     const pre = e.target.closest('pre.raw');
     if (pre && !pre.classList.contains('rlcmp')) lensHeaderMenu(e, pre, 'request');
@@ -1637,7 +1645,9 @@ async function openInspector(id) {
    it (JWT, URL-encoding, Base64, hex), find it in traffic or ask Claude about
    it. Read-only: the Lens shows what was captured. */
 function wireLensSelection(col, ex, side) {
-  const bar = h('div', { class: 'qbar lensqbar' });
+  // Wired once per column; a redraw of the column only puts the bar back.
+  if (col._qbar) return col.appendChild(col._qbar);
+  const bar = (col._qbar = h('div', { class: 'qbar lensqbar' }));
   col.appendChild(bar);
   const picked = () => {
     const sel = window.getSelection();
@@ -1681,7 +1691,31 @@ function decodeSelection(col, t) {
       : it.kind === 'text'
         ? h('div', { class: 'dnote blnote', text: 'This does not look encoded (JWT, URL, Base64 or hex).' })
         : block('Decoded', bl_pretty(it.decode()));
-  clear(slot, h('div', { class: 'spotdetail' }, head, notes, body));
+  const box = h('div', { class: 'spotdetail' });
+  clear(slot, box);
+  fillSpotPanel(box, slot, head, [notes, body]);
+}
+
+/** An opened spotted or decoded value: its header and buttons stay in view
+ *  while only what is under them scrolls, and the handle under it drags its
+ *  height (remembered; a double-click fits it to the value again). */
+const SPOT_H = 'plonix.lens.spotH';
+function fillSpotPanel(box, slot, head, content) {
+  const col = slot.closest('.col') || slot.parentElement;
+  const sized = (px) => {
+    box.style.height = px ? px + 'px' : '';
+    slot.classList.toggle('sized', !!px);
+  };
+  sized(store(SPOT_H));
+  const grip = heightGrip(SPOT_H, {
+    get: () => box.getBoundingClientRect().height,
+    set: sized,
+    fit: () => sized(null),
+    min: 70,
+    max: () => Math.max(120, col.clientHeight - 110),
+    down: true,
+  });
+  clear(box, head, h('div', { class: 'sdbody' }, content), grip);
 }
 
 /** The client certificate Plonix presented for this exchange, if the server asked for one. */
@@ -1778,9 +1812,16 @@ function drawInsights(col, list) {
       h('span', { class: 'sw', text: shortLocation(ins.location) }),
       ins.count > 1 ? h('span', { class: 'sn', text: '×' + ins.count }) : null,
     );
+    chip._value = ins.value;
     return chip;
   });
   clear(slot, h('div', { class: 'spots' }, h('span', { class: 'spotlbl', text: 'Spotted' }), chips), detail);
+}
+
+/** Marks the open spotted value again after the body under it was redrawn. */
+function rehighlight(col) {
+  const on = col.querySelector('.spotslot .spot.on');
+  if (on && on._value) markIn(col.querySelector('pre.raw'), on._value);
 }
 
 function shortLocation(loc) {
@@ -1794,8 +1835,9 @@ function showInsight(box, ins) {
   actions.push(h('button', { class: 'btn sm', text: 'Copy value', onclick: () => copyText(ins.value) }));
   const needle = ins.value.replace(/"/g, '').slice(0, 120);
   if (needle.length >= 4) actions.push(h('button', { class: 'btn sm', text: 'Find in traffic', title: 'Search all captured traffic for this value', onclick: () => setQuery('"' + needle + '"') }));
-  clear(
+  fillSpotPanel(
     box,
+    box.parentElement,
     h(
       'div',
       { class: 'sdh' },
@@ -1803,8 +1845,10 @@ function showInsight(box, ins) {
       h('span', { class: 'muted', text: ' in ' + ins.location + (ins.count > 1 ? ` · seen ${ins.count} times` : '') }),
       h('span', { class: 'sdact' }, actions),
     ),
-    ins.notes && ins.notes.length ? h('div', { class: 'sdnotes' }, ins.notes.map((n) => h('span', { class: 'sdnote' + (/^(unsigned|expired|encoded twice|username)/.test(n) ? ' warn' : ''), text: n }))) : null,
-    ins.decoded != null ? [h('div', { class: 'sdk', text: 'Decoded' }), h('pre', { class: 'sdv', text: ins.decoded })] : [h('div', { class: 'sdk', text: 'Value' }), h('pre', { class: 'sdv', text: ins.value.length > 600 ? ins.value.slice(0, 600) + '…' : ins.value })],
+    [
+      ins.notes && ins.notes.length ? h('div', { class: 'sdnotes' }, ins.notes.map((n) => h('span', { class: 'sdnote' + (/^(unsigned|expired|encoded twice|username)/.test(n) ? ' warn' : ''), text: n }))) : null,
+      ins.decoded != null ? [h('div', { class: 'sdk', text: 'Decoded' }), h('pre', { class: 'sdv', text: ins.decoded })] : [h('div', { class: 'sdk', text: 'Value' }), h('pre', { class: 'sdv', text: ins.value.length > 600 ? ins.value.slice(0, 600) + '…' : ins.value })],
+    ],
   );
 }
 
