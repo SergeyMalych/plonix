@@ -130,9 +130,29 @@ async fn set_saved_users(State(s): State<AppState>, caller: MaybeCaller, Json(bo
 /// The sessions captured traffic carries, with the saved user each belongs
 /// to. User-only: they are credentials.
 fn found_sessions(s: &AppState) -> anyhow::Result<(Vec<crate::gather::FoundSession>, Vec<crate::users::SavedUser>)> {
-    let exchanges = s.engine.store.recent_exchanges(crate::gather::MAX_EXCHANGES)?;
+    // Reading the capture is the slow part, and the Lens asks on every request
+    // it opens: the answer is kept until traffic, users or scope change, or
+    // for half a minute (tokens expire with time).
+    static CACHE: std::sync::Mutex<Option<(String, std::time::Instant, Vec<crate::gather::FoundSession>)>> = std::sync::Mutex::new(None);
     let users = s.engine.store.saved_users()?;
-    let found = crate::gather::sessions(&exchanges, &s.engine.rules(), &users, crate::users::now_secs());
+    let rules = s.engine.rules();
+    let key = format!(
+        "{:p}|{}|{}|{}|{}",
+        Arc::as_ptr(&s.engine),
+        s.engine.store.max_id()?,
+        s.engine.store.count()?,
+        serde_json::to_string(&users)?,
+        serde_json::to_string(&rules)?
+    );
+    if let Some((k, at, found)) = CACHE.lock().unwrap().as_ref()
+        && *k == key
+        && at.elapsed() < std::time::Duration::from_secs(30)
+    {
+        return Ok((found.clone(), users));
+    }
+    let exchanges = s.engine.store.recent_exchanges(crate::gather::MAX_EXCHANGES)?;
+    let found = crate::gather::sessions(&exchanges, &rules, &users, crate::users::now_secs());
+    *CACHE.lock().unwrap() = Some((key, std::time::Instant::now(), found.clone()));
     Ok((found, users))
 }
 
@@ -193,7 +213,7 @@ async fn apply_found_user(State(s): State<AppState>, caller: MaybeCaller, Json(b
                         return Ok(Err(format!("at most {} saved users", crate::users::MAX_USERS)));
                     }
                     let name = body.name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| crate::gather::user_name(&f, users));
-                    let note = if f.label.is_empty() { "Found in captured traffic.".to_string() } else { format!("Found in captured traffic: {}.", f.label) };
+                    let note = if f.label.is_empty() { "Found in captured traffic.".to_string() } else { format!("Found in captured traffic: {}.", f.label.chars().take(150).collect::<String>()) };
                     let mut u = crate::users::SavedUser { id: String::new(), name, note, headers: vec![], scoped: vec![], cookies: vec![], keep_fresh: true };
                     let added = crate::gather::apply(&mut u, &f, now);
                     users.push(u);

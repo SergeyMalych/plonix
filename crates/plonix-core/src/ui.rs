@@ -57,8 +57,20 @@ pub const CODE_TTL: Duration = Duration::from_secs(120);
 /// The page may only load its own scripts and styles and talk to its own
 /// origin. Captured traffic is attacker-controlled; this keeps any markup in
 /// it inert even if a rendering bug let it through.
-const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; \
-                   font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+/// The one inline stylesheet allowed is the findings report's own, by its
+/// hash, so the walkthrough can show the report as it looks when sent.
+fn csp() -> &'static str {
+    static CSP: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    CSP.get_or_init(|| {
+        use base64::Engine as _;
+        use sha2::Digest as _;
+        let report = base64::engine::general_purpose::STANDARD.encode(sha2::Sha256::digest(crate::report::STYLE.as_bytes()));
+        format!(
+            "default-src 'none'; script-src 'self'; style-src 'self' 'sha256-{report}'; img-src 'self' data:; \
+             font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        )
+    })
+}
 
 /// Outstanding one-time launch codes.
 #[derive(Default)]
@@ -94,7 +106,7 @@ fn asset_bytes(content_type: &'static str, body: Vec<u8>) -> Response {
     let mut r = (StatusCode::OK, body).into_response();
     let h = r.headers_mut();
     h.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
-    h.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(CSP));
+    h.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(csp()));
     h.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     h.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
     h.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));

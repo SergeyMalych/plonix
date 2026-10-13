@@ -36,6 +36,8 @@ impl Engine {
             Some(i) => (&rest[..i], format!("/{}", &rest[i..])),
             None => (rest, "/".to_string()),
         };
+        // A user:password@ in front of the host is not part of where it goes.
+        let authority = authority.rsplit_once('@').map_or(authority, |(_, a)| a);
         let host = scope::normalize_host(authority);
         let port = authority
             .rsplit_once(':')

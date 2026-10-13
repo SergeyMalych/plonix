@@ -595,25 +595,22 @@ function lensGrip(strip) {
 }
 /** Pretty | Raw for the request being edited. The editor holds exactly what
  *  is sent, so this lays the body out (or packs it back) in the editor; the
- *  switch shows only while the body is JSON or a form. */
+ *  switch shows only while the body is JSON, where spacing between values
+ *  means nothing to the server. A form is left alone: a line break there
+ *  would be sent as part of a value. */
 function bodyLayoutSeg(tab, editor) {
-  const seg = h('span', { class: 'seg prettyseg', hidden: true, title: 'Lay the JSON or form body out for reading (Pretty) or pack it onto one line (Raw). The body is sent as you see it.' });
+  const seg = h('span', { class: 'seg prettyseg', hidden: true, title: 'Lay the JSON body out for reading (Pretty) or pack it onto one line (Raw). Only spacing changes; the body is sent as you see it.' });
   const split = () => {
     const text = editor.value.replace(/\r\n/g, '\n');
     const cut = text.indexOf('\n\n');
     return cut < 0 ? null : { head: text.slice(0, cut + 2), body: text.slice(cut + 2) };
   };
-  const packed = (body, ct) => {
-    try {
-      return JSON.stringify(JSON.parse(body.trim()));
-    } catch (_) {}
-    return /x-www-form-urlencoded/.test(ct) ? body.trim().replace(/\n&/g, '&') : null;
-  };
+  const packed = (body) => jsonLayout(body.trim(), 0);
   const ctOf = (head) => (head.match(/^content-type:\s*(.*)$/im) || [])[1] || '';
   const draw = () => {
     const p = split();
     const ct = p ? ctOf(p.head) : '';
-    const raw = p && p.body.trim() ? packed(p.body, ct) : null;
+    const raw = p && p.body.trim() ? packed(p.body) : null;
     const pretty = raw != null ? prettyBody(raw, ct) || raw : null;
     seg.hidden = raw == null || raw === pretty;
     if (seg.hidden) return;
@@ -2009,7 +2006,8 @@ function historyPanel(tab, main) {
   const picks = tab.picks || [];
   // Shows up to a dozen sends at once; drag the bottom edge for more or fewer.
   const list = h('div', { class: 'histrows' }, rows.length ? rows : h('div', { class: 'histrow muted', text: 'No sends yet.' }));
-  const saved = store(HIST_H);
+  // A height saved in a taller window is cut to fit this one.
+  const saved = store(HIST_H) && Math.min(store(HIST_H), Math.max(120, window.innerHeight - 200));
   if (saved) list.style.maxHeight = list.style.height = saved + 'px';
   const grip = heightGrip(HIST_H, {
     get: () => list.getBoundingClientRect().height,
@@ -2081,7 +2079,7 @@ async function drawCompare(tab) {
   // The compared texts are as tall as the handle under them was dragged.
   const view = h('div', { class: 'cmpview' });
   const sized = (px) => (px ? view.style.setProperty('--cmph', px + 'px') : view.style.removeProperty('--cmph'));
-  sized(store(CMP_H));
+  sized(store(CMP_H) && Math.min(store(CMP_H), Math.max(160, window.innerHeight - 160)));
   const grip = heightGrip(CMP_H, {
     get: () => left.getBoundingClientRect().height,
     set: sized,

@@ -142,7 +142,8 @@ function syncHeaderRows(u) {
   if (!u._rows) return;
   const where = (r) => (r.host || '').trim() || (r.path || '').trim();
   u.headers = u._rows.filter((r) => !where(r)).map((r) => [r.name, r.value]);
-  u.scoped = u._rows.filter(where).map((r) => ({ name: r.name, value: r.value, host: (r.host || '').trim(), path: (r.path || '').trim() }));
+  // A path needs its host; until the host is typed the row is not saved yet.
+  u.scoped = u._rows.filter((r) => (r.host || '').trim()).map((r) => ({ name: r.name, value: r.value, host: (r.host || '').trim(), path: (r.path || '').trim() }));
 }
 
 /** "api.shop.example/v2/seller", or what a blank place means. */

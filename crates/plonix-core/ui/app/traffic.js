@@ -1706,13 +1706,15 @@ function fillSpotPanel(box, slot, head, content) {
     box.style.height = px ? px + 'px' : '';
     slot.classList.toggle('sized', !!px);
   };
-  sized(store(SPOT_H));
+  // A height saved in a taller Lens is cut so the value under it keeps room.
+  const room = () => Math.max(120, col.clientHeight - 110);
+  sized(store(SPOT_H) && (col.clientHeight ? Math.min(store(SPOT_H), room()) : store(SPOT_H)));
   const grip = heightGrip(SPOT_H, {
     get: () => box.getBoundingClientRect().height,
     set: sized,
     fit: () => sized(null),
     min: 70,
-    max: () => Math.max(120, col.clientHeight - 110),
+    max: room,
     down: true,
   });
   clear(box, head, h('div', { class: 'sdbody' }, content), grip);

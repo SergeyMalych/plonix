@@ -401,10 +401,18 @@ async fn hosts(State(s): State<AppState>, caller: MaybeCaller) -> Response {
     }
 }
 
-async fn facets(State(s): State<AppState>) -> Response {
+async fn facets(State(s): State<AppState>, caller: MaybeCaller) -> Response {
     let engine = s.engine.clone();
+    let in_scope_only = agent_in_scope_only(&s, &caller);
     match tokio::task::spawn_blocking(move || engine.store.facets(&engine.rules())).await {
-        Ok(Ok(f)) => Json(f).into_response(),
+        Ok(Ok(mut f)) => {
+            // An agent kept to in-scope traffic does not learn which other hosts were seen.
+            if in_scope_only {
+                f.other_hosts.clear();
+                f.out_of_scope = 0;
+            }
+            Json(f).into_response()
+        }
         Ok(Err(e)) => internal(e),
         Err(e) => internal(e.into()),
     }
