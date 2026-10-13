@@ -70,6 +70,9 @@ pub struct HubInfo {
 pub async fn start(home: &Home, port: Option<u16>) -> Result<Arc<Hub>> {
     home.ensure()?;
     crate::usage::init(home, true);
+    if let Err(e) = crate::market::switch_on_default_tools(home) {
+        tracing::warn!("switching on the default tools: {e:#}");
+    }
     let token = home.load_or_create_token()?;
     let mut listener = None;
     for p in [port, Some(DEFAULT_HUB_PORT)].into_iter().flatten() {

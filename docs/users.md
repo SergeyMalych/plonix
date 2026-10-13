@@ -2,7 +2,7 @@
 
 Most access-control bugs show up when one user can see or do what another should not. **Saved users** keep each user's cookies and tokens, so you can send the same request as anyone in one click, and the **Access check** replays requests as each of them side by side.
 
-Both are tools you switch on from the [Market](market.md) (under **Tools**). The **Users** screen appears in the sidebar once they are installed.
+Both are tools from the [Market](market.md) (under **Tools**) that come switched on, so the **Users** and **Access** screens are in the sidebar from the start. Remove either in the Market to hide it; it stays off until you install it again.
 
 ## Saving a user
 

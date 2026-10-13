@@ -85,9 +85,9 @@ Plonix has a handful of tools, each with its own name. They are the same in the 
 | **Skills** | Playbooks AI agents follow for a job in Plonix, offered over MCP | `plonix skills` |
 | **Rules** | Change traffic as it passes: add, change or remove a header, or replace text, for browser traffic, the Bench and Scans, optionally only when a Traffic search matches | `plonix replace` |
 | **Rule packs** | Community packs that teach Plonix to recognise technologies | `plonix rules` |
-| **Saved users** | The cookies and tokens for each user of an application. Act as one from the title bar and your browser, the Bench and Scans send as them; see, edit and expire each cookie on the Users screen (a Market tool) | Title bar › Act as, Users |
-| **Access check** | Replays chosen requests as each saved user and signed out, side by side, so differences in what each one may see stand out (a Market tool) | Traffic or Map selection |
-| **Callbacks** | Hands out a unique host for each test and lists every DNS lookup, HTTP request or mail that reaches one (a Market tool) | Callbacks tab, Bench › Insert callback host |
+| **Saved users** | The cookies and tokens for each user of an application. Act as one from the title bar and your browser, the Bench and Scans send as them; see, edit and expire each cookie on the Users screen (a Market tool, on by default) | Title bar › Act as, Users |
+| **Access check** | Replays chosen requests as each saved user and signed out, side by side, so differences in what each one may see stand out (a Market tool, on by default) | Traffic or Map selection |
+| **Callbacks** | Hands out a unique host for each test and lists every DNS lookup, HTTP request or mail that reaches one (a Market tool, on by default) | Callbacks tab, Bench › Insert callback host |
 
 ## A look around
 
@@ -239,7 +239,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 
 ### The Market and starter profiles
 - **One signed catalog** (`store/index.json`) of skills, rule packs, filter packs, payload lists, bug bounty platforms, tools, bundles and extensions. Everything is verified against the signature before it installs. A signed **community Market** sits next to it, and you can add your own from a GitHub repository, a folder, a file or a link; badges say which is **Official**, **Community** or **Your own**.
-- **Tools** switch on a capability built into Plonix that ships off until you want it, such as Saved users, the Access check, Callbacks and Programs. Its screen appears as soon as it is installed.
+- **Tools** switch on a capability built into Plonix. Saved users, the Access check and Callbacks come switched on and can be removed; Programs ships off until you want it. A tool's screen appears as soon as it is installed and goes away when it is removed.
 - **How to use it:** every package page says what it does and where to use it, with its actions one click away (such as **Find subdomains**). An extension that asks for something needing your yes can be allowed later with **Allow** on its page or `plonix extensions allow <name>`.
 - **Starter profiles:** pick bug hunter, red teamer or security researcher on the Start screen, at the top of the Market, in Settings or per project. The Market then shows **Recommended for you**, each item with one line on why, and `plonix market install --starter` installs the set. Pick none and everything stays neutral. See [docs/market.md](docs/market.md).
 

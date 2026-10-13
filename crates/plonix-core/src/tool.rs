@@ -1,6 +1,7 @@
 //! Tools: the smallest kind of Market package. A tool turns on a capability
-//! that is already built into Plonix — a sidebar tab, a Bench control — that
-//! ships switched off until someone installs it.
+//! that is already built into Plonix — a sidebar tab, a Bench control. Some
+//! come installed by default ([`crate::market::DEFAULT_TOOLS`]); the rest ship
+//! switched off until someone installs them.
 //!
 //! A tool package is only data: a name and the id of the built-in feature it
 //! switches on, chosen from a fixed list this build knows ([`FEATURES`]). It

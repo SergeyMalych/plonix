@@ -198,7 +198,7 @@
       "open": "users",
       "shot": "saved-users",
       "steps": [
-        "Install it. A Users screen appears in the sidebar.",
+        "Open Users in the sidebar. Saved users comes switched on; remove it here to hide the screen.",
         "Add each account you test with: its cookies or token, copied from a request where it was signed in.",
         "On the Bench, pick who to send as from the As… menu, or act as a user everywhere from the title bar."
       ]
@@ -208,7 +208,7 @@
       "open": "access",
       "shot": "access-check",
       "steps": [
-        "Install it with Saved users, and save at least two users.",
+        "Save at least two users on the Users screen. The Access check and Saved users come switched on.",
         "Pick requests in Traffic and choose Replay signed out or Check this id across users, or open Access and pick a host.",
         "Read the table: each request as each user and signed out, with what looks wrong flagged under it."
       ]
@@ -217,7 +217,7 @@
       "where": "Callbacks",
       "open": "callbacks",
       "steps": [
-        "Install interactsh on your Mac (brew install interactsh), then install Callbacks.",
+        "Install the interactsh client once, as the Callbacks screen shows (it builds with Go). Callbacks comes switched on; remove it here if you do not need it.",
         "Open Callbacks, press Start listening, then click New host for a test.",
         "Put the host in a request on the Bench, such as a URL parameter or a webhook field, and send it.",
         "Anything that reaches the host shows in Callbacks, with the test it belongs to."

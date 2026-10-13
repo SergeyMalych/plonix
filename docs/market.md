@@ -9,7 +9,7 @@ The Market is where Plonix gets everything modular, in one catalog:
 | **Filter pack** | Named Traffic filters such as `is:auth` ([format](filters.md)) | `$PLONIX_HOME/filters` |
 | **List pack** | Named payload lists for the Bench ([format](bench.md)) | `$PLONIX_HOME/lists` |
 | **Platform** | Where bug bounty programs come from: a platform's API address, sign-in and data shape ([format](programs.md#platform-packs)) | `$PLONIX_HOME/platforms` |
-| **Tool** | Switches on a capability built into Plonix that ships off, such as [Saved users and the Access check](users.md), [Callbacks](callbacks.md) and [Programs](programs.md). Its screen appears as soon as it is installed | `$PLONIX_HOME/tools` |
+| **Tool** | Switches on a capability built into Plonix. [Saved users and the Access check](users.md) and [Callbacks](callbacks.md) come installed and can be removed; [Programs](programs.md) ships off. A tool's screen appears as soon as it is installed and goes away when it is removed | `$PLONIX_HOME/tools` |
 | **Bundle** | A set of other packages, installed and removed together | `$PLONIX_HOME/market/bundles.json` |
 | **Extension** | Code that runs in the Plonix sandbox: today, passive analyzers ([extensions.md](extensions.md)) | `$PLONIX_HOME/extensions` |
 

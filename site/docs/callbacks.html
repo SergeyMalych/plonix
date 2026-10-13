@@ -46,7 +46,7 @@
 <article>
 <h1 id="callbacks">Callbacks</h1>
 <p>Some problems only show when the server reaches out on its own: it fetches a URL you gave it, looks up a host name, or sends mail. <strong>Callbacks</strong> hand out a unique host for each test and list every DNS lookup, HTTP request or mail that later reaches it, next to the test it came from.</p>
-<p>Callbacks is a tool you switch on from the <a href="market.html">Market</a> (under <strong>Tools</strong>). The <strong>Callbacks</strong> tab appears once it is installed.</p>
+<p>Callbacks is a tool from the <a href="market.html">Market</a> (under <strong>Tools</strong>) that comes switched on, so the <strong>Callbacks</strong> tab is in the sidebar from the start. Remove it in the Market to hide the tab; it stays off until you install it again.</p>
 <h2 id="set-up">Set up<a class="anchor" href="#set-up" aria-label="Link to this section">#</a></h2>
 <p>Callbacks use <a href="https://github.com/projectdiscovery/interactsh" rel="noopener">interactsh</a>, the open-source callback tool by ProjectDiscovery (MIT license). Install its client once in Terminal:</p>
 <pre><code class="language-sh">brew install go &amp;&amp; go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest</code></pre>

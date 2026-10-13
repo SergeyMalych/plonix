@@ -86,7 +86,7 @@ const BUILTIN_TOOLS: &[(&str, &[&str])] = &[
         &[
             "Adds a user switcher to the Bench. You keep a short list of the people an application knows — each with its own cookies or token — and choose which one a request is sent as.",
             "Nothing is sent on its own and scope still applies: switching user only changes the auth headers on a request you send yourself, through the same scope-gated path as everything else.",
-            "Install it when you want to see how an application answers the same request for different users.",
+            "Use it when you want to see how an application answers the same request for different users.",
         ],
     ),
     (
@@ -152,6 +152,40 @@ fn inject_builtin_tools(index: &mut Index, trust: &Trust) {
             index.packages.push(p);
         }
     }
+}
+
+/// The built-in tools every Plonix starts with switched on. They are still
+/// ordinary Market installs, so each can be removed there like any other.
+pub const DEFAULT_TOOLS: &[&str] = &["saved-users", "access-check", "callbacks"];
+
+/// Switches on each default tool this Plonix home has not been given yet,
+/// from the snapshot (nothing is downloaded). Which ones were given is kept
+/// in `tools/defaults.json`, so a tool someone removed in the Market stays
+/// removed, and a default added in a later version is still switched on once.
+pub fn switch_on_default_tools(home: &Home) -> Result<()> {
+    let marker = home.root.join("tools").join("defaults.json");
+    let mut given: Vec<String> = match std::fs::read(&marker) {
+        Ok(b) => serde_json::from_slice(&b).unwrap_or_default(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => vec![],
+        Err(e) => return Err(e.into()),
+    };
+    let missing: Vec<&str> = DEFAULT_TOOLS.iter().copied().filter(|n| !given.iter().any(|g| g == n)).collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    // Installed from the catalog built into Plonix, so they are recorded as
+    // signed by the Plonix maintainers like any other Market install.
+    let market = Market::new(home);
+    let cat = bundled(&registry::trusted_keys(&[]))?;
+    for name in missing {
+        if market.tools.installed_version(name).is_none() {
+            market.install(&cat, name)?;
+        }
+        given.push(name.to_string());
+    }
+    std::fs::create_dir_all(marker.parent().unwrap_or(&home.root))?;
+    write_private(&marker, &serde_json::to_vec_pretty(&given)?)?;
+    Ok(())
 }
 
 // ---- settings -------------------------------------------------------------------
@@ -1569,6 +1603,31 @@ mod tests {
         let mut idx = registry::parse(SNAPSHOT.iter().find(|(p, _)| *p == "index.json").unwrap().1.as_bytes()).unwrap();
         inject_builtin_tools(&mut idx, &other.trust);
         assert!(!idx.packages.iter().any(|p| p.kind == Kind::Tool), "third-party catalogs must not get the built-in tools");
+    }
+
+    #[test]
+    fn default_tools_are_switched_on_once_and_stay_removed() {
+        let (_d, home) = home();
+        switch_on_default_tools(&home).unwrap();
+        let on = crate::tool::ToolLibrary::new(&home).enabled_features();
+        for name in DEFAULT_TOOLS {
+            assert!(on.contains(*name), "{name} is not on by default");
+        }
+        assert!(!on.contains("programs"), "Programs stays opt-in");
+        let market = Market::new(&home);
+        assert_eq!(market.verification(Kind::Tool, "callbacks").level, TrustLevel::Verified, "shown as signed, not as added by hand");
+
+        // Removing one in the Market keeps it off the next time Plonix starts.
+        market.remove("callbacks").unwrap();
+        switch_on_default_tools(&home).unwrap();
+        assert!(!crate::tool::ToolLibrary::new(&home).enabled_features().contains("callbacks"));
+
+        // A default this home was not given yet (say, added in a later version) is switched on once.
+        std::fs::write(home.root.join("tools/defaults.json"), r#"["saved-users","callbacks"]"#).unwrap();
+        market.remove("access-check").unwrap();
+        switch_on_default_tools(&home).unwrap();
+        let on = crate::tool::ToolLibrary::new(&home).enabled_features();
+        assert!(on.contains("access-check") && !on.contains("callbacks"));
     }
 
     #[test]

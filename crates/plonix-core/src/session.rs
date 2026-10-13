@@ -54,6 +54,9 @@ pub struct Session {
 pub async fn open(home: &Home, mut project: Project, options: OpenOptions) -> Result<Session> {
     home.ensure()?;
     crate::usage::init(home, true);
+    if let Err(e) = crate::market::switch_on_default_tools(home) {
+        tracing::warn!("switching on the default tools: {e:#}");
+    }
     let lock = project.lock()?;
     let storage = StorageSettings::from_values(&project.settings(settings::STORAGE));
     let ca = Arc::new(CertAuthority::load_or_create(home)?);
