@@ -381,11 +381,16 @@ pub fn global(home: &Home, id: &str) -> Values {
     }
 }
 
+/// Held while settings.json is read, changed and written back, so two saves
+/// at once (a section and the window look) never drop each other's change.
+static GLOBAL_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub fn save_global(home: &Home, id: &str, values: &Values) -> Result<()> {
     home.ensure()?;
     if let Some(st) = section(id).and_then(|s| s.storage) {
         return (st.save)(home, values);
     }
+    let _held = GLOBAL_WRITE.lock().unwrap_or_else(|e| e.into_inner());
     crate::paths::set_aside_unreadable::<GlobalFile>(&global_path(home));
     let mut file = read_global(home);
     file.sections.insert(id.to_string(), Value::Object(values.clone()));
@@ -469,6 +474,7 @@ pub fn set_look(home: &Home, changes: &Value) -> Result<()> {
         }
     }
     home.ensure()?;
+    let _held = GLOBAL_WRITE.lock().unwrap_or_else(|e| e.into_inner());
     crate::paths::set_aside_unreadable::<GlobalFile>(&global_path(home));
     let mut file = read_global(home);
     file.sections.insert(LOOK.to_string(), next);

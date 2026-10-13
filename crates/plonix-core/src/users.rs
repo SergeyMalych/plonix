@@ -308,6 +308,12 @@ impl SavedUser {
                 continue;
             }
             let Some(set) = parse_set_cookie(v, now) else { continue };
+            // A server may only set cookies for itself or a parent domain, as browsers enforce.
+            let host = host.to_ascii_lowercase();
+            if !set.domain.is_empty() && host != set.domain && !host.ends_with(&format!(".{}", set.domain)) {
+                continue;
+            }
+            let host = host.as_str();
             let room = self.cookies.len() < MAX_COOKIES;
             let slot = self.cookies.iter_mut().find(|c| c.name == set.name && (c.domain == set.domain || c.domain.is_empty() || (set.domain.is_empty() && c.sent_to(host))));
             match slot {
@@ -446,7 +452,7 @@ pub fn check(users: &[SavedUser]) -> Result<Vec<SavedUser>, String> {
                 return Err(format!("{name}: the value of `{k}` is too long or contains a line break"));
             }
             let host = sh.host.trim().trim_start_matches('.').to_ascii_lowercase();
-            if !host.bytes().all(|b| b.is_ascii_alphanumeric() || b"-.:[]".contains(&b)) {
+            if !host.bytes().all(|b| b.is_ascii_alphanumeric() || b"-._:[]".contains(&b)) {
                 return Err(format!("{name}: `{}` is not a valid host for `{k}`", clean(&host, 40)));
             }
             let path = sh.path.trim();
@@ -484,7 +490,7 @@ pub fn check(users: &[SavedUser]) -> Result<Vec<SavedUser>, String> {
                 return Err(format!("{name}: the value of cookie `{n}` is too long or contains a `;` or a line break"));
             }
             let domain = c.domain.trim().trim_start_matches('.').to_ascii_lowercase();
-            if !domain.bytes().all(|b| b.is_ascii_alphanumeric() || b"-.:[]".contains(&b)) {
+            if !domain.bytes().all(|b| b.is_ascii_alphanumeric() || b"-._:[]".contains(&b)) {
                 return Err(format!("{name}: `{}` is not a valid cookie domain", clean(&domain, 40)));
             }
             match cookies.iter_mut().find(|x| x.name == n && x.domain == domain) {
@@ -598,6 +604,14 @@ mod tests {
         assert_eq!(user.cookies, vec![c("s", "new"), c("gone", "back"), Cookie { domain: "shop.test".into(), ..c("js", "1") }]);
         assert_eq!(user.headers, vec![("Authorization".to_string(), "Bearer fresh".to_string()), ("X-Api-Key".to_string(), "k1".to_string())]);
         assert!(!user.learn_sent("shop.test", "/", &sent, 100), "nothing new the second time");
+    }
+
+    #[test]
+    fn set_cookie_for_another_site_is_ignored() {
+        let mut user = SavedUser { cookies: vec![c("sid", "mine")], ..u("A", &[]) };
+        let resp = vec![("Set-Cookie".to_string(), "sid=evil; Domain=bank.test".to_string())];
+        assert!(!user.absorb("a.shop.test", &resp, 1000));
+        assert_eq!(user.cookies, vec![c("sid", "mine")]);
     }
 
     #[test]

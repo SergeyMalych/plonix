@@ -342,7 +342,7 @@ pub fn escape(s: &str) -> String {
     out
 }
 
-const STYLE: &str = "\
+pub const STYLE: &str = "\
 body{font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1d1d1f;background:#fff;max-width:960px;margin:0 auto;padding:32px 20px}\
 h1{font-size:24px;margin:0 0 4px}h2{font-size:18px;margin:36px 0 8px;padding-top:18px;border-top:1px solid #e5e5e7}h3{font-size:14px;margin:18px 0 6px}h4{font-size:13px;margin:16px 0 6px;font-family:ui-monospace,Menlo,monospace;word-break:break-all}\
 .muted{color:#6e6e73}table{border-collapse:collapse;width:100%;margin:16px 0}td,th{text-align:left;padding:6px 8px;border-bottom:1px solid #e5e5e7;vertical-align:top}\

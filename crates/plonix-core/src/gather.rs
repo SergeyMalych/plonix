@@ -587,6 +587,9 @@ pub fn apply(user: &mut SavedUser, found: &FoundSession, now: i64) -> usize {
             continue;
         }
         match c.kind {
+            // What a saved user cannot hold is left out rather than failing the save.
+            Kind::Cookie if user.cookies.len() >= crate::users::MAX_COOKIES && !user.cookies.iter().any(|x| x.name == c.name) => continue,
+            Kind::Header if user.scoped.len() >= crate::users::MAX_HEADERS && !user.scoped.iter().any(|s| s.name.eq_ignore_ascii_case(&c.name) && s.host == c.host && s.path == c.path) => continue,
             Kind::Cookie => {
                 match user.cookies.iter_mut().find(|x| x.name == c.name && (x.domain == c.host || x.domain.is_empty() || !x.live(now))) {
                     Some(x) => *x = Cookie { name: c.name.clone(), value: c.value.clone(), domain: c.host.clone(), expires: None },

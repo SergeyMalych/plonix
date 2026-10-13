@@ -1779,12 +1779,53 @@ function prettyBody(text, contentType) {
   const ct = contentType || '';
   const t = text.trim();
   if (/json/.test(ct) || /^[[{]/.test(t)) {
-    try {
-      return JSON.stringify(JSON.parse(t), null, 2);
-    } catch (_) {}
+    const p = jsonLayout(t, 2);
+    if (p != null) return p;
   }
   if (/x-www-form-urlencoded/.test(ct) && t.includes('&') && !/\s/.test(t)) return t.split('&').join('\n&');
   return null;
+}
+
+/** JSON with its spacing redone (indent 0 packs it onto one line). Only the
+ *  whitespace between tokens changes: values are never re-read, so a number
+ *  like 12345678901234567890 or 1.0 stays exactly as written. Null when the
+ *  text is not JSON. */
+function jsonLayout(text, indent) {
+  try {
+    JSON.parse(text);
+  } catch (_) {
+    return null;
+  }
+  let out = '';
+  let depth = 0;
+  const nl = () => (indent ? '\n' + ' '.repeat(indent * depth) : '');
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"') {
+      let j = i + 1;
+      while (text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
+      out += text.slice(i, j + 1);
+      i = j;
+    } else if (c === ' ' || c === '\t' || c === '\n' || c === '\r') {
+      continue;
+    } else if (c === '{' || c === '[') {
+      let j = i + 1;
+      while (/\s/.test(text[j])) j++;
+      if (text[j] === (c === '{' ? '}' : ']')) {
+        out += c + text[j];
+        i = j;
+      } else {
+        depth++;
+        out += c + nl();
+      }
+    } else if (c === '}' || c === ']') {
+      depth--;
+      out += nl() + c;
+    } else if (c === ',') out += ',' + nl();
+    else if (c === ':') out += indent ? ': ' : ':';
+    else out += c;
+  }
+  return out;
 }
 
 /** The view everywhere a request or response is shown: laid out (true) or as captured. */
