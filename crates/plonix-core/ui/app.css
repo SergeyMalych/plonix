@@ -1822,7 +1822,7 @@ iframe.tourreport { display: block; width: 100%; height: min(52vh, 440px); borde
 .btn.xs { padding: 2px 8px; font-size: 11px; border-radius: 6px; }
 .usgrid { display: flex; flex-direction: column; padding: 4px 0; }
 .usrow { display: grid; grid-template-columns: minmax(70px, 1fr) minmax(100px, 2.2fr) minmax(70px, 1fr) minmax(64px, 118px) 62px 26px; gap: 6px; align-items: center; padding: 3px 12px; }
-.usrow.hdr { grid-template-columns: minmax(120px, 1fr) minmax(200px, 3fr) 26px; }
+.usrow.hdr { grid-template-columns: minmax(90px, 1fr) minmax(140px, 2.4fr) minmax(110px, 1.3fr) minmax(70px, .8fr) 26px; }
 .usrow.head { padding-top: 4px; padding-bottom: 2px; }
 .usrow.head span { font-size: 10px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--fg-3); }
 .usrow input { min-width: 0; height: 26px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--surface-2); padding: 0 7px; font-size: 11.5px; }
@@ -1837,5 +1837,37 @@ iframe.tourreport { display: block; width: 100%; height: min(52vh, 440px); borde
 .uscheck input { position: relative; top: 2px; }
 .usfoot { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
 .usfoot .spacer { flex: 1; }
+/* Users found in traffic */
+.ushd { display: flex; align-items: center; gap: 6px; margin: 12px 4px 4px; padding-top: 10px; border-top: 1px solid var(--line-2); font-size: 10px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--fg-3); }
+.ushd .n { background: var(--ok-soft); color: var(--ok); border-radius: 8px; padding: 0 6px; letter-spacing: 0; }
+.usnone { font-size: 11px; line-height: 1.45; padding: 2px 8px; }
+.ubadge.found { background: var(--ok-soft); color: var(--ok); box-shadow: inset 0 0 0 1.5px var(--ok); font-size: 12px; }
+.ubadge.found.lg { font-size: 18px; }
+.ustag.new { background: var(--ok-soft); color: var(--ok); justify-self: start; }
+.fdtitle { font-size: 16px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fdsub { font-size: 12px; }
+.fdpick { height: 26px; font-size: 12px; max-width: 180px; }
+.fdnote { font-size: 12px; line-height: 1.5; color: var(--fg-2); max-width: 760px; }
+.fdgrid { display: flex; flex-direction: column; padding: 4px 0; }
+.fdrow { display: grid; grid-template-columns: 88px minmax(90px, 1fr) minmax(110px, 1.4fr) minmax(150px, 2fr) 78px 52px; gap: 8px; align-items: center; padding: 5px 12px; font-size: 12px; border-top: 1px solid var(--line-2); }
+.fdrow.head { border-top: 0; padding-top: 4px; padding-bottom: 3px; }
+.fdrow.head span { font-size: 10px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--fg-3); }
+.fdrow > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fdrow.saved .fdname, .fdrow.saved .fdval, .fdrow.saved .fdwhere { color: var(--fg-3); }
+.fdkind { font-size: 11px; color: var(--fg-2); }
+.fdval { color: var(--fg-2); font-size: 11.5px; }
+.fdwhere b { font-weight: 600; }
+.fdpath { margin-left: 1px; padding: 0 5px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); font-family: var(--mono); font-size: 11px; }
+.fdseen, .fdhas { font-size: 11px; }
+.fdelse { padding: 8px 12px; border-top: 1px solid var(--line-2); font-size: 11.5px; }
+.fdbanner { display: flex; align-items: center; gap: 9px; background: var(--ok-soft); border: 1px solid color-mix(in srgb, var(--ok) 30%, transparent); border-radius: 8px; padding: 7px 10px 7px 12px; font-size: 12px; }
+.fdbtext { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-2); }
+.fdbtext b { color: var(--fg); font-weight: 600; }
+@media (max-width: 1000px) {
+  .fdrow { grid-template-columns: 76px minmax(80px, 1fr) minmax(130px, 2fr) 46px; }
+  .fdrow > :nth-child(3), .fdrow > :nth-child(5) { display: none; }
+  .fdetail .ushead { flex-wrap: wrap; }
+  .fdetail .ushead .usnames { flex: 1 1 calc(100% - 50px); }
+}
 :root[data-density="roomy"] .usrow { padding: 5px 14px; }
 :root[data-density="roomy"] .usrow input { height: 30px; }

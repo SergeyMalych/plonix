@@ -29,6 +29,7 @@ const MAX_HEADER_VALUE: usize = 8_192;
 pub const MAX_COOKIES: usize = 100;
 const MAX_COOKIE_NAME: usize = 200;
 const MAX_COOKIE_VALUE: usize = 4_096;
+const MAX_PATH: usize = 512;
 
 /// The request headers stripped when a request is sent with no user (the
 /// "signed out" identity), and the ones a saved user replaces rather than
@@ -59,6 +60,12 @@ pub struct SavedUser {
     /// given here is split into [`Self::cookies`] when the user is saved.
     #[serde(default)]
     pub headers: Headers,
+    /// Headers sent only to one part of an application: a large app may
+    /// sign its API, its uploads and its back office with different tokens.
+    /// Where one applies, it wins over a header of the same name in
+    /// [`Self::headers`].
+    #[serde(default)]
+    pub scoped: Vec<ScopedHeader>,
     /// The user's cookies, sent as one `Cookie` header.
     #[serde(default)]
     pub cookies: Vec<Cookie>,
@@ -98,6 +105,39 @@ impl Cookie {
     }
 }
 
+/// A header a saved user sends only to one host (and its subdomains), and,
+/// with a path, only to requests under that path.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ScopedHeader {
+    pub name: String,
+    pub value: String,
+    pub host: String,
+    /// A path prefix such as `/v2/seller`, matched by whole segments. Empty
+    /// means the whole host.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub path: String,
+}
+
+impl ScopedHeader {
+    pub fn applies(&self, host: &str, path: &str) -> bool {
+        let h = self.host.as_str();
+        let host_ok = host.eq_ignore_ascii_case(h) || host.to_ascii_lowercase().ends_with(&format!(".{h}"));
+        host_ok && path_under(path, &self.path)
+    }
+
+    /// How narrowly it applies: a longer path, then an exact host, wins.
+    fn reach(&self) -> (usize, usize) {
+        (self.path.trim_end_matches('/').len(), self.host.len())
+    }
+}
+
+/// Whether `path` lies under `prefix`, by whole segments: `/v2/seller`
+/// holds `/v2/seller` and `/v2/seller/payouts`, not `/v2/sellers`.
+pub fn path_under(path: &str, prefix: &str) -> bool {
+    let p = prefix.trim_end_matches('/');
+    p.is_empty() || path == p || path.strip_prefix(p).is_some_and(|rest| rest.starts_with('/') || rest.starts_with('?'))
+}
+
 /// How an exchange sent as a saved user says so in its `replaced` notes,
 /// followed by the user's name.
 pub const SENT_AS: &str = "sent as saved user: ";
@@ -108,11 +148,29 @@ pub fn now_secs() -> i64 {
 }
 
 impl SavedUser {
-    /// The headers a request to `host` carries when sent as this user: its
-    /// own headers, then one `Cookie` header with its live cookies for that
-    /// host. The caller removes the request's own auth headers first.
-    pub fn request_headers(&self, host: &str, now: i64) -> Headers {
-        let mut out = self.headers.clone();
+    /// The user's headers (not cookies) for a request to `host` at `path`:
+    /// the narrowest scoped header of each name that applies there, then the
+    /// user's other headers.
+    pub fn headers_for(&self, host: &str, path: &str) -> Headers {
+        let mut picked: Vec<&ScopedHeader> = vec![];
+        for sh in self.scoped.iter().filter(|sh| sh.applies(host, path)) {
+            match picked.iter_mut().find(|p| p.name.eq_ignore_ascii_case(&sh.name)) {
+                Some(p) if sh.reach() > p.reach() => *p = sh,
+                Some(_) => {}
+                None => picked.push(sh),
+            }
+        }
+        let mut out: Headers = self.headers.iter().filter(|(k, _)| !picked.iter().any(|p| p.name.eq_ignore_ascii_case(k))).cloned().collect();
+        out.extend(picked.into_iter().map(|p| (p.name.clone(), p.value.clone())));
+        out
+    }
+
+    /// The headers a request to `host` at `path` carries when sent as this
+    /// user: its headers for that part of the application, then one `Cookie`
+    /// header with its live cookies for that host. The caller removes the
+    /// request's own auth headers first.
+    pub fn request_headers(&self, host: &str, path: &str, now: i64) -> Headers {
+        let mut out = self.headers_for(host, path);
         let jar: Vec<String> =
             self.cookies.iter().filter(|c| c.live(now) && c.sent_to(host)).map(|c| format!("{}={}", c.name, c.value)).collect();
         if !jar.is_empty() {
@@ -126,9 +184,9 @@ impl SavedUser {
     /// are, and the user's headers and live cookies fill in only what it did
     /// not send. So a window opened for a user with saved cookies starts
     /// signed in, and signing in there replaces them.
-    pub fn window_headers(&self, host: &str, sent: &Headers, now: i64) -> Headers {
+    pub fn window_headers(&self, host: &str, path: &str, sent: &Headers, now: i64) -> Headers {
         let mut out = sent.clone();
-        for (k, v) in &self.headers {
+        for (k, v) in &self.headers_for(host, path) {
             if !out.iter().any(|(o, _)| o.eq_ignore_ascii_case(k)) {
                 out.push((k.clone(), v.clone()));
             }
@@ -155,7 +213,7 @@ impl SavedUser {
     /// such as a bearer token the page keeps in local storage. So the Bench,
     /// the access check and Scans send what the window sends. Returns whether
     /// anything changed.
-    pub fn learn_sent(&mut self, host: &str, sent: &[(String, String)], now: i64) -> bool {
+    pub fn learn_sent(&mut self, host: &str, path: &str, sent: &[(String, String)], now: i64) -> bool {
         let mut changed = false;
         for (k, v) in sent {
             if k.eq_ignore_ascii_case("cookie") {
@@ -185,6 +243,15 @@ impl SavedUser {
                     }
                 }
             } else if is_auth_header(k) && !k.is_empty() && k.len() <= MAX_HEADER_NAME && k.bytes().all(is_header_name_byte) && v.len() <= MAX_HEADER_VALUE {
+                // A token for one part of the application stays with that part.
+                let narrow = self.scoped.iter_mut().filter(|sh| sh.name.eq_ignore_ascii_case(k) && sh.applies(host, path)).max_by_key(|sh| sh.reach());
+                if let Some(sh) = narrow {
+                    if sh.value != *v {
+                        sh.value = v.clone();
+                        changed = true;
+                    }
+                    continue;
+                }
                 let room = self.headers.len() < MAX_HEADERS;
                 match self.headers.iter_mut().find(|(h, _)| h.eq_ignore_ascii_case(k)) {
                     Some((_, old)) if old != v => {
@@ -363,6 +430,42 @@ pub fn check(users: &[SavedUser]) -> Result<Vec<SavedUser>, String> {
             }
             headers.push((k.to_string(), v.clone()));
         }
+        if u.scoped.len() > MAX_HEADERS {
+            return Err(format!("{name}: at most {MAX_HEADERS} headers for parts of the application"));
+        }
+        let mut scoped: Vec<ScopedHeader> = Vec::with_capacity(u.scoped.len());
+        for sh in &u.scoped {
+            let k = sh.name.trim();
+            if k.is_empty() {
+                continue;
+            }
+            if k.len() > MAX_HEADER_NAME || !k.bytes().all(is_header_name_byte) {
+                return Err(format!("{name}: `{}` is not a valid header name", clean(k, 40)));
+            }
+            if sh.value.len() > MAX_HEADER_VALUE || sh.value.bytes().any(|b| b == b'\r' || b == b'\n') {
+                return Err(format!("{name}: the value of `{k}` is too long or contains a line break"));
+            }
+            let host = sh.host.trim().trim_start_matches('.').to_ascii_lowercase();
+            if !host.bytes().all(|b| b.is_ascii_alphanumeric() || b"-.:[]".contains(&b)) {
+                return Err(format!("{name}: `{}` is not a valid host for `{k}`", clean(&host, 40)));
+            }
+            let path = sh.path.trim();
+            if path.len() > MAX_PATH || (!path.is_empty() && !path.starts_with('/')) || path.bytes().any(|b| b.is_ascii_control() || b == b' ') {
+                return Err(format!("{name}: `{}` is not a valid path for `{k}`", clean(path, 40)));
+            }
+            let path = if path == "/" { "" } else { path.trim_end_matches('/') };
+            if host.is_empty() && path.is_empty() {
+                // Applies everywhere: an ordinary header.
+                headers.retain(|(h, _)| !h.eq_ignore_ascii_case(k));
+                headers.push((k.to_string(), sh.value.clone()));
+                continue;
+            }
+            if host.is_empty() {
+                return Err(format!("{name}: `{k}` needs a host to go with its path"));
+            }
+            scoped.retain(|x| !(x.name.eq_ignore_ascii_case(k) && x.host == host && x.path == path));
+            scoped.push(ScopedHeader { name: k.to_string(), value: sh.value.clone(), host, path: path.to_string() });
+        }
         let mut user = SavedUser { headers, cookies: u.cookies.clone(), ..u.clone() };
         user.fold_cookie_header();
         if user.cookies.len() > MAX_COOKIES {
@@ -390,7 +493,7 @@ pub fn check(users: &[SavedUser]) -> Result<Vec<SavedUser>, String> {
             }
         }
         let id = make_id(&u.id, name, &out);
-        out.push(SavedUser { id, name: name.to_string(), note: u.note.trim().to_string(), headers: user.headers, cookies, keep_fresh: u.keep_fresh });
+        out.push(SavedUser { id, name: name.to_string(), note: u.note.trim().to_string(), headers: user.headers, scoped, cookies, keep_fresh: u.keep_fresh });
     }
     Ok(out)
 }
@@ -433,6 +536,7 @@ mod tests {
             name: name.into(),
             note: String::new(),
             headers: headers.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            scoped: vec![],
             cookies: vec![],
             keep_fresh: true,
         }
@@ -461,9 +565,9 @@ mod tests {
             ],
             ..u("A", &[("Authorization", "Bearer t")])
         };
-        let h = user.request_headers("api.shop.test", 100);
+        let h = user.request_headers("api.shop.test", "/", 100);
         assert_eq!(h, vec![("Authorization".to_string(), "Bearer t".to_string()), ("Cookie".to_string(), "s=1; cart=9".to_string())]);
-        assert_eq!(user.request_headers("x.test", 10)[1].1, "s=1; old=x");
+        assert_eq!(user.request_headers("x.test", "/", 10)[1].1, "s=1; old=x");
     }
 
     #[test]
@@ -474,10 +578,10 @@ mod tests {
         };
         let hv = |pairs: &[(&str, &str)]| -> Headers { pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect() };
         // Nothing of its own yet: the window goes out with the user's session.
-        let fresh = user.window_headers("shop.test", &hv(&[("Accept", "*/*")]), 100);
+        let fresh = user.window_headers("shop.test", "/", &hv(&[("Accept", "*/*")]), 100);
         assert_eq!(fresh, hv(&[("Accept", "*/*"), ("Authorization", "Bearer saved"), ("X-Team", "red"), ("Cookie", "s=saved; theme=dark")]));
         // Signed in there: its own session wins, the user only fills the gaps.
-        let own = user.window_headers("shop.test", &hv(&[("cookie", "s=window"), ("authorization", "Bearer window")]), 100);
+        let own = user.window_headers("shop.test", "/", &hv(&[("cookie", "s=window"), ("authorization", "Bearer window")]), 100);
         assert_eq!(own, hv(&[("cookie", "s=window; theme=dark"), ("authorization", "Bearer window"), ("X-Team", "red")]));
     }
 
@@ -490,10 +594,10 @@ mod tests {
             ("X-Api-Key".into(), "k1".into()),
             ("Accept".into(), "*/*".into()),
         ];
-        assert!(user.learn_sent("shop.test", &sent, 100));
+        assert!(user.learn_sent("shop.test", "/", &sent, 100));
         assert_eq!(user.cookies, vec![c("s", "new"), c("gone", "back"), Cookie { domain: "shop.test".into(), ..c("js", "1") }]);
         assert_eq!(user.headers, vec![("Authorization".to_string(), "Bearer fresh".to_string()), ("X-Api-Key".to_string(), "k1".to_string())]);
-        assert!(!user.learn_sent("shop.test", &sent, 100), "nothing new the second time");
+        assert!(!user.learn_sent("shop.test", "/", &sent, 100), "nothing new the second time");
     }
 
     #[test]
@@ -510,6 +614,31 @@ mod tests {
         assert!(!user.cookies[1].live(1000));
         assert_eq!(user.cookies[2], Cookie { domain: "shop.test".into(), expires: Some(1060), ..c("fresh", "y") });
         assert!(!user.absorb("www.shop.test", &resp[..1], 1000), "the same value again changes nothing");
+    }
+
+    #[test]
+    fn scoped_headers_go_only_to_their_part_of_the_app() {
+        let sh = |name: &str, value: &str, host: &str, path: &str| ScopedHeader { name: name.into(), value: value.into(), host: host.into(), path: path.into() };
+        let mut user = SavedUser {
+            scoped: vec![sh("Authorization", "Bearer customer", "api.shop.test", ""), sh("Authorization", "Bearer seller", "api.shop.test", "/v2/seller"), sh("X-Upload-Token", "up1", "uploads.test", "")],
+            ..u("A", &[("Authorization", "Bearer everywhere")])
+        };
+        let auth = |user: &SavedUser, host: &str, path: &str| user.request_headers(host, path, 0).into_iter().filter(|(k, _)| k == "Authorization").map(|(_, v)| v).collect::<Vec<_>>();
+        assert_eq!(auth(&user, "api.shop.test", "/v1/me"), ["Bearer customer"]);
+        assert_eq!(auth(&user, "api.shop.test", "/v2/seller/payouts"), ["Bearer seller"]);
+        assert_eq!(auth(&user, "api.shop.test", "/v2/sellers"), ["Bearer customer"]);
+        assert_eq!(auth(&user, "www.shop.test", "/"), ["Bearer everywhere"]);
+        assert!(!user.request_headers("api.shop.test", "/", 0).iter().any(|(k, _)| k == "X-Upload-Token"));
+        // A window refreshing its token updates the one for that part only.
+        assert!(user.learn_sent("api.shop.test", "/v2/seller/listings", &[("Authorization".into(), "Bearer seller2".into())], 0));
+        assert_eq!(auth(&user, "api.shop.test", "/v2/seller"), ["Bearer seller2"]);
+        assert_eq!(auth(&user, "api.shop.test", "/v1/me"), ["Bearer customer"]);
+        // Saved and tidied: a scoped header with no host or path is an ordinary one.
+        let out = check(&[SavedUser { scoped: vec![sh("X-Team", "red", "", "/"), sh("Authorization", "Bearer s", "API.shop.test", "/v2/seller/")], ..u("B", &[]) }]).unwrap();
+        assert_eq!(out[0].headers, vec![("X-Team".to_string(), "red".to_string())]);
+        assert_eq!(out[0].scoped, vec![sh("Authorization", "Bearer s", "api.shop.test", "/v2/seller")]);
+        assert!(check(&[SavedUser { scoped: vec![sh("A", "1", "", "/x")], ..u("C", &[]) }]).unwrap_err().contains("needs a host"));
+        assert!(check(&[SavedUser { scoped: vec![sh("A", "1", "h.test", "x")], ..u("C", &[]) }]).unwrap_err().contains("not a valid path"));
     }
 
     #[test]

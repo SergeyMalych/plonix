@@ -406,6 +406,14 @@ impl Store {
         rows.collect::<Result<_, _>>().map_err(Into::into)
     }
 
+    /// The most recent exchanges, newest first.
+    pub fn recent_exchanges(&self, limit: usize) -> Result<Vec<Exchange>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(&format!("SELECT {EXCHANGE_COLS} FROM exchanges ORDER BY id DESC LIMIT ?1"))?;
+        let rows = stmt.query_map(params![limit as i64], row_to_exchange)?;
+        rows.collect::<Result<_, _>>().map_err(Into::into)
+    }
+
     /// A host's most recent exchanges, newest first.
     pub fn exchanges_for_host(&self, host: &str, limit: usize) -> Result<Vec<Exchange>> {
         let conn = self.conn.lock().unwrap();
@@ -648,6 +656,19 @@ impl Store {
         self.set_view_state("acting_user", &serde_json::json!({ "id": id }))
     }
 
+    /// Updates one saved user under the same lock that keeps its cookies
+    /// fresh, so a session found in traffic is never lost to a cookie the
+    /// server set meanwhile. Nothing is saved when `f` turns the change down.
+    pub fn update_saved_users<T, E>(&self, f: impl FnOnce(&mut Vec<crate::users::SavedUser>) -> Result<std::result::Result<T, E>>) -> Result<std::result::Result<T, E>> {
+        let _jar = USERS.lock().unwrap();
+        let mut users = self.saved_users()?;
+        let out = f(&mut users)?;
+        if out.is_ok() {
+            self.set_view_state("users", &serde_json::json!({ "users": users }))?;
+        }
+        Ok(out)
+    }
+
     /// Takes the cookies a server set, in answer to a request sent to `host`
     /// as saved user `id`, into that user. Does nothing for a user that is
     /// gone or does not keep its cookies fresh.
@@ -667,11 +688,11 @@ impl Store {
     /// Takes the session a saved user's own browser window sent to `host`
     /// into that user (see [`crate::users::SavedUser::learn_sent`]). Does
     /// nothing for a user that is gone or does not keep its cookies fresh.
-    pub fn learn_sent(&self, id: &str, host: &str, sent: &[(String, String)]) -> Result<()> {
+    pub fn learn_sent(&self, id: &str, host: &str, path: &str, sent: &[(String, String)]) -> Result<()> {
         let _jar = USERS.lock().unwrap();
         let mut users = self.saved_users()?;
         let Some(u) = users.iter_mut().find(|u| u.id == id && u.keep_fresh) else { return Ok(()) };
-        if u.learn_sent(host, sent, crate::users::now_secs()) {
+        if u.learn_sent(host, path, sent, crate::users::now_secs()) {
             self.set_view_state("users", &serde_json::json!({ "users": users }))?;
         }
         Ok(())

@@ -29,6 +29,7 @@ pub mod demo;
 pub mod detect;
 pub mod dialogs;
 pub mod engine;
+pub mod gather;
 pub mod exclude;
 pub mod insight;
 pub mod listpack;

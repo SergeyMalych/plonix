@@ -1164,6 +1164,9 @@ function rowMenu(e, ex) {
   const idT = idTargetOf(ex);
   const actions = [{ label: 'Send to Bench', run: () => sendToBench(ex.id) }, { label: 'Copy as curl', run: () => copyCurl(ex.id) }];
   if (sessionGrant(ex)) actions.push({ label: 'Save login as a user', run: () => saveLoginAsUser(ex) });
+  if (decide(ex.host) === 'accepted' && authHeadersOf(ex.req_headers || []).length) {
+    actions.push({ label: 'Keep this session as a user…', run: () => keepSessionOf(ex) });
+  }
   if (decide(ex.host) === 'accepted') {
     if (idT) actions.push({ label: 'Check this id across users', run: () => checkIdAcrossUsers(ex) });
     actions.push({ label: 'Replay signed out', run: () => replaySignedOut(ex) });

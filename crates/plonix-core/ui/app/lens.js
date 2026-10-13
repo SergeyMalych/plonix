@@ -510,8 +510,21 @@ async function drawLensSuggestions(slot, ex, list) {
   if (cors) {
     chips.push(h('button', { class: 'chip k-warn', title: cors.note + ' Record it as a finding.', onclick: () => findingForm(null, [ex.id], `Permissive cross-origin policy on ${ex.method} ${ex.path}`, { severity: cors.severity, note: cors.note }) }, h('span', { text: '+ Finding: open CORS policy' })));
   }
+  // The session this request carried has tokens no saved user sends yet:
+  // offer to keep them with the user they belong to, or as a new one.
+  const found = inScope && toolOn('saved-users') && authHeadersOf(ex.req_headers || []).length ? await foundFor(ex.id) : null;
+  const owner = found && found.user && userById(found.user);
+  if (found) {
+    chips.push(
+      h(
+        'button',
+        { class: 'chip k-user', title: `${owner ? `This is ${owner.name}’s session, and it sends tokens they don’t have yet` : 'No saved user has this session yet'}. See what it sends and where, then keep it.`, onclick: () => reviewFound(found.key) },
+        h('span', { text: owner ? `Add ${plural(found.fresh, 'token')} to ${userShortName(owner)}` : 'Save this session as a user' }),
+      ),
+    );
+  }
   // A login handed back a session — offer to keep it as a saved user.
-  if (sessionGrant(ex)) {
+  else if (sessionGrant(ex)) {
     chips.push(h('button', { class: 'chip k-user', title: 'Save the session this response just set as a reusable user, ready in the Bench “As…” picker and the Access check.', onclick: () => saveLoginAsUser(ex) }, h('span', { text: 'Save login as a user' })));
   }
   if (inScope) {

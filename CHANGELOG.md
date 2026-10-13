@@ -4,6 +4,9 @@ What changed in each Plonix release. The newest release is at the top.
 
 ## [Unreleased]
 
+### Added
+- **Users found in traffic.** The Users screen lists the sessions in captured traffic, one per person, with each cookie and token and the part of the app it is sent to (domain, host, path). Add one to the saved user it belongs to, or save it as a new user; the Lens and the Traffic row menu offer the same. Saved users can now send a header only to one host or path, so one user carries different tokens for different parts of an app.
+
 ## [0.1.5] - 2026-10-11
 
 ### Added
