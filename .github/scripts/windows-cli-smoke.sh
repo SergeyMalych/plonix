@@ -13,7 +13,8 @@ step() { echo; echo "::group::$1"; shift; if timeout 120 "$@" </dev/null; then e
 
 "$(command -v python3 || command -v python)" -m http.server 18081 --bind 127.0.0.1 >/dev/null 2>&1 &
 WEB=$!
-sleep 2
+# Wait for the test server itself, so a slow start is not mistaken for a proxy error.
+for _ in $(seq 30); do curl -s -o /dev/null --max-time 2 http://127.0.0.1:18081/ && break; sleep 1; done
 
 step "version"        "$P" --version
 step "projects new"   "$P" projects new smoke
