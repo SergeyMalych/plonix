@@ -168,6 +168,7 @@ function renderShell() {
           h('span', { class: 'nl', text: 'Collapse' }),
         ),
       ),
+      railGrip(),
       h('section', { class: 'main', id: 'main' }),
     ),
     h(
@@ -179,6 +180,7 @@ function renderShell() {
       h('div', { class: 'seg' }, 'Plonix', h('b', { id: 'f-ver' })),
     ),
   );
+  applyRailWidth(store('plonix.railw'));
   updateToggle();
   railShade();
   updateChrome();
@@ -206,6 +208,64 @@ function toggleSidebar() {
   if (rail) rail.classList.toggle('collapsed', S.railCollapsed);
   updateToggle();
   setTimeout(railShade, 200);
+}
+
+/** The sidebar's right edge drags its width. Dragged narrower than it can
+ *  show its names, it folds to icons; dragged out from icons, it opens again.
+ *  The width is remembered; a double-click goes back to the usual width. */
+const RAIL_MIN = 160;
+const RAIL_MAX = 360;
+const RAIL_FOLD = 120;
+function applyRailWidth(px) {
+  const rail = $('#rail');
+  if (!rail) return;
+  if (px) rail.style.setProperty('--railw', px + 'px');
+  else rail.style.removeProperty('--railw');
+}
+function setRailCollapsed(on) {
+  if (S.railCollapsed === on) return;
+  S.railCollapsed = on;
+  store('plonix.rail', on ? 'collapsed' : null);
+  $('#rail')?.classList.toggle('collapsed', on);
+  updateToggle();
+}
+function railGrip() {
+  return h('div', {
+    class: 'railgrip',
+    title: 'Drag to resize the sidebar · drag far left to fold it · double-click to reset',
+    ondblclick: () => {
+      store('plonix.railw', null);
+      applyRailWidth(null);
+      setRailCollapsed(false);
+      setTimeout(railShade, 200);
+    },
+    onmousedown: (e) => {
+      const rail = $('#rail');
+      if (!rail) return;
+      e.preventDefault();
+      const startX = e.clientX;
+      const startW = rail.getBoundingClientRect().width;
+      document.body.classList.add('colresize');
+      rail.classList.add('sizing');
+      const move = (ev) => {
+        const w = startW + ev.clientX - startX;
+        if (w < RAIL_FOLD) return setRailCollapsed(true);
+        setRailCollapsed(false);
+        const px = Math.round(Math.max(RAIL_MIN, Math.min(RAIL_MAX, w)));
+        applyRailWidth(px);
+        store('plonix.railw', px);
+      };
+      const up = () => {
+        document.body.classList.remove('colresize');
+        rail.classList.remove('sizing');
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+        railShade();
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    },
+  });
 }
 
 function updateToggle() {
