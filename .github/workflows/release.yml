@@ -133,10 +133,19 @@ jobs:
           path: Plonix-macOS.*
           if-no-files-found: error
 
-  # The Windows installer (NSIS). It is not code-signed yet, so Windows
-  # SmartScreen asks before it runs the first time; the notes say what to click.
+  # The Windows installer (NSIS). Once the SignPath secrets below are set it is
+  # code-signed through SignPath before it is published; until then it ships
+  # unsigned and the notes say what to click past SmartScreen.
+  #   secrets.SIGNPATH_API_TOKEN          API token of the SignPath CI user
+  #   vars.SIGNPATH_ORGANIZATION_ID       organization id in SignPath
+  #   vars.SIGNPATH_PROJECT_SLUG          project slug (default: plonix)
+  #   vars.SIGNPATH_SIGNING_POLICY_SLUG   signing policy slug (default: release-signing)
   windows:
     runs-on: windows-latest
+    outputs:
+      signed: ${{ steps.codesign.outputs.signed }}
+    env:
+      SIGNPATH: ${{ secrets.SIGNPATH_API_TOKEN != '' && vars.SIGNPATH_ORGANIZATION_ID != '' }}
     defaults:
       run:
         shell: bash
@@ -161,20 +170,51 @@ jobs:
           cp target/release/plonix.exe "crates/plonix-app/binaries/plonix-cli-$host.exe"
       - name: Build the installer
         working-directory: crates/plonix-app
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          updater=false
-          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then updater=true; fi
-          npx --yes @tauri-apps/cli@2 build --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":'"$updater"'}}' -- --locked
+        run: npx --yes @tauri-apps/cli@2 build --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}' -- --locked
       - name: Package
         run: |
           dir=target/release/bundle/nsis
           ls -l "$dir"
-          setup=$(ls "$dir"/*-setup.exe)
-          cp "$setup" Plonix-Windows-setup.exe
-          if [ -f "$setup.sig" ]; then cp "$setup.sig" Plonix-Windows-setup.exe.sig; fi
+          mkdir -p unsigned
+          cp "$(ls "$dir"/*-setup.exe)" unsigned/Plonix-Windows-setup.exe
+      - name: Keep the unsigned installer for SignPath
+        id: unsigned
+        if: env.SIGNPATH == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-unsigned
+          path: unsigned/Plonix-Windows-setup.exe
+          if-no-files-found: error
+      - name: Code-sign the installer
+        if: env.SIGNPATH == 'true'
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'plonix' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+      - name: Check the signature
+        id: codesign
+        shell: pwsh
+        run: |
+          if ($env:SIGNPATH -ne 'true') { Copy-Item unsigned/Plonix-Windows-setup.exe .; "signed=false" >> $env:GITHUB_OUTPUT; exit 0 }
+          Copy-Item signed/Plonix-Windows-setup.exe .
+          $sig = Get-AuthenticodeSignature Plonix-Windows-setup.exe
+          $sig | Format-List Status, StatusMessage, SignerCertificate
+          if ($sig.Status -ne 'Valid') { Write-Error "The installer's signature is not valid: $($sig.StatusMessage)"; exit 1 }
+          "signed=true" >> $env:GITHUB_OUTPUT
+      # The update signature covers the final bytes, so it is made after code signing.
+      - name: Sign the update package
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then exit 0; fi
+          npx --yes @tauri-apps/cli@2 signer sign Plonix-Windows-setup.exe
+          ls -l Plonix-Windows-setup.exe*
       - uses: actions/upload-artifact@v4
         with:
           name: windows
@@ -186,6 +226,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NOTARIZED: ${{ needs.macos.outputs.notarized }}
+      WINDOWS_SIGNED: ${{ needs.windows.outputs.signed }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -225,12 +266,14 @@ jobs:
           Or, in Terminal: `xattr -dr com.apple.quarantine /Applications/Plonix.app`
           NOTES
           fi
-          cat >> notes.md <<'NOTES'
+          if [ "$WINDOWS_SIGNED" != true ]; then
+            cat >> notes.md <<'NOTES'
 
           ### Installing on Windows
 
           Run `Plonix-Windows-setup.exe`. The installer is not code-signed yet, so Windows SmartScreen may say it protected your PC: click **More info**, then **Run anyway**.
           NOTES
+          fi
           cat notes.md
       - name: Write latest.json
         if: env.UPDATER == 'true'

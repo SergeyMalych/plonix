@@ -8,6 +8,7 @@ This page is for maintainers. It covers the one-time setup that lets CI sign and
 - [One-time setup](#one-time-setup)
 - [GitHub secrets](#github-secrets)
 - [Cutting a release](#cutting-a-release)
+- [Windows code signing](#windows-code-signing)
 - [Signing by hand](#signing-by-hand)
 - [Troubleshooting](#troubleshooting)
 
@@ -29,7 +30,7 @@ Where it happens:
 | --- | --- | --- |
 | CI (`.github/workflows/ci.yml`, job `macos-app`) | Pull requests, forks, or no signing secrets | Unsigned `Plonix-macOS` artifact, as before |
 | CI, job `macos-app` | Pushes to `main` with the signing secrets set | Signed, notarized and stapled `Plonix-macOS` artifact; the job fails if any check fails |
-| Release (`.github/workflows/release.yml`) | Pushing a `v*` tag | A GitHub release with `Plonix-macOS.dmg`, `Plonix-macOS.zip`, `Plonix-Windows-setup.exe` and the update packages. The Mac app is signed and notarized when the signing secrets are set (see [Cutting a release](#cutting-a-release)); the Windows installer is not code-signed yet |
+| Release (`.github/workflows/release.yml`) | Pushing a `v*` tag | A GitHub release with `Plonix-macOS.dmg`, `Plonix-macOS.zip`, `Plonix-Windows-setup.exe` and the update packages. The Mac app is signed and notarized when the signing secrets are set (see [Cutting a release](#cutting-a-release)); the Windows installer is code-signed through SignPath when its settings are in place (see [Windows code signing](#windows-code-signing)) |
 
 Secrets are never given to workflows triggered by pull requests from forks, and CI only signs on pushes to `main`, so code from a pull request never runs with the certificate.
 
@@ -153,6 +154,29 @@ Once the signing and notarization secrets are in place, the next push to `main` 
    ```
 
    or simply double-click it: a notarized app opens without the "unidentified developer" warning.
+
+## Windows code signing
+
+The Windows installer is signed for free by SignPath Foundation, which signs open-source projects that build in public CI. Until the settings below exist, the release workflow ships the installer unsigned and the release notes say how to get past SmartScreen.
+
+1. Apply at [signpath.org/apply](https://signpath.org/apply.html). Plonix meets the conditions: Apache-2.0, public repository, releases built by GitHub Actions, and a [code signing policy](code-signing.md) linked from plonix.io.
+2. Once approved, in SignPath: create the project `plonix` linked to this repository (GitHub as a trusted build system), a signing policy `release-signing` that needs manual approval, and this artifact configuration (the workflow uploads a zip holding the installer):
+
+   ```xml
+   <?xml version="1.0" encoding="utf-8"?>
+   <artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+     <zip-file>
+       <pe-file path="Plonix-Windows-setup.exe">
+         <authenticode-sign/>
+       </pe-file>
+     </zip-file>
+   </artifact-configuration>
+   ```
+
+3. Create a CI user in SignPath with submitter rights on the project and copy its API token.
+4. In GitHub, **Settings › Secrets and variables › Actions**: add the secret `SIGNPATH_API_TOKEN`, and the variable `SIGNPATH_ORGANIZATION_ID`. Set `SIGNPATH_PROJECT_SLUG` or `SIGNPATH_SIGNING_POLICY_SLUG` only if you named them differently.
+
+From then on every release sends the installer to SignPath, waits for the request to be approved (up to 10 minutes), checks the Authenticode signature, and only then signs the update package, so updates carry the signed installer. A new certificate can still meet a SmartScreen warning for a while, until enough people have downloaded the signed installer.
 
 ## Signing by hand
 
