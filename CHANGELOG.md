@@ -2,13 +2,20 @@
 
 What changed in each Plonix release. The newest release is at the top.
 
-## [Unreleased]
+## [0.4.1] - 2026-10-13
+
+The release after 0.1.5. The version jumps to 0.4.1; nothing is skipped in between.
 
 ### Added
 - **Users found in traffic.** The Users screen lists the sessions in captured traffic, one per person, with each cookie and token and the part of the app it is sent to (domain, host, path). Add one to the saved user it belongs to, or save it as a new user; the Lens and the Traffic row menu offer the same. Saved users can now send a header only to one host or path, so one user carries different tokens for different parts of an app.
+- **Docs for every tool** on [plonix.io/docs](https://plonix.io/docs): Getting started, the Plonix window, Traffic and the Lens, Scope, the Map, Rules, Saved users and the Access check, Callbacks and Findings, in the Studio look with Try classic. Every page of the website shares one menu: Home, Docs, Analytics and Privacy. Tables fit their content and turn into cards on phones.
 
 ### Changed
 - **Users, Access check and Callbacks are on from the start.** Their screens are in the sidebar on a new install and after updating, with no trip to the Market. Each is still a Market tool: remove it there and it stays off. Callbacks still asks you to install its helper once before it can listen; nothing is downloaded on its own.
+- **Pretty | Raw for requests too.** One switch lays out requests and responses alike: the Lens shows it on both sides (JSON indented, forms one field per line), and the Bench response, run results and Compare follow it. The Bench request has its own Pretty | Raw that lays out its JSON or form body in the editor.
+- **Resizable sidebar.** Drag its right edge to set its width (double-click resets). Dragged narrower than its names, it folds to icons; drag it back out to see them again.
+- **Spotted and decoded values** keep their header and buttons (Copy decoded, Copy value, Find in traffic) in view while only the value scrolls, with a handle underneath to drag its height. The same goes for value cards in the Bench Lens.
+- **Bench History and Compare** each have a handle underneath to drag their height.
 
 ## [0.1.5] - 2026-10-11
 
@@ -177,7 +184,8 @@ The first public release of Plonix for Mac.
 - Crash reports stay on your Mac; Plonix offers to open a prefilled GitHub issue and never sends anything on its own.
 - Documentation at plonix.io/docs.
 
-[Unreleased]: https://github.com/SergeyMalych/plonix/compare/v0.1.4...HEAD
+[0.4.1]: https://github.com/SergeyMalych/plonix/compare/v0.1.5...v0.4.1
+[0.1.5]: https://github.com/SergeyMalych/plonix/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/SergeyMalych/plonix/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/SergeyMalych/plonix/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/SergeyMalych/plonix/compare/v0.1.1...v0.1.2
