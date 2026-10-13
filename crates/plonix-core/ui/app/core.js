@@ -474,7 +474,7 @@ const TOUR_STEPS = [
     target: ['#mkinds', '#main .view'],
     title: 'Market',
     test: 'market',
-    text: 'Extensions, skills, filter packs and word lists, each signed and checked before it installs. Tools such as Saved users and the Access check, which replays requests as each user and signed out, are switched on from here in your own projects.',
+    text: 'Extensions, skills, filter packs and word lists, each signed and checked before it installs. Tools such as Saved users, the Access check and Callbacks come switched on, and can be removed or added back here.',
   },
   {
     view: 'market',

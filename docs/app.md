@@ -6,7 +6,7 @@ Plonix is a native app on macOS and Windows. Double-click it and the Start scree
 
 The sidebar lists the tools, with **Open target** at the top. Under them it shows the scope suggestions waiting on you (accept or reject in one click) and the hosts in scope with their request counts: click one to filter Traffic. **Settings** and **Collapse** stay pinned at the bottom. Collapse the sidebar to icons with ⌃⌘S, or `\` when the window runs in a browser.
 
-Some tools ship off and appear once you install them from the [Market](market.md): Saved users and the Access check ([Users](users.md)), [Callbacks](callbacks.md) and [Programs](programs.md).
+Saved users and the Access check ([Users](users.md)) and [Callbacks](callbacks.md) are Market tools that come switched on; remove one in the [Market](market.md) to hide its screen. [Programs](programs.md) ships off and appears once you install it.
 
 ## Keyboard shortcuts
 

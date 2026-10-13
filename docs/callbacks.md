@@ -2,7 +2,7 @@
 
 Some problems only show when the server reaches out on its own: it fetches a URL you gave it, looks up a host name, or sends mail. **Callbacks** hand out a unique host for each test and list every DNS lookup, HTTP request or mail that later reaches it, next to the test it came from.
 
-Callbacks is a tool you switch on from the [Market](market.md) (under **Tools**). The **Callbacks** tab appears once it is installed.
+Callbacks is a tool from the [Market](market.md) (under **Tools**) that comes switched on, so the **Callbacks** tab is in the sidebar from the start. Remove it in the Market to hide the tab; it stays off until you install it again.
 
 ## Set up
 
