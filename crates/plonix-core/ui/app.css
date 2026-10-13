@@ -57,7 +57,8 @@ code, .mono { font-family: var(--mono); }
 .body { flex: 1; display: flex; min-height: 0; }
 
 /* sidebar: navigation plus live shortcuts; collapses to icons */
-.rail { width: 212px; flex: 0 0 auto; background: var(--chrome-2); border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; padding: 10px 8px 8px; overflow: hidden; transition: width .16s ease; }
+/* --railw is the width dragged with the edge (railGrip in app/shell.js); a window gives it at most a quarter of its width */
+.rail { width: min(var(--railw, 212px), 26vw); flex: 0 0 auto; background: var(--chrome-2); border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; padding: 10px 8px 8px; overflow: hidden; transition: width .16s ease; }
 .navsec { font-size: 10.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3); padding: 12px 8px 4px; white-space: nowrap; }
 .nav { display: flex; flex-direction: column; gap: 1px; }
 .nav button, .opentarget, .railtoggle { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0; background: transparent; padding: 6px 8px; border-radius: 7px; color: var(--fg-2); font-weight: 500; white-space: nowrap; }
@@ -96,6 +97,11 @@ code, .mono { font-family: var(--mono); }
 .railmid.more-below .railmore { display: block; }
 .railtoggle { color: var(--fg-3); font-size: 12px; }
 .rail.collapsed { width: 52px; }
+.rail.sizing { transition: none; }
+/* the sidebar's right edge: a thin strip that drags its width */
+.railgrip { flex: 0 0 auto; width: 7px; margin: 0 -4px 0 -3px; position: relative; z-index: 5; cursor: col-resize; }
+.railgrip::after { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: transparent; transition: background .15s, width .15s; }
+.railgrip:hover::after, .colresize .railgrip::after { left: 2px; width: 3px; background: var(--accent); }
 .rail.collapsed .nl, .rail.collapsed .railsecs, .rail.collapsed .nav button .ct:not(.hot) { display: none; }
 .rail.collapsed .nav button, .rail.collapsed .opentarget, .rail.collapsed .railtoggle { justify-content: center; position: relative; padding: 7px 0; }
 .rail.collapsed .nav button .ct.hot { position: absolute; top: 1px; right: 1px; font-size: 9px; padding: 0 4px; }
@@ -310,6 +316,12 @@ code, .mono { font-family: var(--mono); }
 .lbl .seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 6px; overflow: hidden; }
 .lbl .seg button { border: 0; background: transparent; padding: 1px 7px; font-size: 10.5px; color: var(--fg-3); text-transform: none; letter-spacing: 0; }
 .lbl .seg button.on { background: var(--accent-soft); color: var(--accent); }
+/* Pretty | Raw sits at the right of a label, beside its details when there are any. */
+.lbl > .prettyseg { margin-left: auto; }
+.lbl > .r ~ .prettyseg { margin-left: 0; }
+/* on a narrow Lens the request's details give way first, so its switches stay whole */
+.lbl > .seg { flex: 0 0 auto; }
+.col > .lbl > span.r:not(.seg) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 pre.raw { position: relative; margin: 0; flex: 1; min-height: 0; overflow: auto; padding: 4px 12px 12px; font-family: var(--mono); font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-all; }
 .hl-h { color: var(--accent); font-weight: 650; } .hl-k { color: var(--violet); } .hl-note { color: var(--fg-3); font-style: italic; }
 /* WebSocket messages under a handshake in the lens */
@@ -333,11 +345,22 @@ pre.raw { position: relative; margin: 0; flex: 1; min-height: 0; overflow: auto;
 .spot .sn { font-size: 10px; color: var(--fg-3); }
 .spot:hover { border-color: var(--line); }
 .spot.on { border-color: var(--accent); background: var(--accent-soft); }
-.spotslot { flex: 0 1 auto; min-height: 0; max-height: 60%; overflow: auto; }
-.spotdetail { margin: 0 12px 8px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--surface); overflow: hidden; }
+/* An opened value keeps its header and buttons in view; only .sdbody scrolls.
+   Until its handle is dragged (.sized) it takes up to 60% of the column. */
+.spotslot { flex: 0 1 auto; min-height: 0; max-height: 60%; overflow: hidden; display: flex; flex-direction: column; }
+.spotslot.sized, .selslot.sized { max-height: none; }
+.spotslot > .spots { flex: 0 0 auto; }
+.spotdetail { margin: 0 12px 8px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--surface); overflow: hidden; display: flex; flex-direction: column; flex: 0 1 auto; min-height: 50px; }
+.spotdetail > .sdh { flex: 0 0 auto; }
+.sdbody { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.spotdetail > .hgrip { height: 9px; border-top: 1px solid var(--line-2); background: var(--surface-2); }
 .sdh { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 7px 10px; border-bottom: 1px solid var(--line-2); font-size: 12px; }
 .sdh .muted { font-family: var(--mono); font-size: 11px; }
 .sdact { margin-left: auto; display: flex; gap: 6px; }
+/* an opened value's header stays one line, so its buttons are always in view: where it is named gives way */
+.spotdetail > .sdh { flex-wrap: nowrap; white-space: nowrap; }
+.spotdetail > .sdh .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.spotdetail > .sdh > b, .spotdetail > .sdh .sdact, .spotdetail > .sdh .blx { flex: 0 0 auto; }
 .sdnotes { display: flex; gap: 5px; flex-wrap: wrap; padding: 7px 10px 0; }
 .sdnote { font-size: 10.5px; border-radius: 5px; padding: 1px 6px; background: var(--surface-2); color: var(--fg-2); border: 1px solid var(--line-2); }
 .sdnote.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
@@ -362,7 +385,10 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .qmenu button:hover { background: var(--surface-2); }
 
 .benchlens { flex: 0 0 auto; max-height: 46%; overflow: auto; border-top: 1px solid var(--line-2); background: var(--chrome-2); }
-.benchlens.open { max-height: calc(100% - 140px); border-top: 0; }
+.benchlens.open { max-height: calc(100% - 140px); border-top: 0; display: flex; flex-direction: column; overflow: hidden; }
+/* an open value card: the chips and the card's header stay put, its content scrolls */
+.benchlens.open > .blspots { flex: 0 1 auto; min-height: 34px; overflow: auto; }
+.benchlens.open > .blslot { flex: 1 1 auto; min-height: 92px; display: flex; flex-direction: column; }
 .rcol .hgrip { display: none; background: var(--chrome-2); border-top: 1px solid var(--line-2); }
 .rcol.lensopen .hgrip { display: flex; }
 .hgrip { flex: 0 0 auto; height: 9px; display: flex; align-items: center; justify-content: center; cursor: row-resize; }
@@ -426,7 +452,6 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .hist, .card { border: 1px solid var(--line-2); border-radius: 11px; background: var(--surface); overflow: hidden; }
 .hist { flex: 0 0 auto; }
 .histrows { max-height: min(34vh, 320px); overflow: auto; }
-.hist .hgrip { height: 8px; background: var(--surface-2); }
 .histhead { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line-2); background: var(--surface-2); }
 .histhead .t { font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--fg-3); }
 .histhead .hint { font-size: 11px; color: var(--fg-3); }
@@ -449,7 +474,10 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .cmpcols .cc { min-width: 0; border-left: 1px solid var(--line-2); }
 .cmpcols .cc:first-child { border-left: 0; }
 .cmpcols .cch { font-family: var(--mono); font-size: 11px; padding: 6px 12px; border-bottom: 1px solid var(--line-2); color: var(--fg-2); display: flex; gap: 8px; align-items: center; }
-.cmpcols pre { margin: 0; padding: 6px 0; font-family: var(--mono); font-size: 11px; line-height: 1.55; overflow: auto; max-height: 55vh; }
+.cmpcols pre { margin: 0; padding: 6px 0; font-family: var(--mono); font-size: 11px; line-height: 1.55; overflow: auto; max-height: var(--cmph, 55vh); }
+/* with a dragged height both texts take it, so the handle tracks the mouse */
+.cmpview[style*="--cmph"] .cmpcols pre { height: var(--cmph); }
+.cmpview > .hgrip, .hist > .hgrip { height: 10px; border-top: 1px solid var(--line-2); background: var(--surface-2); }
 .dl { display: block; padding: 0 10px; border-left: 3px solid transparent; white-space: pre-wrap; word-break: break-all; min-height: 1.55em; }
 .dl.add { border-left-color: var(--ok); background: var(--ok-soft); }
 .dl.del { border-left-color: var(--crit); background: var(--crit-soft); }
@@ -611,6 +639,7 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 
 @media (max-width: 900px) {
   .rail { width: 52px; }
+  .railgrip { display: none; }
   .rail .nl, .rail .railsecs, .nav button .ct:not(.hot) { display: none; }
   .nav button, .opentarget, .railtoggle { justify-content: center; position: relative; padding: 7px 0; }
   .nav button .ct.hot { position: absolute; top: 1px; right: 1px; font-size: 9px; padding: 0 4px; }
@@ -1586,7 +1615,7 @@ tr.acnote > td { border-bottom: none; }
 /* Decode a selection in the Lens */
 .inspector .col { position: relative; }
 .lensqbar { top: 34px; right: 12px; }
-.selslot { flex: 0 1 auto; min-height: 0; max-height: 60%; overflow: auto; }
+.selslot { flex: 0 1 auto; min-height: 0; max-height: 60%; overflow: hidden; display: flex; flex-direction: column; }
 .selslot:empty { display: none; }
 .selslot .spotdetail { margin-top: 8px; }
 .selslot .sdv { max-height: none; }
@@ -1648,7 +1677,7 @@ tr.acnote > td { border-bottom: none; }
 :root[data-density="roomy"] .titlebar { height: 44px; padding: 0 18px; }
 :root[data-density="roomy"] .demobar { padding: 10px 52px 10px 18px; gap: 12px; }
 :root[data-density="roomy"] .demobar .x { top: 9px; right: 18px; }
-:root[data-density="roomy"] .rail:not(.collapsed) { width: 224px; }
+:root[data-density="roomy"] .rail:not(.collapsed) { width: min(var(--railw, 224px), 26vw); }
 :root[data-density="roomy"] .rail { padding: 14px 12px 12px; gap: 3px; }
 :root[data-density="roomy"] .nav { gap: 3px; }
 :root[data-density="roomy"] .rail:not(.collapsed) .nav button, :root[data-density="roomy"] .rail:not(.collapsed) .railtoggle { padding: 8px 10px; }
