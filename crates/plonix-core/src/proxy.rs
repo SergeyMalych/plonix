@@ -242,7 +242,7 @@ fn act_as_user(engine: &Arc<Engine>, outbound: &mut OutboundRequest, pending: &m
         }
     };
     outbound.headers.retain(|(k, _)| !crate::users::is_auth_header(k));
-    outbound.headers.extend(user.request_headers(&pending.ex.host, crate::users::now_secs()));
+    outbound.headers.extend(user.request_headers(&pending.ex.host, &pending.ex.path, crate::users::now_secs()));
     pending.ex.req_headers = outbound.headers.clone();
     pending.ex.replaced.push(format!("{}{}", crate::users::SENT_AS, user.name));
     pending.as_user = Some(user.id);
@@ -269,12 +269,12 @@ fn window_user(engine: &Arc<Engine>, id: &str, outbound: &mut OutboundRequest, p
     // What the window sends is the user's session now: a cookie set from
     // JavaScript, a bearer token the page keeps in local storage.
     if user.keep_fresh
-        && user.clone().learn_sent(&pending.ex.host, &outbound.headers, crate::users::now_secs())
-        && let Err(e) = engine.store.learn_sent(&user.id, &pending.ex.host, &outbound.headers)
+        && user.clone().learn_sent(&pending.ex.host, &pending.ex.path, &outbound.headers, crate::users::now_secs())
+        && let Err(e) = engine.store.learn_sent(&user.id, &pending.ex.host, &pending.ex.path, &outbound.headers)
     {
         tracing::warn!("saved user {id}: could not keep its session: {e:#}");
     }
-    outbound.headers = user.window_headers(&pending.ex.host, &outbound.headers, crate::users::now_secs());
+    outbound.headers = user.window_headers(&pending.ex.host, &pending.ex.path, &outbound.headers, crate::users::now_secs());
     pending.ex.req_headers = outbound.headers.clone();
     pending.ex.replaced.push(format!("{}{}", crate::users::SENT_AS, user.name));
     pending.as_user = Some(user.id);

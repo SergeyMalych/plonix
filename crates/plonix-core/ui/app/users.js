@@ -57,7 +57,9 @@ function userBadge(u, cls = '') {
  * Users screen is editing in place (taking only the ids the engine gave),
  * so typing carries on into the next save. */
 async function saveUsers(keep) {
-  const r = await api('/api/users', { method: 'PUT', body: { users: S.users } });
+  S.users.forEach(syncHeaderRows);
+  FOUND.byEx.clear();
+  const r = await api('/api/users', { method: 'PUT', body: { users: S.users.map(({ _rows, ...u }) => u) } });
   if (keep && (r.users || []).length === S.users.length) r.users.forEach((u, i) => (S.users[i].id = u.id));
   else S.users = r.users || [];
   drawActing();
@@ -119,9 +121,32 @@ function userSummary(u) {
   const dead = (u.cookies || []).length - live;
   const bits = [live === 1 ? '1 cookie' : live + ' cookies'];
   if (dead) bits.push(dead + ' expired');
-  if ((u.headers || []).length) bits.push((u.headers || []).map((x) => x[0]).join(', '));
+  const names = {};
+  for (const n of [...(u.headers || []).map((x) => x[0]), ...(u.scoped || []).map((x) => x.name)]) names[n] = (names[n] || 0) + 1;
+  const hs = Object.entries(names).map(([n, c]) => (c > 1 ? `${n} ×${c}` : n));
+  if (hs.length) bits.push(hs.join(', '));
   return bits.join(' · ');
 }
+
+/** A user's headers as one editable list: each with the host and path it is
+ * sent to (blank: every in-scope host). Kept on the user while it is edited
+ * and split back into `headers` and `scoped` when saved. */
+function headerRows(u) {
+  if (!u._rows) {
+    u._rows = [...(u.headers || []).map(([name, value]) => ({ name, value, host: '', path: '' })), ...(u.scoped || []).map((x) => ({ name: x.name, value: x.value, host: x.host, path: x.path || '' }))];
+  }
+  return u._rows;
+}
+
+function syncHeaderRows(u) {
+  if (!u._rows) return;
+  const where = (r) => (r.host || '').trim() || (r.path || '').trim();
+  u.headers = u._rows.filter((r) => !where(r)).map((r) => [r.name, r.value]);
+  u.scoped = u._rows.filter(where).map((r) => ({ name: r.name, value: r.value, host: (r.host || '').trim(), path: (r.path || '').trim() }));
+}
+
+/** "api.shop.example/v2/seller", or what a blank place means. */
+const placeText = (host, path) => (host ? host + (path || '') : 'every in-scope host');
 
 /** "in 3 h", "expired 2 d ago", or "no expiry". */
 function expiryText(t) {
@@ -176,6 +201,167 @@ function userSwitcher(tab, main) {
   return h('span', { class: 'asbox' }, h('span', { class: 'aslbl', text: '⚿' }), sel);
 }
 
+/* ---- users found in traffic ----
+   The sessions captured browser traffic carries, grouped by person: a cookie
+   for the pages, a token for the API, another for a back office. Plonix
+   finds them; the person decides which user each one goes to. */
+
+const FOUND = { list: null, byEx: new Map() };
+const foundKey = (sel) => (sel && sel.startsWith('found:') ? sel.slice(6) : null);
+const foundByKey = (key) => (FOUND.list || []).find((f) => f.key === key) || null;
+/** Sessions with something no saved user sends yet. */
+const foundNew = () => (FOUND.list || []).filter((f) => f.fresh > 0);
+
+async function loadFound() {
+  try {
+    FOUND.list = (await api('/api/users/found')).sessions || [];
+  } catch (_) {
+    FOUND.list = [];
+  }
+  FOUND.byEx.clear();
+  return FOUND.list;
+}
+
+/** The session a captured request carried, if it has anything new. Cached per request. */
+async function foundFor(id) {
+  if (FOUND.byEx.has(id)) return FOUND.byEx.get(id);
+  let f = null;
+  try {
+    f = ((await api('/api/users/found?exchange=' + id)).sessions || []).find((x) => x.fresh > 0) || null;
+  } catch (_) {}
+  FOUND.byEx.set(id, f);
+  return f;
+}
+
+/** What a found session is called: who it is, or where it was used. */
+const foundTitle = (f) => f.label || 'A session on ' + (f.credentials[0] || {}).host;
+const credPlace = (c) => (c.kind === 'cookie' ? c.host + ' and its subdomains' : c.host + (c.path || ''));
+const credKind = (c) => (c.kind === 'cookie' ? 'Cookie' : /^authorization$/i.test(c.name) && /^Bearer /i.test(c.preview) ? 'Bearer token' : 'Header');
+
+/** From a Traffic row: shows the session the request carried, to keep. */
+async function keepSessionOf(ex) {
+  if (!(await useTool('saved-users', 'Keep this session as a user'))) return;
+  FOUND.byEx.delete(ex.id);
+  const f = await foundFor(ex.id);
+  if (!f) return toast('Every token this request sent is already with a saved user.', 'ok');
+  reviewFound(f.key);
+}
+
+/** Opens a found session on the Users screen, to look at before keeping it. */
+function reviewFound(key) {
+  US.sel = 'found:' + key;
+  if (S.view === 'users') return drawUsers();
+  leaveTo('users');
+}
+
+/** Keeps a found session with a saved user (`userId`), or as a new user. */
+async function applyFound(f, userId) {
+  let r;
+  try {
+    r = await api('/api/users/found/apply', { method: 'POST', body: { key: f.key, user: userId || null } });
+  } catch (e) {
+    return toast(e.message, 'err');
+  }
+  S.users = r.users || [];
+  US.sel = r.user;
+  drawActing();
+  await loadFound();
+  const u = userById(r.user);
+  if (u) toast(`${userId ? 'Added ' + plural(r.added, 'credential') + ' to' : 'Saved'} ${u.name}. Each one is sent only where it was found.`, 'ok');
+  drawUsers();
+  return u;
+}
+
+function foundItem(f) {
+  const owner = f.user && userById(f.user);
+  return h(
+    'button',
+    { class: 'usitem found' + ('found:' + f.key === US.sel ? ' on' : ''), onclick: () => ((US.sel = 'found:' + f.key), drawUsers()) },
+    h('span', { class: 'ubadge found', text: '+' }),
+    h(
+      'span',
+      { class: 'usitemtext' },
+      h('b', { text: foundTitle(f) }),
+      h('span', { class: 'muted', text: owner ? `${plural(f.fresh, 'new token')} for ${userShortName(owner)}` : `${plural(f.credentials.length, 'credential')} · ${f.requests} requests` }),
+    ),
+  );
+}
+
+function foundDetail(f) {
+  const owner = f.user && userById(f.user);
+  const others = (S.users || []).filter((u) => u.id !== f.user);
+  const when = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const pick = h(
+    'select',
+    { class: 'fdpick', title: 'Add this session to another saved user', onchange: (e) => e.target.value && applyFound(f, e.target.value) },
+    h('option', { value: '', text: 'Add to another user…' }),
+    others.map((u) => h('option', { value: u.id, text: u.name })),
+  );
+  const row = (c) =>
+    h(
+      'div',
+      { class: 'fdrow' + (c.new ? '' : ' saved') },
+      h('span', { class: 'fdkind', text: credKind(c) }),
+      h('span', { class: 'mono fdname', text: c.name }),
+      h('span', { class: 'mono fdval', text: c.preview, title: 'Shortened. The full value goes to the user when you keep it.' }),
+      h('span', { class: 'fdwhere', title: c.kind === 'cookie' ? 'Sent to this domain and its subdomains' : c.path ? `Sent only to requests under ${c.path} on ${c.host}` : `Sent to every request to ${c.host}` }, h('b', { text: c.host }), c.kind === 'header' && c.path ? h('span', { class: 'fdpath', text: c.path }) : null, c.kind === 'cookie' ? h('span', { class: 'muted', text: ' + subdomains' }) : null),
+      h('span', { class: 'fdseen muted', text: c.requests ? plural(c.requests, 'request') : 'set by the server' }),
+      c.new ? h('span', { class: 'ustag new', text: 'new' }) : h('span', { class: 'muted fdhas', text: owner ? 'has it' : '' }),
+    );
+  const hosts = [...new Set(f.credentials.map((c) => c.host))];
+  return h(
+    'div',
+    { class: 'usdetail fdetail' },
+    h(
+      'div',
+      { class: 'ushead' },
+      h('span', { class: 'ubadge found lg', text: '+' }),
+      h(
+        'div',
+        { class: 'usnames' },
+        h('div', { class: 'fdtitle', text: foundTitle(f) }),
+        h('div', { class: 'muted fdsub', text: [f.role, `found in ${plural(f.requests, 'captured request')}`, `last ${when(f.last_ts)}`].filter(Boolean).join(' · ') }),
+      ),
+      owner
+        ? h('button', { class: 'btn sm primary', text: `Add ${plural(f.fresh, 'token')} to ${userShortName(owner)}`, title: `Keep the new ones with ${owner.name}. Each is sent only to the part of the app it was found on.`, onclick: () => applyFound(f, owner.id) })
+        : h('button', { class: 'btn sm primary', text: 'Save as a new user', title: 'Make a saved user with this session', onclick: () => applyFound(f, null) }),
+      owner ? h('button', { class: 'btn sm', text: 'Save as a new user', onclick: () => applyFound(f, null) }) : null,
+      others.length ? pick : null,
+    ),
+    h(
+      'div',
+      { class: 'fdnote' },
+      owner
+        ? `${owner.name} already has some of these, so this is their session. The new ones are what other parts of the app use: ${hosts.length > 1 ? 'other hosts' : 'other paths'}, other tokens. Nothing is added until you say so.`
+        : 'No saved user has this session yet. These were sent together, handed out for one another or name the same account, so they belong to one person. Nothing is saved until you say so.',
+    ),
+    h(
+      'section',
+      { class: 'ussec' },
+      h('div', { class: 'ussech' }, h('h3', { text: 'What this session sends, and where' }), h('span', { class: 'spacer' }), h('button', { class: 'btn xs', text: 'Open a request', title: 'Show one request that carried this session', onclick: () => showExchange(f.sample) })),
+      h('div', { class: 'fdgrid' }, h('div', { class: 'fdrow head' }, ['Kind', 'Name', 'Value', 'Sent to', 'Seen', ''].map((t) => h('span', { text: t }))), f.credentials.map(row)),
+      f.elsewhere.length
+        ? h('div', { class: 'muted fdelse', text: `Also sent to ${andList(f.elsewhere)}, outside scope, so not kept. Add ${f.elsewhere.length > 1 ? 'them' : 'it'} to scope to keep ${f.elsewhere.length > 1 ? 'their' : 'its'} tokens too.` })
+        : null,
+    ),
+  );
+}
+
+/** On a saved user: their session in the traffic has tokens they lack. */
+function foundBanner(u) {
+  const f = foundNew().find((x) => x.user === u.id);
+  if (!f) return null;
+  const what = f.credentials.filter((c) => c.new).map((c) => `${c.name} for ${credPlace(c)}`);
+  return h(
+    'div',
+    { class: 'fdbanner' },
+    h('span', { class: 'ubadge found', text: '+' }),
+    h('span', { class: 'fdbtext' }, h('b', { text: `Found in traffic: ${plural(f.fresh, 'more token')} of ${userShortName(u)}’s. ` }), what.slice(0, 3).join(', ') + (what.length > 3 ? '…' : '')),
+    h('button', { class: 'btn xs', text: 'Review', onclick: () => reviewFound(f.key) }),
+    h('button', { class: 'btn xs primary', text: 'Add them', onclick: () => applyFound(f, u.id) }),
+  );
+}
+
 /* ---- the Users screen ---- */
 
 const US = { sel: null, timer: null, saving: false };
@@ -199,7 +385,7 @@ async function renderUsers(main) {
       h('div', { class: 'usbody', id: 'usbody' }, h('div', { class: 'empty', text: 'Loading users…' })),
     ),
   );
-  await loadUsers(true);
+  await Promise.all([loadUsers(true), loadFound()]);
   drawActing();
   drawUsers();
 }
@@ -239,19 +425,34 @@ function drawUsers() {
   const body = $('#usbody');
   if (!body) return;
   const users = S.users || [];
-  if (!users.length) {
+  const found = foundNew();
+  const foundList = [
+    h('div', { class: 'ushd' }, h('span', { text: 'Found in traffic' }), found.length ? h('span', { class: 'n', text: found.length }) : null),
+    found.length ? found.map(foundItem) : h('div', { class: 'muted usnone', text: 'Nothing new. Browse the app signed in, and the sessions it uses show up here.' }),
+  ];
+  if (US.pickFound && FOUND.list) {
+    const want = found.find((f) => f.user === US.pickFound);
+    if (want) US.sel = 'found:' + want.key;
+    US.pickFound = null;
+  }
+  const fsel = foundByKey(foundKey(US.sel));
+  if (!users.length && !fsel) {
+    if (found.length) {
+      US.sel = 'found:' + found[0].key;
+      return drawUsers();
+    }
     return clear(
       body,
       h(
         'div',
         { class: 'rlempty' },
         h('h3', { text: 'No saved users yet' }),
-        h('p', { class: 'muted', text: 'A saved user is a set of cookies and headers, such as a session cookie or a bearer token. Sign in as someone in your browser and press “Save login as a user” in the Lens, or add one and paste its Cookie header.' }),
+        h('p', { class: 'muted', text: 'A saved user is a set of cookies and headers, such as a session cookie or a bearer token. Browse the app signed in and the sessions it uses show up here to keep, or add one and paste its Cookie header.' }),
         h('button', { class: 'btn primary', text: '+ Add user', onclick: addBlankUser }),
       ),
     );
   }
-  if (!userById(US.sel)) US.sel = (actingUser() || users[0]).id;
+  if (!fsel && !userById(US.sel)) US.sel = (actingUser() || users[0]).id;
   const list = h(
     'div',
     { class: 'uslist' },
@@ -271,15 +472,16 @@ function drawUsers() {
       h('span', { class: 'usitemtext' }, h('b', { text: 'Your browser' }), h('span', { class: 'muted', text: S.acting ? 'Click to use its own cookies again' : 'Its own cookies' })),
       S.acting ? null : h('span', { class: 'ustag', text: 'acting' }),
     ),
+    foundList,
   );
-  clear(body, list, userDetail(userById(US.sel)));
+  clear(body, list, fsel ? foundDetail(fsel) : userDetail(userById(US.sel)));
 }
 
 function userDetail(u) {
   const acting = u.id === S.acting;
   const now = nowSecs();
   const cookies = u.cookies || (u.cookies = []);
-  const headers = u.headers || (u.headers = []);
+  const headers = headerRows(u);
   const field = (cls, value, placeholder, set, extra = {}) =>
     h('input', { class: cls, value, placeholder, spellcheck: 'false', oninput: (e) => (set(e.target.value), usersChanged()), ...extra });
 
@@ -302,8 +504,10 @@ function userDetail(u) {
     h(
       'div',
       { class: 'usrow hdr' },
-      field('mono', hd[0], 'Authorization', (v) => (hd[0] = v)),
-      field('mono', hd[1], 'Bearer …', (v) => (hd[1] = v)),
+      field('mono', hd.name, 'Authorization', (v) => (hd.name = v)),
+      field('mono', hd.value, 'Bearer …', (v) => (hd.value = v)),
+      field('mono', hd.host, 'every in-scope host', (v) => (hd.host = v), { title: 'Send only to this host and its subdomains. Leave blank for every in-scope host.' }),
+      field('mono', hd.path, 'any path', (v) => (hd.path = v), { title: 'Send only to requests under this path, such as /v2/seller. Where two apply, the longer path wins.' }),
       h('button', { class: 'iconbtn', text: '✕', title: 'Remove this header', onclick: () => (headers.splice(i, 1), usersChanged(true)) }),
     );
   const pasteCookies = () => {
@@ -351,6 +555,7 @@ function userDetail(u) {
         onclick: () => openTarget(u),
       }),
     ),
+    foundBanner(u),
     acting ? h('div', { class: 'usnote-on' }, userBadge(u), `You are acting as ${u.name}. In-scope browser traffic, the Bench and Scans send with these cookies, and cookies the server sets land here instead of in your browser.`) : null,
     h(
       'section',
@@ -380,11 +585,11 @@ function userDetail(u) {
         'div',
         { class: 'ussech' },
         h('h3', { text: 'Headers' }),
-        h('span', { class: 'muted', text: 'sent with every request as this user, such as a bearer token' }),
+        h('span', { class: 'muted', text: 'such as a bearer token; give a host or path to send one only to that part of the app' }),
         h('span', { class: 'spacer' }),
-        h('button', { class: 'btn xs', text: '+ Add header', onclick: () => (headers.push(['', '']), drawUsers()) }),
+        h('button', { class: 'btn xs', text: '+ Add header', onclick: () => (headers.push({ name: '', value: '', host: '', path: '' }), drawUsers()) }),
       ),
-      headers.length ? h('div', { class: 'usgrid' }, headers.map(headerRow)) : null,
+      headers.length ? h('div', { class: 'usgrid' }, h('div', { class: 'usrow hdr head' }, ['Name', 'Value', 'Host', 'Path', ''].map((t) => h('span', { text: t }))), headers.map(headerRow)) : null,
     ),
     h(
       'div',

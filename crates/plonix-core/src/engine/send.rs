@@ -53,7 +53,8 @@ impl Engine {
                     return Err(SendError::BadRequest(format!("there is no saved user '{uid}'")));
                 };
                 req.headers.retain(|(k, _)| !crate::users::is_auth_header(k));
-                req.headers.extend(user.request_headers(&host, crate::users::now_secs()));
+                let path = target.split('?').next().unwrap_or("/");
+                req.headers.extend(user.request_headers(&host, path, crate::users::now_secs()));
                 Some(user)
             }
             None => None,

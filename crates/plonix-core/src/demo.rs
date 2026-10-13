@@ -108,6 +108,13 @@ const RESEARCHER: &str = "brightcart-researcher";
 /// request as each of them. Session A is the one in the captured traffic.
 const SESSION_A: &str = "s%3Ah7Qd2kXvR9wLm4ZpT8yB1cN6.Jf0aWq3Ue5rYt7Io9Pl2Kj4Hg6Fd8Sa";
 const SESSION_B: &str = "s%3A2bV9nK4xQ7wE1rT6yU3iO8pA.Lm5Zj0Hg7Fd2Sa9Wq4Ue1rYt6Io3Pl0K";
+/// Maya also sells on the marketplace: the seller back office under
+/// `/v2/seller` takes a token of its own, not her shopper's one.
+const SELLER_TOKEN: &str = "slr_live_7Hq2Lm9Xc4Vb8Nz1Kp5Rt3";
+/// A support colleague's session, captured in the same browser earlier: a
+/// session no saved user holds yet, for Users to find in the traffic.
+const SESSION_STAFF: &str = "s%3A9kT3pW7xN2qL5vB8mR1cY4hD.Qz6Wj2Ue8rYt1Io4Pl7Kj0Hg3Fd5Sa";
+const STAFF_TOKEN: &str = "stf_3Nq8Wv1Zx6Lc9Bm2Rk7Tp4";
 const UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15";
 
 fn b64(s: &str) -> String {
@@ -202,7 +209,9 @@ fn route(method: &str, host: &str, path: &str, query: &str, headers: &Headers) -
         // The admin endpoint enforces the signature: an unsigned (`alg: none`)
         // token is refused outright; a customer token lacks the role.
         if path.starts_with("/v1/admin/") {
-            return if is_none_alg(auth) {
+            return if auth == format!("Bearer {STAFF_TOKEN}") {
+                (200, json, json!({ "items": [ { "id": 1037, "status": "flagged", "reason": "address mismatch" } ] }).to_string())
+            } else if is_none_alg(auth) {
                 (401, json, json!({ "error": "invalid_token", "message": "unsupported algorithm: none" }).to_string())
             } else {
                 (403, json, json!({ "error": "forbidden", "message": "admin role required" }).to_string())
@@ -229,9 +238,25 @@ fn route(method: &str, host: &str, path: &str, query: &str, headers: &Headers) -
                 (200, json, json!({ "id": "usr_8f2c41", "email": "maya.lopez@mail.example", "name": "Maya Lopez", "role": "customer" }).to_string())
             } else if sess == SESSION_B {
                 (200, json, json!({ "id": "usr_3b91de", "email": "dana.quinn@mail.example", "name": "Dana Quinn", "role": "customer" }).to_string())
+            } else if sess == SESSION_STAFF {
+                (200, json, json!({ "id": "usr_a1d907", "email": "sam.ortiz@brightcart.example", "name": "Sam Ortiz", "role": "support" }).to_string())
             } else {
                 (401, json, json!({ "error": "unauthorized", "message": "sign in to continue" }).to_string())
             };
+        }
+        // The seller back office takes only a seller token: a shopper's
+        // session is turned away, so a user needs both to work as Maya.
+        if path.starts_with("/v2/seller/") {
+            return if auth == format!("Bearer {SELLER_TOKEN}") {
+                (200, json, json!({ "shop": "Maya's Makers", "path": path, "balance": 41250, "currency": "EUR" }).to_string())
+            } else if has_session(headers) {
+                (403, json, json!({ "error": "forbidden", "message": "seller token required" }).to_string())
+            } else {
+                (401, json, json!({ "error": "unauthorized", "message": "sign in to continue" }).to_string())
+            };
+        }
+        if path == "/v1/seller/session" && method == "POST" && has_session(headers) {
+            return (201, json, json!({ "seller_token": SELLER_TOKEN, "token_type": "Bearer", "expires_in": 1800 }).to_string());
         }
         // The catalog reads an undocumented `debug` parameter and answers
         // with internals, so the parameter probe has something to find.
@@ -260,7 +285,7 @@ fn route(method: &str, host: &str, path: &str, query: &str, headers: &Headers) -
 fn has_session(headers: &Headers) -> bool {
     let cookie = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("cookie")).map(|(_, v)| v.as_str()).unwrap_or("");
     let sess = cookie.split(';').find_map(|c| c.trim().strip_prefix("bc_session=")).unwrap_or("");
-    if sess == SESSION_A || sess == SESSION_B {
+    if sess == SESSION_A || sess == SESSION_B || sess == SESSION_STAFF {
         return true;
     }
     let auth = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("authorization")).map(|(_, v)| v.as_str()).unwrap_or("");
@@ -825,6 +850,24 @@ export async function api(path, opts = {{}}) {{
         resp(200, "application/json").json(json!({ "id": "c0ffee00c0ffee00c0ffee00c0ffee00" })).ms(73),
     )?;
 
+    // Maya's seller back office: the same API, under /v2/seller, signed with
+    // a seller token handed out for her shopper's one.
+    s.add(
+        authed("POST", "https://api.brightcart.example/v1/seller/session").json(json!({ "scope": "seller" })),
+        resp(201, "application/json").api().json(json!({ "seller_token": SELLER_TOKEN, "token_type": "Bearer", "expires_in": 1800, "shop": "Maya's Makers" })),
+    )?;
+    let seller = |url: &'static str| {
+        req("GET", url).h("Accept", "application/json").h("Origin", page("")).h("Authorization", format!("Bearer {SELLER_TOKEN}")).h("Cookie", cookies.clone())
+    };
+    s.add(
+        seller("https://api.brightcart.example/v2/seller/payouts"),
+        resp(200, "application/json").api().json(json!({ "shop": "Maya's Makers", "balance": 41250, "currency": "EUR", "next_payout": "2026-10-15" })),
+    )?;
+    s.add(
+        seller("https://api.brightcart.example/v2/seller/listings?status=active"),
+        resp(200, "application/json").api().json(json!({ "items": [ { "id": "lst_204", "title": "Hand-thrown mug", "price": 2800 }, { "id": "lst_211", "title": "Linen apron", "price": 3900 } ] })),
+    )?;
+
     // A profile picture goes to a separate upload host, with the same token.
     s.add(
         req("POST", "https://uploads.brightcart-files.example/v2/avatars")
@@ -839,6 +882,20 @@ export async function api(path, opts = {{}}) {{
     s.add(
         req("GET", "https://uploads.brightcart-files.example/v2/avatars/usr_8f2c41").h("Authorization", bearer.clone()).h("Origin", page("")).h("Accept", "application/json"),
         resp(200, "application/json").h("Server", "uploader/2.3").json(json!({ "owner": "usr_8f2c41", "url": "https://media.brightcart.example/u/usr_8f2c41/avatar.png" })),
+    )?;
+
+    // A support colleague used this browser earlier: another person's
+    // session in the same capture, which no saved user holds yet.
+    let staff = |url: &'static str| {
+        req("GET", url).h("Accept", "application/json").h("Origin", page("")).h("Authorization", format!("Bearer {STAFF_TOKEN}")).h("Cookie", format!("bc_session={SESSION_STAFF}"))
+    };
+    s.add(
+        staff("https://api.brightcart.example/v1/me"),
+        resp(200, "application/json").api().json(json!({ "id": "usr_a1d907", "email": "sam.ortiz@brightcart.example", "name": "Sam Ortiz", "role": "support" })),
+    )?;
+    s.add(
+        staff("https://api.brightcart.example/v1/admin/orders?limit=10&status=flagged"),
+        resp(200, "application/json").api().json(json!({ "items": [ { "id": 1037, "status": "flagged", "reason": "address mismatch" } ] })),
     )?;
 
     // A few more page views, so the timeline looks like a real session.
@@ -977,7 +1034,7 @@ export async function api(path, opts = {{}}) {{
     // and Access check tools from the Market to replay requests as them.
     let jar = |sess: &str| format!("bc_session={sess}; cart_state={cart_state}; consent=analytics%3D1");
     let user = |id: &str, name: &str, note: &str, sess: &str| {
-        let mut u = SavedUser { id: id.into(), name: name.into(), note: note.into(), headers: vec![("Cookie".into(), jar(sess))], cookies: vec![], keep_fresh: true };
+        let mut u = SavedUser { id: id.into(), name: name.into(), note: note.into(), headers: vec![("Cookie".into(), jar(sess))], scoped: vec![], cookies: vec![], keep_fresh: true };
         u.fold_cookie_header();
         u
     };
@@ -1100,7 +1157,17 @@ mod tests {
         assert!(users.iter().all(|u| u.headers.is_empty() && u.cookies.iter().any(|c| c.name == "bc_session")));
         let now = crate::users::now_secs();
         assert!(users[1].cookies.iter().any(|c| !c.live(now)));
-        assert!(users[1].request_headers("api.brightcart.example", now)[0].1.contains(SESSION_B));
+        assert!(users[1].request_headers("api.brightcart.example", "/v1/me", now)[0].1.contains(SESSION_B));
+        // Users finds Maya's API and seller tokens, and Sam's session.
+        let found = crate::gather::sessions(&store.exchanges_after(0, 500).unwrap(), &rules, &users, now);
+        let maya = found.iter().find(|f| f.user.as_deref() == Some("maya")).unwrap_or_else(|| panic!("Maya's session is found: {found:#?}"));
+        let new: Vec<(&str, &str)> = maya.credentials.iter().filter(|c| c.new).map(|c| (c.host.as_str(), c.path.as_str())).collect();
+        assert_eq!(new, [("api.brightcart.example", ""), ("api.brightcart.example", "/v2/seller")], "{maya:#?}");
+        assert!(maya.credentials.iter().any(|c| c.name == "bc_session" && c.host == "brightcart.example" && !c.new));
+        assert!(maya.elsewhere.contains(&"uploads.brightcart-files.example".to_string()));
+        let sam = found.iter().find(|f| f.user.is_none()).expect("Sam's session is found");
+        assert_eq!(crate::gather::user_name(sam, &users), "Sam Ortiz (support)");
+        assert_eq!(found.len(), 2, "{found:#?}");
         let named = crate::filterpack::FilterLibrary::at(&home.root.join("filters")).load();
         let tour = store.view_state("filter_tour").unwrap().unwrap();
         for v in tour["views"].as_array().unwrap() {

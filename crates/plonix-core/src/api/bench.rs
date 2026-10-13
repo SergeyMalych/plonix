@@ -11,6 +11,8 @@ pub(super) fn routes() -> Router<AppState> {
         .route("/api/run/lists", get(run_lists))
         .route("/api/users", get(saved_users).put(set_saved_users))
         .route("/api/users/acting", put(set_acting_user))
+        .route("/api/users/found", get(found_users))
+        .route("/api/users/found/apply", post(apply_found_user))
         .route("/api/access-check", post(access_check))
 }
 
@@ -122,6 +124,94 @@ async fn set_saved_users(State(s): State<AppState>, caller: MaybeCaller, Json(bo
     match s.engine.store.set_saved_users(&clean) {
         Ok(()) => Json(json!({ "users": clean })).into_response(),
         Err(e) => internal(e),
+    }
+}
+
+/// The sessions captured traffic carries, with the saved user each belongs
+/// to. User-only: they are credentials.
+fn found_sessions(s: &AppState) -> anyhow::Result<(Vec<crate::gather::FoundSession>, Vec<crate::users::SavedUser>)> {
+    let exchanges = s.engine.store.recent_exchanges(crate::gather::MAX_EXCHANGES)?;
+    let users = s.engine.store.saved_users()?;
+    let found = crate::gather::sessions(&exchanges, &s.engine.rules(), &users, crate::users::now_secs());
+    Ok((found, users))
+}
+
+#[derive(serde::Deserialize)]
+struct FoundQuery {
+    /// Only the session this request carried.
+    exchange: Option<i64>,
+}
+
+async fn found_users(State(s): State<AppState>, caller: MaybeCaller, Query(q): Query<FoundQuery>) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    let st = s.clone();
+    match tokio::task::spawn_blocking(move || found_sessions(&st)).await {
+        Ok(Ok((found, _))) => {
+            let found: Vec<_> = found.into_iter().filter(|f| q.exchange.is_none_or(|id| f.exchanges.contains(&id))).collect();
+            Json(json!({ "sessions": found })).into_response()
+        }
+        Ok(Err(e)) => internal(e),
+        Err(e) => internal(e.into()),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct ApplyFoundBody {
+    key: String,
+    /// The saved user to add the session to. None makes a new user.
+    #[serde(default)]
+    user: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+/// Keeps a session found in traffic with a saved user, or as a new one.
+/// User-only, and it sends nothing.
+async fn apply_found_user(State(s): State<AppState>, caller: MaybeCaller, Json(body): Json<ApplyFoundBody>) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    let st = s.clone();
+    let work = move || -> anyhow::Result<Result<serde_json::Value, String>> {
+        let (found, _) = found_sessions(&st)?;
+        let Some(f) = found.into_iter().find(|f| f.key == body.key) else {
+            return Ok(Err("that session is no longer in the traffic".into()));
+        };
+        st.engine.store.update_saved_users(|users| {
+            let now = crate::users::now_secs();
+            let (at, added) = match body.user.as_deref().filter(|u| !u.is_empty()) {
+                Some(id) => {
+                    let Some(at) = users.iter().position(|u| u.id == id) else {
+                        return Ok(Err(format!("there is no saved user '{}'", crate::detect::clean(id, 40))));
+                    };
+                    (at, crate::gather::apply(&mut users[at], &f, now))
+                }
+                None => {
+                    if users.len() >= crate::users::MAX_USERS {
+                        return Ok(Err(format!("at most {} saved users", crate::users::MAX_USERS)));
+                    }
+                    let name = body.name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| crate::gather::user_name(&f, users));
+                    let note = if f.label.is_empty() { "Found in captured traffic.".to_string() } else { format!("Found in captured traffic: {}.", f.label) };
+                    let mut u = crate::users::SavedUser { id: String::new(), name, note, headers: vec![], scoped: vec![], cookies: vec![], keep_fresh: true };
+                    let added = crate::gather::apply(&mut u, &f, now);
+                    users.push(u);
+                    (users.len() - 1, added)
+                }
+            };
+            match crate::users::check(users) {
+                Ok(clean) => *users = clean,
+                Err(e) => return Ok(Err(e)),
+            }
+            Ok(Ok(json!({ "user": users[at].id, "added": added, "users": users.clone() })))
+        })
+    };
+    match tokio::task::spawn_blocking(work).await {
+        Ok(Ok(Ok(v))) => Json(v).into_response(),
+        Ok(Ok(Err(e))) => err(StatusCode::BAD_REQUEST, "bad_request", &e),
+        Ok(Err(e)) => internal(e),
+        Err(e) => internal(e.into()),
     }
 }
 

@@ -423,6 +423,14 @@ const TOUR_STEPS = [
   },
   {
     view: 'users',
+    prep: () => (US.pickFound = 'maya'),
+    target: ['.fdetail .ussec', '#main .view'],
+    title: 'Users found in traffic',
+    test: 'foundusers',
+    text: 'Plonix reads the sessions in your traffic and works out whose they are. Maya’s browser used a cookie for the shop, a bearer token for the API and another token for the seller back office under /v2/seller. Keep them with Maya in one click: each token goes only to its own part of the app. Sam, a colleague who used the same browser, shows up as a new user to save.',
+  },
+  {
+    view: 'users',
     target: '#actas',
     title: 'Act as a user',
     test: 'actas',
@@ -990,6 +998,60 @@ const TOUR_TESTS = {
       return `Sent one request as Maya, then picked Dana in the box next to Send and sent it again. The shop answered ${first}, then ${second}: each user’s cookies went with the same request, and nothing else changed.`;
     },
   },
+  foundusers: (() => {
+    let before = null;
+    let tab = null;
+    return {
+      run: async (t) => {
+        await loadUsers(true);
+        before = JSON.parse(JSON.stringify((S.users || []).map(({ _rows, ...u }) => u)));
+        const payouts = 'https://api.brightcart.example/v2/seller/payouts';
+        const send = () => api('/api/send', { method: 'POST', body: { method: 'GET', url: payouts, headers: [['Accept', 'application/json']], as_user: 'maya' } }).catch(() => null);
+        const was = await send();
+        const add = await t.until(() => [...document.querySelectorAll('.fdetail .ushead .btn.primary')].find((b) => /maya/i.test(b.textContent)));
+        if (!add) return 'Maya’s session is not in the traffic any more; start the demo over to get it back.';
+        await t.press(add);
+        await t.until(() => S.view === 'users' && US.sel === 'maya' && $('.usrow.hdr:not(.head)'));
+        await t.wait(300);
+        t.ring(['.usrow.hdr:not(.head)', '#main .view']);
+        const maya = userById('maya');
+        const where = ((maya && maya.scoped) || []).map((x) => x.host + (x.path || ''));
+        await t.wait(1400);
+        go('bench', true);
+        tab = { name: 'Seller payouts', method: 'GET', url: payouts, raw: 'Accept: application/json\nUser-Agent: Plonix\n\n', bodyB64: null, history: [], cur: null, picks: [], asUser: 'maya' };
+        R.tabs.push(tab);
+        R.active = R.tabs.length - 1;
+        saveBench();
+        renderBench($('#main'));
+        const sendBtn = await t.until(() => $('.reqbar .btn.primary:not([disabled])'));
+        t.ring('.reqbar');
+        await t.press(sendBtn);
+        await t.until(() => tab.cur && !$('.reqbar .btn.primary[disabled]'));
+        await t.wait(250);
+        t.ring(['.rsplit > .rcol:last-child', '#main .view']);
+        const now = tab.cur ? await getExchange(tab.cur).catch(() => null) : null;
+        const kept = where.length ? `Kept ${plural(where.length, 'token')} with Maya, each for its own place (${andList(where)})` : 'Kept the tokens with Maya';
+        return `${kept}. Then sent the seller payouts request as Maya: ${now ? now.status : 'no answer'}${was ? `, where a moment ago, with only her shop cookie, the back office answered ${was.status}` : ''}.`;
+      },
+      undo: () => {
+        if (tab) {
+          const i = R.tabs.indexOf(tab);
+          if (i >= 0) {
+            R.tabs.splice(i, 1);
+            R.active = Math.min(R.active, R.tabs.length - 1);
+            saveBench();
+          }
+          tab = null;
+        }
+        if (!before) return;
+        S.users = before;
+        before = null;
+        saveUsers()
+          .then(loadFound)
+          .catch(() => {});
+      },
+    };
+  })(),
   actas: {
     run: async (t) => {
       const pill = await t.until(() => $('#actas'));

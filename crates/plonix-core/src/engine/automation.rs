@@ -572,7 +572,7 @@ impl Engine {
                 // carried, then set this user's own. Signed out: drop them and
                 // set nothing.
                 let user = if ident.anon { None } else { req.users.iter().find(|u| u.id == ident.id) };
-                let set_headers = user.map(|u| u.request_headers(&orig.host, crate::users::now_secs())).unwrap_or_default();
+                let set_headers = user.map(|u| u.request_headers(&orig.host, &orig.path, crate::users::now_secs())).unwrap_or_default();
                 let replay = ReplayRequest {
                     id: tid,
                     method: None,

@@ -7,9 +7,18 @@ Both are tools you switch on from the [Market](market.md) (under **Tools**). The
 ## Saving a user
 
 - **Save login as a user** in the Lens, on a response that sets a session, keeps that user's cookies.
+- **Found in traffic** on the Users screen lists the sessions your captured browser traffic carries (see below).
 - **+ Add user** on the Users screen creates one by hand: paste a `Cookie` header, add cookies one by one, or add headers sent with every request as that user, such as a bearer token.
 
 Values stay in the project. Nothing is sent until you browse, press Send or run a scan.
+
+## Users found in traffic
+
+Large apps rarely sign everything with one token: the pages use a session cookie, the API a bearer token, a back office another token again. Plonix reads the captured traffic to in-scope hosts and groups these into sessions, one per person: tokens sent together in one request, a token handed back in answer to a request signed with another, and tokens naming the same account belong together.
+
+Each session lists what it sends and where: a cookie with its domain, a header with its host and, when a host takes different tokens under different paths, the path (for example `/v2/seller`). When a saved user already holds part of a session, Plonix says whose it is and offers **Add to** that user; otherwise **Save as a new user**, named from the account the traffic shows. Nothing is kept until you pick. The Lens offers the same on a request that carries such a session, and so does **Keep this session as a user…** in the Traffic row menu.
+
+Only captured traffic counts: requests you sent from the Bench or Scans are experiments, not sessions. Tokens also sent to hosts outside scope are listed but not kept.
 
 ## Acting as a user
 
@@ -22,6 +31,7 @@ A Bench tab can pick its own user with **As …** next to Send. **As written** s
 Each user lists their cookies and headers:
 
 - edit, **Expire** or **Restore** a cookie, or remove it; **Expire all** signs the user out but keeps the cookies;
+- headers can have a **Host** and **Path**: a header with a host is sent only to that host and its subdomains, with a path only under that path, and where two apply the longer path wins; a header with neither goes to every in-scope host;
 - **Keep cookies fresh** updates a cookie here when the server sets or clears it in answer to a request sent as this user;
 - **Open a browser as** the user gives them a browser window of their own, so you can be signed in as two users at once. What that window learns (cookies, bearer tokens) is saved with the user.
 
