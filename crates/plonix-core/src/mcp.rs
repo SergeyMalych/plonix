@@ -70,7 +70,7 @@ const TOOLS: &[Tool] = &[
         route: "/api/traffic",
         title: "Search traffic",
         description: "Search captured HTTP traffic, newest first. Returns one line per request: id, method, status, in/out of scope, response size, content type, URL. \
-Query filters (combine with spaces): host:example.com  method:POST  status:404|5xx|none  path:/api  mime:json  scope:in|out  source:proxy|replay  \"quoted phrase\"  -negated  free text (matches URL, headers and bodies). An empty query lists recent traffic.",
+Query filters (combine with spaces): host:example.com  method:POST  status:404 (or 5xx, none; several: status:4xx,5xx)  path:/api  mime:json  scope:in (or out)  source:proxy (or replay)  \"quoted phrase\"  -negated  free text (matches URL, headers and bodies). An empty query lists recent traffic.",
         schema: || {
             json!({
                 "type": "object",

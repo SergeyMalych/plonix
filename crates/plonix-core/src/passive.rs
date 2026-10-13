@@ -286,20 +286,21 @@ fn query_pairs(query: &str) -> impl Iterator<Item = (String, String)> + '_ {
 /// Minimal percent-decoding for comparing a query value to a Location, enough
 /// for `%2F` and `%3A` in a redirect target; unknown escapes are left as-is.
 fn percent_decode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
+    // Byte by byte: a `%` before a multi-byte character must not split it.
+    let mut out = Vec::with_capacity(s.len());
     let b = s.as_bytes();
     let mut i = 0;
     while i < b.len() {
-        let decoded = (b[i] == b'%' && i + 2 < b.len()).then(|| u8::from_str_radix(&s[i + 1..i + 3], 16).ok()).flatten();
+        let decoded = (b[i] == b'%' && i + 2 < b.len()).then(|| std::str::from_utf8(&b[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok())).flatten();
         if let Some(byte) = decoded {
-            out.push(byte as char);
+            out.push(byte);
             i += 3;
         } else {
-            out.push(if b[i] == b'+' { ' ' } else { b[i] as char });
+            out.push(if b[i] == b'+' { b' ' } else { b[i] });
             i += 1;
         }
     }
-    out
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn looks_like_url(v: &str) -> bool {
@@ -323,6 +324,13 @@ fn header_label(lower: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn percent_decode_keeps_characters_whole() {
+        assert_eq!(percent_decode("%aé"), "%aé");
+        assert_eq!(percent_decode("https%3A%2F%2Fx.test%2F%C3%A9"), "https://x.test/é");
+        assert_eq!(percent_decode("a+b"), "a b");
+    }
     use crate::model::Exchange;
 
     fn ex(scheme: &str, status: Option<u16>, req: &[(&str, &str)], resp: &[(&str, &str)], body: &str) -> Exchange {

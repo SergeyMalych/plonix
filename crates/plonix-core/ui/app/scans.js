@@ -451,7 +451,7 @@ function scanTacticRow(t, intrusive) {
     h('span', { class: 'tt', text: t.title }),
     t.variant ? h('span', { class: 'tag out', text: t.variant }) : null,
     h('span', { class: 'tag ' + (INTRU_TAG[t.intrusiveness] || 'out'), text: INTRU_LABEL[t.intrusiveness] || t.intrusiveness }),
-    t.requires && t.requires.length ? h('span', { class: 'muted scanreq', text: 'needs ' + t.requires.join(', ') }) : null,
+    t.requires && t.requires.length ? h('span', { class: 'muted scanneeds', text: 'needs ' + t.requires.join(', ') }) : null,
   );
 }
 

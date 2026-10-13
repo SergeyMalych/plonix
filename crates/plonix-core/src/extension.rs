@@ -522,10 +522,8 @@ impl ExtensionLibrary {
 
     fn write_state(&self, s: &StateFile) -> Result<()> {
         std::fs::create_dir_all(&self.dir)?;
-        let tmp = self.dir.join("state.json.tmp");
-        write_private(&tmp, &serde_json::to_vec_pretty(s)?)?;
-        std::fs::rename(&tmp, self.state_path())?;
-        Ok(())
+        // write_private is atomic with a temp name of its own, so two saves never share one.
+        write_private(&self.state_path(), &serde_json::to_vec_pretty(s)?)
     }
 
     pub fn stamp(&self) -> Stamp {
