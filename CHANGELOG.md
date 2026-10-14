@@ -18,6 +18,7 @@ The release after 0.1.5. The version jumps to 0.5.1; nothing is skipped in betwe
 - **Bench History and Compare** each have a handle underneath to drag their height.
 
 ### Fixed
+- **Callbacks keep listening.** The listener comes back on when a project it was on for reopens, making a host starts it, and the tab says when callbacks can't be fetched instead of showing Listening.
 - **Pretty on the Bench** only re-spaces JSON, so numbers such as `12345678901234567890` or `1.0` stay exactly as written. Form bodies no longer get the switch, since it put line breaks into the values sent. The Lens and Compare keep numbers exactly as captured in Pretty too.
 - **Agents** limited to in-scope traffic no longer see other hosts in the Traffic filter counts.
 - **Saved users** ignore a Set-Cookie for a domain other than the site that sent it, and accept hosts with `_` in scoped headers and cookie domains. Keeping a session found in traffic no longer fails on a long name or many tokens, and a header row with a path but no host waits for the host instead of showing an error.
