@@ -402,7 +402,7 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .tidynote { flex: 0 0 auto; padding: 5px 12px; border-top: 1px solid var(--line-2); background: var(--surface-2); font-size: 11px; color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tidynote .tok { color: var(--ok); font-weight: 600; }
 .tidynote .tsentnote { color: var(--fg-2); }
-.tpop { position: absolute; z-index: 8; width: min(420px, calc(100% - 16px)); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 11px 13px; font-size: 12px; line-height: 1.5; }
+.tpop { position: absolute; z-index: 8; overflow: auto; width: min(420px, calc(100% - 16px)); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 11px 13px; font-size: 12px; line-height: 1.5; }
 .tph { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; min-width: 0; }
 .tph .tchip { cursor: default; flex: 0 1 auto; }
 .tpwho { font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -410,8 +410,8 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .tptab td { padding: 1px 12px 1px 0; vertical-align: top; word-break: break-all; }
 .tptab td:first-child { color: var(--fg-3); white-space: nowrap; }
 .tjson { margin: 4px 0 6px; padding: 6px 8px; max-height: 160px; overflow: auto; background: var(--surface-2); border-radius: 6px; font-family: var(--mono); font-size: 11px; }
-.tpraw { margin: 4px 0 8px; padding: 6px 8px; max-height: 84px; overflow: auto; background: var(--surface-2); border-radius: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--fg-3); word-break: break-all; user-select: text; }
-.tpact { display: flex; flex-wrap: wrap; gap: 6px; }
+.tpraw { margin: 4px 0 0; padding: 6px 8px; max-height: 84px; overflow: auto; background: var(--surface-2); border-radius: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--fg-3); word-break: break-all; user-select: text; }
+.tpact { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
 .qbar { position: absolute; top: 6px; right: 8px; z-index: 6; display: none; align-items: center; gap: 1px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; box-shadow: var(--shadow); padding: 3px; }
 .qbar.show { display: flex; }
 .qbar > button { border: 0; background: transparent; color: var(--fg); border-radius: 6px; padding: 4px 8px; font-size: 11.5px; font-weight: 550; white-space: nowrap; }

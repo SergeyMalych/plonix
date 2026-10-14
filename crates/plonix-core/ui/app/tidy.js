@@ -456,9 +456,6 @@ function tidyPop(chip, tab, editor, main, open, wrap) {
     'div',
     { class: 'tpop', role: 'dialog' },
     h('div', { class: 'tph' }, h('span', { class: 'tchip ' + info.cls }, h('i'), info.label), h('span', { class: 'tpwho', text: who })),
-    rows.length ? h('table', { class: 'tptab' }, rows.map(([k, v]) => h('tr', null, h('td', { text: k }), h('td', { text: v })))) : null,
-    decoded,
-    h('div', { class: 'tpraw', text: info.value.length > 400 ? info.value.slice(0, 400) + '…' : info.value }),
     h(
       'div',
       { class: 'tpact' },
@@ -467,13 +464,20 @@ function tidyPop(chip, tab, editor, main, open, wrap) {
       h('button', { class: 'btn sm', text: 'Show raw here', title: 'Show this value as text in the Tidy view', onclick: () => (closeTidyPop(), open('v:' + info.value)) }),
       h('button', { class: 'btn sm', text: 'Copy', onclick: () => (copyText(info.value), closeTidyPop()) }),
     ),
+    rows.length ? h('table', { class: 'tptab' }, rows.map(([k, v]) => h('tr', null, h('td', { text: k }), h('td', { text: v })))) : null,
+    decoded,
+    h('div', { class: 'tpraw', text: info.value.length > 400 ? info.value.slice(0, 400) + '…' : info.value }),
   );
   wrap.append(pop);
   const wr = wrap.getBoundingClientRect();
   const cr = chip.getBoundingClientRect();
   const left = Math.max(8, Math.min(cr.left - wr.left, wr.width - pop.offsetWidth - 8));
   pop.style.left = left + 'px';
-  pop.style.top = cr.bottom - wr.top + 6 + 'px';
+  // In a short window the card scrolls inside the room under the chip rather than run off the column.
+  const top = cr.bottom - wr.top + 6;
+  pop.style.top = top + 'px';
+  const col = (wrap.closest('.rcol') || wrap).getBoundingClientRect();
+  pop.style.maxHeight = Math.max(120, col.bottom - cr.bottom - 14) + 'px';
   const away = (e) => {
     if (!pop.contains(e.target) && !chip.contains(e.target)) closeTidyPop();
   };
