@@ -2004,39 +2004,52 @@ function historyPanel(tab, main) {
     ),
   );
   const picks = tab.picks || [];
-  // Shows up to a dozen sends at once; drag the bottom edge for more or fewer.
+  // Shows up to a dozen sends at once; the handle above it trades height
+  // between History and the Request and Response columns.
   const list = h('div', { class: 'histrows' }, rows.length ? rows : h('div', { class: 'histrow muted', text: 'No sends yet.' }));
-  // A height saved in a taller window is cut to fit this one.
-  const saved = store(HIST_H) && Math.min(store(HIST_H), Math.max(120, window.innerHeight - 200));
-  if (saved) list.style.maxHeight = list.style.height = saved + 'px';
+  const sized = (px) => {
+    list.style.maxHeight = list.style.height = px ? px + 'px' : '';
+    // A History the user sized lets the columns above get shorter before
+    // the Bench starts to scroll.
+    main.querySelector('.rbody')?.style.setProperty('--rsplit-min', px ? (innerWidth <= 900 ? 300 : 220) + 'px' : '');
+  };
+  // Room History can take: everything but the columns' smallest height,
+  // and never so much that a saved height from a taller window overflows.
+  const room = () => {
+    const split = main.querySelector('.rsplit');
+    const free = split ? list.getBoundingClientRect().height + split.getBoundingClientRect().height - (innerWidth <= 900 ? 300 : 220) : 0;
+    return Math.max(40, Math.min(free, innerHeight - 200));
+  };
+  if (store(HIST_H)) requestAnimationFrame(() => sized(Math.min(store(HIST_H), room())));
   const grip = heightGrip(HIST_H, {
     get: () => list.getBoundingClientRect().height,
-    set: (px) => (list.style.maxHeight = list.style.height = px + 'px'),
-    fit: () => (list.style.maxHeight = list.style.height = ''),
+    set: sized,
+    fit: () => sized(null),
     min: 40,
-    max: () => Math.max(120, window.innerHeight - 200),
-    down: true,
+    max: room,
   });
-  return h(
-    'div',
-    { class: 'hist' },
+  grip.classList.add('histgrip');
+  return [
+    grip,
     h(
       'div',
-      { class: 'histhead' },
-      h('span', { class: 't', text: 'History' }),
-      h('span', { class: 'hint', text: tab.history.length ? 'tick two sends to compare them side by side' : 'every send is kept here and in Traffic' }),
+      { class: 'hist' },
       h(
         'div',
-        { class: 'r' },
-        h('button', { class: 'btn sm', text: picks.length === 2 ? 'Compare ✓' : `Compare (${picks.length}/2)`, disabled: tab.history.length < 2, onclick: () => compareLatest(tab, main) }),
+        { class: 'histhead' },
+        h('span', { class: 't', text: 'History' }),
+        h('span', { class: 'hint', text: tab.history.length ? 'tick two sends to compare them side by side' : 'every send is kept here and in Traffic' }),
+        h(
+          'div',
+          { class: 'r' },
+          h('button', { class: 'btn sm', text: picks.length === 2 ? 'Compare ✓' : `Compare (${picks.length}/2)`, disabled: tab.history.length < 2, onclick: () => compareLatest(tab, main) }),
+        ),
       ),
+      list,
     ),
-    list,
-    rows.length > 1 ? grip : null,
-  );
+  ];
 }
 const HIST_H = 'plonix.bench.histH';
-const CMP_H = 'plonix.bench.cmpH';
 
 function compareLatest(tab, main) {
   if ((tab.picks || []).length !== 2) tab.picks = tab.history.slice(0, 2).map((e) => e.id).reverse();
@@ -2076,18 +2089,7 @@ async function drawCompare(tab) {
     ['response', 'request'].map((m) => h('button', { class: R.mode === m ? 'on' : '', text: m[0].toUpperCase() + m.slice(1), onclick: () => ((R.mode = m), drawCompare(tab)) })),
   );
   const head = (ex) => h('div', { class: 'cch' }, h('b', { text: '#' + ex.id }), h('span', { class: statusClass(ex.status), text: ex.status == null ? 'ERR' : ex.status }), `${ex.duration_ms} ms · ${fmtSize(b64len(ex.resp_body))}`);
-  // The compared texts are as tall as the handle under them was dragged.
   const view = h('div', { class: 'cmpview' });
-  const sized = (px) => (px ? view.style.setProperty('--cmph', px + 'px') : view.style.removeProperty('--cmph'));
-  sized(store(CMP_H) && Math.min(store(CMP_H), Math.max(160, window.innerHeight - 160)));
-  const grip = heightGrip(CMP_H, {
-    get: () => left.getBoundingClientRect().height,
-    set: sized,
-    fit: () => sized(null),
-    min: 80,
-    max: () => Math.max(160, window.innerHeight - 160),
-    down: true,
-  });
   clear(
     slot,
     append(view, [
@@ -2099,7 +2101,6 @@ async function drawCompare(tab) {
       ),
       h('div', { class: 'cmpsum', text: changed ? `${changed} line${changed === 1 ? '' : 's'} differ in the ${R.mode}.` : `The ${R.mode}s are identical.` }),
       h('div', { class: 'cmpcols' }, h('div', { class: 'cc' }, head(a), left), h('div', { class: 'cc' }, head(b), right)),
-      grip,
     ]),
   );
   if (R.scrollToCompare) {
