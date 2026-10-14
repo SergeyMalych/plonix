@@ -19,6 +19,7 @@ pub(super) fn routes() -> Router<AppState> {
         .route("/api/agents/activity", get(agent_activity))
         .route("/api/agents/watch", get(watch_view).put(watch_settings))
         .route("/api/agents/watch/look", post(watch_look))
+        .route("/api/agents/watch/stop", post(watch_stop))
         .route("/api/agents/watch/items", post(watch_items))
         .route("/api/agents/chats", get(agent_chats))
         .route("/api/agents/chats/{id}", get(agent_chat).delete(delete_agent_chat))
@@ -226,8 +227,17 @@ async fn watch_look(State(s): State<AppState>) -> Response {
     if !s.agent_settings.get().enabled {
         return err(StatusCode::FORBIDDEN, "agents_disabled", "agent access is turned off in Settings › AI agents");
     }
+    if s.watch.view().capped {
+        return err(StatusCode::TOO_MANY_REQUESTS, "limit_reached", "today’s token limit for watching is used up; raise it or wait until tomorrow");
+    }
     s.watch.look_now();
     Json(json!({ "ok": true })).into_response()
+}
+
+/// Stops the look in flight, ending Claude Code and what it started.
+async fn watch_stop(State(s): State<AppState>) -> Response {
+    let stopped = s.watch.stop();
+    Json(json!({ "stopped": stopped, "watch": s.watch.view() })).into_response()
 }
 
 #[derive(Deserialize)]

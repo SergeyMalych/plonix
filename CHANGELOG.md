@@ -2,6 +2,15 @@
 
 What changed in each Plonix release. The newest release is at the top.
 
+## [Unreleased]
+
+### Added
+- **Stop for the traffic watcher.** While Claude looks at your traffic, the Agents inbox shows Stop: it ends the look at once, Claude Code and everything it started included. Turning off Watch my traffic, or agent access in Settings, stops a look in flight too.
+- **Your own daily token limit.** Pick Custom… under the inbox and type a limit such as 350k or 1.5M (10k to 10M). The default stays 200k a day.
+
+### Fixed
+- **The watcher stays within its daily limit.** Every call Claude makes is counted now, not just the last one, so the meter shows what a look really uses (often two to three times more than before). A look is not started when too few tokens are left for it, and one that would go past the limit is stopped before its next call.
+
 ## [0.5.1] - 2026-10-14
 
 The release after 0.1.5. The version jumps to 0.5.1; nothing is skipped in between.
