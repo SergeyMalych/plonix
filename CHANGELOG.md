@@ -2,11 +2,6 @@
 
 What changed in each Plonix release. The newest release is at the top.
 
-## [Unreleased]
-
-### Added
-- **Is a user still signed in?** Each saved user shows whether its session works, is about to run out, has expired or was refused by the server, read from the expiry its tokens and cookies state and from how the server answered requests sent as that user. It says when it can't tell, and **Check now** asks the server once. **What it may do** lists the roles, scopes and groups the user's tokens and "who am I" answers name, and the endpoints that allowed or refused it. The walkthrough has a stop for it.
-
 ## [0.5.1] - 2026-10-14
 
 The release after 0.1.5. The version jumps to 0.5.1; nothing is skipped in between.
@@ -14,6 +9,7 @@ The release after 0.1.5. The version jumps to 0.5.1; nothing is skipped in betwe
 ### Added
 - **Users found in traffic.** The Users screen lists the sessions in captured traffic, one per person, with each cookie and token and the part of the app it is sent to (domain, host, path). Add one to the saved user it belongs to, or save it as a new user; the Lens and the Traffic row menu offer the same. Saved users can now send a header only to one host or path, so one user carries different tokens for different parts of an app.
 - **Docs for every tool** on [plonix.io/docs](https://plonix.io/docs): Getting started, the Plonix window, Traffic and the Lens, Scope, the Map, Rules, Saved users and the Access check, Callbacks and Findings, in the Studio look with Try classic. Every page of the website shares one menu: Home, Docs, Analytics and Privacy. Tables fit their content and turn into cards on phones.
+- **Is a user still signed in?** Each saved user shows whether its session works, is about to run out, has expired or was refused by the server, read from the expiry its tokens and cookies state and from how the server answered requests sent as that user. It says when it can't tell, and **Check now** asks the server once. **What it may do** lists the roles, scopes and groups the user's tokens and "who am I" answers name, and the endpoints that allowed or refused it. The walkthrough has a stop for it.
 
 ### Changed
 - **Users, Access check and Callbacks are on from the start.** Their screens are in the sidebar on a new install and after updating, with no trip to the Market. Each is still a Market tool: remove it there and it stays off. Callbacks still asks you to install its helper once before it can listen; nothing is downloaded on its own.
