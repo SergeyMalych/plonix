@@ -303,11 +303,14 @@ function renderBench(main) {
   // actions on any selected text. Send mode only, to stay clear of the Run
   // panel's position markers.
   const lensStrip = runMode ? null : h('div', { class: 'benchlens' });
-  const editWrap = runMode ? editor : h('div', { class: 'editorwrap' }, editor);
+  // Tidy reads the request for you (tokens as "JWT of Maya", noise folded);
+  // the editor underneath stays the request, shown as it is in Raw.
+  const tidy = runMode || !tidyOn() ? null : tidyView(tab, editor, main);
+  const editWrap = runMode ? editor : h('div', { class: 'editorwrap' + (tidy ? ' tidyon' : '') }, editor, tidy);
   const reqCol = h(
     'div',
     { class: 'rcol' },
-    h('div', { class: 'lbl' }, 'Request', binaryNote, runMode || tab.bodyB64 ? null : bodyLayoutSeg(tab, editor)),
+    h('div', { class: 'lbl' }, 'Request', runMode ? null : tidySeg(tab, main), binaryNote, runMode || tab.bodyB64 ? null : bodyLayoutSeg(tab, editor)),
     editWrap,
     lensStrip ? lensGrip(lensStrip) : null,
     lensStrip,
@@ -678,6 +681,7 @@ function spliceEditor(editor, tab, span, enc) {
   span.end = span.start + enc.length;
   tab.raw = editor.value;
   saveBench();
+  if (editor._tidy) editor._tidy();
 }
 function blFlash(el) {
   el.classList.add('on');

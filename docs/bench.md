@@ -13,6 +13,26 @@ the Bench presents it and marks the response **cert · CN=…**.
 
 ![The Bench: a request on the left, its JSON response on the right, and the send history below with Restore, Branch and Finding buttons](../site/assets/studio-bench-light.webp)
 
+## Tidy and Raw
+
+The request editor has two views. **Tidy**, the default, reads the request for
+you:
+
+- A sign-in token shows whose it is, such as **JWT of Maya · 52 min left** or
+  **session of Maya**. Plonix matches it against your [saved users](users.md)
+  and the sessions it found in traffic; a token nobody owns shows who its claims
+  name, or a short preview.
+- A Base64 JSON value shows decoded, such as `{cart: "c_51d0", items: 2, …}`.
+- The headers every browser adds (User-Agent, Accept-Language, sec-ch-ua,
+  Sec-Fetch and the like) fold into one **browser headers** line, and analytics
+  and consent cookies fold into one **tracking cookies** chip. **Show** opens them.
+
+Click a token for its claims and its full value, with **Edit claims**, **Use
+Dana's** (another saved user's value for the same header or cookie), **Show raw
+here** and **Copy**. Tidy stays editable: type anywhere, and type over a token to
+replace it. **Raw** is the editor as it always was, every byte. Both send the
+same request, with the real values.
+
 ## Comparing sends
 
 Every send in a tab is kept in its **History**. Tick two sends and press

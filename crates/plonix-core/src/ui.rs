@@ -30,6 +30,7 @@ const FILES: &[(&str, &'static str, &str)] = &[
     ("app/traffic.js", "text/javascript; charset=utf-8", include_str!("../ui/app/traffic.js")),
     ("app/lens.js", "text/javascript; charset=utf-8", include_str!("../ui/app/lens.js")),
     ("app/bench.js", "text/javascript; charset=utf-8", include_str!("../ui/app/bench.js")),
+    ("app/tidy.js", "text/javascript; charset=utf-8", include_str!("../ui/app/tidy.js")),
     ("app/scope.js", "text/javascript; charset=utf-8", include_str!("../ui/app/scope.js")),
     ("app/map.js", "text/javascript; charset=utf-8", include_str!("../ui/app/map.js")),
     ("app/users.js", "text/javascript; charset=utf-8", include_str!("../ui/app/users.js")),

@@ -395,6 +395,17 @@ const TOUR_STEPS = [
     view: 'bench',
     prep: () => {
       const i = R.tabs.findIndex((x) => x.name === 'Order lookup');
+      if (i >= 0) (R.active = i), (R.tabs[i].panel = 'send');
+    },
+    target: ['.rsplit > .rcol:first-child', '#main .view'],
+    title: 'Tidy requests',
+    test: 'tidy',
+    text: 'Tidy reads the request for you: a sign-in token shows whose it is, as JWT of Maya, Base64 values show decoded, and the headers every browser adds fold into one line. Click a token to see its claims, edit it or swap in another user’s. Raw shows every byte, and Send always sends the real values.',
+  },
+  {
+    view: 'bench',
+    prep: () => {
+      const i = R.tabs.findIndex((x) => x.name === 'Order lookup');
       if (i >= 0) R.active = i;
     },
     target: ['.hist', '#main .view'],
@@ -1191,6 +1202,37 @@ const TOUR_TESTS = {
       return `Order 1043 came back with ${who || 'someone else’s order'}, while signed in as Maya. The API never checks whose order it is.`;
     },
   },
+  tidy: {
+    run: async (t) => {
+      const i = R.tabs.findIndex((x) => x.name === 'Order lookup');
+      if (i < 0) return 'The order lookup experiment is gone; start the demo over to get it back.';
+      R.active = i;
+      R.tabs[i].panel = 'send';
+      store(TIDY_KEY, 'raw');
+      saveBench();
+      renderBench($('#main'));
+      await t.until(() => $('#bencheditor'));
+      t.ring('.rsplit > .rcol:first-child');
+      const raw = $('#bencheditor').value.split('\n\n')[0].split('\n').length;
+      await t.wait(1200);
+      await t.press($('#tidybtn'));
+      const chip = await t.until(() => [...document.querySelectorAll('#benchtidy .tchip.u')].find((c) => /^JWT/.test(c.textContent)));
+      t.ring('.rsplit > .rcol:first-child');
+      if (!chip) return 'Tidy is on, but no token in this request belongs to a saved user.';
+      await t.wait(900);
+      await t.press(chip);
+      const pop = await t.until(() => $('.tpop'));
+      if (pop) t.ring('.tpop');
+      const rows = [...document.querySelectorAll('#benchtidy .tl')];
+      const blank = rows.findIndex((r) => !r.textContent.trim());
+      const shown = blank < 0 ? rows.length : blank;
+      return `The same request: ${raw} header lines in Raw, ${shown} in Tidy. The long token is ${chip.firstChild.nextSibling.textContent}, matched from Users, the browser headers and tracking cookies fold away, and Send still sends every byte.`;
+    },
+    undo: () => {
+      closeTidyPop();
+      store(TIDY_KEY, 'tidy');
+    },
+  },
   run: {
     run: async (t) => {
       const i = R.tabs.findIndex((x) => /run/i.test(x.name || '') && (x.url || '').includes(MARK));
@@ -1368,7 +1410,7 @@ function startTour(at = 0) {
   document.body.append(TOUR.spot, TOUR.el);
   TOUR.keys = (e) => {
     if ($('.modal:not(.tourmodal), .popover, .ctxmenu')) return;
-    if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName)) return;
+    if (isTyping()) return;
     const k = { ArrowRight: 1, ArrowLeft: -1, Escape: 0 }[e.key];
     if (k === undefined || e.metaKey || e.ctrlKey || e.altKey) return;
     e.preventDefault();
