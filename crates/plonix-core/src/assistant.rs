@@ -16,7 +16,7 @@
 //! Claude works. Follow-up turns resume the same Claude session with
 //! `--resume <session_id>`, so the conversation keeps its context.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Mutex;
@@ -53,6 +53,11 @@ pub struct Run {
     session_id: Option<String>,
     /// Aborting this ends the background task, which kills the child.
     abort: Option<tokio::task::AbortHandle>,
+    /// The `claude` process, so stopping can end it and everything it started.
+    pid: Option<u32>,
+    /// Most tokens this run may use, all its calls together, and what to say
+    /// when it is stopped for reaching that.
+    limit: Option<(u64, String)>,
     /// Monotonic id for pruning finished runs oldest-first.
     ord: u64,
     progress: Progress,
@@ -60,7 +65,7 @@ pub struct Run {
 
 impl Run {
     fn new(ord: u64) -> Self {
-        Run { events: Vec::new(), status: Status::Running, session_id: None, abort: None, ord, progress: Progress::new() }
+        Run { events: Vec::new(), status: Status::Running, session_id: None, abort: None, pid: None, limit: None, ord, progress: Progress::new() }
     }
 }
 
@@ -74,6 +79,13 @@ struct Progress {
     step: String,
     /// The size of what Claude is reading: the context of its latest call.
     tokens_in: u64,
+    /// Tokens read by all calls so far. Each call reads the whole context
+    /// again, so this grows much faster than `tokens_in`.
+    in_total: u64,
+    /// Calls already added to `in_total`; each is reported more than once.
+    counted: HashSet<String>,
+    /// The context of the first call: the least any run costs.
+    first_in: u64,
     /// Tokens written by calls that have finished.
     out_done: u64,
     /// Tokens written so far by the call in flight (estimated until it ends).
@@ -89,7 +101,23 @@ struct Progress {
 impl Progress {
     fn new() -> Self {
         let now = Instant::now();
-        Progress { started: now, heard: now, finished: None, step: "Starting Claude Code".into(), tokens_in: 0, out_done: 0, out_cur: 0, chars_cur: 0, draft: String::new(), tool: String::new() }
+        Progress { started: now, heard: now, finished: None, step: "Starting Claude Code".into(), tokens_in: 0, in_total: 0, counted: HashSet::new(), first_in: 0, out_done: 0, out_cur: 0, chars_cur: 0, draft: String::new(), tool: String::new() }
+    }
+
+    /// Every token read and written so far, all calls together.
+    fn used(&self) -> u64 {
+        self.in_total + self.out_done + self.out_cur
+    }
+
+    /// Counts one call's input once, however many times it is reported.
+    fn count_call(&mut self, id: Option<&str>, input: u64) {
+        if id.is_some_and(|id| !self.counted.insert(id.to_string())) {
+            return;
+        }
+        if self.counted.len() <= 1 && self.first_in == 0 {
+            self.first_in = input;
+        }
+        self.in_total += input;
     }
 
     fn view(&self) -> ProgressView {
@@ -100,6 +128,7 @@ impl Progress {
             idle_ms: if self.finished.is_some() { 0 } else { self.heard.elapsed().as_millis() as u64 },
             tokens_in: self.tokens_in,
             tokens_out: self.out_done + self.out_cur,
+            tokens_used: self.used(),
             draft: self.draft.clone(),
         }
     }
@@ -117,6 +146,8 @@ pub struct ProgressView {
     pub tokens_in: u64,
     /// Tokens Claude has written so far, thinking included.
     pub tokens_out: u64,
+    /// Every token read and written so far, all calls together.
+    pub tokens_used: u64,
     /// The answer as it is being written; empty when nothing is in flight.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub draft: String,
@@ -167,6 +198,16 @@ pub struct Snapshot {
     pub progress: ProgressView,
 }
 
+/// What one run has cost so far.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Usage {
+    pub running: bool,
+    /// Tokens read and written, all calls together.
+    pub used: u64,
+    /// The context of its first call, the least a run like it costs.
+    pub first_call: u64,
+}
+
 /// Why a conversation could not be started.
 pub enum StartError {
     /// The `claude` command is not installed (or not on the PATH).
@@ -202,12 +243,20 @@ impl Conversations {
     /// Like [`start`](Self::start), with the MCP server named `<client>/<run>`
     /// in the activity feed.
     pub fn start_as(&self, home: &Home, prompt: String, resume: Option<String>, client: &str) -> Result<String, StartError> {
+        self.start_limited(home, prompt, resume, client, None)
+    }
+
+    /// Like [`start_as`](Self::start_as), stopped before it goes past
+    /// `limit` tokens: when a call has used them up, or when the next call
+    /// would, since it reads at least the context the last one did.
+    pub fn start_limited(&self, home: &Home, prompt: String, resume: Option<String>, client: &str, limit: Option<(u64, String)>) -> Result<String, StartError> {
         let bin = claude_bin().ok_or(StartError::NoCli)?;
         let ord = self.next.fetch_add(1, Ordering::Relaxed);
         // Unique across engine restarts, since saved chats remember it.
         let id = format!("c{}-{ord}", started_tag());
 
         let run = std::sync::Arc::new(Mutex::new(Run::new(ord)));
+        run.lock().unwrap().limit = limit;
         let mcp = mcp_config(home, &format!("{client}/{id}"));
         let cwd = run_dir(home);
         let task_run = run.clone();
@@ -250,23 +299,32 @@ impl Conversations {
         }))
     }
 
-    /// Whether a run is still going, and the tokens it has read and written.
-    pub fn usage(&self, id: &str) -> Option<(bool, u64)> {
+    /// Whether a run is still going, the tokens it has read and written, all
+    /// calls together, and the size of its first call.
+    pub fn usage(&self, id: &str) -> Option<Usage> {
         let run = self.runs.lock().unwrap().get(id).cloned()?;
         let run = run.lock().unwrap();
-        let p = run.progress.view();
-        Some((run.status == Status::Running, p.tokens_in + p.tokens_out))
+        Some(Usage { running: run.status == Status::Running, used: run.progress.used(), first_call: run.progress.first_in })
     }
 
-    /// Stops a running conversation; the child process is killed on drop.
+    /// Stops a running conversation: ends `claude` and whatever it started
+    /// (its MCP server, a wrapper's children), not just the task reading it.
     pub fn cancel(&self, id: &str) -> bool {
+        self.stop(id, "The conversation was stopped.")
+    }
+
+    /// Like [`cancel`](Self::cancel), saying `why`.
+    pub fn stop(&self, id: &str, why: &str) -> bool {
         let Some(run) = self.runs.lock().unwrap().get(id).cloned() else { return false };
         let mut run = run.lock().unwrap();
         if run.status == Status::Running {
+            if let Some(pid) = run.pid.take() {
+                kill_tree(pid);
+            }
             if let Some(a) = run.abort.take() {
                 a.abort();
             }
-            push(&mut run, Kind::Error, "The conversation was stopped.".into());
+            push(&mut run, Kind::Error, why.into());
             end(&mut run, Status::Error, "Stopped");
         }
         true
@@ -345,6 +403,7 @@ async fn drive(bin: PathBuf, mcp: Value, cwd: PathBuf, prompt: String, resume: O
         Ok(c) => c,
         Err(e) => return finish_err(&run, format!("Could not start Claude Code: {e}")),
     };
+    run.lock().unwrap().pid = child.id();
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
 
@@ -370,7 +429,15 @@ async fn drive(bin: PathBuf, mcp: Value, cwd: PathBuf, prompt: String, resume: O
             let quiet = tokio::time::sleep(tokio::time::Duration::from_secs(QUIET_SECS));
             tokio::select! {
                 line = lines.next_line() => match line {
-                    Ok(Some(l)) => on_line(&run, &l),
+                    Ok(Some(l)) => {
+                        if let Some(why) = on_line(&run, &l) {
+                            if let Some(pid) = child.id() {
+                                kill_tree(pid);
+                            }
+                            finish_err(&run, why);
+                            return;
+                        }
+                    }
                     _ => break,
                 },
                 _ = &mut deadline => {
@@ -401,14 +468,16 @@ async fn drive(bin: PathBuf, mcp: Value, cwd: PathBuf, prompt: String, resume: O
     }
 }
 
-/// Parses one line of `claude`'s stream-json output into events.
-fn on_line(run: &std::sync::Arc<Mutex<Run>>, line: &str) {
+/// Parses one line of `claude`'s stream-json output into events. Returns why
+/// the run must stop now, when it has reached its token limit.
+fn on_line(run: &std::sync::Arc<Mutex<Run>>, line: &str) -> Option<String> {
     let line = line.trim();
     if line.is_empty() {
-        return;
+        return None;
     }
-    let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+    let Ok(v) = serde_json::from_str::<Value>(line) else { return None };
     let mut r = run.lock().unwrap();
+    let mut next_call = false;
     r.progress.heard = Instant::now();
     match v.get("type").and_then(Value::as_str) {
         Some("system") if v.get("subtype").and_then(Value::as_str) == Some("init") => {
@@ -423,11 +492,21 @@ fn on_line(run: &std::sync::Arc<Mutex<Run>>, line: &str) {
             // Tool results flow back to Claude as a user message.
             let has_result = v.pointer("/message/content").and_then(Value::as_array).is_some_and(|c| c.iter().any(|b| b.get("type").and_then(Value::as_str) == Some("tool_result")));
             if has_result {
+                next_call = true;
                 let p = &mut r.progress;
                 p.step = if p.tool.is_empty() { "Reading the results".into() } else { format!("Reading {}", p.tool) };
             }
         }
         Some("assistant") => {
+            // Without token-by-token output this is where a call is first seen.
+            if let Some(u) = v.pointer("/message/usage") {
+                let id = v.pointer("/message/id").and_then(Value::as_str);
+                let input = input_tokens(u);
+                r.progress.count_call(id, input);
+                if input > 0 {
+                    r.progress.tokens_in = input;
+                }
+            }
             if let Some(blocks) = v.pointer("/message/content").and_then(Value::as_array) {
                 for b in blocks {
                     match b.get("type").and_then(Value::as_str) {
@@ -458,6 +537,10 @@ fn on_line(run: &std::sync::Arc<Mutex<Run>>, line: &str) {
                 p.out_done = (p.out_done + p.out_cur).max(out);
                 p.out_cur = 0;
             }
+            if let Some(u) = v.get("usage") {
+                let p = &mut r.progress;
+                p.in_total = p.in_total.max(input_tokens(u));
+            }
             if let Some(sid) = v.get("session_id").and_then(Value::as_str) {
                 r.session_id = Some(sid.to_string());
             }
@@ -470,6 +553,52 @@ fn on_line(run: &std::sync::Arc<Mutex<Run>>, line: &str) {
         }
         _ => {}
     }
+    if r.status != Status::Running {
+        return None;
+    }
+    let (limit, why) = r.limit.clone()?;
+    let p = &r.progress;
+    // The next call reads at least the context the last one did.
+    let over = p.used() >= limit || (next_call && p.used() + p.tokens_in > limit);
+    over.then_some(why)
+}
+
+/// Everything a call (or, in the final tally, a whole turn) read.
+fn input_tokens(u: &Value) -> u64 {
+    let n = |k: &str| u.get(k).and_then(Value::as_u64).unwrap_or(0);
+    n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens")
+}
+
+/// Ends `pid` and everything it started. `claude` may be a wrapper script,
+/// and it runs the Plonix MCP server, so ending only the one process can
+/// leave the real work running.
+fn kill_tree(pid: u32) {
+    #[cfg(unix)]
+    {
+        fn children(pid: u32) -> Vec<u32> {
+            let out = std::process::Command::new("pgrep").args(["-P", &pid.to_string()]).stderr(Stdio::null()).output();
+            out.map(|o| String::from_utf8_lossy(&o.stdout).split_whitespace().filter_map(|s| s.parse().ok()).collect()).unwrap_or_default()
+        }
+        // Collect the whole tree first: ending a parent hands its children on.
+        let mut all = vec![pid];
+        let mut i = 0;
+        while i < all.len() && all.len() < 256 {
+            let more = children(all[i]);
+            all.extend(more);
+            i += 1;
+        }
+        for p in all {
+            let _ = std::process::Command::new("kill").args(["-KILL", &p.to_string()]).stderr(Stdio::null()).status();
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = std::process::Command::new("taskkill").args(["/T", "/F", "/PID", &pid.to_string()]).stdout(Stdio::null()).stderr(Stdio::null()).creation_flags(CREATE_NO_WINDOW).status();
+    }
+    #[cfg(not(any(unix, windows)))]
+    let _ = pid;
 }
 
 /// Follows one raw API streaming event: what Claude is doing and how many
@@ -481,9 +610,9 @@ fn on_stream(p: &mut Progress, ev: &Value) {
             p.out_cur = 0;
             p.chars_cur = 0;
             if let Some(u) = ev.pointer("/message/usage") {
-                let n = |k: &str| u.get(k).and_then(Value::as_u64).unwrap_or(0);
-                p.tokens_in = n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
-                p.out_cur = n("output_tokens");
+                p.tokens_in = input_tokens(u);
+                p.out_cur = u.get("output_tokens").and_then(Value::as_u64).unwrap_or(0);
+                p.count_call(ev.pointer("/message/id").and_then(Value::as_str), p.tokens_in);
             }
             p.step = "Reading what you shared".into();
         }
@@ -793,5 +922,83 @@ mod tests {
         assert!(step().draft.is_empty(), "the finished text replaces the draft");
         on_line(&run, r#"{"type":"result","subtype":"success","session_id":"s","usage":{"output_tokens":60}}"#);
         assert_eq!(step().tokens_out, 60);
+        // Both calls read their whole context: 38002 + 38900, plus what was written.
+        assert_eq!(step().tokens_used, 38002 + 38900 + 60);
+    }
+
+    #[test]
+    fn each_call_is_counted_once() {
+        let run = std::sync::Arc::new(Mutex::new(Run::new(0)));
+        let start = r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m1","usage":{"input_tokens":5,"cache_read_input_tokens":20000,"output_tokens":1}}}}"#;
+        on_line(&run, start);
+        // The same call, reported again as each of its blocks lands.
+        on_line(&run, r#"{"type":"assistant","message":{"id":"m1","usage":{"input_tokens":5,"cache_read_input_tokens":20000,"output_tokens":9},"content":[{"type":"text","text":"a"}]}}"#);
+        on_line(&run, r#"{"type":"assistant","message":{"id":"m2","usage":{"input_tokens":5,"cache_read_input_tokens":25000,"output_tokens":9},"content":[{"type":"text","text":"b"}]}}"#);
+        let p = &run.lock().unwrap().progress;
+        assert_eq!((p.in_total, p.first_in, p.tokens_in), (45010, 20005, 25005));
+    }
+
+    #[test]
+    fn the_final_tally_covers_every_call() {
+        let run = std::sync::Arc::new(Mutex::new(Run::new(0)));
+        on_line(&run, r#"{"type":"result","subtype":"success","usage":{"input_tokens":5,"cache_creation_input_tokens":12902,"cache_read_input_tokens":124309,"output_tokens":1604}}"#);
+        assert_eq!(run.lock().unwrap().progress.view().tokens_used, 5 + 12902 + 124309 + 1604);
+    }
+
+    #[test]
+    fn a_run_stops_at_its_limit() {
+        let run = std::sync::Arc::new(Mutex::new(Run::new(0)));
+        run.lock().unwrap().limit = Some((50_000, "out of tokens".into()));
+        let call = |id: &str, ctx: u64| format!(r#"{{"type":"stream_event","event":{{"type":"message_start","message":{{"id":"{id}","usage":{{"input_tokens":{ctx},"output_tokens":1}}}}}}}}"#);
+        assert_eq!(on_line(&run, &call("m1", 20_000)), None);
+        // Another call of at least 20k would go past 50k: stop before it starts.
+        assert_eq!(on_line(&run, r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"..."}]}}"#), None, "20k + 20k fits");
+        assert_eq!(on_line(&run, &call("m2", 26_000)), None);
+        assert_eq!(on_line(&run, r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"..."}]}}"#).as_deref(), Some("out of tokens"));
+        // And a call that lands past it stops the run too.
+        let over = std::sync::Arc::new(Mutex::new(Run::new(1)));
+        over.lock().unwrap().limit = Some((10_000, "out".into()));
+        assert_eq!(on_line(&over, &call("m1", 12_000)).as_deref(), Some("out"));
+        // A run without a limit is never stopped for tokens.
+        let free = std::sync::Arc::new(Mutex::new(Run::new(2)));
+        assert_eq!(on_line(&free, &call("m1", 900_000)), None);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stopping_ends_the_whole_process_tree() {
+        // A wrapper that starts a child of its own, like `claude` behind a script.
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "sleep 300 & wait"]).kill_on_drop(true);
+        let mut child = cmd.spawn().unwrap();
+        let pid = child.id().unwrap();
+        let grandchild = || {
+            let out = std::process::Command::new("pgrep").args(["-P", &pid.to_string()]).output().unwrap();
+            String::from_utf8_lossy(&out.stdout).split_whitespace().next().map(str::to_string)
+        };
+        let mut sleeper = None;
+        for _ in 0..50 {
+            sleeper = grandchild();
+            if sleeper.is_some() {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+        }
+        let sleeper = sleeper.expect("the wrapper started its child");
+        kill_tree(pid);
+        let _ = child.wait().await;
+        let mut gone = false;
+        for _ in 0..50 {
+            // Gone, or a zombie waiting for whoever took it in to reap it.
+            let out = std::process::Command::new("ps").args(["-o", "stat=", "-p", &sleeper]).output().unwrap();
+            let stat = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            let alive = !stat.is_empty() && !stat.starts_with('Z');
+            if !alive {
+                gone = true;
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+        }
+        assert!(gone, "the child the wrapper started was ended too");
     }
 }

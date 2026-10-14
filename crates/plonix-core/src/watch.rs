@@ -9,7 +9,9 @@
 //!
 //! It is off until the user turns it on. It runs only when new in-scope
 //! traffic has arrived and then gone quiet for a moment (or when the user
-//! asks it to look now), and never past the daily token limit the user set.
+//! asks it to look now), and never past the daily token limit the user set:
+//! a look that would go past it is not started, and one that reaches it is
+//! stopped. The user can stop a look at any time.
 //! Its settings, counters and inbox are stored per project.
 
 use std::collections::BTreeSet;
@@ -58,9 +60,11 @@ impl Default for WatchSettings {
 
 impl WatchSettings {
     pub const BUDGETS: &'static [u64] = &[50_000, 100_000, 200_000, 500_000, 1_000_000];
+    /// The smallest and largest daily limit the user can set.
+    pub const LIMITS: [u64; 2] = [10_000, 10_000_000];
 
     fn clean(mut self) -> Self {
-        self.daily_tokens = self.daily_tokens.clamp(10_000, 5_000_000);
+        self.daily_tokens = self.daily_tokens.clamp(Self::LIMITS[0], Self::LIMITS[1]);
         self.idle_secs = self.idle_secs.clamp(10, 3600);
         self.min_new = self.min_new.clamp(1, 100);
         self
@@ -115,6 +119,9 @@ pub struct WatchState {
     pub tokens_today: u64,
     pub looks_today: u64,
     pub last_look_at: Option<i64>,
+    /// What the first call of the last look read: the least a look costs, so
+    /// one is not started when less than this is left today.
+    pub call_tokens: u64,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub last_error: String,
 }
@@ -136,13 +143,16 @@ pub struct View {
     pub state: WatchState,
     /// A look is running now.
     pub running: bool,
-    /// Today's tokens have run out; looks resume tomorrow.
+    /// Today's tokens have run out, or too few are left for a look; looks
+    /// resume tomorrow.
     pub capped: bool,
     /// New in-scope requests waiting for the next look.
     pub waiting: usize,
     pub unread: usize,
     pub items: Vec<Item>,
     pub budgets: &'static [u64],
+    /// The smallest and largest daily limit allowed.
+    pub limits: [u64; 2],
 }
 
 /// One project's watcher. Shared by the API and the background loop.
@@ -156,7 +166,14 @@ pub struct Watch {
     seen: Mutex<(i64, i64)>,
     /// Set by "Look now"; the next tick looks whatever is waiting.
     asked: Mutex<bool>,
+    /// Set when the user stops the look in flight: what to say about it.
+    stopped: Mutex<Option<&'static str>>,
 }
+
+const STOPPED: &str = "Stopped. Claude looks again when new traffic comes in, or when you press Look now.";
+const OFF: &str = "Stopped: watching was turned off.";
+const AGENTS_OFF: &str = "Stopped: agent access was turned off in Settings.";
+const CAPPED: &str = "Stopped: today’s token limit was reached. Looks resume tomorrow, or raise the limit.";
 
 fn today() -> i64 {
     now_ms() / DAY_MS
@@ -170,7 +187,13 @@ impl Watch {
         if data.state.last_id == 0 {
             data.state.last_id = engine.store.max_id().unwrap_or(0);
         }
-        Arc::new(Watch { engine, home, conversations, data: Mutex::new(data), running: Mutex::new(None), seen: Mutex::new((0, now_ms())), asked: Mutex::new(false) })
+        Arc::new(Watch { engine, home, conversations, data: Mutex::new(data), running: Mutex::new(None), seen: Mutex::new((0, now_ms())), asked: Mutex::new(false), stopped: Mutex::new(None) })
+    }
+
+    /// Whether today's tokens are used up, or too few are left for a look.
+    fn capped(data: &Data) -> bool {
+        let (used, limit) = (data.state.tokens_today, data.settings.daily_tokens);
+        used >= limit || used + data.state.call_tokens > limit
     }
 
     fn save(&self, data: &Data) {
@@ -203,7 +226,7 @@ impl Watch {
         Self::roll_day(&mut data);
         let waiting = if data.settings.enabled { self.new_requests(data.state.last_id).len() } else { 0 };
         View {
-            capped: data.state.tokens_today >= data.settings.daily_tokens,
+            capped: Self::capped(&data),
             running: self.running.lock().unwrap().is_some(),
             waiting,
             unread: data.items.iter().filter(|i| !i.read).count(),
@@ -211,6 +234,7 @@ impl Watch {
             state: data.state,
             items: data.items,
             budgets: WatchSettings::BUDGETS,
+            limits: WatchSettings::LIMITS,
         }
     }
 
@@ -227,7 +251,26 @@ impl Watch {
             data.state.last_id = self.engine.store.max_id().unwrap_or(data.state.last_id);
         }
         self.save(&data);
-        data.settings.clone()
+        let settings = data.settings.clone();
+        drop(data);
+        // Turning it off stops the look in flight, not just the next one.
+        if !settings.enabled {
+            self.stop_with(OFF);
+        }
+        settings
+    }
+
+    /// Stops the look in flight, and a look asked for but not started yet.
+    /// Returns whether a look was running.
+    pub fn stop(&self) -> bool {
+        self.stop_with(STOPPED)
+    }
+
+    fn stop_with(&self, why: &'static str) -> bool {
+        *self.asked.lock().unwrap() = false;
+        let Some(run) = self.running.lock().unwrap().clone() else { return false };
+        *self.stopped.lock().unwrap() = Some(why);
+        self.conversations.stop(&run, why)
     }
 
     /// Marks items read, or removes them (dismiss). Empty `ids` means all.
@@ -281,7 +324,7 @@ impl Watch {
         let (settings, last_id, capped) = {
             let mut data = self.data.lock().unwrap();
             Self::roll_day(&mut data);
-            (data.settings.clone(), data.state.last_id, data.state.tokens_today >= data.settings.daily_tokens)
+            (data.settings.clone(), data.state.last_id, Self::capped(&data))
         };
         if !(settings.enabled || asked) || !agents_on() || capped || self.running.lock().unwrap().is_some() {
             return Ok(());
@@ -308,7 +351,7 @@ impl Watch {
             self.save(&data);
             return Ok(());
         }
-        self.look(list, again).await
+        self.look(list, again, agents_on).await
     }
 
     fn latest(&self) -> Vec<crate::model::ExchangeSummary> {
@@ -318,35 +361,49 @@ impl Watch {
         v
     }
 
-    async fn look(&self, list: Vec<crate::model::ExchangeSummary>, again: bool) -> Result<()> {
+    async fn look(&self, list: Vec<crate::model::ExchangeSummary>, again: bool, agents_on: &impl Fn() -> bool) -> Result<()> {
         let newest = list.iter().map(|x| x.id).max().unwrap_or(0);
-        let (dismissed, open): (Vec<String>, Vec<String>) = {
+        let (dismissed, open, left): (Vec<String>, Vec<String>, u64) = {
             let data = self.data.lock().unwrap();
-            (data.dismissed.clone(), data.items.iter().filter(|i| i.kind != ItemKind::Digest).map(|i| i.title.clone()).collect())
+            let left = data.settings.daily_tokens.saturating_sub(data.state.tokens_today);
+            (data.dismissed.clone(), data.items.iter().filter(|i| i.kind != ItemKind::Digest).map(|i| i.title.clone()).collect(), left)
         };
         let prompt = prompt(&list, again, &dismissed, &open);
-        let run = match self.conversations.start_as(&self.home, prompt, None, crate::mcp::WATCH_CLIENT) {
+        *self.stopped.lock().unwrap() = None;
+        // The run itself stops before a call that would go past what is left.
+        let run = match self.conversations.start_limited(&self.home, prompt, None, crate::mcp::WATCH_CLIENT, Some((left, CAPPED.into()))) {
             Ok(r) => r,
             Err(_) => anyhow::bail!("Claude Code is not installed on this Mac, so the watcher cannot look."),
         };
         *self.running.lock().unwrap() = Some(run.clone());
-        let mut used = 0;
+        let mut usage = crate::assistant::Usage { running: true, used: 0, first_call: 0 };
         loop {
             tokio::time::sleep(Duration::from_millis(500)).await;
-            match self.conversations.usage(&run) {
-                Some((true, t)) => used = t,
-                Some((false, t)) => {
-                    used = t;
-                    break;
-                }
-                None => break,
+            let Some(u) = self.conversations.usage(&run) else { break };
+            usage = u;
+            if !u.running {
+                break;
+            }
+            // The limit may be lowered, or agents turned off, while it runs.
+            let over = {
+                let data = self.data.lock().unwrap();
+                data.state.tokens_today + u.used >= data.settings.daily_tokens
+            };
+            if over {
+                self.conversations.stop(&run, CAPPED);
+            } else if !agents_on() {
+                self.conversations.stop(&run, AGENTS_OFF);
             }
         }
         *self.running.lock().unwrap() = None;
+        let by_user = self.stopped.lock().unwrap().take();
         let out = self.conversations.outcome(&run).flatten();
         let mut data = self.data.lock().unwrap();
         Self::roll_day(&mut data);
-        data.state.tokens_today += used;
+        data.state.tokens_today += usage.used;
+        if usage.first_call > 0 {
+            data.state.call_tokens = usage.first_call;
+        }
         data.state.looks_today += 1;
         data.state.last_look_at = Some(now_ms());
         data.state.last_id = data.state.last_id.max(newest);
@@ -363,6 +420,7 @@ impl Watch {
                 data.items.splice(0..0, keep);
                 data.items.truncate(MAX_ITEMS);
             }
+            Some(_) if by_user.is_some() => data.state.last_error = by_user.unwrap_or(STOPPED).into(),
             Some(o) => data.state.last_error = if o.error.is_empty() { "The look did not finish.".into() } else { o.error },
             None => data.state.last_error = "The look was lost.".into(),
         }
@@ -502,7 +560,27 @@ mod tests {
     fn settings_are_kept_in_range() {
         let s = WatchSettings { enabled: true, daily_tokens: 1, idle_secs: 0, min_new: 0 }.clean();
         assert_eq!((s.daily_tokens, s.idle_secs, s.min_new), (10_000, 10, 1));
+        let s = WatchSettings { daily_tokens: u64::MAX, ..Default::default() }.clean();
+        assert_eq!(s.daily_tokens, 10_000_000);
+        let s = WatchSettings { daily_tokens: 350_000, ..Default::default() }.clean();
+        assert_eq!(s.daily_tokens, 350_000, "a custom limit is kept as typed");
+        assert_eq!(WatchSettings::default().daily_tokens, 200_000);
         assert!(!WatchSettings::default().enabled, "the watcher is off until the user turns it on");
+    }
+
+    #[test]
+    fn a_look_is_not_started_without_room_for_it() {
+        let mut d = Data::default();
+        d.settings.daily_tokens = 200_000;
+        assert!(!Watch::capped(&d));
+        d.state.tokens_today = 200_000;
+        assert!(Watch::capped(&d), "used up");
+        // 60k left, but the last look's first call alone read 70k.
+        d.state.tokens_today = 140_000;
+        d.state.call_tokens = 70_000;
+        assert!(Watch::capped(&d));
+        d.state.call_tokens = 40_000;
+        assert!(!Watch::capped(&d));
     }
 
     #[test]

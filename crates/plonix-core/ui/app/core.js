@@ -501,7 +501,7 @@ const TOUR_STEPS = [
     view: 'agents',
     target: '#main .view > .toolbar',
     title: 'Agents',
-    text: 'Let an AI agent such as Claude Code work with this project over MCP: ask about the traffic, the map and the findings, and see what each answer was based on.',
+    text: 'Let an AI agent such as Claude Code work with this project over MCP: ask about the traffic, the map and the findings, and see what each answer was based on. When Claude watches your traffic, you set how many tokens it may use a day, and Stop ends a look at once.',
   },
   {
     title: 'That’s the tour',

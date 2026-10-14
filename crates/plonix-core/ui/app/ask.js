@@ -30,7 +30,7 @@ function askButton(subject, title) {
   }, h('span', { class: 'askico', text: '✦' }), ' Ask Claude');
 }
 
-const fmtTok = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n));
+const fmtTok = (n) => (n >= 1e6 ? +(n / 1e6).toFixed(n % 1e6 ? 2 : 0) + 'M' : n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n));
 const fmtDur = (ms) => {
   const s = Math.floor(ms / 1000);
   return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');

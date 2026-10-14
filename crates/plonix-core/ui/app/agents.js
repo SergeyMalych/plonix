@@ -298,10 +298,74 @@ async function lookNow() {
   toast('Claude will look at your latest traffic in a moment', 'ok');
 }
 
+/** Stops the look in flight: Claude Code is ended, and what it used so far counts. */
+async function stopLook() {
+  AG.lookAsked = 0;
+  try {
+    const r = await api('/api/agents/watch/stop', { method: 'POST' });
+    AG.watch = r.watch;
+  } catch (e) {
+    return toast(e.message, 'err');
+  }
+  drawAgentInbox();
+  toast('Stopped', 'ok');
+}
+
+/** Reads a limit typed as 250000, 250k or 1.5M; null when it is not a number. */
+function parseTokens(text) {
+  const m = String(text).trim().toLowerCase().replace(/[,_\s]/g, '').match(/^(\d+(?:\.\d+)?)([km]?)$/);
+  if (!m) return null;
+  return Math.round(Number(m[1]) * (m[2] === 'm' ? 1e6 : m[2] === 'k' ? 1e3 : 1));
+}
+
+/** The daily limit: the usual amounts, or one of your own. */
+function budgetPicker(w) {
+  const st = w.settings;
+  const [min, max] = w.limits || [10000, 10000000];
+  const preset = w.budgets.includes(st.daily_tokens);
+  const box = h('span', { class: 'agbudget' });
+  const custom = () => {
+    const input = h('input', { type: 'text', class: 'agbudgetin', value: fmtTok(st.daily_tokens), 'aria-label': 'Daily token limit', title: `Tokens a day, from ${fmtTok(min)} to ${fmtTok(max)}. Type 250k or 1.5M.` });
+    const save = () => {
+      const n = parseTokens(input.value);
+      if (n == null || n < min || n > max) {
+        input.classList.add('bad');
+        return toast(`Enter a daily limit from ${fmtTok(min)} to ${fmtTok(max)} tokens, such as 250k`, 'err');
+      }
+      input.classList.remove('bad');
+      AG.customBudget = false;
+      input.blur();
+      if (n !== st.daily_tokens) saveWatch({ daily_tokens: n });
+      else drawAgentInbox();
+    };
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') save();
+      if (e.key === 'Escape') ((input.value = fmtTok(st.daily_tokens)), input.blur(), (AG.customBudget = false), drawAgentInbox());
+    };
+    input.onchange = save;
+    clear(box, input, h('span', { class: 'muted fine', text: 'a day' }), h('button', { class: 'mini', text: '↺', title: 'Back to the usual amounts', onclick: () => ((AG.customBudget = false), saveWatch({ daily_tokens: 200000 })) }));
+    return input;
+  };
+  const sel = h(
+    'select',
+    {
+      title: 'Most tokens Claude may use per day watching this project',
+      onchange: (e) => (e.target.value === 'custom' ? ((AG.customBudget = true), custom().select()) : saveWatch({ daily_tokens: Number(e.target.value) })),
+    },
+    w.budgets.map((n) => h('option', { value: n, text: fmtTok(n) + ' a day', selected: n === st.daily_tokens })),
+    h('option', { value: 'custom', text: 'Custom…' }),
+  );
+  if (preset && !AG.customBudget) clear(box, sel);
+  else custom();
+  return box;
+}
+
 function drawAgentInbox() {
   const box = $('#aginbox');
   const w = AG.watch;
   if (!box || !w) return;
+  // Not while a limit is being typed: the redraw would take it away.
+  if (document.activeElement && document.activeElement.classList.contains('agbudgetin') && box.contains(document.activeElement)) return;
   const a = AG.policy;
   const st = w.settings;
   const items = w.items || [];
@@ -312,19 +376,19 @@ function drawAgentInbox() {
   const pct = Math.min(100, Math.round((used / st.daily_tokens) * 100));
   const status = !st.enabled
     ? 'Off'
-    : w.capped
-      ? 'Paused until tomorrow: today’s tokens are used up'
-      : looking
+    : w.running
+      ? 'Looking at your traffic…'
+      : w.capped && used >= st.daily_tokens
+        ? 'Paused until tomorrow: today’s tokens are used up'
+        : w.capped
+          ? 'Paused until tomorrow: too few tokens left today for a look'
+          : looking
         ? 'Looking at your traffic…'
         : w.waiting
           ? `${w.waiting} new request${w.waiting === 1 ? '' : 's'} waiting; Claude looks when you pause`
           : 'Watching your traffic';
   const toggle = h('input', { type: 'checkbox', checked: st.enabled, onchange: () => saveWatch({ enabled: toggle.checked }) });
-  const budget = h(
-    'select',
-    { title: 'Most tokens Claude may use per day watching this project', onchange: (e) => saveWatch({ daily_tokens: Number(e.target.value) }) },
-    w.budgets.map((n) => h('option', { value: n, text: fmtTok(n) + ' a day', selected: n === st.daily_tokens })),
-  );
+  const budget = budgetPicker(w);
   const head = h(
     'div',
     { class: 'aghead' },
@@ -333,7 +397,9 @@ function drawAgentInbox() {
     h('span', { class: 'agstat' + (looking ? ' busy' : ''), text: status }),
     h('span', { class: 'sp' }),
     w.unread ? h('button', { class: 'btn sm ghost', text: 'Mark all read', onclick: () => markItems([], false) }) : null,
-    h('button', { class: 'btn sm', text: looking ? 'Looking…' : 'Look now', disabled: looking || !a || !a.enabled || a.ask_in_app === false, title: 'Have Claude look at the latest in-scope traffic now', onclick: lookNow }),
+    looking
+      ? h('button', { class: 'btn sm danger agstop', text: '■ Stop', title: 'Stop this look now. Claude Code is ended; nothing more is used.', onclick: stopLook })
+      : h('button', { class: 'btn sm', text: 'Look now', disabled: !a || !a.enabled || a.ask_in_app === false || w.capped, title: w.capped ? 'Today’s token limit is reached. Raise it below, or wait until tomorrow.' : 'Have Claude look at the latest in-scope traffic now', onclick: lookNow }),
     h('label', { class: 'agswitch', title: 'Let Claude read new in-scope traffic in the background and leave notes and leads here' }, toggle, h('span', { text: 'Watch my traffic' })),
   );
   let body;
