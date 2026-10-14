@@ -2,6 +2,11 @@
 
 What changed in each Plonix release. The newest release is at the top.
 
+## [Unreleased]
+
+### Added
+- **Is a user still signed in?** Each saved user shows whether its session works, is about to run out, has expired or was refused by the server, read from the expiry its tokens and cookies state and from how the server answered requests sent as that user. It says when it can't tell, and **Check now** asks the server once. **What it may do** lists the roles, scopes and groups the user's tokens and "who am I" answers name, and the endpoints that allowed or refused it. The walkthrough has a stop for it.
+
 ## [0.5.1] - 2026-10-14
 
 The release after 0.1.5. The version jumps to 0.5.1; nothing is skipped in between.

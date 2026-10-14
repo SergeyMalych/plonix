@@ -13,6 +13,7 @@ pub(super) fn routes() -> Router<AppState> {
         .route("/api/users/acting", put(set_acting_user))
         .route("/api/users/found", get(found_users))
         .route("/api/users/found/apply", post(apply_found_user))
+        .route("/api/users/standing", get(user_standing))
         .route("/api/access-check", post(access_check))
 }
 
@@ -172,6 +173,25 @@ async fn found_users(State(s): State<AppState>, caller: MaybeCaller, Query(q): Q
             let found: Vec<_> = found.into_iter().filter(|f| q.exchange.is_none_or(|id| f.exchanges.contains(&id))).collect();
             Json(json!({ "sessions": found })).into_response()
         }
+        Ok(Err(e)) => internal(e),
+        Err(e) => internal(e.into()),
+    }
+}
+
+/// Whether each saved user's session still works, and what it may do, read
+/// from its credentials and the traffic. User-only, and it sends nothing.
+async fn user_standing(State(s): State<AppState>, caller: MaybeCaller) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    let st = s.clone();
+    let work = move || -> anyhow::Result<Vec<crate::userstate::Standing>> {
+        let users = st.engine.store.saved_users()?;
+        let exchanges = st.engine.store.recent_exchanges(crate::gather::MAX_EXCHANGES)?;
+        Ok(crate::userstate::standings(&exchanges, &st.engine.rules(), &users, crate::users::now_secs()))
+    };
+    match tokio::task::spawn_blocking(work).await {
+        Ok(Ok(list)) => Json(json!({ "users": list })).into_response(),
         Ok(Err(e)) => internal(e),
         Err(e) => internal(e.into()),
     }

@@ -114,7 +114,7 @@ const NOT_SESSIONS: &[&str] = &["_ga", "_gid", "_gat", "_gcl", "_fbp", "_fbc", "
 
 /// Whether a cookie reads like part of a session: a session-ish name, or a
 /// long, random-looking value.
-fn session_cookie(name: &str, value: &str) -> bool {
+pub(crate) fn session_cookie(name: &str, value: &str) -> bool {
     let n = name.to_ascii_lowercase();
     if NOT_SESSIONS.iter().any(|p| n.starts_with(p)) || value.len() < 8 {
         return false;
@@ -126,12 +126,12 @@ fn session_cookie(name: &str, value: &str) -> bool {
 
 /// A header carrying a credential (see [`crate::users::is_auth_header`]),
 /// cookies aside.
-fn session_header(name: &str, value: &str) -> bool {
+pub(crate) fn session_header(name: &str, value: &str) -> bool {
     !name.eq_ignore_ascii_case("cookie") && crate::users::is_auth_header(name) && value.trim().len() >= 8
 }
 
 /// The token itself, without an auth scheme such as `Bearer `.
-fn bare(value: &str) -> &str {
+pub(crate) fn bare(value: &str) -> &str {
     match value.split_once(' ') {
         Some((scheme, rest)) if !scheme.is_empty() && scheme.bytes().all(|b| b.is_ascii_alphabetic()) => rest.trim(),
         _ => value.trim(),
@@ -157,7 +157,7 @@ fn jwt_claims(token: &str) -> Option<(String, String, String)> {
 }
 
 /// Who a "who am I" answer says the caller is: (label, role).
-fn whoami(ex: &Exchange) -> Option<(String, String)> {
+pub(crate) fn whoami(ex: &Exchange) -> Option<(String, String)> {
     let last = ex.path.trim_end_matches('/').rsplit('/').next().unwrap_or("").to_ascii_lowercase();
     if !["me", "user", "profile", "account", "whoami", "userinfo", "session", "self"].contains(&last.as_str()) || !ex.status.is_some_and(|s| (200..300).contains(&s)) {
         return None;
@@ -212,7 +212,7 @@ impl Uf {
 }
 
 /// The tokens a request carries: (kind, name, value).
-fn sent_tokens(ex: &Exchange) -> Vec<(Kind, String, String)> {
+pub(crate) fn sent_tokens(ex: &Exchange) -> Vec<(Kind, String, String)> {
     let mut out = vec![];
     for (k, v) in &ex.req_headers {
         if k.eq_ignore_ascii_case("cookie") {
