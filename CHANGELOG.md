@@ -2,9 +2,9 @@
 
 What changed in each Plonix release. The newest release is at the top.
 
-## [0.4.1] - 2026-10-13
+## [0.5.1] - 2026-10-14
 
-The release after 0.1.5. The version jumps to 0.4.1; nothing is skipped in between.
+The release after 0.1.5. The version jumps to 0.5.1; nothing is skipped in between.
 
 ### Added
 - **Users found in traffic.** The Users screen lists the sessions in captured traffic, one per person, with each cookie and token and the part of the app it is sent to (domain, host, path). Add one to the saved user it belongs to, or save it as a new user; the Lens and the Traffic row menu offer the same. Saved users can now send a header only to one host or path, so one user carries different tokens for different parts of an app.
@@ -196,7 +196,7 @@ The first public release of Plonix for Mac.
 - Crash reports stay on your Mac; Plonix offers to open a prefilled GitHub issue and never sends anything on its own.
 - Documentation at plonix.io/docs.
 
-[0.4.1]: https://github.com/SergeyMalych/plonix/compare/v0.1.5...v0.4.1
+[0.5.1]: https://github.com/SergeyMalych/plonix/compare/v0.1.5...v0.5.1
 [0.1.5]: https://github.com/SergeyMalych/plonix/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/SergeyMalych/plonix/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/SergeyMalych/plonix/compare/v0.1.2...v0.1.3
