@@ -19,6 +19,7 @@ The release after 0.1.5. The version jumps to 0.5.1; nothing is skipped in betwe
 - **Resizable sidebar.** Drag its right edge to set its width (double-click resets). Dragged narrower than its names, it folds to icons; drag it back out to see them again.
 - **Spotted and decoded values** keep their header and buttons (Copy decoded, Copy value, Find in traffic) in view while only the value scrolls, with a handle underneath to drag its height. The same goes for value cards in the Bench Lens.
 - **Bench History and Compare** each have a handle underneath to drag their height.
+- **Website**: one menu on every page (Home, Docs, Analytics, Privacy), download buttons that offer the Mac or Windows app to match your computer, docs tables that fit on a phone, and a [Code signing policy](https://plonix.io/docs/code-signing.html) page for the coming signed Windows installer.
 
 ### Fixed
 - **The watcher stays within its daily limit.** Every call Claude makes is counted now, not just the last one, so the meter shows what a look really uses (often two to three times more than before). A look is not started when too few tokens are left for it, and one that would go past the limit is stopped before its next call.
