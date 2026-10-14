@@ -131,9 +131,39 @@ fn jwt(now: i64) -> String {
     format!(
         "{}.{}.{}",
         b64url(r#"{"alg":"HS256","typ":"JWT","kid":"web-2026-09"}"#),
-        b64url(&format!(r#"{{"sub":"usr_8f2c41","email":"maya.lopez@mail.example","role":"customer","iat":{iat},"exp":{}}}"#, iat + 3600)),
+        b64url(&format!(r#"{{"sub":"usr_8f2c41","email":"maya.lopez@mail.example","role":"customer","scope":"orders:read profile:write","iat":{iat},"exp":{}}}"#, iat + 3600)),
         "3q2-7wAAvu8kM1n0dXN0LWEtZGVtby1zaWduYXR1cmU",
     )
+}
+
+/// The account an old administrator token in the saved users belongs to.
+const ADMIN_SUB: &str = "usr_0c55aa";
+
+/// An administrator's token from an earlier session: properly signed, with
+/// admin and support roles, but its `exp` passed three days ago, so the API
+/// turns it away. Users shows it as expired, and what it was allowed to do.
+fn expired_admin_jwt(now: i64) -> String {
+    let iat = now / 1000 - 4 * 86_400;
+    format!(
+        "{}.{}.{}",
+        b64url(r#"{"alg":"HS256","typ":"JWT","kid":"web-2026-09"}"#),
+        b64url(&format!(
+            r#"{{"sub":"{ADMIN_SUB}","email":"ari.chen@brightcart.example","roles":["admin","support"],"scope":"orders:read orders:refund users:read","iat":{iat},"exp":{}}}"#,
+            iat + 86_400
+        )),
+        "Zt4-1kQmV8wLp0dXN0LWEtZGVtby1hZG1pbi1zaWc",
+    )
+}
+
+/// Whether a bearer token is the old administrator token, now past its `exp`.
+fn is_expired_admin(auth: &str) -> bool {
+    let tok = auth.strip_prefix("Bearer ").unwrap_or(auth);
+    let claims = tok
+        .split('.')
+        .nth(1)
+        .and_then(|b| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(b).ok())
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
+    claims.is_some_and(|c| c["sub"] == ADMIN_SUB && c["exp"].as_i64().is_some_and(|e| e <= crate::users::now_secs()))
 }
 
 /// The same claims with `"alg":"none"` and the role raised: what an
@@ -206,6 +236,11 @@ fn route(method: &str, host: &str, path: &str, query: &str, headers: &Headers) -
     let auth = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("authorization")).map(|(_, v)| v.as_str()).unwrap_or("");
 
     if host == API {
+        // An expired token is turned away everywhere, however much it was
+        // once allowed.
+        if is_expired_admin(auth) {
+            return (401, json, json!({ "error": "invalid_token", "message": "token expired" }).to_string());
+        }
         // The admin endpoint enforces the signature: an unsigned (`alg: none`)
         // token is refused outright; a customer token lacks the role.
         if path.starts_with("/v1/admin/") {
@@ -1047,7 +1082,18 @@ export async function api(path, opts = {{}}) {{
     }
     dana.cookies.iter_mut().filter(|c| c.name == "bc_session").for_each(|c| c.expires = Some(crate::users::now_secs() + 86_400));
     dana.cookies.push(crate::users::Cookie { name: "promo".into(), value: "SPRING10".into(), domain: "brightcart.example".into(), expires: Some(crate::users::now_secs() - 3_600) });
-    store.set_saved_users(&[maya, dana])?;
+    // An administrator from an earlier session, kept with a token that has
+    // since expired: Users shows it as expired, and the roles it carried.
+    let ari = SavedUser {
+        id: "ari".into(),
+        name: "Ari (admin)".into(),
+        note: "An administrator token kept from an earlier session.".into(),
+        headers: vec![("Authorization".into(), format!("Bearer {}", expired_admin_jwt(now)))],
+        scoped: vec![],
+        cookies: vec![],
+        keep_fresh: true,
+    };
+    store.set_saved_users(&[maya, dana, ari])?;
 
     seed_filters(store)?;
     seed_traffic_rules(store)?;
@@ -1151,10 +1197,11 @@ mod tests {
         // Findings, the Bench and Lens insights.
         assert_eq!(store.findings().unwrap().len(), 5);
 
-        // Two saved users, their cookies one by one; one of Dana's has run out.
+        // Two shoppers, their cookies one by one; one of Dana's has run out.
+        // And an administrator whose token has expired.
         let users = store.saved_users().unwrap();
-        assert_eq!(users.len(), 2);
-        assert!(users.iter().all(|u| u.headers.is_empty() && u.cookies.iter().any(|c| c.name == "bc_session")));
+        assert_eq!(users.len(), 3);
+        assert!(users[..2].iter().all(|u| u.headers.is_empty() && u.cookies.iter().any(|c| c.name == "bc_session")));
         let now = crate::users::now_secs();
         assert!(users[1].cookies.iter().any(|c| !c.live(now)));
         assert!(users[1].request_headers("api.brightcart.example", "/v1/me", now)[0].1.contains(SESSION_B));
@@ -1168,6 +1215,16 @@ mod tests {
         let sam = found.iter().find(|f| f.user.is_none()).expect("Sam's session is found");
         assert_eq!(crate::gather::user_name(sam, &users), "Sam Ortiz (support)");
         assert_eq!(found.len(), 2, "{found:#?}");
+        // Each user's standing: Maya works as a customer, Dana's session has
+        // a day left, and Ari's admin token has expired.
+        let standing = crate::userstate::standings(&store.exchanges_after(0, 500).unwrap(), &rules, &users, now);
+        use crate::userstate::State;
+        assert_eq!(standing.iter().map(|s| s.state).collect::<Vec<_>>(), [State::Working, State::Valid, State::Expired], "{standing:#?}");
+        assert!(standing[0].grants.iter().any(|g| g.value == "customer"));
+        assert!(standing[2].grants.iter().any(|g| g.value == "admin") && standing[2].grants.iter().any(|g| g.value == "orders:refund"));
+        assert_eq!(standing[2].probe.as_ref().map(|p| p.path.as_str()), Some("/v1/me"), "Ari can be checked against who-am-I");
+        let ari = users[2].request_headers("api.brightcart.example", "/v1/me", now);
+        assert_eq!(route("GET", API, "/v1/me", "", &ari).0, 401, "the expired token is turned away");
         let named = crate::filterpack::FilterLibrary::at(&home.root.join("filters")).load();
         let tour = store.view_state("filter_tour").unwrap().unwrap();
         for v in tour["views"].as_array().unwrap() {

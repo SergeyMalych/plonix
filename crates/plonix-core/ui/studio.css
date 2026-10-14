@@ -121,3 +121,10 @@
 [data-style="studio"] .mico.k-platform::before { background: var(--st-pink); border-radius: 100% 0 0 0; }
 [data-style="studio"] .mico.k-tool::before { background: var(--st-blue); clip-path: polygon(0 0, 100% 0, 100% 34%, 66% 34%, 66% 100%, 34% 100%, 34% 34%, 0 34%); }
 [data-style="studio"] .mico.k-detectors::before { background: var(--st-red); border-radius: 50%; }
+
+/* Users: a session's state as a flat colour */
+[data-style="studio"] .usst { border-radius: 999px; }
+[data-style="studio"] .usst.ok { background: var(--st-green); color: #fff; }
+[data-style="studio"] .usst.warn { background: var(--st-yellow); color: #1e1c19; }
+[data-style="studio"] .usst.crit { background: var(--st-red); color: #fff; }
+[data-style="studio"] :is(.usgchip, .usseen) { border-radius: 999px; }
