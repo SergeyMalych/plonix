@@ -535,13 +535,13 @@ footer a:hover { color: var(--fg); }
   <div class="geo" aria-hidden="true"><i class="a"></i><i class="b"></i><i class="c"></i></div>
   <div class="wrap hero-grid">
     <div>
-      <span class="eyebrow">Open source, native on macOS</span>
-      <h1>Test web app <span class="hl">security</span> from your Mac.</h1>
+      <span class="eyebrow" data-win="Open source, native on Windows">Open source, native on macOS</span>
+      <h1>Test web app <span class="hl">security</span> from your <span data-win="PC">Mac</span>.</h1>
       <p class="lede">Plonix captures every request, maps the target as you browse, and helps you prove what you find. From a window, a terminal or Claude Code.</p>
       <div class="cta-row">
-        <a class="btn primary" href="#start">
+        <a class="btn primary" href="#start" id="herodl">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M6 10l6 6 6-6M5 20h14"/></svg>
-          Download for Mac
+          <span>Download</span>
         </a>
         <a class="btn" href="https://github.com/SergeyMalych/plonix">Star on GitHub</a>
         <button type="button" class="btn tour-btn" id="tourbtn" aria-haspopup="dialog">
@@ -606,7 +606,7 @@ footer a:hover { color: var(--fg); }
         <div class="txt"><h3>Scope that works, and stays easy</h3><p>Scope grows as you browse, with evidence for every suggestion. One click to accept or reject, and noise like trackers is excluded for you.</p><span class="more">Adaptive scope &rarr;</span></div>
       </a>
     </div>
-    <div class="facts2 reveal"><span>Native Mac app</span><span>Rust engine</span><span>Your data stays on your Mac</span><span>Open source, Apache-2.0</span><span>CLI + local API</span></div>
+    <div class="facts2 reveal"><span data-win="Native Windows app">Native Mac app</span><span>Rust engine</span><span data-win="Your data stays on your PC">Your data stays on your Mac</span><span>Open source, Apache-2.0</span><span>CLI + local API</span></div>
   </div>
 </section>
 
@@ -835,9 +835,9 @@ footer a:hover { color: var(--fg); }
         <div>
           <span class="eyebrow">Get started</span>
           <h2 style="margin-top:18px">Captured traffic in under a minute.</h2>
-          <div class="cta-row">
-            <a class="btn primary" href="https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-macOS.dmg">Download for Mac</a>
-            <a class="btn" href="https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-Windows-setup.exe">Download for Windows</a>
+          <div class="cta-row" id="startdl">
+            <a class="btn primary" data-os="mac" href="https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-macOS.dmg">Download for Mac</a>
+            <a class="btn" data-os="windows" href="https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-Windows-setup.exe">Download for Windows</a>
           </div>
           <p class="note">Mac: Apple silicon and Intel, macOS 11 or later. Plonix is in early development and not notarized by Apple yet: the first time, open it from <b>System Settings › Privacy &amp; Security › Open Anyway</b>. Windows: 64-bit Windows 10 or 11; the installer is not code-signed yet, so click <b>More info › Run anyway</b> if SmartScreen asks. <a href="https://github.com/SergeyMalych/plonix#quickstart">Quickstart</a> · <a href="https://github.com/SergeyMalych/plonix/releases">All releases</a></p>
         </div>
@@ -886,6 +886,21 @@ footer a:hover { color: var(--fg); }
 </dialog>
 
 <script>
+(() => {
+  /* ---- download buttons follow the visitor's OS ---- */
+  const ua = navigator.userAgent, plat = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+  const os = /win/i.test(plat) || /Windows NT/.test(ua) ? 'windows'
+    : /mac/i.test(plat) && !(navigator.maxTouchPoints > 1) && !/iPhone|iPad|iPod/.test(ua) ? 'mac' : '';
+  const REL = 'https://github.com/SergeyMalych/plonix/releases/latest/download/';
+  const hero = document.getElementById('herodl');
+  if (os === 'mac') { hero.href = REL + 'Plonix-macOS.dmg'; hero.lastElementChild.textContent = 'Download for Mac'; }
+  if (os === 'windows') {
+    hero.href = REL + 'Plonix-Windows-setup.exe'; hero.lastElementChild.textContent = 'Download for Windows';
+    document.querySelectorAll('[data-win]').forEach((el) => { el.textContent = el.dataset.win; });
+    const row = document.getElementById('startdl'), win = row.querySelector('[data-os="windows"]'), mac = row.querySelector('[data-os="mac"]');
+    row.insertBefore(win, mac); win.classList.add('primary'); mac.classList.remove('primary');
+  }
+})();
 (() => {
   /* ---- theme switch ---- */
   const root = document.documentElement, tbtn = document.getElementById('theme');
