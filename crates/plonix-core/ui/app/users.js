@@ -977,6 +977,8 @@ function drawCallbackFeed(box) {
     h('span', { class: 'muted', text: ' · ' + list.length + (list.length === 1 ? ' callback' : ' callbacks') }),
     CB.list.length ? h('button', { class: 'link', style: { marginLeft: 'auto' }, text: 'Clear all', onclick: clearCallbacks }) : null,
   );
+  // The client keeps running when it can no longer fetch callbacks; say so.
+  const warn = d.phase === 'listening' && d.error ? h('div', { class: 'cbwarn', text: d.error }) : null;
   if (!list.length) {
     const why =
       d.phase === 'listening'
@@ -986,7 +988,7 @@ function drawCallbackFeed(box) {
         : d.phase === 'starting'
           ? 'Connecting to the callback server…'
           : d.error || 'Press Start listening to register with a callback server. Nothing is sent to any target.';
-    return clear(box, head, h('div', { class: 'empty cbempty' + (d.phase === 'failed' ? ' bad' : ''), text: why }));
+    return clear(box, head, warn, h('div', { class: 'empty cbempty' + (d.phase === 'failed' ? ' bad' : ''), text: why }));
   }
   if (!CB.sel || !list.some((i) => i.seq === CB.sel)) CB.sel = list[0].seq;
   const rows = list.map((i) => {
@@ -1013,7 +1015,7 @@ function drawCallbackFeed(box) {
     ),
   );
   const detail = h('div', { class: 'cbdetail' });
-  clear(box, head, table, detail);
+  clear(box, head, warn, table, detail);
   drawCallbackDetail(detail, list.find((i) => i.seq === CB.sel));
 }
 

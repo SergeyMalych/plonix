@@ -55,21 +55,23 @@ async fn callbacks_start(State(s): State<AppState>, caller: MaybeCaller) -> Resp
     if let Some(r) = callbacks_gate(&s, &caller) {
         return r;
     }
-    let Some(exe) = crate::callbacks::locate() else {
+    if crate::callbacks::locate().is_none() {
         return err(
             StatusCode::BAD_REQUEST,
             "not_installed",
             &format!("{} is not installed. Install it with `{}`, then start again.", crate::callbacks::PROGRAM, crate::callbacks::INSTALL),
         );
-    };
+    }
     crate::usage::record("callbacks_start");
-    let project = s.engine.project_ref.get().map(|p| p.id.clone()).unwrap_or_else(|| s.engine.project.clone());
-    let session = crate::callbacks::session_path(&s.home, &project);
-    let config = crate::callbacks::Config::load(&s.home);
-    match s.engine.callbacks.start(&exe, &config, &session) {
+    match start_listening(&s) {
         Ok(()) => Json(callbacks_view(&s, u64::MAX)).into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, "start_failed", &e),
     }
+}
+
+fn start_listening(s: &AppState) -> Result<(), String> {
+    let project = s.engine.project_ref.get().map(|p| p.id.clone()).unwrap_or_else(|| s.engine.project.clone());
+    crate::callbacks::start_for(&s.engine.callbacks, &s.home, &project)
 }
 
 async fn callbacks_stop(State(s): State<AppState>, caller: MaybeCaller) -> Response {
@@ -77,7 +79,7 @@ async fn callbacks_stop(State(s): State<AppState>, caller: MaybeCaller) -> Respo
         return r;
     }
     let cb = s.engine.callbacks.clone();
-    let _ = tokio::task::spawn_blocking(move || cb.stop()).await;
+    let _ = tokio::task::spawn_blocking(move || cb.stop_listening()).await;
     Json(callbacks_view(&s, u64::MAX)).into_response()
 }
 
@@ -134,6 +136,13 @@ async fn callbacks_new_payload(State(s): State<AppState>, caller: MaybeCaller, J
     }
     match s.engine.callbacks.new_payload(&b.label) {
         Ok(p) => {
+            // A host is only heard while the client polls: making one starts
+            // listening again if it was stopped.
+            if !s.engine.callbacks.is_running()
+                && let Err(e) = start_listening(&s)
+            {
+                tracing::warn!("callbacks: could not start listening for a new host: {e}");
+            }
             let _ = s.engine.callbacks.persist(&s.engine.store);
             Json(p).into_response()
         }

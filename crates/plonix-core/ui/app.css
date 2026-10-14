@@ -1496,6 +1496,7 @@ tr.acnote > td { border-bottom: none; }
 .cbfeedhead .link { font-family: var(--ui); }
 .cbempty { flex: 1; }
 .cbempty.bad { color: var(--crit); }
+.cbwarn { margin: 8px 12px 0; padding: 7px 10px; font-size: 12px; color: var(--fg); background: var(--warn-soft); border: 1px solid var(--warn); border-radius: 6px; }
 .cbtablewrap { flex: 0 1 auto; max-height: 42%; min-height: 90px; overflow: auto; border-bottom: 1px solid var(--line); }
 .cbtable { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .cbtable col.c-t { width: 84px; } .cbtable col.c-p { width: 72px; } .cbtable col.c-f { width: 22%; } .cbtable col.c-r { width: 130px; }
