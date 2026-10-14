@@ -431,6 +431,14 @@ const TOUR_STEPS = [
   },
   {
     view: 'users',
+    prep: () => (US.sel = 'ari'),
+    target: ['.usstate', '#main .view'],
+    title: 'Is a user still signed in?',
+    test: 'userstate',
+    text: 'Each user shows whether its session still works and what it may do: the expiry its tokens and cookies state, the roles and scopes they carry, and how the server answered requests sent as that user. Ari’s admin token says it ran out days ago. Where nothing says, Plonix tells you it can’t tell, and Check now asks the server once.',
+  },
+  {
+    view: 'users',
     target: '#actas',
     title: 'Act as a user',
     test: 'actas',
@@ -1052,6 +1060,26 @@ const TOUR_TESTS = {
       },
     };
   })(),
+  userstate: {
+    run: async (t) => {
+      if (S.view !== 'users' || US.sel !== 'ari') {
+        US.sel = 'ari';
+        go('users', true);
+      }
+      const btn = await t.until(() => [...document.querySelectorAll('.usstate .ussech .btn')].find((b) => /check now/i.test(b.textContent) && !b.disabled));
+      if (!btn) return 'Ari is gone; start the demo over to get the admin user back.';
+      const st = STAND.byUser.get('ari');
+      t.ring('.usstate');
+      await t.press(btn);
+      await t.until(() => !STAND.checking && $('.usstate .usst'));
+      await t.wait(300);
+      t.ring(['.usstate', '#main .view']);
+      const now = STAND.byUser.get('ari');
+      const roles = ((now && now.grants) || []).filter((g) => g.kind === 'role').map((g) => g.value);
+      const answer = now && now.refused ? `${now.refused.status}${now.refused.why ? ' “' + now.refused.why + '”' : ''}` : 'no clear answer';
+      return `Sent ${st && st.probe ? answerText(st.probe) : 'one request'} as Ari, once: the shop answered ${answer}, so Ari is now marked ${now ? (STATE_LOOK[now.state] || STATE_LOOK.unknown)[0].toLowerCase() : 'unchanged'}.${roles.length ? ` The token still tells you what Ari could do: ${andList(roles)}.` : ''} Sign in again as Ari to test the admin pages.`;
+    },
+  },
   actas: {
     run: async (t) => {
       const pill = await t.until(() => $('#actas'));

@@ -35,6 +35,16 @@ Each user lists their cookies and headers:
 - **Keep cookies fresh** updates a cookie here when the server sets or clears it in answer to a request sent as this user;
 - **Open a browser as** the user gives them a browser window of their own, so you can be signed in as two users at once. What that window learns (cookies, bearer tokens) is saved with the user.
 
+## Is a user still signed in?
+
+Each user on the Users screen shows whether its session still works and what it may do, read from what Plonix already has. Nothing is sent to find out.
+
+- **Session** says Working, Not expired, Expiring soon, Partly expired, Refused, Expired or Can't tell, with what that rests on: the expiry a token or cookie states (a JSON Web Token's `exp`, a cookie's expiry, or the `expires_in` of the answer that handed a token out), and how the server answered requests that carried the user's credentials. The list of users shows the same in one word.
+- A user is called **Expired** only when every credential it sends has passed its stated expiry, and **Refused** only when the server turned the session away: a 401, or a redirect to a sign-in page, on an endpoint that took the same session before, a "who am I" endpoint, or with an answer that blames the token. A 403 is a missing permission, not an expired session. Where nothing says, it reads **Can't tell**.
+- **Check now** sends one captured request, a "who am I" one where there is one, as that user, to settle it. It goes through the scope check and is recorded in Traffic.
+- When the server still accepts a token after its stated expiry, Plonix points it out: an expired token should be refused.
+- **What it may do** lists the roles, scopes, groups and permissions its tokens and "who am I" answers name, and the endpoints that allowed or refused requests sent as this user. Click one to open the request. To find out more, run the Access check as that user.
+
 ## The Access check
 
 The Access check replays requests as each saved user and once **signed out** (auth headers removed), then lines up status, size and content for each.

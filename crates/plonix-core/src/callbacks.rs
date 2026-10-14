@@ -8,8 +8,10 @@
 //!
 //! Plonix drives `interactsh-client`, a tool the user installs, against a
 //! public callback server or one they host. Nothing starts on its own: the
-//! listener runs only after the user presses Start, and stops when they press
-//! Stop or the project closes. The client registers once with one server and
+//! listener runs only after the user presses Start (or makes a host), and
+//! stops when they press Stop. Closing the project pauses it; a project whose
+//! listener was on when it closed starts it again when it opens, so hosts
+//! already handed out keep reporting. The client registers once with one server and
 //! prints a payload host; every host Plonix hands out is that host's
 //! correlation id with a fresh suffix, so each test gets a name of its own and
 //! each callback can be traced to the test it came from. The client's session
@@ -169,6 +171,9 @@ struct Saved {
     payloads: Vec<Payload>,
     interactions: VecDeque<Interaction>,
     seq: u64,
+    /// The user started listening and has not pressed Stop since: the
+    /// listener comes back when the project opens.
+    listening: bool,
 }
 
 struct Inner {
@@ -312,7 +317,10 @@ impl Callbacks {
         g.phase = Phase::Starting;
         g.error = None;
         g.started = Some(Instant::now());
+        g.dirty |= !g.saved.listening;
+        g.saved.listening = true;
         drop(g);
+        tracing::info!("callbacks: started {PROGRAM} ({})", if config.server.is_empty() { "public servers" } else { &config.server });
 
         let me = self.clone();
         std::thread::spawn(move || {
@@ -324,21 +332,42 @@ impl Callbacks {
         });
         let me = self.clone();
         std::thread::spawn(move || {
-            let mut last_problem = String::new();
             for line in BufReader::new(stderr).lines() {
                 let Ok(line) = line else { break };
                 let line = strip_ansi(&line);
                 if let Some(host) = payload_host_in(&line) {
                     me.on_base(run, &host);
                 } else if line.contains("[FTL]") || line.contains("[ERR]") {
-                    last_problem = line;
+                    // Shown at once: a client that can no longer poll keeps
+                    // running, and would otherwise look like it is listening.
+                    tracing::warn!("callbacks: {}", clean(&line, 300));
+                    me.on_problem(run, &line);
                 }
-            }
-            if !last_problem.is_empty() {
-                me.on_problem(run, &last_problem);
             }
         });
         Ok(())
+    }
+
+    /// Whether the listener should come back when the project opens.
+    pub fn wants_listening(&self) -> bool {
+        self.inner.lock().unwrap().saved.listening
+    }
+
+    /// Whether the client is running (or registering).
+    pub fn is_running(&self) -> bool {
+        let g = self.inner.lock().unwrap();
+        matches!(g.phase, Phase::Starting | Phase::Listening) && g.child.is_some()
+    }
+
+    /// The user pressed Stop: stops the client, and it stays off when the
+    /// project opens again.
+    pub fn stop_listening(&self) {
+        {
+            let mut g = self.inner.lock().unwrap();
+            g.dirty |= g.saved.listening;
+            g.saved.listening = false;
+        }
+        self.stop();
     }
 
     /// Stops the client. Its session is saved, so the hosts keep working the
@@ -418,6 +447,8 @@ impl Callbacks {
         }
         let seq = g.saved.seq + 1;
         let Some(i) = parse_interaction(&v, seq, &g.saved.payloads) else { return };
+        // Callbacks arrive, so polling works again.
+        g.error = None;
         g.saved.seq = seq;
         g.saved.interactions.push_back(i);
         while g.saved.interactions.len() > MAX_INTERACTIONS {
@@ -445,6 +476,7 @@ impl Callbacks {
         if g.error.is_none() {
             g.error = Some(format!("{PROGRAM} stopped unexpectedly."));
         }
+        tracing::warn!("callbacks: {PROGRAM} stopped: {}", g.error.as_deref().unwrap_or(""));
     }
 }
 
@@ -471,6 +503,14 @@ fn stop_child(g: &mut Inner) {
     }
     let _ = child.kill();
     let _ = child.wait();
+}
+
+/// Starts the project's listener with the saved server settings.
+pub fn start_for(cb: &Callbacks, home: &Home, project: &str) -> Result<(), String> {
+    let Some(exe) = locate() else {
+        return Err(format!("{PROGRAM} is not installed. Install it with `{INSTALL}`, then start again."));
+    };
+    cb.start(&exe, &Config::load(home), &session_path(home, project))
 }
 
 /// Where a project's client sessions are kept (one per server, see
@@ -532,6 +572,15 @@ fn explain(line: &str) -> String {
     }
     if l.contains("token") && (l.contains("invalid") || l.contains("unauthorized") || l.contains("401")) {
         return "The server refused the token. Check it in Server settings.".into();
+    }
+    if l.contains("correlation id was not found") || l.contains("evicted") {
+        return "The callback server forgot this session, so callbacks cannot be collected. Press Stop, then Start listening to register again.".into();
+    }
+    if l.contains("could not authenticate") {
+        return "The callback server refused to hand over callbacks. Check the token in Server settings.".into();
+    }
+    if l.contains("could not poll") || l.contains("could not decode interactions") {
+        return "Could not fetch callbacks from the server. Plonix keeps trying; check your connection.".into();
     }
     let msg = line.split_once(']').map(|(_, m)| m.trim()).unwrap_or(line);
     clean(msg, 300)
@@ -643,6 +692,35 @@ mod tests {
     }
 
     #[test]
+    fn shows_poll_errors_while_listening_and_clears_them_when_callbacks_arrive() {
+        let cb = Callbacks::default();
+        cb.on_base(0, BASE);
+        cb.on_problem(0, "[ERR] The correlation id was not found (probably evicted due to inactivity): x");
+        let snap = cb.snapshot(0);
+        assert_eq!(snap["phase"], json!("listening"));
+        assert!(snap["error"].as_str().unwrap().starts_with("The callback server forgot"));
+        cb.on_stdout(0, &json!({ "protocol": "dns", "full-id": "x" }).to_string());
+        assert_eq!(cb.snapshot(0)["error"], Value::Null);
+    }
+
+    #[test]
+    fn remembers_that_the_user_was_listening() {
+        let store = Store::open_in_memory().unwrap();
+        let cb = Callbacks::load(&store);
+        assert!(!cb.wants_listening());
+        cb.inner.lock().unwrap().saved.listening = true;
+        cb.inner.lock().unwrap().dirty = true;
+        // Closing the project pauses the client but keeps the wish.
+        cb.stop();
+        cb.persist(&store).unwrap();
+        assert!(Callbacks::load(&store).wants_listening());
+        // Pressing Stop does not.
+        cb.stop_listening();
+        cb.persist(&store).unwrap();
+        assert!(!Callbacks::load(&store).wants_listening());
+    }
+
+    #[test]
     fn checks_server_addresses() {
         assert_eq!(check_server(" oast.example.com/ ").unwrap(), "oast.example.com");
         assert_eq!(check_server("https://OAST.example.com:8443").unwrap(), "https://oast.example.com:8443");
@@ -656,5 +734,6 @@ mod tests {
     fn explains_registration_failures() {
         assert!(explain("[FTL] Could not create client: could not register to servers").starts_with("Could not reach"));
         assert_eq!(explain("[ERR] something odd"), "something odd");
+        assert!(explain("[ERR] The correlation id was not found (probably evicted due to inactivity): x").starts_with("The callback server forgot"));
     }
 }

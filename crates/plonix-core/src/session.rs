@@ -113,6 +113,14 @@ pub async fn open(home: &Home, mut project: Project, options: OpenOptions) -> Re
     });
 
     project.update(|f| f.last_api_port = Some(api_addr.port()))?;
+    // The listener was on when the project last closed: hosts handed out
+    // earlier keep reporting without the user pressing Start again.
+    if engine.callbacks.wants_listening() && crate::tool::ToolLibrary::new(home).enabled_features().contains("callbacks") {
+        match crate::callbacks::start_for(&engine.callbacks, home, project.id()) {
+            Ok(()) => tracing::info!("{}: listening for callbacks again", project.name()),
+            Err(e) => tracing::warn!("{}: callbacks: {e}", project.name()),
+        }
+    }
     project::remember(home, &project, true)?;
     let session = Session { engine, project, api_addr, token, home: home.clone(), _lock: lock };
     session.announce()?;

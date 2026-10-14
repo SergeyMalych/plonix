@@ -266,7 +266,7 @@ async function applyFound(f, userId) {
   S.users = r.users || [];
   US.sel = r.user;
   drawActing();
-  await loadFound();
+  await Promise.all([loadFound(), loadStanding()]);
   const u = userById(r.user);
   if (u) toast(`${userId ? 'Added ' + plural(r.added, 'credential') + ' to' : 'Saved'} ${u.name}. Each one is sent only where it was found.`, 'ok');
   drawUsers();
@@ -363,6 +363,174 @@ function foundBanner(u) {
   );
 }
 
+/* ---- whether a user's session still works, and what it may do ----
+   Read from what Plonix already holds: the expiry each token or cookie
+   states, how the server answered requests sent with them, and the roles
+   and scopes the tokens and "who am I" answers name. Nothing is sent to
+   find out unless the person presses Check now. */
+
+const STAND = { byUser: new Map(), checking: null };
+
+async function loadStanding() {
+  try {
+    const list = (await api('/api/users/standing')).users || [];
+    STAND.byUser = new Map(list.map((x) => [x.user, x]));
+  } catch (_) {
+    STAND.byUser = new Map();
+  }
+  return STAND.byUser;
+}
+
+/** Each state's word and tone. */
+const STATE_LOOK = {
+  working: ['Working', 'ok'],
+  valid: ['Not expired', 'ok'],
+  expiring: ['Expiring soon', 'warn'],
+  partly: ['Partly expired', 'warn'],
+  refused: ['Refused', 'crit'],
+  expired: ['Expired', 'crit'],
+  unknown: ['Can’t tell', 'none'],
+};
+
+/** Shorter words for the user list, where "can't tell" shows nothing. */
+const STATE_SHORT = { working: 'Works', valid: 'Valid', expiring: 'Expiring', partly: 'Partly', refused: 'Refused', expired: 'Expired' };
+
+function stateTag(st, cls = '') {
+  if (!st) return null;
+  const [word, tone] = STATE_LOOK[st.state] || STATE_LOOK.unknown;
+  if (cls === 'sm' && !STATE_SHORT[st.state]) return null;
+  return h('span', { class: `usst ${tone} ${cls}`, text: cls === 'sm' ? STATE_SHORT[st.state] : word, title: cls === 'sm' ? word : null });
+}
+
+/** "GET /v1/me". */
+const answerText = (a) => `${a.method} ${a.path}`;
+/** "10:42", or a date for older ones. */
+const whenText = (ms) => (Date.now() - ms < 20 * 3600e3 ? new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }));
+const credLabel = (c) => (c.kind === 'cookie' ? `the ${c.name} cookie` : /^authorization$/i.test(c.name) ? 'the Authorization token' : `the ${c.name} header`);
+const SOURCE_TEXT = { 'exp claim': 'its exp claim', 'cookie expiry': 'the cookie’s expiry', expires_in: 'expires_in in the answer that handed it out' };
+
+/** What the state rests on, in a sentence or two. */
+function standingText(u, st) {
+  const who = userShortName(u);
+  const dead = st.credentials.filter((c) => c.expired);
+  const soon = st.credentials.filter((c) => !c.expired && c.expires != null).sort((a, b) => a.expires - b.expires)[0];
+  const ranOut = (c) => `${credLabel(c)} ran out ${expiryText(c.expires).replace('expired ', '')} (${SOURCE_TEXT[c.source] || 'its expiry'})`;
+  const until = soon ? ` ${credLabel(soon)[0].toUpperCase() + credLabel(soon).slice(1)} runs out ${expiryText(soon.expires)}.` : '';
+  const acc = st.accepted ? `the server accepted this session at ${whenText(st.accepted.at)} (${answerText(st.accepted)} → ${st.accepted.status})` : '';
+  switch (st.state) {
+    case 'working':
+      return `${acc[0].toUpperCase() + acc.slice(1)}.${until}`;
+    case 'valid':
+      return `Nothing sent as ${who} has been answered yet, but nothing has run out.${until}`;
+    case 'expiring':
+      return `${soon ? credLabel(soon)[0].toUpperCase() + credLabel(soon).slice(1) + ' runs out ' + expiryText(soon.expires) : 'A credential runs out soon'}. ${acc ? acc[0].toUpperCase() + acc.slice(1) + '.' : ''}`;
+    case 'partly': {
+      const bits = dead.map(ranOut);
+      if (st.refused) bits.push(`${answerText(st.refused)} was refused at ${whenText(st.refused.at)} (${st.refused.status}${st.refused.why ? ' “' + st.refused.why + '”' : ''})`);
+      return `${bits.join('; ')[0].toUpperCase() + bits.join('; ').slice(1)}.${acc ? ' Elsewhere ' + acc + '.' : ''}`;
+    }
+    case 'refused':
+      return `The server turned ${who} away at ${whenText(st.refused.at)}: ${answerText(st.refused)} → ${st.refused.status}${st.refused.why ? ' “' + st.refused.why + '”' : ''}${st.accepted ? `, where it accepted the same session at ${whenText(st.accepted.at)}` : ''}. Sign in again as ${who}, or paste ${st.credentials.some((c) => c.kind === 'cookie') ? 'fresh cookies' : 'a fresh token'}.`;
+    case 'expired':
+      return `${dead.map(ranOut).join('; ').replace(/^./, (c) => c.toUpperCase())}. The server will most likely refuse it.${st.probe ? ' Check now to be sure.' : ''}`;
+    default:
+      return st.credentials.length
+        ? `Can’t tell yet: its ${st.credentials.length === 1 ? 'credential states' : 'credentials state'} no expiry, and no answer to a request sent as ${who} is in the traffic.${st.probe ? ' Check now asks the server once.' : ''}`
+        : `Can’t tell: ${who} has no session cookie or token yet.`;
+  }
+}
+
+/** Replays one captured request as the user, once, to see whether the server still takes the session. */
+async function checkStanding(u, st) {
+  STAND.checking = u.id;
+  drawUsers();
+  let cell = null;
+  try {
+    const r = await api('/api/access-check', { method: 'POST', body: { targets: [st.probe.exchange], user_ids: [u.id], include_anon: false } });
+    cell = ((r.rows || [])[0] || { cells: [] }).cells[0] || null;
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+  await loadStanding();
+  STAND.checking = null;
+  if (cell) toast(`Sent ${answerText(st.probe)} as ${u.name}: ${cell.error ? cell.error : cell.status}.`, cell.status && cell.status < 300 ? 'ok' : 'err');
+  drawUsers();
+  return cell;
+}
+
+const GRANT_KINDS = [
+  ['role', 'Roles'],
+  ['scope', 'Scopes'],
+  ['group', 'Groups'],
+  ['permission', 'Permissions'],
+  ['flag', 'Flags'],
+];
+
+function standingSection(u) {
+  const st = STAND.byUser.get(u.id);
+  if (!st) return null;
+  const busy = STAND.checking === u.id;
+  const check = st.probe
+    ? h('button', {
+        class: 'btn xs' + (['expired', 'unknown', 'valid', 'refused'].includes(st.state) ? ' primary' : ''),
+        text: busy ? 'Checking…' : 'Check now',
+        disabled: busy,
+        title: `Send ${answerText(st.probe)} to ${st.probe.host} once as ${u.name}, to see whether the server still takes this session`,
+        onclick: () => checkStanding(u, st),
+      })
+    : null;
+  const lives = st.credentials.filter((c) => c.expires != null);
+  const life = (c) =>
+    h(
+      'div',
+      { class: 'uslife' + (c.expired ? ' dead' : '') },
+      h('span', { class: 'mono', text: c.name }),
+      h('span', { class: 'muted', text: c.place || (c.kind === 'cookie' ? 'any in-scope host' : 'every in-scope host') }),
+      h('span', { class: 'usexp' + (c.expired ? ' dead' : ''), title: new Date(c.expires * 1000).toLocaleString(), text: expiryText(c.expires) }),
+      h('span', { class: 'muted', text: SOURCE_TEXT[c.source] ? 'from ' + SOURCE_TEXT[c.source] : '' }),
+    );
+
+  const groups = GRANT_KINDS.map(([k, label]) => [label, st.grants.filter((g) => g.kind === k)]).filter(([, gs]) => gs.length);
+  const seenRow = (label, list, total, tone) =>
+    list.length
+      ? h(
+          'div',
+          { class: 'usgrant' },
+          h('span', { class: 'usglbl', text: `${label}${total > list.length ? ` (${total})` : ''}` }),
+          h(
+            'span',
+            { class: 'usgchips' },
+            list.map((a) => h('button', { class: `usseen ${tone}`, title: `${a.host}${a.path} · ${whenText(a.at)} · open this request`, onclick: () => showExchange(a.exchange) }, h('span', { class: 'meth m-' + a.method, text: a.method }), h('span', { class: 'mono', text: a.path }), h('b', { text: a.status }))),
+          ),
+        )
+      : null;
+  const nothingSeen = !st.allowed.length && !st.blocked.length;
+
+  return h(
+    'section',
+    { class: 'ussec usstate' },
+    h('div', { class: 'ussech' }, h('h3', { text: 'Session' }), stateTag(st), h('span', { class: 'spacer' }), check),
+    h('div', { class: 'usstxt' }, standingText(u, st)),
+    st.late_accept ? h('div', { class: 'usstxt warn' }, h('b', { text: 'Worth a look: ' }), 'the server accepted this session after its stated expiry had passed. An expired token should be refused.') : null,
+    lives.length ? h('div', { class: 'uslives' }, lives.map(life)) : null,
+    h('div', { class: 'ussech sub' }, h('h3', { text: 'What it may do' }), h('span', { class: 'muted', text: 'read from its tokens, “who am I” answers and the traffic' })),
+    groups.length
+      ? groups.map(([label, gs]) => h('div', { class: 'usgrant' }, h('span', { class: 'usglbl', text: label }), h('span', { class: 'usgchips' }, gs.map((g) => h('span', { class: 'usgchip', title: 'From ' + g.from, text: g.value })))))
+      : h('div', { class: 'usstxt muted', text: 'Its tokens and “who am I” answers name no roles, scopes or groups.' }),
+    seenRow('Allowed', st.allowed, st.allowed_total, 'ok'),
+    seenRow('Refused', st.blocked, st.blocked_total, 'crit'),
+    nothingSeen
+      ? h(
+          'div',
+          { class: 'usstxt muted' },
+          `No request sent as ${userShortName(u)} has been answered yet, so what it reaches is not known. `,
+          h('button', { class: 'link', text: 'Run the Access check', onclick: () => startAccessCheck({ users: [u.id] }) }),
+          ' to replay a branch of the app as this user.',
+        )
+      : null,
+  );
+}
+
 /* ---- the Users screen ---- */
 
 const US = { sel: null, timer: null, saving: false };
@@ -386,7 +554,7 @@ async function renderUsers(main) {
       h('div', { class: 'usbody', id: 'usbody' }, h('div', { class: 'empty', text: 'Loading users…' })),
     ),
   );
-  await Promise.all([loadUsers(true), loadFound()]);
+  await Promise.all([loadUsers(true), loadFound(), loadStanding()]);
   drawActing();
   drawUsers();
 }
@@ -414,6 +582,7 @@ function usersChanged(redraw) {
     try {
       await saveUsers(!redraw);
       if (note) note.textContent = 'Saved';
+      if (redraw) await loadStanding();
     } catch (e) {
       if (note) note.textContent = '';
       toast(e.message, 'err');
@@ -462,7 +631,7 @@ function drawUsers() {
         'button',
         { class: 'usitem' + (u.id === US.sel ? ' on' : ''), onclick: () => ((US.sel = u.id), drawUsers()) },
         userBadge(u),
-        h('span', { class: 'usitemtext' }, h('b', { text: u.name }), h('span', { class: 'muted', text: userSummary(u) })),
+        h('span', { class: 'usitemtext' }, h('span', { class: 'usitemname' }, h('b', { text: u.name }), stateTag(STAND.byUser.get(u.id), 'sm')), h('span', { class: 'muted', text: userSummary(u) })),
         u.id === S.acting ? h('span', { class: 'ustag', text: 'acting' }) : null,
       ),
     ),
@@ -558,6 +727,7 @@ function userDetail(u) {
     ),
     foundBanner(u),
     acting ? h('div', { class: 'usnote-on' }, userBadge(u), `You are acting as ${u.name}. In-scope browser traffic, the Bench and Scans send with these cookies, and cookies the server sets land here instead of in your browser.`) : null,
+    standingSection(u),
     h(
       'section',
       { class: 'ussec uscookies' },
@@ -616,7 +786,7 @@ function userDetail(u) {
 const AC = { host: null, prefix: '/', targets: [], sourceLabel: '', anon: true, picks: null, running: false, report: null, err: null };
 
 /** Opens the Access check on a selection from Traffic or the Map. */
-function startAccessCheck({ targets = [], host = null, prefix = '/', sourceLabel = '', onlyAnon = false } = {}) {
+function startAccessCheck({ targets = [], host = null, prefix = '/', sourceLabel = '', onlyAnon = false, users = null } = {}) {
   AC.targets = targets;
   AC.host = host;
   AC.prefix = prefix || '/';
@@ -624,7 +794,7 @@ function startAccessCheck({ targets = [], host = null, prefix = '/', sourceLabel
   AC.report = null;
   AC.err = null;
   AC.anon = onlyAnon ? true : AC.anon;
-  AC.picks = onlyAnon ? new Set() : null; // onlyAnon: signed-out only; otherwise every saved user
+  AC.picks = onlyAnon ? new Set() : users ? new Set(users) : null; // onlyAnon: signed-out only; otherwise the given users, or every saved user
   leaveTo('access');
 }
 
@@ -977,6 +1147,8 @@ function drawCallbackFeed(box) {
     h('span', { class: 'muted', text: ' · ' + list.length + (list.length === 1 ? ' callback' : ' callbacks') }),
     CB.list.length ? h('button', { class: 'link', style: { marginLeft: 'auto' }, text: 'Clear all', onclick: clearCallbacks }) : null,
   );
+  // The client keeps running when it can no longer fetch callbacks; say so.
+  const warn = d.phase === 'listening' && d.error ? h('div', { class: 'cbwarn', text: d.error }) : null;
   if (!list.length) {
     const why =
       d.phase === 'listening'
@@ -986,7 +1158,7 @@ function drawCallbackFeed(box) {
         : d.phase === 'starting'
           ? 'Connecting to the callback server…'
           : d.error || 'Press Start listening to register with a callback server. Nothing is sent to any target.';
-    return clear(box, head, h('div', { class: 'empty cbempty' + (d.phase === 'failed' ? ' bad' : ''), text: why }));
+    return clear(box, head, warn, h('div', { class: 'empty cbempty' + (d.phase === 'failed' ? ' bad' : ''), text: why }));
   }
   if (!CB.sel || !list.some((i) => i.seq === CB.sel)) CB.sel = list[0].seq;
   const rows = list.map((i) => {
@@ -1013,7 +1185,7 @@ function drawCallbackFeed(box) {
     ),
   );
   const detail = h('div', { class: 'cbdetail' });
-  clear(box, head, table, detail);
+  clear(box, head, warn, table, detail);
   drawCallbackDetail(detail, list.find((i) => i.seq === CB.sel));
 }
 

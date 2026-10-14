@@ -5,6 +5,7 @@ What changed in each Plonix release. The newest release is at the top.
 ## [Unreleased]
 
 ### Added
+- **Is a user still signed in?** Each saved user shows whether its session works, is about to run out, has expired or was refused by the server, read from the expiry its tokens and cookies state and from how the server answered requests sent as that user. It says when it can't tell, and **Check now** asks the server once. **What it may do** lists the roles, scopes and groups the user's tokens and "who am I" answers name, and the endpoints that allowed or refused it. The walkthrough has a stop for it.
 - **Stop for the traffic watcher.** While Claude looks at your traffic, the Agents inbox shows Stop: it ends the look at once, Claude Code and everything it started included. Turning off Watch my traffic, or agent access in Settings, stops a look in flight too.
 - **Your own daily token limit.** Pick Custom… under the inbox and type a limit such as 350k or 1.5M (10k to 10M). The default stays 200k a day.
 
@@ -27,6 +28,7 @@ The release after 0.1.5. The version jumps to 0.5.1; nothing is skipped in betwe
 - **Bench History and Compare** each have a handle underneath to drag their height.
 
 ### Fixed
+- **Callbacks keep listening.** The listener comes back on when a project it was on for reopens, making a host starts it, and the tab says when callbacks can't be fetched instead of showing Listening.
 - **Pretty on the Bench** only re-spaces JSON, so numbers such as `12345678901234567890` or `1.0` stay exactly as written. Form bodies no longer get the switch, since it put line breaks into the values sent. The Lens and Compare keep numbers exactly as captured in Pretty too.
 - **Agents** limited to in-scope traffic no longer see other hosts in the Traffic filter counts.
 - **Saved users** ignore a Set-Cookie for a domain other than the site that sent it, and accept hosts with `_` in scoped headers and cookie domains. Keeping a session found in traffic no longer fails on a long name or many tokens, and a header row with a path but no host waits for the host instead of showing an error.

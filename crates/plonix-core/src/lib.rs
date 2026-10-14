@@ -75,6 +75,7 @@ pub mod trust;
 pub mod ui;
 pub mod upstream;
 pub mod users;
+pub mod userstate;
 pub mod watch;
 pub mod usage;
 pub mod websocket;
