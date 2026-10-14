@@ -1021,12 +1021,19 @@ export async function api(path, opts = {{}}) {{
     let sent = |id: i64, status: u16, url: &str, auth: &str| {
         json!({ "id": id, "ts": now, "status": status, "ms": 40, "len": sizes.get(&id).copied().unwrap_or(0), "req": { "method": "GET", "url": url, "raw": raw(auth) } })
     };
+    // The order lookup as the browser sent it, every header and cookie kept:
+    // the Bench's Tidy view folds the noise away and names whose token it is.
+    let browser_raw = |auth: &str| {
+        format!(
+            "Accept: application/json\nAccept-Language: en-GB,en;q=0.9\nAccept-Encoding: gzip, deflate, br, zstd\nUser-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36\nsec-ch-ua: \"Chromium\";v=\"129\", \"Not=A?Brand\";v=\"8\"\nsec-ch-ua-mobile: ?0\nsec-ch-ua-platform: \"macOS\"\nSec-Fetch-Site: same-site\nSec-Fetch-Mode: cors\nSec-Fetch-Dest: empty\nOrigin: https://{WWW}\nReferer: https://{WWW}/account/orders\nAuthorization: {auth}\nCookie: {cookies}; _ga=GA1.2.1784523390.1791912000; _gid=GA1.2.402113871.1791998400\n\n"
+        )
+    };
     let lookup = json!({
         "name": "Order lookup",
         "from": own_order,
         "method": "GET",
         "url": "https://api.brightcart.example/v1/orders/1041",
-        "raw": raw(&bearer),
+        "raw": browser_raw(&bearer),
         "bodyB64": null,
         "history": [
             sent(other_order, 200, "https://api.brightcart.example/v1/orders/1041", &bearer),

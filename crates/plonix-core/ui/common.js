@@ -43,6 +43,11 @@ function clear(el, ...kids) {
 }
 
 const $ = (sel, root = document) => root.querySelector(sel);
+/** True while the person types in a field, or in editable text such as the Bench's Tidy view. */
+const isTyping = () => {
+  const el = document.activeElement;
+  return !!el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable);
+};
 
 /* ---------- formatting ---------- */
 

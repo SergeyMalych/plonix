@@ -373,6 +373,45 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 
 /* ---- editable Lens on the Bench ---- */
 .editorwrap { position: relative; flex: 1; min-height: 0; display: flex; }
+
+/* ---- Tidy view of the Bench request ---- */
+.editorwrap.tidyon > textarea { display: none; }
+.tidywrap { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.tidy { flex: 1; min-height: 0; overflow: auto; outline: 0; padding: 10px 12px; font-family: var(--mono); font-size: 11.5px; line-height: 1.85; white-space: pre-wrap; word-break: break-all; tab-size: 2; color: var(--fg); caret-color: var(--accent); }
+.tidy .tl { min-height: 1.85em; }
+.tidy .tk { color: var(--fg-2); }
+.tidy .tsent { opacity: .55; text-decoration: line-through; text-decoration-color: var(--fg-3); }
+.tchip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; vertical-align: 1px; padding: 0 8px; border-radius: 5px; border: 1px solid transparent; font-family: var(--ui); font-size: 11.5px; font-weight: 550; line-height: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; user-select: none; text-decoration: none; }
+.tchip > i { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 2px; background: currentColor; }
+.tchip .tsub { font-weight: 400; opacity: .8; }
+.tchip.u { background: var(--accent-soft); color: var(--accent); }
+.tchip.j { background: var(--info-soft); color: var(--info); }
+.tchip.j > i { border-radius: 50%; }
+.tchip.d { background: var(--warn-soft); color: var(--warn); }
+.tchip.d > i { border-radius: 0; transform: rotate(45deg); width: 6px; height: 6px; }
+.tchip.g { background: var(--surface-2); color: var(--fg-2); border-color: var(--line); }
+.tchip.g > i { background: var(--fg-3); border-radius: 50%; width: 5px; height: 5px; }
+.tchip:hover, .tchip.on { border-color: currentColor; }
+.tfold { display: flex; align-items: center; gap: 8px; min-width: 0; font-family: var(--ui); font-size: 12px; color: var(--fg-3); cursor: pointer; user-select: none; white-space: nowrap; }
+.tfold b { font-weight: 550; color: var(--fg-2); }
+.tfold .tnames { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tfold .tshow, .trefold { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; font-family: var(--ui); font-size: 11.5px; }
+.trefold { margin-left: 10px; user-select: none; }
+.ttri { flex: 0 0 auto; width: 0; height: 0; border-left: 5px solid var(--fg-3); border-top: 4px solid transparent; border-bottom: 4px solid transparent; }
+.tfold:hover b, .tfold:hover .tshow { color: var(--accent); }
+.tidynote { flex: 0 0 auto; padding: 5px 12px; border-top: 1px solid var(--line-2); background: var(--surface-2); font-size: 11px; color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tidynote .tok { color: var(--ok); font-weight: 600; }
+.tidynote .tsentnote { color: var(--fg-2); }
+.tpop { position: absolute; z-index: 8; overflow: auto; width: min(420px, calc(100% - 16px)); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 11px 13px; font-size: 12px; line-height: 1.5; }
+.tph { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; min-width: 0; }
+.tph .tchip { cursor: default; flex: 0 1 auto; }
+.tpwho { font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tptab { border-collapse: collapse; margin: 2px 0 6px; }
+.tptab td { padding: 1px 12px 1px 0; vertical-align: top; word-break: break-all; }
+.tptab td:first-child { color: var(--fg-3); white-space: nowrap; }
+.tjson { margin: 4px 0 6px; padding: 6px 8px; max-height: 160px; overflow: auto; background: var(--surface-2); border-radius: 6px; font-family: var(--mono); font-size: 11px; }
+.tpraw { margin: 4px 0 0; padding: 6px 8px; max-height: 84px; overflow: auto; background: var(--surface-2); border-radius: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--fg-3); word-break: break-all; user-select: text; }
+.tpact { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
 .qbar { position: absolute; top: 6px; right: 8px; z-index: 6; display: none; align-items: center; gap: 1px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; box-shadow: var(--shadow); padding: 3px; }
 .qbar.show { display: flex; }
 .qbar > button { border: 0; background: transparent; color: var(--fg); border-radius: 6px; padding: 4px 8px; font-size: 11.5px; font-weight: 550; white-space: nowrap; }

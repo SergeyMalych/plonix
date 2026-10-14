@@ -14,6 +14,7 @@ pub(super) fn routes() -> Router<AppState> {
         .route("/api/users/found", get(found_users))
         .route("/api/users/found/apply", post(apply_found_user))
         .route("/api/users/standing", get(user_standing))
+        .route("/api/users/whose", post(whose_values))
         .route("/api/access-check", post(access_check))
 }
 
@@ -192,6 +193,29 @@ async fn user_standing(State(s): State<AppState>, caller: MaybeCaller) -> Respon
     };
     match tokio::task::spawn_blocking(work).await {
         Ok(Ok(list)) => Json(json!({ "users": list })).into_response(),
+        Ok(Err(e)) => internal(e),
+        Err(e) => internal(e.into()),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct WhoseBody {
+    values: Vec<String>,
+}
+
+/// Most values asked about at once.
+const MAX_WHOSE: usize = 64;
+
+/// Who each token belongs to, so the Bench can show a request as "JWT of
+/// Maya". Answers with names only, never values. User-only.
+async fn whose_values(State(s): State<AppState>, caller: MaybeCaller, Json(body): Json<WhoseBody>) -> Response {
+    if let Some(r) = user_only(&caller) {
+        return r;
+    }
+    let values: Vec<String> = body.values.into_iter().take(MAX_WHOSE).map(|v| v.chars().take(8192).collect()).collect();
+    let st = s.clone();
+    match tokio::task::spawn_blocking(move || found_sessions(&st).map(|(found, users)| crate::gather::owners(&values, &users, &found))).await {
+        Ok(Ok(owners)) => Json(json!({ "owners": owners })).into_response(),
         Ok(Err(e)) => internal(e),
         Err(e) => internal(e.into()),
     }

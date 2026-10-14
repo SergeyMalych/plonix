@@ -59,6 +59,7 @@ function userBadge(u, cls = '') {
 async function saveUsers(keep) {
   S.users.forEach(syncHeaderRows);
   FOUND.byEx.clear();
+  TIDY_OWNERS.clear();
   const r = await api('/api/users', { method: 'PUT', body: { users: S.users.map(({ _rows, ...u }) => u) } });
   if (keep && (r.users || []).length === S.users.length) r.users.forEach((u, i) => (S.users[i].id = u.id));
   else S.users = r.users || [];
@@ -1294,6 +1295,7 @@ const urlPath = (u) => {
 
 /** Makes a callback host for this Bench request and puts it where the cursor was. */
 async function insertCallbackHost(tab, field, main) {
+  const tidy = field === 'tidy' ? $('#benchtidy') : null;
   const el = field === 'url' ? $('#benchurl') : $('#bencheditor');
   if (!el) return;
   const start = el.selectionStart ?? el.value.length;
@@ -1307,6 +1309,12 @@ async function insertCallbackHost(tab, field, main) {
       return leaveTo('callbacks');
     }
     return toast(e.message, 'err');
+  }
+  if (tidy && tidy.isConnected) {
+    // Typed at the cursor in the Tidy view, which writes it to the request.
+    tidy.focus();
+    document.execCommand('insertText', false, p.host);
+    return toast('Callback host inserted. Its callbacks show up in Callbacks.', 'ok');
   }
   el.value = el.value.slice(0, start) + p.host + el.value.slice(end);
   if (field === 'url') tab.url = el.value;

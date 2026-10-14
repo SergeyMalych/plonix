@@ -627,6 +627,54 @@ pub fn user_name(found: &FoundSession, taken: &[SavedUser]) -> String {
     name.chars().take(60).collect()
 }
 
+/// Whose a token is, for showing a request as "JWT of Maya".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Owner {
+    /// The saved user sending the token, if one does.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    /// The user's name, or who a found session belongs to.
+    pub name: String,
+}
+
+/// Shortest value matched to a person: anything shorter is too common to say.
+const MIN_OWNED: usize = 8;
+
+/// Who each value belongs to: a saved user sending it, else the person a
+/// session found in the traffic belongs to. None when nobody, or more than
+/// one saved user, sends it.
+pub fn owners(values: &[String], users: &[SavedUser], found: &[FoundSession]) -> Vec<Option<Owner>> {
+    let mut by: HashMap<&str, Option<Owner>> = HashMap::new();
+    for u in users {
+        let owner = Owner { user: Some(u.id.clone()), name: u.name.clone() };
+        let held = u.headers.iter().map(|(_, v)| v.as_str()).chain(u.scoped.iter().map(|s| s.value.as_str())).chain(u.cookies.iter().map(|c| c.value.as_str()));
+        let mut mine = BTreeSet::new();
+        for v in held.map(bare).filter(|v| v.len() >= MIN_OWNED) {
+            mine.insert(v);
+        }
+        for v in mine {
+            by.entry(v).and_modify(|o| *o = None).or_insert_with(|| Some(owner.clone()));
+        }
+    }
+    for f in found {
+        let owner = match &f.user {
+            Some(id) => match users.iter().find(|u| &u.id == id) {
+                Some(u) => Owner { user: Some(u.id.clone()), name: u.name.clone() },
+                None => continue,
+            },
+            None if !f.label.is_empty() => Owner { user: None, name: f.label.clone() },
+            None => continue,
+        };
+        for c in &f.credentials {
+            let v = bare(&c.value);
+            if v.len() >= MIN_OWNED {
+                by.entry(v).or_insert_with(|| Some(owner.clone()));
+            }
+        }
+    }
+    values.iter().map(|v| by.get(bare(v.trim())).cloned().flatten()).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -726,4 +774,21 @@ mod tests {
         assert_eq!(user_name(&f("", ""), &[]), "User 1");
         assert_eq!(preview("Bearer eyJhbGciOiJIUzI1NiJ9.x.y"), "Bearer e….x.y");
     }
+
+    #[test]
+    fn owners_name_saved_users_then_found_sessions() {
+        let tok = jwt(r#"{"sub":"u1","email":"maya@shop.test"}"#);
+        let user = |id: &str, sid: &str| SavedUser { id: id.into(), name: format!("{id} (customer)"), note: String::new(), headers: vec![], scoped: vec![], cookies: vec![Cookie { name: "sid".into(), value: sid.into(), domain: String::new(), expires: None }], keep_fresh: true };
+        let traffic = vec![ex(1, "api.shop.test", "/v1/orders", &[("Authorization", &format!("Bearer {tok}")), ("Cookie", &format!("sid={S1}"))]), ex(2, "www.shop.test", "/", &[("Cookie", &format!("sid={S2}"))])];
+        let users = vec![user("maya", S1)];
+        let found = sessions(&traffic, &rules(&["www.shop.test", "api.shop.test"]), &users, 0);
+        let got = owners(&[tok.clone(), format!("Bearer {tok}"), S1.into(), "short".into(), "nobody-sends-this-value".into()], &users, &found);
+        let maya = Some(Owner { user: Some("maya".into()), name: "maya (customer)".into() });
+        assert_eq!(got, vec![maya.clone(), maya.clone(), maya, None, None]);
+
+        // A value two saved users send says nothing about who it is.
+        let both = vec![user("maya", S1), user("dana", S1)];
+        assert_eq!(owners(&[S1.into()], &both, &[]), vec![None]);
+    }
+
 }

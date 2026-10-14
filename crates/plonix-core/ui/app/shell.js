@@ -612,7 +612,7 @@ setInterval(() => {
 
 document.addEventListener('keydown', (e) => {
   if (!S.token || !$('#main')) return;
-  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName);
+  const typing = isTyping();
   if (e.key === 'Escape') {
     if ($('.popover, .ctxmenu')) return closePopover();
     if ($('.modal')) return closeModal();
