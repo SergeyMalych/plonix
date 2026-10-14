@@ -484,7 +484,7 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .scopehint .btn { margin-left: auto; }
 /* The request and response fill the free height; the page only scrolls when
    the window is too small for them. */
-.rsplit { flex: 1 1 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr); gap: 12px; min-height: 340px; }
+.rsplit { flex: 1 1 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr); gap: 12px; min-height: var(--rsplit-min, 340px); }
 .rcol { display: flex; flex-direction: column; border: 1px solid var(--line-2); border-radius: 11px; overflow: hidden; min-width: 0; background: var(--surface); }
 .rcol .lbl { border-bottom: 1px solid var(--line-2); background: var(--surface-2); padding: 7px 12px; }
 .rcol textarea { flex: 1; border: 0; outline: 0; resize: none; background: transparent; font-family: var(--mono); font-size: 11.5px; line-height: 1.6; padding: 10px 12px; min-height: 0; tab-size: 2; }
@@ -516,10 +516,10 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .cmpcols .cc { min-width: 0; border-left: 1px solid var(--line-2); }
 .cmpcols .cc:first-child { border-left: 0; }
 .cmpcols .cch { font-family: var(--mono); font-size: 11px; padding: 6px 12px; border-bottom: 1px solid var(--line-2); color: var(--fg-2); display: flex; gap: 8px; align-items: center; }
-.cmpcols pre { margin: 0; padding: 6px 0; font-family: var(--mono); font-size: 11px; line-height: 1.55; overflow: auto; max-height: var(--cmph, 55vh); }
-/* with a dragged height both texts take it, so the handle tracks the mouse */
-.cmpview[style*="--cmph"] .cmpcols pre { height: var(--cmph); }
-.cmpview > .hgrip, .hist > .hgrip { height: 10px; border-top: 1px solid var(--line-2); background: var(--surface-2); }
+.cmpcols pre { margin: 0; padding: 6px 0; font-family: var(--mono); font-size: 11px; line-height: 1.55; overflow: auto; max-height: 55vh; }
+/* The handle between the Request and Response columns and History sits in
+   the gap between them; drag it up for a taller History. */
+.hgrip.histgrip { height: 12px; margin: -11px 0; }
 .dl { display: block; padding: 0 10px; border-left: 3px solid transparent; white-space: pre-wrap; word-break: break-all; min-height: 1.55em; }
 .dl.add { border-left-color: var(--ok); background: var(--ok-soft); }
 .dl.del { border-left-color: var(--crit); background: var(--crit-soft); }
@@ -1484,9 +1484,10 @@ button.tag.edited { cursor: pointer; }
 .actable col.acreqcol { width: 36%; }
 .actable col.acidc { width: auto; }
 .actable th, .actable td { border-bottom: 1px solid var(--line-2); padding: 6px 10px; text-align: left; vertical-align: middle; }
-.actable th.acidcol { text-align: center; white-space: nowrap; }
+.actable th.acidcol { text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .actable th.acidcol.anon { color: var(--fg-3); font-style: italic; }
-.actable td.actarget { display: flex; align-items: center; gap: 8px; overflow: hidden; }
+.actable tbody tr:not(.acnoterow) > td { height: 36px; }
+.actarget .acreq { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
 .actable .acpath { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .actable td.accell { text-align: center; }
 .acbtn { display: inline-flex; align-items: baseline; justify-content: center; gap: 6px; min-width: 66px; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 3px 9px; line-height: 1.25; cursor: pointer; }

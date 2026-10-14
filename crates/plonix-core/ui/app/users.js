@@ -901,12 +901,12 @@ function drawAccessReport(box) {
     flagged ? h('b', { class: 'acflag', text: ` ${flagged} to look at.` }) : h('span', { class: 'muted', text: ' Nothing stood out.' }),
   );
   const headCells = [h('th', { class: 'actarget', text: 'Request' })];
-  for (const id of r.identities) headCells.push(h('th', { class: 'acidcol' + (id.anon ? ' anon' : ''), text: id.label }));
+  for (const id of r.identities) headCells.push(h('th', { class: 'acidcol' + (id.anon ? ' anon' : ''), text: id.label, title: id.label }));
   const rows = [];
   for (const row of r.rows) {
     const byId = {};
     for (const c of row.cells) byId[c.identity] = c;
-    const tds = [h('td', { class: 'actarget' }, h('span', { class: 'meth m-' + row.method, text: row.method }), h('span', { class: 'mono acpath', text: row.path, title: row.host + row.path }))];
+    const tds = [h('td', { class: 'actarget' }, h('div', { class: 'acreq' }, h('span', { class: 'meth m-' + row.method, text: row.method }), h('span', { class: 'mono acpath', text: row.path, title: row.host + row.path })))];
     for (const id of r.identities) {
       const c = byId[id.id];
       tds.push(
