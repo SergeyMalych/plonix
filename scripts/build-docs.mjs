@@ -89,8 +89,9 @@ function inline(src, link) {
           const alt = esc(stripTags(inline(m.text, link)));
           // A site screenshot with a dark twin shows the one that fits the theme.
           const pair = /^\.\.\/assets\/[\w-]+-light\.webp$/.test(href);
+          const dark = href.replace(/-light\.webp$/, '-dark.webp');
           out += pair
-            ? hold(`<img class="pic-light" src="${esc(href)}" alt="${alt}"${title} loading="lazy"><img class="pic-dark" src="${esc(href.replace(/-light\.webp$/, '-dark.webp'))}" alt="${alt}"${title} loading="lazy">`)
+            ? hold(`<img class="pic-light" src="${esc(href + assetVersion(href))}" alt="${alt}"${title} loading="lazy"><img class="pic-dark" src="${esc(dark + assetVersion(dark))}" alt="${alt}"${title} loading="lazy">`)
             : hold(`<img src="${esc(href)}" alt="${alt}"${title} loading="lazy">`);
         } else {
           const ext = /^https?:/.test(href) ? ' rel="noopener"' : '';
@@ -450,7 +451,7 @@ ${main}
 <footer>
   <div class="wrap">
     <a class="brand" href="../" aria-label="Plonix home">${MARK}Plonix</a>
-    <span>Open-source web security workbench for macOS. Apache-2.0.</span>
+    <span>Open-source, AI-first web security workbench. Apache-2.0.</span>
     <nav aria-label="Footer">
       <a href="${REPO}">GitHub</a>
       <a href="./">Docs</a>
@@ -543,7 +544,17 @@ a { color: inherit; }
 .style-btn:hover { border-color: var(--fg); }
 .style-btn svg { width: 22px; height: 14px; flex: none; }
 .brand .mark-studio { display: none; }
-@media (max-width: 760px) { .nav-links a:not([aria-current]) { display: none; } .nav .wrap { gap: 14px; } .style-btn span { display: none; } .style-btn { padding: 0 9px; } }
+/* phones: the links take a row of their own under the logo, scrolling sideways if they ever outgrow it */
+@media (max-width: 760px) {
+  .nav .wrap { flex-wrap: wrap; height: auto; column-gap: 14px; row-gap: 0; padding-top: 13px; }
+  .nav .theme-btn { margin-left: auto; }
+  .nav-links { order: 1; flex: 1 0 100%; margin-left: 0; height: 42px; align-items: center; gap: 22px; overflow-x: auto; scrollbar-width: none; white-space: nowrap; }
+  .nav-links::-webkit-scrollbar { display: none; }
+  .nav-links a[aria-current] { text-decoration: underline 2px var(--indigo); text-underline-offset: 7px; }
+  [data-style="studio"] .nav-links a[aria-current] { text-decoration-color: var(--st-red); }
+  html { scroll-padding-top: 120px; }
+  .style-btn span { display: none; } .style-btn { padding: 0 9px; }
+}
 @media (max-width: 420px) { .nav .btn.small { display: none; } }
 
 /* layout: a sidebar of docs beside the page */
@@ -698,6 +709,14 @@ footer a { text-decoration: none; color: var(--muted); }
 footer a:hover { color: var(--fg); }
 `;
 
+// Site screenshots load by their content hash too, so a new picture shows up
+// at once instead of after the cache runs out.
+function assetVersion(href) {
+  const file = path.join(ROOT, 'site', href.replace(/^\.\.\//, ''));
+  if (!fs.existsSync(file)) return '';
+  return '?v=' + crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex').slice(0, 10);
+}
+
 // Pages ask for docs.css by its content hash, so a browser never keeps an old
 // stylesheet under new pages.
 const CSS_VERSION = crypto.createHash('sha256').update(CSS).digest('hex').slice(0, 10);
@@ -726,7 +745,7 @@ function build() {
 <p class="lede">How to use Plonix, tool by tool: capture traffic, explore it, experiment on the Bench, prove what you find, and work with Claude. Plus how Plonix keeps your data and updates on your terms.</p>
 <p>New to Plonix? Start with <a href="getting-started.html">Getting started</a>, or open the demo project from the Start screen and take the tour. The <code>plonix</code> command explains itself too: run <code>plonix --help</code>.</p>
 ${sections}`;
-  out.set('index.html', page({ file: 'index.html', title: 'Plonix docs', description: 'Documentation for Plonix, the open-source web security workbench for macOS.', sidebar: sidebar(docs, null), main: overview }));
+  out.set('index.html', page({ file: 'index.html', title: 'Plonix docs', description: 'Documentation for Plonix, the open-source, AI-first web security workbench for a new era of web assessments.', sidebar: sidebar(docs, null), main: overview }));
   return out;
 }
 

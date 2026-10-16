@@ -56,7 +56,17 @@ a { color: inherit; }
 .style-btn:hover { border-color: var(--fg); }
 .style-btn svg { width: 22px; height: 14px; flex: none; }
 .brand .mark-studio { display: none; }
-@media (max-width: 760px) { .nav-links a:not([aria-current]) { display: none; } .nav .wrap { gap: 14px; } .style-btn span { display: none; } .style-btn { padding: 0 9px; } }
+/* phones: the links take a row of their own under the logo, scrolling sideways if they ever outgrow it */
+@media (max-width: 760px) {
+  .nav .wrap { flex-wrap: wrap; height: auto; column-gap: 14px; row-gap: 0; padding-top: 13px; }
+  .nav .theme-btn { margin-left: auto; }
+  .nav-links { order: 1; flex: 1 0 100%; margin-left: 0; height: 42px; align-items: center; gap: 22px; overflow-x: auto; scrollbar-width: none; white-space: nowrap; }
+  .nav-links::-webkit-scrollbar { display: none; }
+  .nav-links a[aria-current] { text-decoration: underline 2px var(--indigo); text-underline-offset: 7px; }
+  [data-style="studio"] .nav-links a[aria-current] { text-decoration-color: var(--st-red); }
+  html { scroll-padding-top: 120px; }
+  .style-btn span { display: none; } .style-btn { padding: 0 9px; }
+}
 @media (max-width: 420px) { .nav .btn.small { display: none; } }
 
 /* layout: a sidebar of docs beside the page */

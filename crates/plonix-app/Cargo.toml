@@ -3,7 +3,7 @@ name = "plonix-app"
 version = "0.5.1"
 edition = "2024"
 license.workspace = true
-description = "Plonix for macOS: the Plonix window as a native app, with the engine built in"
+description = "The Plonix app for macOS and Windows: the Plonix window as a native app, with the engine built in"
 
 [[bin]]
 name = "plonix-app"
