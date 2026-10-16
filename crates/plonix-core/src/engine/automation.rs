@@ -580,6 +580,7 @@ impl Engine {
                     set_headers,
                     remove_headers: remove_auth.clone(),
                     body: None,
+                    as_user: None,
                 };
                 let cell = match self.replay(replay, initiator).await {
                     Ok(ex) => {

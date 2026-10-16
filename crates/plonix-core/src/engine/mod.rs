@@ -243,6 +243,10 @@ pub struct ReplayRequest {
     pub remove_headers: Vec<String>,
     #[serde(default)]
     pub body: Option<String>,
+    /// Send as this saved user (its id): its cookies and auth headers
+    /// replace the ones the request carried.
+    #[serde(default)]
+    pub as_user: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]

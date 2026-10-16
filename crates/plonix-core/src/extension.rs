@@ -112,7 +112,7 @@ impl Capability {
             Capability::PassiveAnalysis => "annotate traffic it was given",
             Capability::ProposeFindings => "propose findings (unconfirmed until you confirm)",
             Capability::ScopedRequests => "send requests to accepted hosts only; each one is checked against scope and recorded",
-            Capability::RunProgram => "run a program on this Mac",
+            Capability::RunProgram => "run a program on this computer",
             Capability::SuggestScope => "suggest domains for scope with evidence; you accept or reject each one",
         }
     }
@@ -124,8 +124,8 @@ impl Capability {
             return self.describe();
         }
         match program.and_then(crate::program::get).map(|p| p.kind) {
-            Some(crate::program::Kind::Scan) => "run a program you install on this Mac over copies of captured requests and responses",
-            Some(crate::program::Kind::Enumerate) => "run a program you install on this Mac that looks up subdomains of your in-scope domains online",
+            Some(crate::program::Kind::Scan) => "run a program you install on this computer over copies of captured requests and responses",
+            Some(crate::program::Kind::Enumerate) => "run a program you install on this computer that looks up subdomains of your in-scope domains online",
             Some(crate::program::Kind::Probe) => "run Plonix's built-in parameter probe against an in-scope address you pick",
             None => self.describe(),
         }

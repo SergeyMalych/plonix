@@ -270,7 +270,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - **Client certificates** (per project): certificates presented to servers that ask for one, and one switch that turns them all off.
 - **Storage** (per project): keep only in-scope traffic, with a count of what it would delete and a button to delete it now.
 - **Interface** (all projects): open projects in a Plonix window or in your web browser.
-- **Appearance** (this Mac): theme (match the system, light or dark) and spacing. **Dense**, the default, fits more on screen; **Roomy** gives rows and panels more air.
+- **Appearance** (this computer): theme (match the system, light or dark) and spacing. **Dense**, the default, fits more on screen; **Roomy** gives rows and panels more air.
 - **Usage statistics** (all projects): share anonymous feature counts once a day, or not. See [Privacy](#privacy).
 - Settings are a registry: a feature adds a section by describing its fields, and the Settings screens draw it with validation and storage included (see [docs/projects.md](docs/projects.md#adding-a-settings-section)).
 

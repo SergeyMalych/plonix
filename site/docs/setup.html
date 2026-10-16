@@ -4,10 +4,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Setting up capture on any Mac · Plonix docs</title>
-<meta name="description" content="Plonix aims to take you from download to captured traffic in under a minute, whatever is installed on your Mac. This page covers the three things that can stand in the way and…">
-<meta property="og:title" content="Setting up capture on any Mac · Plonix docs">
-<meta property="og:description" content="Plonix aims to take you from download to captured traffic in under a minute, whatever is installed on your Mac. This page covers the three things that can stand in the way and…">
+<title>Setting up capture on any computer · Plonix docs</title>
+<meta name="description" content="Plonix aims to take you from download to captured traffic in under a minute, whatever is installed on your Mac or PC. This page covers the three things that can stand in the…">
+<meta property="og:title" content="Setting up capture on any computer · Plonix docs">
+<meta property="og:description" content="Plonix aims to take you from download to captured traffic in under a minute, whatever is installed on your Mac or PC. This page covers the three things that can stand in the…">
 <meta property="og:url" content="https://plonix.io/docs/setup">
 <meta property="og:image" content="https://plonix.io/assets/studio-window-light.webp">
 <link rel="canonical" href="https://plonix.io/docs/setup">
@@ -39,23 +39,24 @@
 <aside class="side">
 <details class="side-menu" open>
 <summary>Documentation</summary>
-<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li class="side-head">Get started</li><li><a href="getting-started.html">Getting started</a></li><li><a href="app.html">The Plonix window</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li class="here"><a href="setup.html" aria-current="page">Setting up capture on any Mac</a><ul class="toc"><li><a href="#which-browser-plonix-opens">Which browser Plonix opens</a></li><li><a href="#the-plonix-browser-for-macs-with-only-safari">The Plonix browser: for Macs with only Safari</a></li><li><a href="#firefox-and-the-plonix-certificate">Firefox and the Plonix certificate</a></li><li><a href="#the-plonix-command-from-the-app">The plonix command from the app</a></li></ul></li><li class="side-head">Capture and explore</li><li><a href="traffic.html">Traffic and the Lens</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scope.html">Scope</a></li><li><a href="map.html">The Map</a></li><li><a href="rules.html">Rules</a></li><li class="side-head">Experiment and prove</li><li><a href="bench.html">The Bench</a></li><li><a href="users.html">Saved users and the Access check</a></li><li><a href="callbacks.html">Callbacks</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="findings.html">Findings</a></li><li><a href="programs.html">Programs</a></li><li class="side-head">AI and the Market</li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li class="side-head">Your data</li><li><a href="updates.html">Updates</a></li><li><a href="privacy.html">Privacy and usage statistics</a></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="code-signing.html">Code signing policy</a></li><li class="side-head">Contributing</li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li class="side-head">Get started</li><li><a href="getting-started.html">Getting started</a></li><li><a href="app.html">The Plonix window</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li class="here"><a href="setup.html" aria-current="page">Setting up capture on any computer</a><ul class="toc"><li><a href="#which-browser-plonix-opens">Which browser Plonix opens</a></li><li><a href="#the-plonix-browser-for-macs-with-only-safari">The Plonix browser: for Macs with only Safari</a></li><li><a href="#firefox-and-the-plonix-certificate">Firefox and the Plonix certificate</a></li><li><a href="#the-plonix-command-from-the-app">The plonix command from the app</a></li></ul></li><li class="side-head">Capture and explore</li><li><a href="traffic.html">Traffic and the Lens</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scope.html">Scope</a></li><li><a href="map.html">The Map</a></li><li><a href="rules.html">Rules</a></li><li class="side-head">Experiment and prove</li><li><a href="bench.html">The Bench</a></li><li><a href="users.html">Saved users and the Access check</a></li><li><a href="callbacks.html">Callbacks</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="findings.html">Findings</a></li><li><a href="programs.html">Programs</a></li><li class="side-head">AI and the Market</li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li class="side-head">Your data</li><li><a href="updates.html">Updates</a></li><li><a href="privacy.html">Privacy and usage statistics</a></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="code-signing.html">Code signing policy</a></li><li class="side-head">Contributing</li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
 </details>
 </aside>
 <main class="doc">
 <article>
-<h1 id="setting-up-capture-on-any-mac">Setting up capture on any Mac</h1>
+<h1 id="setting-up-capture-on-any-computer">Setting up capture on any computer</h1>
 <p>Plonix aims to take you from download to captured traffic in under a minute,
-whatever is installed on your Mac. This page covers the three things that can
+whatever is installed on your Mac or PC. This page covers the three things that can
 stand in the way and what Plonix does about each: which browser it opens, the
 certificate HTTPS needs, and the <code>plonix</code> command for the terminal.</p>
 <h2 id="which-browser-plonix-opens">Which browser Plonix opens<a class="anchor" href="#which-browser-plonix-opens" aria-label="Link to this section">#</a></h2>
-<p><strong>Open target</strong> (⌘O in the app) and <code>plonix open &lt;target&gt;</code> open the site in
+<p><strong>Open target</strong> (⌘O on a Mac, Ctrl+O on Windows) and <code>plonix open &lt;target&gt;</code> open the site in
 the <em>capture browser</em>: a separate browser window with a profile of its own,
 routed through the Plonix proxy. Your everyday browser, its cookies and its
 settings are never touched. Plonix picks, in order:</p>
 <ol><li><code>$PLONIX_BROWSER</code>, if you set it to a browser's executable.</li><li>The first Chromium-based browser it finds: Google Chrome, Chromium, Brave,
-Microsoft Edge, Chrome Canary (in <code>/Applications</code> or <code>~/Applications</code>).</li><li>The <strong>Plonix browser</strong>, if you downloaded it (below).</li><li>Firefox.</li></ol>
+Microsoft Edge, Chrome Canary (on a Mac in <code>/Applications</code> or
+<code>~/Applications</code>; on Windows in Program Files or your local app data).</li><li>The <strong>Plonix browser</strong>, if you downloaded it (below).</li><li>Firefox.</li></ol>
 <p>Chromium-based browsers trust the Plonix certificate on their own (Plonix
 passes its key pin when it launches them), so HTTPS works with nothing to set
 up. <code>plonix browser</code> shows which browser Plonix will use.</p>

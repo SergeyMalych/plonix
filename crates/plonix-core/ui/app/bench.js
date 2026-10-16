@@ -151,9 +151,11 @@ function renderBench(main) {
     'div',
     { class: 'view' },
     h('div', { class: 'toolbar' }, backButton(), h('h2', { text: 'Bench' }), h('span', { class: 'hint', text: 'Each tab is an experiment: edit a request, send it, branch it, compare responses. Sends only reach in-scope hosts.' })),
+    h('div', { id: 'newprops' }),
     tabs,
   );
   clear(main, view);
+  drawNewRequests();
   updateChrome();
   if (!tab) {
     view.append(
@@ -207,7 +209,7 @@ function renderBench(main) {
       }
     },
   });
-  const sendBtn = h('button', { class: 'btn primary', onclick: () => send() }, 'Send', h('kbd', { text: '⌘↵' }));
+  const sendBtn = h('button', { class: 'btn primary', onclick: () => send() }, 'Send', h('kbd', { text: MOD_KEY + '↵' }));
   const send = async () => {
     if (sendBtn.disabled) return;
     tab.method = method.value.trim().toUpperCase() || 'GET';
@@ -964,6 +966,67 @@ async function drawProposal(tab, main) {
   clear(slot, proposalCard(tab, main, v.proposal, v.diff, list.length));
 }
 
+/* ---- requests Claude suggests trying (propose_request) ---- */
+
+/** The Bench draft id agents use for a request of their own, not an edit. */
+const NEW_DRAFT = 'new';
+
+/** Requests an agent suggests trying, above the tabs: each opens as a new
+ * tab, unsent, for the person to read and send. */
+/** Who suggested a request, in a word: Claude for Claude Code and Plonix's own runs, else the agent's name. */
+const proposer = (from) => (/claude|plonix-(ask|watch)/i.test(from || '') ? 'Claude' : !from || ['agent', 'api', 'mcp'].includes(from) ? 'Your agent' : from);
+
+async function drawNewRequests() {
+  const slot = $('#newprops');
+  if (!slot) return;
+  let list = [];
+  try {
+    list = (await api('/api/bench/proposals?draft=' + NEW_DRAFT)).proposals || [];
+  } catch (_) {}
+  if (!document.body.contains(slot)) return;
+  R.newSeen = list.map((p) => p.id).join(',');
+  const open = async (p) => {
+    const q = p.request;
+    R.tabs.push({
+      name: ('✦ ' + q.method + ' ' + urlPath(q.url)).slice(0, 60),
+      method: q.method,
+      url: q.url,
+      raw: q.headers.map(([k, v]) => `${k}: ${v}`).join('\n') + '\n\n' + (q.body || ''),
+      history: [],
+      cur: null,
+      picks: [],
+    });
+    R.active = R.tabs.length - 1;
+    saveBench();
+    try {
+      await api(`/api/bench/proposals/${p.id}`, { method: 'DELETE' });
+    } catch (_) {}
+    renderBench($('#main'));
+    toast('Opened on the Bench. Nothing was sent: read it, then press Send if you want to.', 'ok');
+  };
+  const discard = async (p) => {
+    try {
+      await api(`/api/bench/proposals/${p.id}`, { method: 'DELETE' });
+    } catch (_) {}
+    drawNewRequests();
+  };
+  clear(
+    slot,
+    list.map((p) =>
+      h(
+        'div',
+        { class: 'propnew' },
+        h('span', { class: 'askico', text: '✦' }),
+        h('b', { text: `${proposer(p.from)} suggests trying` }),
+        h('span', { class: 'mono propnewreq', text: `${p.request.method} ${p.request.url}`, title: p.request.url }),
+        p.summary ? h('span', { class: 'muted propnewsum', text: p.summary, title: p.summary }) : null,
+        h('button', { class: 'btn sm', text: 'Discard', onclick: () => discard(p) }),
+        h('button', { class: 'btn sm primary', text: 'Open on the Bench', onclick: () => open(p) }),
+      ),
+    ),
+  );
+}
+
 /** Re-compares after the user edits the draft, while a suggestion is shown. */
 function proposalEdited(tab, main) {
   if (!$('#propslot .propcard')) return;
@@ -974,6 +1037,10 @@ function proposalEdited(tab, main) {
 // Suggestions can arrive while the Bench is open (from the in-app answer or a
 // Claude Code session in a terminal), so the active tab checks for new ones.
 setInterval(() => {
+  if (S.view === 'bench' && !document.hidden && $('#newprops'))
+    api('/api/bench/proposals?draft=' + NEW_DRAFT)
+      .then((v) => (v.proposals || []).map((p) => p.id).join(',') !== R.newSeen && drawNewRequests())
+      .catch(() => {});
   const tab = R.tabs[R.active];
   if (S.view !== 'bench' || document.hidden || !tab || !tab.did || !$('#propslot')) return;
   api('/api/bench/proposals?draft=' + encodeURIComponent(tab.did))
@@ -1815,7 +1882,7 @@ async function drawBenchResponse(tab, col) {
       h('div', { class: 'rerr' }, h('b', { text: blocked ? 'Not sent. ' : 'Failed. ' }), tab.error.message),
     );
   }
-  if (tab.cur == null) return clear(col, label(), h('pre', { class: 'raw muted', text: 'Press Send (⌘↵) to see the response here.' }));
+  if (tab.cur == null) return clear(col, label(), h('pre', { class: 'raw muted', text: `Press Send (${MOD_KEY}↵) to see the response here.` }));
   clear(col, label(), h('pre', { class: 'raw muted', text: 'Loading…' }));
   let ex;
   try {

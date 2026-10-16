@@ -293,47 +293,24 @@ function excludedSection() {
   );
 }
 
-/** First run: offer to exclude common third-party domains, once per project. */
-function maybeAskExclusions() {
+/** First run: keep common third parties (analytics, ads, CDNs…) out of scope,
+ * once per project, without asking a question a newcomer can't answer yet.
+ * The demo is already curated, so it is only marked as asked. A toast says
+ * what happened and where to change it. */
+async function maybeAskExclusions() {
   if (!S.exclusions || S.exclusions.asked || S.askedExclusionsThisSession) return;
   const groups = S.exclusions.groups || [];
   if (!groups.length) return;
   S.askedExclusionsThisSession = true;
-  const picks = {};
-  groups.forEach((g) => (picks[g.id] = true));
-  const rows = groups.map((g) =>
-    h(
-      'label',
-      { class: 'domrow' },
-      h('input', { type: 'checkbox', checked: true, onchange: (e) => (picks[g.id] = e.target.checked) }),
-      h('span', null, h('b', { text: g.name }), ' ', h('span', { class: 'muted', text: `(${g.domains.length} domains)` })),
-    ),
-  );
-  const finish = async (enable) => {
-    closeModal();
-    try {
-      if (enable) {
-        for (const g of groups) if (picks[g.id]) await api('/api/scope/exclusions/group', { method: 'POST', body: { id: g.id, on: true } });
-      }
-      await api('/api/scope/exclusions/asked', { method: 'POST' });
-      await loadScope();
-      if (S.view === 'scope') renderScopeBody();
-      if (enable) toast('Common domains excluded. Edit them anytime on the Scope screen.', 'ok');
-    } catch (e) {
-      toast(e.message, 'err');
-    }
-  };
-  modal(
-    'Exclude common domains?',
-    h(
-      'div',
-      null,
-      h('p', { class: 'muted', text: 'Plonix can keep common third parties — analytics, ads, payments, CDNs and the like — out of your target scope, so they are never suggested or sent to. Pick the groups to exclude; you can change these anytime on the Scope screen.' }),
-      h('div', { class: 'domlist' }, rows),
-    ),
-    [
-      h('button', { class: 'btn', text: 'Not now', onclick: () => finish(false) }),
-      h('button', { class: 'btn primary', text: 'Exclude selected', onclick: () => finish(true) }),
-    ],
-  );
+  try {
+    const st = S.status || (await api('/api/status'));
+    const demo = !!(st && st.demo);
+    if (!demo) for (const g of groups) if (g.state !== 'on') await api('/api/scope/exclusions/group', { method: 'POST', body: { id: g.id, on: true } });
+    await api('/api/scope/exclusions/asked', { method: 'POST' });
+    await loadScope();
+    if (S.view === 'scope') renderScopeBody();
+    if (!demo) toast('Analytics, ads, CDNs and other common third parties are kept out of scope. Change this on the Scope screen.', 'ok');
+  } catch (e) {
+    toast(e.message, 'err');
+  }
 }

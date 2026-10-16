@@ -4,6 +4,8 @@
 //!
 //! The work happens in `plonix_core::market`; this is presentation.
 
+use std::io::{IsTerminal, Write};
+
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Subcommand};
 use plonix_core::access::{AgentSettings, Group};
@@ -51,8 +53,8 @@ enum MarketCmd {
         /// For an extension: also grant a sensitive capability it asks for (read-out-of-scope, run-program); repeatable
         #[arg(long, value_name = "CAPABILITY")]
         grant: Vec<String>,
-        /// For an extension update that asks for more than before: approve it
-        #[arg(long)]
+        /// Install extensions without asking first (for scripts); also approves an update that asks for more than before
+        #[arg(long, short = 'y')]
         yes: bool,
     },
     /// Items that suit your kind of work: bug hunter, red teamer or security researcher
@@ -379,7 +381,9 @@ pub fn market_cmd(ctx: &Ctx, a: MarketArgs) -> Result<()> {
                 eprintln!("warning: installing from an unsigned Market index ({})", cat.location());
             }
             let grant = grant.iter().map(|g| plonix_core::extension::Capability::parse(g).map_err(|e| anyhow!(e))).collect::<Result<Vec<_>>>()?;
-            let consent = plonix_core::extension::Consent { grant, approve_new: yes };
+            // An extension runs code: say what it may do and get a yes before it is switched on.
+            let asked = !yes && confirm_extensions(ctx, &m, &cat, &names, &grant)?;
+            let consent = plonix_core::extension::Consent { grant, approve_new: yes || asked };
             let mut all = vec![];
             for name in &names {
                 let changes = m.install_with(&cat, name, &consent)?;
@@ -539,6 +543,7 @@ fn group_label(g: Group) -> &'static str {
         Group::Scope => "scope",
         Group::Findings => "findings",
         Group::Scan => "scan",
+        Group::Users => "users",
         Group::Bench => "bench",
     }
 }
@@ -549,6 +554,54 @@ fn group_label(g: Group) -> &'static str {
 /// and only with `yes`. `skills add`, `rules add` and `filters add` come
 /// through here too, so every way in asks the same way and the Market sees
 /// the same thing. `want` refuses another kind of file, `sha256` another build.
+/// Shows what each extension about to be installed may do and asks before
+/// going on. True when it asked and the person said yes; false when there was
+/// nothing to ask. Without a terminal to ask on, it stops and points at --yes.
+fn confirm_extensions(ctx: &Ctx, m: &Market, cat: &Catalog, names: &[String], grant: &[plonix_core::extension::Capability]) -> Result<bool> {
+    let mut exts = vec![];
+    for name in names {
+        for n in registry::install_order(&cat.index, name).unwrap_or_default() {
+            if let Some(p) = cat.index.get(&n).filter(|p| p.kind == Kind::Extension && matches!(m.status(p), Status::Available | Status::Update { .. }))
+                && !exts.iter().any(|e: &&registry::Package| e.name == p.name)
+            {
+                exts.push(p);
+            }
+        }
+    }
+    if exts.is_empty() {
+        return Ok(false);
+    }
+    for p in &exts {
+        let Ok(mf) = cat.fetch(p).and_then(|b| market::extension_manifest(&b).map_err(|e| anyhow!(e))) else { continue };
+        eprintln!("{} {} · extension by {}", p.name, p.version, p.author);
+        eprintln!("It will be allowed to:");
+        for c in &mf.capabilities {
+            let note = if !c.sensitive() {
+                ""
+            } else if grant.contains(c) {
+                " (you grant this with --grant)"
+            } else {
+                " (not granted: add --grant to allow it)"
+            };
+            eprintln!("  - {}{note}", c.describe_for(mf.program.as_deref()));
+        }
+        eprintln!("{}
+", market::runtime_note(&mf));
+    }
+    let what = if exts.len() == 1 { format!("{} and switch it on", exts[0].name) } else { "these extensions and switch them on".into() };
+    if ctx.json || !std::io::stdin().is_terminal() {
+        bail!("not installed yet: run it again with --yes to install {what}");
+    }
+    eprint!("Install {what}? [y/N] ");
+    std::io::stderr().flush().ok();
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+    if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+        bail!("not installed");
+    }
+    Ok(true)
+}
+
 pub fn add_own(ctx: &Ctx, source: &str, yes: bool, want: Option<Kind>, sha256: Option<&str>) -> Result<()> {
     let m = Market::new(&ctx.home);
     let (bytes, label) = market::read_external(source)?;

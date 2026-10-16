@@ -1,20 +1,21 @@
-# Setting up capture on any Mac
+# Setting up capture on any computer
 
 Plonix aims to take you from download to captured traffic in under a minute,
-whatever is installed on your Mac. This page covers the three things that can
+whatever is installed on your Mac or PC. This page covers the three things that can
 stand in the way and what Plonix does about each: which browser it opens, the
 certificate HTTPS needs, and the `plonix` command for the terminal.
 
 ## Which browser Plonix opens
 
-**Open target** (⌘O in the app) and `plonix open <target>` open the site in
+**Open target** (⌘O on a Mac, Ctrl+O on Windows) and `plonix open <target>` open the site in
 the *capture browser*: a separate browser window with a profile of its own,
 routed through the Plonix proxy. Your everyday browser, its cookies and its
 settings are never touched. Plonix picks, in order:
 
 1. `$PLONIX_BROWSER`, if you set it to a browser's executable.
 2. The first Chromium-based browser it finds: Google Chrome, Chromium, Brave,
-   Microsoft Edge, Chrome Canary (in `/Applications` or `~/Applications`).
+   Microsoft Edge, Chrome Canary (on a Mac in `/Applications` or
+   `~/Applications`; on Windows in Program Files or your local app data).
 3. The **Plonix browser**, if you downloaded it (below).
 4. Firefox.
 

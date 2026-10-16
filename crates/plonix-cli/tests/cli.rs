@@ -456,7 +456,8 @@ fn open_starts_everything_and_launches_the_browser_through_the_proxy() {
     let out = r.ok().stdout();
     assert!(out.contains("(created)"), "{out}");
     assert!(out.contains("(started, project 127.0.0.1)"), "{out}");
-    assert!(out.contains("✓ Scope        127.0.0.1 (+ subdomains)"), "{out}");
+    // An IP address has no subdomains, so its rule never claims them.
+    assert!(out.contains("✓ Scope        127.0.0.1  (more domains"), "{out}");
     assert!(out.contains("✓ Browser      fake-chrome (isolated profile, trusts Plonix)"), "{out}");
     assert!(out.contains("plonix ca trust"), "first run shows trust guidance:\n{out}");
     assert!(p.home.path().join("ca.pem").exists());

@@ -135,7 +135,7 @@ pub fn build(engine: &Engine, req: &AskRequest, settings: &AgentSettings) -> Res
 const FOOTER: &str = "This comes from Plonix, the user's web security workbench, captured on their own machine while testing \
 a target they are authorized to test. If the Plonix MCP tools are connected (search_traffic, get_request, get_insights, \
 list_endpoints, get_scope, list_findings), use them to look further. They are read-only. Do not send traffic to the target \
-yourself; suggest requests for the user to send from Plonix instead.";
+yourself; suggest requests for the user to send from Plonix instead (the `propose_request` tool puts one on their Bench to review).";
 
 /// The footer for a Bench draft: Claude may suggest a concrete edit, which
 /// the user reviews as a diff and applies (or not) before sending it.

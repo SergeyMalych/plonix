@@ -211,7 +211,7 @@ impl Engine {
             None => (None, Some(base64::engine::general_purpose::STANDARD.encode(&orig.req_body))),
         };
         self.send(
-            SendRequest { method: req.method.clone().unwrap_or(orig.method.clone()), url, headers, body, body_base64, as_user: None },
+            SendRequest { method: req.method.clone().unwrap_or(orig.method.clone()), url, headers, body, body_base64, as_user: req.as_user.clone() },
             initiator,
         )
         .await

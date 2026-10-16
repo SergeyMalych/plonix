@@ -21,6 +21,7 @@ mod replace;
 mod render;
 mod bench;
 mod scan;
+mod users;
 
 use std::io::{BufRead, IsTerminal, Write};
 use std::path::PathBuf;
@@ -145,6 +146,10 @@ enum Cmd {
     },
     /// Re-send a captured request, optionally modified (a Bench send; accepted hosts only)
     Replay(ReplayArgs),
+    /// Saved users to test as, and which credentials each carries (never the values)
+    Users,
+    /// Access check: replay requests as every saved user and signed out, and compare
+    Access(users::AccessArgs),
     /// Hold requests (and responses) in the proxy to forward, edit or drop them
     Intercept {
         #[command(subcommand)]
@@ -374,6 +379,9 @@ struct ReplayArgs {
     /// Replace the body; @file reads it from a file
     #[arg(long, short = 'd', value_name = "BODY")]
     data: Option<String>,
+    /// Send as a saved user (name or id): its cookies and auth headers replace the captured ones
+    #[arg(long = "as", value_name = "USER")]
+    as_user: Option<String>,
     /// Print bodies in full
     #[arg(long)]
     full: bool,
@@ -432,7 +440,7 @@ enum CaCmd {
 enum BrowserCmd {
     /// The browser `plonix open` launches (the default)
     Show,
-    /// Download the Plonix browser (Chromium, about 150 MB) for Macs without Chrome, Brave or Edge
+    /// Download the Plonix browser (Chromium, about 150 MB) for computers without Chrome, Brave or Edge
     Install,
     /// Delete the downloaded Plonix browser
     Remove,
@@ -561,6 +569,8 @@ fn dispatch(ctx: Ctx, command: Cmd) -> Result<ExitCode> {
         Cmd::Crawl(a) => scan::crawl_cmd(&ctx, a)?,
         Cmd::Findings { cmd } => findings::findings_cmd(&ctx, cmd.unwrap_or(findings::FindingsCmd::List { status: None }))?,
         Cmd::Bench { cmd } => bench::bench_cmd(&ctx, cmd)?,
+        Cmd::Users => users::users_cmd(&ctx)?,
+        Cmd::Access(a) => users::access_cmd(&ctx, a)?,
         Cmd::Callbacks { cmd } => callbacks::callbacks_cmd(&ctx, cmd.unwrap_or(callbacks::CallbacksCmd::Status))?,
         Cmd::Intercept { cmd } => intercept::intercept_cmd(&ctx, cmd.unwrap_or(intercept::InterceptCmd::Status))?,
         Cmd::Replace { cmd } => replace::replace_cmd(&ctx, cmd.unwrap_or(replace::ReplaceCmd::List))?,
@@ -787,19 +797,25 @@ fn replay_cmd(ctx: &Ctx, a: ReplayArgs) -> Result<()> {
         },
         None => None,
     };
+    let c = ctx.client()?;
+    let as_user = a.as_user.as_deref().map(|u| users::user_id(&c, u)).transpose()?;
     let req = json!({
         "id": a.id,
+        "as_user": as_user,
         "method": a.method,
         "target": a.target,
         "set_headers": set_headers,
         "remove_headers": a.remove_headers,
         "body": body,
     });
-    let v = ctx.client()?.post("/api/replay", req)?;
+    let v = c.post("/api/replay", req)?;
     if ctx.json {
         return ctx.print_json(&v);
     }
-    println!("Replayed #{} as #{}\n", a.id, v["id"]);
+    match &a.as_user {
+        Some(u) => println!("Replayed #{} as {} → #{}\n", a.id, render::safe(u), v["id"]),
+        None => println!("Replayed #{} as #{}\n", a.id, v["id"]),
+    }
     print!("{}", render::exchange(&v, if a.full { usize::MAX } else { 4000 }));
     Ok(())
 }

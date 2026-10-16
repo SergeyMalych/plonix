@@ -31,7 +31,7 @@ Suggestions wait in three places: the Scope screen, the sidebar and a banner in 
 
 ## Third parties
 
-Analytics, ads, payments, CDNs and the like are rarely what you are testing. Scope keeps common third parties out in named groups, so they are never suggested or sent to. Plonix asks which groups to exclude, you switch each group on or off as a set on the Scope screen, and you can create groups of your own.
+Analytics, ads, payments, CDNs and the like are rarely what you are testing. Scope keeps common third parties out in named groups, so they are never suggested or sent to. A new project starts with every group on and says so once; you switch each group on or off as a set on the Scope screen, and you can create groups of your own.
 
 ## What scope changes
 

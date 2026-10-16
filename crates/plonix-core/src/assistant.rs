@@ -521,6 +521,8 @@ fn on_line(run: &std::sync::Arc<Mutex<Run>>, line: &str) -> Option<String> {
                             let name = b.get("name").and_then(Value::as_str).unwrap_or("a tool");
                             if name.ends_with("propose_bench_edit") {
                                 push(&mut r, Kind::Proposal, "Suggested an edit to the request".into());
+                            } else if name.ends_with("propose_request") {
+                                push(&mut r, Kind::Proposal, "Suggested a request to try on the Bench".into());
                             } else if is_plonix_tool(name) {
                                 push(&mut r, Kind::Tool, friendly_tool(name));
                             }
@@ -628,7 +630,13 @@ fn on_stream(p: &mut Progress, ev: &Value) {
                         "Getting ready".into()
                     } else {
                         p.tool = tool_label(name);
-                        if name.ends_with("propose_bench_edit") { "Drafting an edit to the request".into() } else { format!("Looking at {}", p.tool) }
+                        if name.ends_with("propose_bench_edit") {
+                            "Drafting an edit to the request".into()
+                        } else if name.ends_with("propose_request") {
+                            "Drafting a request to try".into()
+                        } else {
+                            format!("Looking at {}", p.tool)
+                        }
                     }
                 }
                 _ => "Writing the answer".into(),

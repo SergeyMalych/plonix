@@ -51,8 +51,21 @@ The Access check replays requests as each saved user and once **signed out** (au
 
 1. Pick the requests: select rows in Traffic or endpoints on the [Map](map.md), or choose a host and, optionally, a branch of the application (paths starting with `/api/admin`, say). One captured request is checked for each endpoint on that branch.
 2. Tick the users to compare, and whether to include signed out.
-3. Press **Check access**.
+3. For a branch, requests that change data (POST, PUT, PATCH, DELETE) are left out unless you tick **Also requests that change data**: replaying them as every user could create, change or delete real records. The results say which were left out.
+4. Press **Check access**.
 
-The results point out where a signed-out request still succeeds and where different users get the same response. They draw no conclusions: you decide what they mean, and record a [finding](findings.md) with the requests as evidence. Every request goes through the scope check and is recorded in Traffic.
+The results point out where a signed-out request still succeeds and where different users get the same response. Rows worth a look come first; pages that answered everyone the same, signed out included, are marked **Public** and go last, since there is nothing to protect there. They draw no conclusions: you decide what they mean, and record a [finding](findings.md) with the requests as evidence. Every request goes through the scope check and is recorded in Traffic.
 
 **Check this id across users** in the Lens, on a request with an id in its path, starts an Access check for that request in one click. **Replay signed out**, on a signed-in request that worked, sends it again with your login removed, to see whether it needs you signed in at all.
+
+## From the terminal
+
+```sh
+plonix users                                   # saved users and which credentials each carries (never the values)
+plonix replay 42 --as "Bob"                    # replay a request as a saved user (name or id)
+plonix access 42 57                            # Access check on these requests, every user and signed out
+plonix access --host shop.example.com --prefix /api --users alice,bob
+plonix access --host shop.example.com --include-unsafe   # also replay requests that change data
+```
+
+`plonix access` prints one row per request and one column per user, with Plonix's notes underneath; rows worth a look are marked `!`. Add `--json` for the full report. AI agents can read the saved users (names only) and your last Access check through the `list_users` and `get_access_check` tools ([agents.md](agents.md#tools)).

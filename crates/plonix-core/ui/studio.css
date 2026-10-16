@@ -92,6 +92,8 @@
 [data-style="studio"] .nav button[data-v="programs"] .ico { background: var(--st-ink); clip-path: polygon(0 0, 100% 0, 50% 100%); }
 [data-style="studio"] .nav button[data-v="rules"] .ico { background: linear-gradient(90deg, var(--st-pink) 50%, var(--st-ink) 50%); border-radius: 50% 0 0 50%; }
 [data-style="studio"] .nav button[data-v="settings"] .ico { background: transparent; border: 3px solid var(--st-ink); border-radius: 50%; }
+[data-style="studio"] .nav button.navmore .ico { background: linear-gradient(var(--st-ink), var(--st-ink)) center / 100% 3px no-repeat, linear-gradient(var(--st-ink), var(--st-ink)) center / 3px 100% no-repeat; opacity: 0.7; }
+[data-style="studio"] .nav.showmore button.navmore .ico { background: linear-gradient(var(--st-ink), var(--st-ink)) center / 100% 3px no-repeat; }
 [data-style="studio"] .opentarget .ico { background: linear-gradient(currentColor 0 0) center / 100% 3px no-repeat, linear-gradient(currentColor 0 0) center / 3px 100% no-repeat; }
 
 /* round controls */

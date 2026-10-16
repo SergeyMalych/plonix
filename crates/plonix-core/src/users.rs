@@ -532,6 +532,35 @@ fn make_id(given: &str, name: &str, taken: &[SavedUser]) -> String {
     (2..).map(|n| format!("{base}-{n}")).find(|id| !used(id)).unwrap()
 }
 
+/// A saved user as agents may see it: which credentials it carries, by name
+/// only. No header or cookie value ever leaves through this.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Summary {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub note: String,
+    /// Header names, e.g. `Authorization`.
+    pub headers: Vec<String>,
+    /// Headers sent to one part of the app, as `name on host/path`.
+    pub scoped: Vec<String>,
+    pub cookies: Vec<String>,
+}
+
+pub fn summaries(users: &[SavedUser]) -> Vec<Summary> {
+    users
+        .iter()
+        .map(|u| Summary {
+            id: u.id.clone(),
+            name: u.name.clone(),
+            note: u.note.clone(),
+            headers: u.headers.iter().map(|(n, _)| n.clone()).collect(),
+            scoped: u.scoped.iter().map(|h| format!("{} on {}{}", h.name, h.host, h.path)).collect(),
+            cookies: u.cookies.iter().map(|c| c.name.clone()).collect(),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -692,5 +721,21 @@ mod tests {
         assert!(is_auth_header("cookie") && is_auth_header("Authorization") && is_auth_header("X-API-Key"));
         assert!(!is_auth_header("Accept"));
         assert!(is_auth_header("X-Access-Token") && is_auth_header("Api-Key") && is_auth_header("X-Session-Id"));
+    }
+
+    #[test]
+    fn summaries_never_carry_values() {
+        let u = SavedUser {
+            id: "alice".into(),
+            name: "Alice".into(),
+            note: String::new(),
+            headers: vec![("Authorization".into(), "Bearer sekret-token".into())],
+            scoped: vec![ScopedHeader { name: "X-Key".into(), value: "sekret-key".into(), host: "api.shop.test".into(), path: "/v2".into() }],
+            cookies: vec![Cookie { name: "sid".into(), value: "sekret-cookie".into(), domain: String::new(), expires: None }],
+            keep_fresh: true,
+        };
+        let out = serde_json::to_string(&summaries(&[u])).unwrap();
+        assert!(!out.contains("sekret"), "{out}");
+        assert!(out.contains("Authorization") && out.contains("sid") && out.contains("X-Key on api.shop.test/v2"), "{out}");
     }
 }
