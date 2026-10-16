@@ -883,6 +883,8 @@ impl Engine {
             None => (scope::normalize_host(domain), include_subdomains),
         };
         anyhow::ensure!(!pattern.is_empty(), "empty domain");
+        // An IP address has no subdomains: `*.127.0.0.1` would only confuse.
+        let subs = subs && pattern.trim_matches(['[', ']']).parse::<std::net::IpAddr>().is_err();
         let rule = Rule { pattern, include_subdomains: subs, decision, created_at: now_ms(), note: note.to_string() };
         self.store.put_rule(&rule)?;
         *self.rules.write().unwrap() = self.store.rules()?;

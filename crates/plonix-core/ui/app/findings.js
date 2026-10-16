@@ -118,7 +118,7 @@ function confirmDeleteFinding(f) {
 async function fetchReport(format) {
   let resp;
   try {
-    resp = await fetch('/api/findings/export?format=' + format, { headers: { Authorization: 'Bearer ' + S.token, 'X-Plonix-Client': 'gui' }, cache: 'no-store' });
+    resp = await fetch('/api/findings/export?format=' + format + (S.reportSecrets ? '&secrets=true' : ''), { headers: { Authorization: 'Bearer ' + S.token, 'X-Plonix-Client': 'gui' }, cache: 'no-store' });
   } catch (_) {
     throw new ApiError(0, 'engine_down', 'The Plonix engine is not reachable.');
   }
@@ -165,6 +165,12 @@ function exportMenu(anchor) {
     h('div', { class: 'msep' }),
     item('Copy as Markdown', copy),
     h('div', { class: 'msep' }),
+    h(
+      'label',
+      { class: 'mcheck', title: 'Off: cookie, token and other credential values in the evidence are masked, so a shared report holds no live session.' },
+      h('input', { type: 'checkbox', checked: !!S.reportSecrets, onchange: (e) => (S.reportSecrets = e.target.checked) }),
+      h('span', { text: 'Keep cookie and token values' }),
+    ),
     h('div', { class: 'mnote', text: 'False positives are left out. Choose findings with plonix findings export.' }),
   );
   showPopover(menu, anchor.getBoundingClientRect());

@@ -121,9 +121,12 @@ async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<ProxyResponse, Infal
         Some(pq) => pq.as_str().to_string(),
         None => "/".to_string(),
     };
+    // Proxy-Connection only ever talks to Plonix itself: it is never sent on,
+    // so it is not recorded either, and the Bench never replays it.
     let mut req_headers: Headers = req
         .headers()
         .iter()
+        .filter(|(k, _)| k.as_str() != "proxy-connection")
         .map(|(k, v)| (k.as_str().to_string(), String::from_utf8_lossy(v.as_bytes()).into_owned()))
         .collect();
     if req.version() == http::Version::HTTP_2 {

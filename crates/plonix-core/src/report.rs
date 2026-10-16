@@ -62,6 +62,9 @@ pub struct Selection {
     /// Only findings with these statuses. Empty means every status when ids
     /// are given, and everything but false positives otherwise.
     pub statuses: Vec<String>,
+    /// Keep cookie, token and other credential values as captured. Off by
+    /// default: a report is shared, and a live session in it is a gift.
+    pub keep_secrets: bool,
 }
 
 impl Selection {
@@ -73,7 +76,7 @@ impl Selection {
         let statuses = split(statuses)
             .map(|s| parse_status(s).map(str::to_string).ok_or_else(|| format!("status must be one of {}", FINDING_STATUSES.join(", "))))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self { ids, statuses })
+        Ok(Self { ids, statuses, keep_secrets: false })
     }
 
     fn statuses(&self) -> Vec<String> {
@@ -96,6 +99,8 @@ pub struct Report {
     pub plonix_version: &'static str,
     /// The statuses the report covers.
     pub statuses: Vec<String>,
+    /// Credential values in the evidence were masked.
+    pub redacted: bool,
     pub findings: Vec<ReportFinding>,
 }
 
@@ -148,7 +153,10 @@ pub fn build(store: &Store, project: &str, sel: &Selection, visible: &dyn Fn(&Ex
             evidence.push(match store.get_exchange(id)? {
                 None => EvidenceItem { id, note: Some("no longer in the project's traffic".into()), ..Default::default() },
                 Some(ex) if !visible(&ex) => EvidenceItem { id, note: Some("not in scope, and agents may see in-scope traffic only".into()), ..Default::default() },
-                Some(ex) => {
+                Some(mut ex) => {
+                    if !sel.keep_secrets {
+                        redact(&mut ex);
+                    }
                     let (request, c1) = request_text(&ex, MAX_BODY_CHARS);
                     let (response, c2) = response_text(&ex, MAX_BODY_CHARS);
                     EvidenceItem {
@@ -170,7 +178,54 @@ pub fn build(store: &Store, project: &str, sel: &Selection, visible: &dyn Fn(&Ex
         }
         out.push(ReportFinding { finding: f, evidence });
     }
-    Ok(Report { project: project.to_string(), generated_at: now_ms(), plonix_version: env!("CARGO_PKG_VERSION"), statuses, findings: out })
+    Ok(Report { project: project.to_string(), generated_at: now_ms(), plonix_version: env!("CARGO_PKG_VERSION"), statuses, redacted: !sel.keep_secrets, findings: out })
+}
+
+/// Masks credential values in a request and its response, keeping enough to
+/// tell them apart: cookie and token values, Set-Cookie values, and JWTs in
+/// bodies. Names stay, so the report still shows what was sent.
+pub fn redact(ex: &mut Exchange) {
+    fn mask(v: &str) -> String {
+        let v = v.trim();
+        if v.chars().count() <= 4 {
+            return "[redacted]".into();
+        }
+        format!("{}…[redacted]", v.chars().take(4).collect::<String>())
+    }
+    fn mask_pairs(v: &str, sep: char) -> String {
+        v.split(sep)
+            .map(|part| match part.split_once('=') {
+                Some((k, val)) => format!("{k}={}", mask(val)),
+                None => part.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join(&sep.to_string())
+    }
+    for (k, v) in ex.req_headers.iter_mut() {
+        if k.eq_ignore_ascii_case("cookie") {
+            *v = mask_pairs(v, ';');
+        } else if crate::users::is_auth_header(k) {
+            *v = match v.split_once(' ') {
+                // Keep the scheme: "Bearer eyJ…" reads better than a bare mask.
+                Some((scheme, rest)) if scheme.len() <= 10 && !rest.is_empty() => format!("{scheme} {}", mask(rest)),
+                _ => mask(v),
+            };
+        }
+    }
+    for (k, v) in ex.resp_headers.iter_mut() {
+        if k.eq_ignore_ascii_case("set-cookie") {
+            // Only the cookie's own value; its attributes follow the first ';'.
+            let (first, rest) = v.split_once(';').map(|(a, b)| (a.to_string(), format!(";{b}"))).unwrap_or((v.clone(), String::new()));
+            *v = format!("{}{rest}", mask_pairs(&first, ';'));
+        }
+    }
+    static JWT: std::sync::LazyLock<regex::bytes::Regex> =
+        std::sync::LazyLock::new(|| regex::bytes::Regex::new(r"eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]+").unwrap());
+    for body in [&mut ex.req_body, &mut ex.resp_body] {
+        if JWT.is_match(body) {
+            *body = JWT.replace_all(body, &b"eyJ\xe2\x80\xa6[redacted JWT]"[..]).into_owned();
+        }
+    }
 }
 
 /// Whether a reader limited by `visible` may see this finding at all: it is
@@ -241,6 +296,9 @@ fn intro(r: &Report) -> String {
         let _ = write!(s, "{n} finding{}: {}.", if n == 1 { "" } else { "s" }, tally(r));
     }
     let _ = write!(s, " Statuses included: {}.", r.statuses.iter().map(|s| status_label(s)).collect::<Vec<_>>().join(", "));
+    if r.redacted {
+        s.push_str(" Cookie, token and other credential values are masked.");
+    }
     s
 }
 
@@ -453,6 +511,22 @@ mod tests {
         let fp = add("Not real", "critical", vec![]);
         s.update_finding(fp.id, &FindingEdit { status: Some("false_positive".into()), ..Default::default() }.checked().unwrap()).unwrap();
         s
+    }
+
+    #[test]
+    fn credentials_are_masked_unless_kept() {
+        let mut ex = exchange("api.example.com", "{\"token\":\"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl\"}");
+        ex.req_headers.push(("Cookie".into(), "sid=abcdef123456; theme=dark".into()));
+        ex.req_headers.push(("Authorization".into(), "Bearer abcdefghijklmnop".into()));
+        ex.resp_headers.push(("Set-Cookie".into(), "sid=zyxwvut987; Path=/; HttpOnly".into()));
+        let mut masked = ex.clone();
+        redact(&mut masked);
+        let h = |hs: &crate::model::Headers, k: &str| hs.iter().find(|(n, _)| n == k).unwrap().1.clone();
+        assert_eq!(h(&masked.req_headers, "Cookie"), "sid=abcd…[redacted]; theme=[redacted]");
+        assert_eq!(h(&masked.req_headers, "Authorization"), "Bearer abcd…[redacted]");
+        assert_eq!(h(&masked.resp_headers, "Set-Cookie"), "sid=zyxw…[redacted]; Path=/; HttpOnly");
+        assert!(!String::from_utf8_lossy(&masked.resp_body).contains("c2lnbmF0dXJl"));
+        assert_eq!(h(&masked.req_headers, "Content-Type"), "text/plain");
     }
 
     #[test]

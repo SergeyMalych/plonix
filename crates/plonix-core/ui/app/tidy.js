@@ -15,7 +15,7 @@ const TIDY_KEY = 'plonix.bench.view';
 const tidyOn = () => store(TIDY_KEY) !== 'raw';
 
 /** Headers a browser adds to every request, which rarely change the answer. */
-const BROWSER_HEADER = /^(host|user-agent|accept-language|accept-encoding|connection|keep-alive|sec-ch-ua(-[\w-]+)?|sec-fetch-[\w-]+|sec-gpc|sec-purpose|dnt|upgrade-insecure-requests|priority|te|cache-control|pragma|origin|content-length)$/i;
+const BROWSER_HEADER = /^(host|user-agent|accept-language|accept-encoding|connection|proxy-connection|keep-alive|sec-ch-ua(-[\w-]+)?|sec-fetch-[\w-]+|sec-gpc|sec-purpose|dnt|upgrade-insecure-requests|priority|te|cache-control|pragma|origin|content-length)$/i;
 /** Cookies analytics and consent tools set, which never sign anyone in. */
 const TRACKING_COOKIE = /^(_ga(_\w+)?|_gid|_gat\w*|_gcl_\w+|_fbp|_fbc|_hj\w*|_clck|_clsk|_uet\w*|__utm\w*|_pk_\w+(\.\w+)*|ajs_\w+|amplitude\w*|mp_\w+|optanon\w*|cookieconsent\w*|cookie_?consent\w*|consent|_tt_\w*|_ttp|_pin_unauth|_rdt_uuid|hubspotutk|__hs\w+|intercom-[\w-]+)$/i;
 /** Cookie names that usually carry a session. */

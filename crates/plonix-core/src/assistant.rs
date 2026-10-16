@@ -521,7 +521,7 @@ fn on_line(run: &std::sync::Arc<Mutex<Run>>, line: &str) -> Option<String> {
                             let name = b.get("name").and_then(Value::as_str).unwrap_or("a tool");
                             if name.ends_with("propose_bench_edit") {
                                 push(&mut r, Kind::Proposal, "Suggested an edit to the request".into());
-                            } else {
+                            } else if is_plonix_tool(name) {
                                 push(&mut r, Kind::Tool, friendly_tool(name));
                             }
                         }
@@ -622,8 +622,14 @@ fn on_stream(p: &mut Progress, ev: &Value) {
                 Some("thinking") | Some("redacted_thinking") => "Thinking".into(),
                 Some("tool_use") => {
                     let name = block.and_then(|b| b.get("name")).and_then(Value::as_str).unwrap_or("a tool");
-                    p.tool = tool_label(name);
-                    if name.ends_with("propose_bench_edit") { "Drafting an edit to the request".into() } else { format!("Looking at {}", p.tool) }
+                    if !is_plonix_tool(name) {
+                        // Claude Code's own housekeeping, such as finding its tools.
+                        p.tool.clear();
+                        "Getting ready".into()
+                    } else {
+                        p.tool = tool_label(name);
+                        if name.ends_with("propose_bench_edit") { "Drafting an edit to the request".into() } else { format!("Looking at {}", p.tool) }
+                    }
                 }
                 _ => "Writing the answer".into(),
             };
@@ -653,6 +659,12 @@ fn finish_err(run: &std::sync::Arc<Mutex<Run>>, msg: String) {
         push(&mut r, Kind::Error, msg);
         end(&mut r, Status::Error, "Stopped");
     }
+}
+
+/// Whether a tool call is one of Plonix's own (`mcp__plonix__…`), as opposed
+/// to Claude Code's internals, which mean nothing to the person.
+fn is_plonix_tool(name: &str) -> bool {
+    name.starts_with("mcp__plonix__")
 }
 
 /// A short, human label for a Plonix MCP tool name like `mcp__plonix__traffic`.
@@ -860,6 +872,7 @@ mod tests {
     fn friendly_tool_names_read_nicely() {
         assert_eq!(friendly_tool("mcp__plonix__traffic"), "Looked at traffic");
         assert_eq!(friendly_tool("mcp__plonix__scope_suggest"), "Looked at scope suggest");
+        assert!(is_plonix_tool("mcp__plonix__status") && !is_plonix_tool("ToolSearch"));
     }
 
     #[test]
