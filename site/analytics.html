@@ -65,7 +65,14 @@ p { margin: 0; }
 .nav-links a:hover, .nav-links a[aria-current] { color: var(--fg); }
 .theme-btn { width: 38px; height: 36px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); display: grid; place-items: center; cursor: pointer; }
 .theme-btn svg { width: 18px; height: 18px; }
-@media (max-width: 640px) { .nav-links { display: none; } .theme-btn { margin-left: auto; } }
+/* phones: the links take a row of their own under the logo, scrolling sideways if they ever outgrow it */
+@media (max-width: 760px) {
+  .nav .wrap { flex-wrap: wrap; height: auto; column-gap: 14px; row-gap: 0; padding-top: 13px; }
+  .theme-btn { margin-left: auto; }
+  .nav-links { order: 1; flex: 1 0 100%; margin-left: 0; height: 42px; align-items: center; gap: 22px; overflow-x: auto; scrollbar-width: none; white-space: nowrap; }
+  .nav-links::-webkit-scrollbar { display: none; }
+  .nav-links a[aria-current] { text-decoration: underline 2px var(--red); text-underline-offset: 7px; }
+}
 
 /* hero */
 .hero { position: relative; overflow: hidden; padding: 84px 0 64px; }

@@ -296,6 +296,14 @@ async fn agent_run_cancel(State(s): State<AppState>, Path(id): Path<String>) -> 
 /// agents may write to, and all it does is store the suggestion: nothing is
 /// sent and the draft is untouched until the user applies it on the Bench.
 async fn add_proposal(State(s): State<AppState>, caller: MaybeCaller, headers: HeaderMap, Json(new): Json<NewProposal>) -> Response {
+    // An agent kept to in-scope traffic may not point the user at other hosts either.
+    if agent_in_scope_only(&s, &caller)
+        && let Ok(uri) = new.request.url.parse::<http::Uri>()
+        && let Some(host) = uri.host()
+        && !s.engine.rules().in_scope(host)
+    {
+        return outside_agent_data();
+    }
     let from = if caller.is_some_and(|c| c.0 == Caller::Agent) { initiator(&headers) } else { "you".into() };
     match s.proposals.add(new, &from) {
         Ok(p) => Json(p).into_response(),

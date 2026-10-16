@@ -18,7 +18,7 @@ Plonix · connect Claude Code
   ✓ Claude Code  added MCP server "plonix" for all your projects: /Users/you/.cargo/bin/plonix mcp
 
 What the agent can do (read-only; a Bench edit is only suggested, for you to apply):
-  status · search_traffic · get_request · get_insights · get_messages · list_hosts · list_endpoints · detected_tech · get_scope · list_findings · list_skills · get_skill · findings_report · propose_bench_edit
+  status · search_traffic · get_request · get_insights · get_messages · list_hosts · list_endpoints · detected_tech · get_scope · list_findings · list_users · get_access_check · list_skills · get_skill · findings_report · propose_bench_edit · propose_request
 Not allowed:
   ✗ Send or replay requests
   ✗ Accept, reject or remove scope rules
@@ -75,9 +75,12 @@ Set `PLONIX_HOME` in the server's environment if your data is not in `~/.plonix`
 | `get_scope` | Scope rules and suggested domains with their evidence |
 | `list_findings` | Findings with severity, status, description and evidence request ids |
 | `findings_report` | The findings as a Markdown report with their evidence requests and responses (bodies clipped); false positives left out unless asked for. Evidence on hosts outside scope is left out when agents see in-scope traffic only |
+| `list_users` | The users you saved to test as: name, note, and which headers and cookies each carries, by name only. Credential values are never shared |
+| `get_access_check` | The last Access check you ran: each request replayed as every saved user and signed out, with status, size and Plonix's notes. Rows on hosts outside scope are left out when agents see in-scope traffic only |
 | `propose_bench_edit` | Leaves a suggested edit to a Bench draft for you to review: the draft id, a summary and the complete edited request. Sends nothing and changes nothing |
+| `propose_request` | Leaves a new request for you to try, such as a captured request with another id: a summary, and a captured request id to start from or the full request. It waits above the Bench with **Open on the Bench** and **Discard**. Sends nothing |
 
-Every tool is marked read-only in its MCP annotations, except `propose_bench_edit`: it stores a suggestion, so it is marked as not read-only, but it is not destructive and never reaches the network.
+Every tool is marked read-only in its MCP annotations, except `propose_bench_edit` and `propose_request`: each stores a suggestion, so it is marked as not read-only, but it is not destructive and never reaches the network.
 
 ## Suggested Bench edits
 
@@ -87,7 +90,8 @@ When you ask Claude about a request on the Bench, the prompt carries that draft'
 - The Bench shows it as a diff against your draft as it is now, with **Apply to draft** and **Discard** ([bench.md](bench.md#claudes-suggested-edits)). Applying only changes the draft; sending stays your click on **Send**, through the usual scope check.
 - JWTs: Claude has no signing key, so an edited token keeps its original signature and is marked unsigned until you re-sign it in the Lens. A signature Claude made up is replaced with the original.
 - Agents can only add a proposal (`POST /api/bench/proposals`). Listing, comparing, applying and discarding are yours (those routes are refused to the agent token), and so are sending and runs.
-- Switch it off in **Settings › AI agents** (*Suggest edits to a Bench request*): the tool disappears and the route is refused with `capability_off`.
+- Claude can also suggest a request of its own with `propose_request` (no draft needed). It shows in a strip above the Bench tabs, *Claude suggests trying*, with the method, URL and why; **Open on the Bench** puts it in a new tab for you to look at and send, **Discard** drops it. An agent that sees in-scope traffic only cannot suggest a request to another host.
+- Switch it off in **Settings › AI agents** (*Suggest requests and edits on the Bench*): the tool disappears and the route is refused with `capability_off`.
 
 In the in-app conversation, Claude's proposal shows up as *Suggested an edit to the request*, with **Review on the Bench** once the answer is done. A Claude Code session in a terminal can propose too, as long as you pass it the draft id from the prompt (Copy prompt and Open in Terminal include it).
 
@@ -102,7 +106,7 @@ The Plonix window has an **Ask Claude** button on a request (the Lens), a findin
 - clips each request and response body, and estimates the total size against your limit;
 - warns, and makes you confirm, when the context is larger than your limit, so a huge payload is never sent silently.
 
-**Ask Claude** runs Claude Code on this Mac and shows the answer in the sheet as it is written. The run is wired to Plonix's read-only MCP server and nothing else: your other MCP servers are not loaded, and Claude Code's shell, file, web and sub-agent tools are switched off, even if your own Claude Code settings allow them, so text hidden in captured traffic has nothing to act with. The answer is formatted with headings, lists, tables and code blocks you can copy. While it works, a line under the conversation says what Claude is doing (thinking, looking at traffic, writing the answer), how many tokens it has read and written, and how long it has taken. If Claude Code goes quiet, the sheet says so; after two minutes of silence, or five minutes in all, the run is stopped with a message saying why.
+**Ask Claude** runs Claude Code on this computer and shows the answer in the sheet as it is written. The run is wired to Plonix's read-only MCP server and nothing else: your other MCP servers are not loaded, and Claude Code's shell, file, web and sub-agent tools are switched off, even if your own Claude Code settings allow them, so text hidden in captured traffic has nothing to act with. The answer is formatted with headings, lists, tables and code blocks you can copy. While it works, a line under the conversation says what Claude is doing (thinking, looking at traffic, writing the answer), how many tokens it has read and written, and how long it has taken. If Claude Code goes quiet, the sheet says so; after two minutes of silence, or five minutes in all, the run is stopped with a message saying why.
 
 **Copy prompt** puts the prompt on your clipboard. **Open in Claude Code** writes the prompt to a private file under `$PLONIX_HOME/claude/` and opens Claude Code in a new Terminal window reading that file, so captured text never goes on a command line. If the Plonix MCP server is connected in that session, Claude Code can follow up with the read-only tools.
 

@@ -27,6 +27,7 @@ const pstore = (key, value) => store(pkey(key), value);
 const S = {
   token: null,
   railCollapsed: store('plonix.rail') === 'collapsed',
+  navMore: store('plonix.navMore') === '1',
   status: null,
   engineUp: true,
   view: 'traffic',
@@ -175,7 +176,7 @@ function demoBar() {
     'div',
     { class: 'demobar' },
     h('span', null, h('b', { text: 'Demo project. ' }), 'Brightcart, a made-up shop, captured ahead of time. Nothing here reaches the internet.'),
-    h('span', { class: 'tour' }, h('button', { class: 'btn sm primary', text: 'Take the tour', title: 'A short walk through every part of Plonix  (about two minutes)', onclick: () => startTour() })),
+    h('span', { class: 'tour' }, h('button', { class: 'btn sm primary', text: 'Take the tour', title: 'A walk through every part of Plonix, with live examples  (about ten minutes; leave whenever you like)', onclick: () => startTour() })),
     h('button', {
       class: 'iconbtn x',
       title: 'Hide this strip until the demo opens again',
@@ -263,7 +264,7 @@ async function filterTour() {
 const TOUR_STEPS = [
   {
     title: 'Welcome to the Plonix demo',
-    text: 'Brightcart is a made-up shop whose traffic was captured ahead of time. This walk takes about two minutes and stops on each part of Plonix. Where you see Test now!, press it to watch that part work for real on the demo. Use the arrow keys or the buttons, and leave whenever you like.',
+    text: 'Brightcart is a made-up shop whose traffic was captured ahead of time. This walk stops on each part of Plonix, about ten minutes in all. Where you see Test now!, press it to watch that part work for real on the demo. Use the arrow keys or the buttons, and leave whenever you like.',
     view: 'traffic',
   },
   {
@@ -456,6 +457,18 @@ const TOUR_STEPS = [
     text: 'Pick who you are from the title bar. Your browser, the Bench and Scans then send as that user to in-scope hosts, so you can click around as Dana and compare with Maya. Switching sends nothing by itself.',
   },
   {
+    view: 'access',
+    target: ['#main .view .accard', '#main .view .acpane', '#main .view'],
+    title: 'Access check',
+    text: 'Pick a host, or rows in Traffic, and the Access check replays each request as every saved user and once signed out, side by side. A customer who gets the admin’s answer stands out at the top. Only requests that read are replayed unless you tick otherwise.',
+  },
+  {
+    view: 'callbacks',
+    target: ['#main .view .cbinstall', '#main .view .toolbar', '#main .view'],
+    title: 'Callbacks',
+    text: 'Some flaws only show when the server calls out: a webhook, an image fetch, an email. Callbacks gives you a host to put in a request and lists everything that later reaches it. Plonix downloads the small helper it needs the first time, then Start listening.',
+  },
+  {
     view: 'findings',
     target: ['#findbody > .finding', '#findbody'],
     title: 'Findings',
@@ -516,7 +529,7 @@ const TOUR_STEPS = [
   },
   {
     title: 'That’s the tour',
-    text: 'Press Open target to capture a site of your own. The demo stays on the Start screen, and you can take this walk again with Take the tour in the demo strip.',
+    text: 'Press Open target to capture a site of your own. The demo stays on the Start screen, where ⋯ › Start demo over puts it back as it shipped, and you can take this walk again with Take the tour in the demo strip.',
     view: 'traffic',
   },
 ];

@@ -11,8 +11,8 @@
 //! record, edit or delete findings or control the engine.
 //!
 //! The one thing an agent may leave behind is a *suggestion*: an edited
-//! version of a request the user is working on in the Bench
-//! (`POST /api/bench/proposals`, see [`crate::proposal`]). It is kept in
+//! version of a request the user is working on in the Bench, or a new request
+//! to try (`POST /api/bench/proposals`, see [`crate::proposal`]). It is kept in
 //! memory for the user to review; it sends nothing, and only the user can
 //! apply it to the draft (and then send it themselves).
 //!
@@ -94,6 +94,8 @@ pub enum Group {
     Scope,
     Findings,
     Scan,
+    /// Saved users by name (never their credentials) and the last Access check.
+    Users,
     /// Suggesting edits to a Bench draft, for the user to review.
     Bench,
 }
@@ -107,7 +109,8 @@ impl Group {
         (Group::Scope, "Scope rules and suggestions"),
         (Group::Findings, "Findings"),
         (Group::Scan, "Scan detectors, tactics and suggested profiles"),
-        (Group::Bench, "Suggest edits to a Bench request (you review and apply them; nothing is sent)"),
+        (Group::Users, "Saved users by name (never their tokens or cookies) and the last Access check"),
+        (Group::Bench, "Suggest requests and edits on the Bench (you review them and send them yourself)"),
     ];
 }
 
@@ -132,12 +135,14 @@ const READ_ONLY: &[Capability] = &[
     cap("/api/scan/catalog", "Available scan detectors and tactics", Group::Scan),
     cap("/api/scan/suggest/{host}", "Suggested scan profile for a host (read-only advice)", Group::Scan),
     cap("/api/scan/plan/{host}", "Reviewable scan plan for a host: proposed tests with rationale (read-only)", Group::Scan),
+    cap("/api/users/summary", "Saved users: names and which credentials they hold, never the values", Group::Users),
+    cap("/api/access-check/last", "The last Access check the user ran", Group::Users),
     cap("/api/agents", "This access policy", Group::Basics),
     cap("/api/skills", "Skills: playbooks for jobs in Plonix", Group::Basics),
     cap("/api/skills/{name}", "Skills: playbooks for jobs in Plonix", Group::Basics),
     // The only write: it stores a suggestion for the user to review on the
     // Bench. It cannot send, apply or change anything else.
-    Capability { method: "POST", path: "/api/bench/proposals", what: "Suggest an edit to a Bench request, for the user to review", group: Group::Bench },
+    Capability { method: "POST", path: "/api/bench/proposals", what: "Suggest a request, or an edit to a Bench request, for the user to review", group: Group::Bench },
 ];
 
 /// Which captured traffic agents may see.

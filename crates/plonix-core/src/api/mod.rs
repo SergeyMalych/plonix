@@ -66,6 +66,8 @@ struct AppState {
     chats_lock: Arc<tokio::sync::Mutex<()>>,
     /// Edits agents suggested for Bench drafts, waiting for the user.
     proposals: Arc<Proposals>,
+    /// The last Access check the user ran, for agents to read.
+    last_access: Arc<std::sync::Mutex<Option<crate::authcheck::AuthCheckReport>>>,
     api_addr: SocketAddr,
     launch_codes: Arc<LaunchCodes>,
     home: Home,
@@ -98,6 +100,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         watch,
         chats_lock: Arc::default(),
         proposals: Arc::default(),
+        last_access: Arc::default(),
         api_addr,
         launch_codes: Arc::default(),
         home,

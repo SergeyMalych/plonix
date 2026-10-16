@@ -58,7 +58,7 @@ pub struct AddArgs {
     #[arg(long, short = 'd', value_name = "TEXT")]
     pub description: Option<String>,
     /// Request ids that prove it (repeatable, or comma-separated)
-    #[arg(long = "request", short = 'r', value_name = "ID", value_delimiter = ',')]
+    #[arg(long = "request", short = 'r', visible_short_alias = 'e', visible_alias = "evidence", value_name = "ID", value_delimiter = ',')]
     pub requests: Vec<i64>,
 }
 
@@ -88,6 +88,9 @@ pub struct ExportArgs {
     /// Only these statuses, e.g. open,confirmed
     #[arg(long, value_name = "STATUS")]
     pub status: Option<String>,
+    /// Keep cookie and token values as captured (masked by default)
+    #[arg(long)]
+    pub keep_secrets: bool,
 }
 
 pub fn findings_cmd(ctx: &Ctx, cmd: FindingsCmd) -> Result<()> {
@@ -200,9 +203,10 @@ fn export(ctx: &Ctx, c: &crate::client::Client, a: ExportArgs) -> Result<()> {
     };
     let ids: Vec<String> = a.ids.iter().map(i64::to_string).collect();
     let path = format!(
-        "/api/findings/export?format={}&ids={}&status={}",
+        "/api/findings/export?format={}&ids={}&secrets={}&status={}",
         encode(&format),
         encode(&ids.join(",")),
+        a.keep_secrets,
         encode(&a.status.as_deref().map(|s| s.split(',').map(normalize_status).collect::<Vec<_>>().join(",")).unwrap_or_default())
     );
     let doc = c.get_text(&path)?;

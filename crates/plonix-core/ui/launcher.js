@@ -317,6 +317,11 @@ function drawList() {
     box.replaceChildren(welcome());
     return;
   }
+  // Only the demo so far: keep "Start your first project" in front, with the demo under it.
+  if (L.projects.every((p) => p.demo)) {
+    box.replaceChildren(welcome({ demoOpened: true }), h('div', { class: 'lsec', text: 'The demo' }), h('div', { class: 'recent' }, L.projects.map(card)));
+    return;
+  }
   // Suggest the last few projects first; everything else follows.
   const recent = L.projects
     .filter((p) => p.available && p.last_opened > 0)
@@ -391,7 +396,7 @@ function row(p) {
   );
 }
 
-function welcome() {
+function welcome({ demoOpened = false } = {}) {
   const name = h('input', { placeholder: 'e.g. Acme staging', spellcheck: 'false', autocomplete: 'off' });
   const go = () => createProject({ name: name.value, location: '' }, null).catch((e) => toast(e.message, 'err'));
   name.addEventListener('keydown', (e) => e.key === 'Enter' && go());
@@ -404,7 +409,9 @@ function welcome() {
     h('div', { class: 'starter' }, name, h('button', { class: 'btn primary', text: 'Create and Open', onclick: go })),
     h('p', { class: 'small', text: 'It is saved in ' + tilde(L.about.projects_dir || '~/Plonix') + '. Choose another folder with New Project.' }),
     workPicker(),
-    h(
+    demoOpened
+      ? null
+      : h(
       'div',
       { class: 'demohint' },
       h('span', { text: 'New to Plonix? Look around a sample project first: traffic from a made-up shop, already explored.' }),

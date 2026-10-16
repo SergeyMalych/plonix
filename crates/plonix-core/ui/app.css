@@ -67,6 +67,9 @@ code, .mono { font-family: var(--mono); }
 .nav button .ct.hot { background: var(--accent); color: #fff; border-radius: 10px; padding: 0 6px; font-weight: 650; }
 .nav button:hover, .railtoggle:hover { background: var(--surface-2); color: var(--fg); }
 .nav button.on { background: var(--accent); color: var(--accent-fg); }
+.nav:not(.showmore) button.xtra:not(.on) { display: none; }
+.nav button.navmore { color: var(--fg-3); font-size: 12px; }
+.nav button.navmore .ico { font-size: 13px; }
 .nav button.on .ct { color: rgba(255, 255, 255, .85); }
 .nav button.on .ct.hot { background: rgba(255, 255, 255, .25); }
 .opentarget { margin-bottom: 6px; border: 1px solid var(--line-2); background: transparent; color: var(--fg); font-weight: 500; }
@@ -527,6 +530,10 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .cmpsum { font-size: 11.5px; color: var(--fg-2); padding: 7px 12px; border-bottom: 1px solid var(--line-2); }
 
 /* Claude's suggested edit on the Bench: a diff with Apply / Discard */
+.propnew { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; padding: 8px 12px; border: 1px solid var(--accent); border-radius: 10px; background: var(--surface); font-size: 13px; min-width: 0; }
+.propnew .propnewreq { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; font-size: 12px; }
+.propnew .propnewsum { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+.propnew .btn:first-of-type { margin-left: auto; }
 .propcard { border: 1px solid var(--accent); border-radius: 11px; overflow: hidden; background: var(--surface); }
 .proph { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--accent-soft); color: var(--accent); font-size: 12px; }
 .proph b { font-weight: 650; }
@@ -642,6 +649,7 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .finding .fstatus:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .finding.closed .ft, .finding.closed .sev { opacity: .55; }
 .ctxmenu .mnote { padding: 2px 10px 4px; font-size: 11px; color: var(--fg-3); max-width: 240px; }
+.ctxmenu .mcheck { display: flex; align-items: center; gap: 7px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
 
 /* modal */
 .modal { position: fixed; inset: 0; background: color-mix(in srgb, var(--bg) 60%, transparent); backdrop-filter: blur(6px); z-index: 50; display: grid; place-items: center; padding: 16px; }
@@ -1500,6 +1508,9 @@ tr.acnote > td { border-bottom: none; }
 .acnotes { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 6px 10px 8px; background: var(--warn-soft); border-bottom: 1px solid var(--line-2); }
 .acnotechip { display: inline-flex; align-items: center; gap: 5px; color: var(--warn); font-size: 12px; }
 .acnotechip .acnoteico { font-size: 11px; opacity: 0.9; }
+.acnoterow.public .acnotes { background: transparent; padding-top: 0; }
+.acnoterow.public .acnotechip { color: var(--fg-3); }
+.acid.acunsafe { margin-top: 10px; align-self: flex-start; }
 
 /* ---- Callbacks ---- */
 .cbstate { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
@@ -1569,10 +1580,17 @@ tr.acnote > td { border-bottom: none; }
 .cbraw { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 .cbraw + .cbraw { border-left: 1px solid var(--line-2); }
 .cbinstall { margin: auto; max-width: 520px; }
-.cbinstall .mnote { color: var(--fg-2); }
+.cbinstall .mnote { color: var(--fg-2); margin-bottom: 14px; }
 .cbcmd { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 14px 0; }
 .cbcmd code { font-size: 12px; padding: 7px 10px; text-align: left; line-height: 1.5; overflow-wrap: anywhere; }
 .cbacts { display: flex; justify-content: center; }
+.cbinstall .pbar { margin: 14px auto 0; max-width: 320px; }
+.cbinstall .cbline { margin-top: 6px; min-height: 17px; }
+.cbinstall .rerr { padding: 8px 0 0; }
+.cbown { margin-top: 18px; font-size: 12px; }
+.cbown summary { cursor: pointer; color: var(--fg-2); }
+.cbown .mnote { margin-top: 10px; }
+.cbown .cbcmd { margin: 10px 0; }
 
 /* manage-users sheet */
 .usersheet { width: min(520px, 86vw); display: flex; flex-direction: column; gap: 10px; }

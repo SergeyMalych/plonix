@@ -106,9 +106,13 @@ fn permissive_cors(ex: &Exchange, c: &mut Collector) {
     if !creds {
         return;
     }
+    // `*` with credentials is refused by browsers, so it exposes nothing signed in.
     let origin = header(&ex.req_headers, "origin").map(str::trim).filter(|o| !o.is_empty());
-    let reflects = acao.trim() == "*" || origin.is_some_and(|o| o.eq_ignore_ascii_case(acao.trim()));
-    if !reflects {
+    let reflects = origin.is_some_and(|o| o.eq_ignore_ascii_case(acao.trim()));
+    // The site's own front end, allowed by name, is how most APIs work.
+    let site = |h: &str| h.trim_end_matches('.').rsplit('.').take(2).collect::<Vec<_>>().join(".").to_ascii_lowercase();
+    let origin_host = origin.and_then(|o| o.split("://").nth(1)).map(|h| h.split([':', '/']).next().unwrap_or(h)).unwrap_or("");
+    if !reflects || site(origin_host) == site(&ex.host) {
         return;
     }
     c.add(format!("cors:{}", ex.host), PassiveFinding {
@@ -377,6 +381,20 @@ mod tests {
         // Bare `*` without credentials is normal and not flagged.
         let star = run(&[ex("https", Some(200), &[], &[("Access-Control-Allow-Origin", "*")], "")]);
         assert!(star.is_empty());
+
+        // Browsers refuse `*` together with credentials, so that is not flagged either.
+        let star_creds = run(&[ex("https", Some(200), &[], &[("Access-Control-Allow-Origin", "*"), ("Access-Control-Allow-Credentials", "true")], "")]);
+        assert!(star_creds.is_empty(), "got {star_creds:?}");
+
+        // The site's own front end, allowed by name, is normal too.
+        let own = run(&[ex(
+            "https",
+            Some(200),
+            &[("Origin", "https://www.api.example")],
+            &[("Access-Control-Allow-Origin", "https://www.api.example"), ("Access-Control-Allow-Credentials", "true")],
+            "",
+        )]);
+        assert!(own.is_empty(), "got {own:?}");
     }
 
     #[test]

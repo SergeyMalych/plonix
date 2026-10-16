@@ -15,7 +15,9 @@ pub(super) fn routes() -> Router<AppState> {
         .route("/api/users/found/apply", post(apply_found_user))
         .route("/api/users/standing", get(user_standing))
         .route("/api/users/whose", post(whose_values))
+        .route("/api/users/summary", get(users_summary))
         .route("/api/access-check", post(access_check))
+        .route("/api/access-check/last", get(last_access_check))
 }
 
 fn send_result(s: &AppState, r: Result<Exchange, SendError>) -> Response {
@@ -296,6 +298,10 @@ struct AccessCheckBody {
     include_anon: bool,
     #[serde(default)]
     delay_ms: Option<u64>,
+    /// For a branch: also replay requests that change data (POST, PUT,
+    /// PATCH, DELETE…). Off unless the person ticks it.
+    #[serde(default)]
+    include_unsafe: bool,
 }
 
 fn default_true() -> bool {
@@ -311,13 +317,29 @@ async fn access_check(State(s): State<AppState>, caller: MaybeCaller, headers: H
     crate::usage::record("access_check");
     // Resolve a host+prefix branch to one representative request per endpoint.
     let mut targets = body.targets;
+    let mut skipped = Vec::new();
     if targets.is_empty()
         && let Some(host) = body.host.as_deref()
     {
         let prefix = body.prefix.as_deref().unwrap_or("/");
         match s.engine.store.endpoints(host) {
-            Ok(eps) => targets = eps.into_iter().filter(|e| e.path.starts_with(prefix)).map(|e| e.sample_id).collect(),
+            Ok(eps) => {
+                for e in eps.into_iter().filter(|e| e.path.starts_with(prefix)) {
+                    if body.include_unsafe || crate::authcheck::reads_only(&e.method) {
+                        targets.push(e.sample_id);
+                    } else {
+                        skipped.push(format!("{} {}", e.method, e.path));
+                    }
+                }
+            }
             Err(e) => return internal(e),
+        }
+        if targets.is_empty() && !skipped.is_empty() {
+            return err(
+                StatusCode::BAD_REQUEST,
+                "bad_request",
+                &format!("every request on this branch changes data ({}); tick \"Also requests that change data\" to replay them", skipped.join(", ")),
+            );
         }
     }
     let all = match s.engine.store.saved_users() {
@@ -327,7 +349,37 @@ async fn access_check(State(s): State<AppState>, caller: MaybeCaller, headers: H
     let users = if body.user_ids.is_empty() { all } else { all.into_iter().filter(|u| body.user_ids.contains(&u.id)).collect() };
     let req = crate::authcheck::AuthCheckRequest { targets, users, include_anon: body.include_anon, delay_ms: body.delay_ms };
     match s.engine.access_check(req, &initiator(&headers)).await {
-        Ok(report) => Json(report).into_response(),
+        Ok(mut report) => {
+            report.skipped = skipped;
+            if let Ok(mut last) = s.last_access.lock() {
+                *last = Some(report.clone());
+            }
+            Json(report).into_response()
+        }
         Err(e) => send_error(e),
     }
+}
+
+/// The saved users without their secrets: names, notes and which headers and
+/// cookies each one carries, never the values. Agents may read it.
+async fn users_summary(State(s): State<AppState>) -> Response {
+    let acting = s.engine.store.acting_user().ok().flatten().map(|u| u.id);
+    match s.engine.store.saved_users() {
+        Ok(users) => Json(json!({ "users": crate::users::summaries(&users), "acting": acting })).into_response(),
+        Err(e) => internal(e),
+    }
+}
+
+/// The last Access check the user ran in this engine, if any. An agent kept
+/// to in-scope traffic sees only the rows for in-scope hosts.
+async fn last_access_check(State(s): State<AppState>, caller: MaybeCaller) -> Response {
+    let Some(mut report) = s.last_access.lock().ok().and_then(|l| l.clone()) else {
+        return Json(json!({ "report": null, "note": "no Access check has been run since Plonix started" })).into_response();
+    };
+    if agent_in_scope_only(&s, &caller) {
+        let rules = s.engine.rules();
+        report.rows.retain(|r| rules.in_scope(&r.host));
+        report.skipped.clear();
+    }
+    Json(json!({ "report": report })).into_response()
 }

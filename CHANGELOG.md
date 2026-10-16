@@ -2,6 +2,32 @@
 
 What changed in each Plonix release. The newest release is at the top.
 
+## [Unreleased]
+
+### Added
+- **Claude suggests requests to try.** Besides editing a Bench draft, Claude can now suggest a request of its own (the `propose_request` MCP tool): it waits in a strip above the Bench tabs with what it tests, **Open on the Bench** and **Discard**. Nothing is sent until you press Send.
+- **Agents see saved users and the Access check.** `list_users` names the users you saved, with which headers and cookies each carries but never their values, and `get_access_check` reads your last Access check. Both can be switched off in Settings › AI agents.
+- **Users and the Access check in the terminal.** `plonix users`, `plonix access <ids>` or `plonix access --host … --prefix …` (a table with the rows worth a look marked), and `plonix replay <id> --as <user>`.
+- **Callbacks without Go.** One click (or `plonix callbacks install`) downloads interactsh-client from its GitHub release, checks its checksum and keeps it with your Plonix data. The new `plonix callbacks` command starts, stops and lists callbacks and makes hosts.
+- **Two new walkthrough stops**: the Access check and Callbacks.
+
+### Changed
+- **A new era of web assessments.** The website and README lead with what Plonix is for, on macOS and Windows alike, with a phone menu and fresh window screenshots.
+- **The Access check leaves out requests that change data** (POST, PUT, PATCH, DELETE) when it checks a branch, unless you tick **Also requests that change data**, and says which it left out. Rows worth a look come first; pages that answered everyone the same are marked Public and go last.
+- **Reports mask credentials.** Exported findings show cookie, token and auth header values as `abcd…[redacted]`. Tick **Keep cookie and token values** in the Export menu (or `plonix findings export --keep-secrets`) for a private copy.
+- **A calmer sidebar.** A new project shows the everyday screens; **More tools** adds Callbacks, Scans, Market, Programs and Rules (the demo shows everything).
+- **Common third parties are kept out of scope** on a new project without asking, with a note saying where to change it.
+- The Start screen keeps **Start your first project** and the profile picker until you have a project of your own, with the demo listed under it.
+- `plonix market install` shows what an extension may do and asks before switching it on; `--yes` skips the question in scripts.
+- Keyboard hints read Ctrl on Windows.
+
+### Fixed
+- **The Map, `list_endpoints`, the Access check and Ask Claude keep every endpoint** after a big run or scan; they used to see only a host's newest 20,000 requests.
+- **Fewer CORS false alarms.** `Access-Control-Allow-Origin: *` is no longer flagged as reflecting your origin (browsers refuse it with credentials), and origins on the same site are not flagged.
+- Ask Claude shows only Plonix steps in its progress line, not Claude Code's own housekeeping.
+- The `Proxy-Connection` header is no longer recorded, so replays don't send it.
+- A scope rule for an IP address no longer claims subdomains.
+
 ## [0.5.1] - 2026-10-14
 
 The release after 0.1.5. The version jumps to 0.5.1; nothing is skipped in between.

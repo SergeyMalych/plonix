@@ -373,7 +373,7 @@ impl Watch {
         // The run itself stops before a call that would go past what is left.
         let run = match self.conversations.start_limited(&self.home, prompt, None, crate::mcp::WATCH_CLIENT, Some((left, CAPPED.into()))) {
             Ok(r) => r,
-            Err(_) => anyhow::bail!("Claude Code is not installed on this Mac, so the watcher cannot look."),
+            Err(_) => anyhow::bail!("Claude Code is not installed on this computer, so the watcher cannot look."),
         };
         *self.running.lock().unwrap() = Some(run.clone());
         let mut usage = crate::assistant::Usage { running: true, used: 0, first_call: 0 };

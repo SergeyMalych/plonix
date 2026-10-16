@@ -371,7 +371,7 @@ async function extensionConsent(p, action) {
   };
 }
 
-/** The program an extension runs: installed on this Mac, or how to install it. */
+/** The program an extension runs: installed on this computer, or how to install it. */
 function programNeeds(pr) {
   if (pr.found) return h('div', { class: 'mcap' }, capIcon('ok'), h('span', { text: `${pr.id} is installed on ${THIS_COMPUTER}.` }));
   return [

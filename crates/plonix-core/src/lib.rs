@@ -32,6 +32,7 @@ pub mod engine;
 pub mod gather;
 pub mod exclude;
 pub mod insight;
+pub mod interactsh;
 pub mod listpack;
 pub mod intercept;
 pub mod market;

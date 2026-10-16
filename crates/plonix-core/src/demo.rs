@@ -807,14 +807,19 @@ export async function api(path, opts = {{}}) {{
             "phone": "+44 7700 900123", "marketing_opt_in": true
         })),
     )?;
-    // The wishlist service answers any origin and still allows credentials, so
-    // any site Maya visits could read her saved items.
+    // The wishlist service echoes whatever Origin calls it and still allows
+    // credentials, so any site Maya visits (here a coupon site) could read her
+    // saved items.
     s.add(
-        authed("GET", "https://api.brightcart.example/v1/wishlist"),
+        req("GET", "https://api.brightcart.example/v1/wishlist")
+            .h("Accept", "application/json")
+            .h("Origin", "https://brightcart-coupons.example")
+            .h("Authorization", bearer.clone())
+            .h("Cookie", cookies.clone()),
         resp(200, "application/json")
             .h("Server", "nginx/1.25.4")
             .h("X-Powered-By", "Express")
-            .h("Access-Control-Allow-Origin", "*")
+            .h("Access-Control-Allow-Origin", "https://brightcart-coupons.example")
             .h("Access-Control-Allow-Credentials", "true")
             .json(json!({ "owner": "usr_8f2c41", "email": "maya.lopez@mail.example", "items": [ { "id": 1002, "name": "Merino hoodie" }, { "id": 1004, "name": "Rain shell" } ] })),
     )?;

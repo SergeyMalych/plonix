@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Plonix</title>
-<meta name="description" content="Plonix is an open-source, macOS-native web security workbench: intercept, adaptive scope, fast search, scriptable API, AI-native.">
+<meta name="description" content="Plonix brings a new era of web assessments: an open-source, AI-first security workbench that works with Claude Code while you stay in charge. Fast capture, adaptive scope, scriptable API. On macOS and Windows.">
 <meta property="og:title" content="Plonix">
-<meta property="og:description" content="Open-source, macOS-native web security workbench: intercept, adaptive scope, fast search, scriptable API, AI-native.">
+<meta property="og:description" content="A new era of web assessments: an open-source, AI-first security workbench that works with Claude Code while you stay in charge. On macOS and Windows.">
 <meta property="og:url" content="https://plonix.io/">
 <meta property="og:image" content="https://plonix.io/assets/studio-window-light.webp">
 <link rel="canonical" href="https://plonix.io/">
@@ -144,7 +144,16 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; }
 .tour video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; background: #0d0e13; }
 .tour-close { position: absolute; top: 12px; right: 12px; z-index: 1; width: 36px; height: 36px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); background: rgba(13,14,19,.7); color: #ecedf4; font: 500 20px/1 var(--body); cursor: pointer; }
 .tour-close:hover { border-color: #8b93ff; }
-@media (max-width: 760px) { .nav-links { display: none; } .nav .theme-btn { margin-left: auto; } }
+/* phones: the links take a row of their own under the logo, scrolling sideways if they ever outgrow it */
+@media (max-width: 760px) {
+  .nav .wrap { flex-wrap: wrap; height: auto; column-gap: 14px; row-gap: 0; padding-top: 13px; }
+  .nav .theme-btn { margin-left: auto; }
+  .nav-links { order: 1; flex: 1 0 100%; margin-left: 0; height: 42px; align-items: center; gap: 22px; overflow-x: auto; scrollbar-width: none; white-space: nowrap; }
+  .nav-links::-webkit-scrollbar { display: none; }
+  .nav-links a[aria-current] { text-decoration: underline 2px var(--indigo); text-underline-offset: 7px; }
+  [data-style="studio"] .nav-links a[aria-current] { text-decoration-color: var(--st-red); }
+  [id] { scroll-margin-top: 120px; }
+}
 
 /* ---------- hero ---------- */
 .hero { position: relative; padding-block: 76px 40px; }
@@ -535,9 +544,9 @@ footer a:hover { color: var(--fg); }
   <div class="geo" aria-hidden="true"><i class="a"></i><i class="b"></i><i class="c"></i></div>
   <div class="wrap hero-grid">
     <div>
-      <span class="eyebrow" data-win="Open source, native on Windows">Open source, native on macOS</span>
-      <h1>Test web app <span class="hl">security</span> from your <span data-win="PC">Mac</span>.</h1>
-      <p class="lede">Plonix captures every request, maps the target as you browse, and helps you prove what you find. From a window, a terminal or Claude Code.</p>
+      <span class="eyebrow">Open source, AI-first</span>
+      <h1>A new era of web <span class="hl">assessments</span>.</h1>
+      <p class="lede">Plonix captures every request, maps the target as you browse, and brings Claude Code in to help you prove what you find. You drive, it assists. Fast, open source, on macOS and Windows.</p>
       <div class="cta-row">
         <a class="btn primary" href="#start" id="herodl">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M6 10l6 6 6-6M5 20h14"/></svg>
@@ -569,7 +578,7 @@ footer a:hover { color: var(--fg); }
   <div class="wrap">
     <div class="shot">
       <div class="bar"><i></i><i></i><i></i><span>Plonix</span></div>
-      <img class="shot-light" src="assets/studio-window-light.webp" fetchpriority="high" width="1920" height="1200" alt="The Plonix window: live traffic with filter chips, a scope suggestion for a newly seen domain, and the Lens showing a request and its response."><img class="shot-dark" src="assets/studio-window-dark.webp" loading="lazy" width="1920" height="1200" alt="The Plonix window: live traffic with filter chips, a scope suggestion for a newly seen domain, and the Lens showing a request and its response.">
+      <img class="shot-light" src="assets/studio-window-light.webp?v=2" fetchpriority="high" width="1920" height="1200" alt="The Plonix window: live traffic with filter chips, a scope suggestion for a newly seen domain, and the Lens showing a request and its response."><img class="shot-dark" src="assets/studio-window-dark.webp?v=2" loading="lazy" width="1920" height="1200" alt="The Plonix window: live traffic with filter chips, a scope suggestion for a newly seen domain, and the Lens showing a request and its response.">
     </div>
     <p class="shot-caption">The Plonix window, capturing. A new domain is suggested for scope with the evidence behind it.</p>
   </div>
@@ -599,14 +608,14 @@ footer a:hover { color: var(--fg); }
       </a>
       <a class="fcard tint" href="#start">
         <div class="demo"><div class="big">&lt;60s<small>download to captured traffic</small></div><div class="checks"><span>Certificate</span><span>Proxy</span><span>Scope</span><span>Browser</span></div></div>
-        <div class="txt"><h3>Friendly from the first minute</h3><p>One click or one command sets up the certificate, proxy, scope and a capture browser. A real Mac app with shortcuts you already know.</p><span class="more">Get started &rarr;</span></div>
+        <div class="txt"><h3>Friendly from the first minute</h3><p>One click or one command sets up the certificate, proxy, scope and a capture browser. A native app on macOS and Windows, with the shortcuts you already know.</p><span class="more">Get started &rarr;</span></div>
       </a>
       <a class="fcard wide" href="#scope">
         <div class="demo"><div class="sug"><div><b>cdn.bcstatic.example</b> looks like part of your target</div><div>&#8599; called from www.brightcart.example &middot; shares a certificate</div><div class="btns"><span class="acc">Accept</span><span>+ subdomains</span><span class="rej">Reject</span></div></div></div>
         <div class="txt"><h3>Scope that works, and stays easy</h3><p>Scope grows as you browse, with evidence for every suggestion. One click to accept or reject, and noise like trackers is excluded for you.</p><span class="more">Adaptive scope &rarr;</span></div>
       </a>
     </div>
-    <div class="facts2 reveal"><span data-win="Native Windows app">Native Mac app</span><span>Rust engine</span><span data-win="Your data stays on your PC">Your data stays on your Mac</span><span>Open source, Apache-2.0</span><span>CLI + local API</span></div>
+    <div class="facts2 reveal"><span>macOS and Windows</span><span>Rust engine</span><span>Your data stays on your machine</span><span>Open source, Apache-2.0</span><span>CLI + local API</span></div>
   </div>
 </section>
 
@@ -867,7 +876,7 @@ footer a:hover { color: var(--fg); }
       <svg class="mark-studio" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#e5401f"/><rect x="7" y="6" width="5" height="20" fill="#1e1c19"/><circle cx="18" cy="13" r="7" fill="#f1b11b"/><path d="M18 6a7 7 0 0 1 0 14z" fill="#1d4fc4"/></svg>
       Plonix
     </a>
-    <span>Open-source web security workbench for macOS. Apache-2.0.</span>
+    <span>Open-source, AI-first web security workbench. Apache-2.0.</span>
     <nav aria-label="Footer">
       <a href="https://github.com/SergeyMalych/plonix">GitHub</a>
       <a href="docs/">Docs</a>
@@ -896,7 +905,6 @@ footer a:hover { color: var(--fg); }
   if (os === 'mac') { hero.href = REL + 'Plonix-macOS.dmg'; hero.lastElementChild.textContent = 'Download for Mac'; }
   if (os === 'windows') {
     hero.href = REL + 'Plonix-Windows-setup.exe'; hero.lastElementChild.textContent = 'Download for Windows';
-    document.querySelectorAll('[data-win]').forEach((el) => { el.textContent = el.dataset.win; });
     const row = document.getElementById('startdl'), win = row.querySelector('[data-os="windows"]'), mac = row.querySelector('[data-os="mac"]');
     row.insertBefore(win, mac); win.classList.add('primary'); mac.classList.remove('primary');
   }
@@ -921,7 +929,7 @@ footer a:hover { color: var(--fg); }
   /* ---- style switch: Classic (default) or Studio, saved per browser ---- */
   const sbtn = document.getElementById('style');
   // every app screenshot has a Classic twin: assets/<name>-<theme>.webp
-  const shots = [...document.querySelectorAll('img.shot-light, img.shot-dark')].filter((i) => /^assets\/studio-[a-z]+-(light|dark)\.webp$/.test(i.getAttribute('src')));
+  const shots = [...document.querySelectorAll('img.shot-light, img.shot-dark')].filter((i) => /^assets\/studio-[a-z]+-(light|dark)\.webp(\?v=\d+)?$/.test(i.getAttribute('src')));
   shots.forEach((i) => { i.dataset.studio = i.getAttribute('src'); });
   const setStyle = (on) => {
     if (on) root.dataset.style = 'studio'; else delete root.dataset.style;

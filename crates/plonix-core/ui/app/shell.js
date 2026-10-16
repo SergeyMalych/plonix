@@ -77,23 +77,45 @@ function useTool(id, action) {
 const SHORTCUTS = ['traffic', 'bench', 'scope', 'map', 'findings', 'agents', 'market', 'scans', 'programs'];
 const shownView = (key) => !!VIEWS[key] && !VIEWS[key].footer && (!VIEWS[key].tool || toolOn(VIEWS[key].tool));
 
+/** Screens that sit under "More tools" until opened, so a new project starts
+ * with the everyday ones. The screen on show is never hidden. */
+const MORE_VIEWS = ['callbacks', 'scans', 'market', 'programs', 'rules'];
+/** All screens in the sidebar: chosen once, and always in the demo, whose tour visits each. */
+const navAll = () => S.navMore || !!(S.status && S.status.demo);
+
 /** The sidebar's screen buttons, without the tools that are not switched on. */
 function navList() {
-  const nav = h('div', { class: 'nav' });
-  Object.entries(VIEWS).forEach(([key, v]) => {
-    if (!shownView(key)) return;
+  const nav = h('div', { class: 'nav' + (navAll() ? ' showmore' : '') });
+  const button = (key, v) => {
     const n = SHORTCUTS.indexOf(key);
+    return h(
+      'button',
+      { 'data-v': key, class: MORE_VIEWS.includes(key) ? 'xtra' : null, title: n < 0 ? v.label : `${v.label}  (${IN_APP ? MOD_KEY : ''}${n + 1})`, onclick: () => go(key) },
+      h('span', { class: 'ico', text: v.ico }),
+      h('span', { class: 'nl', text: v.label }),
+      h('span', { class: 'ct', id: 'ct-' + key }),
+    );
+  };
+  const shown = Object.entries(VIEWS).filter(([key]) => shownView(key));
+  shown.filter(([key]) => !MORE_VIEWS.includes(key)).forEach(([key, v]) => nav.append(button(key, v)));
+  if (!(S.status && S.status.demo)) {
     nav.append(
       h(
         'button',
-        { 'data-v': key, title: n < 0 ? v.label : `${v.label}  (${IN_APP ? '⌘' : ''}${n + 1})`, onclick: () => go(key) },
-        h('span', { class: 'ico', text: v.ico }),
-        h('span', { class: 'nl', text: v.label }),
-        h('span', { class: 'ct', id: 'ct-' + key }),
+        { class: 'navmore', title: navAll() ? 'Show only the everyday screens' : 'Callbacks, Scans, Market, Programs and Rules', onclick: toggleMoreNav },
+        h('span', { class: 'ico', text: navAll() ? '−' : '+' }),
+        h('span', { class: 'nl', text: navAll() ? 'Fewer tools' : 'More tools' }),
       ),
     );
-  });
+  }
+  shown.filter(([key]) => MORE_VIEWS.includes(key)).forEach(([key, v]) => nav.append(button(key, v)));
   return nav;
+}
+
+function toggleMoreNav() {
+  S.navMore = !S.navMore;
+  store('plonix.navMore', S.navMore ? '1' : null);
+  redrawNav();
 }
 
 /** Rebuilds the sidebar's buttons and the Act as pill when a tool is
@@ -141,7 +163,7 @@ function renderShell() {
         { class: 'rail' + (S.railCollapsed ? ' collapsed' : ''), id: 'rail' },
         h(
           'button',
-          { class: 'opentarget', title: `Open a target in the capture browser${IN_APP ? '  (⌘O)' : ''}`, onclick: openTarget },
+          { class: 'opentarget', title: `Open a target in the capture browser${IN_APP ? `  (${MOD_KEY}O)` : ''}`, onclick: openTarget },
           h('span', { class: 'ico', text: '+' }),
           h('span', { class: 'nl', text: 'Open target' }),
         ),
@@ -156,7 +178,7 @@ function renderShell() {
           { class: 'nav navfoot' },
           h(
             'button',
-            { 'data-v': 'settings', title: `Settings: proxy, storage and more${IN_APP ? '  (⌘,)' : ''}`, onclick: () => go('settings') },
+            { 'data-v': 'settings', title: `Settings: proxy, storage and more${IN_APP ? `  (${MOD_KEY},)` : ''}`, onclick: () => go('settings') },
             h('span', { class: 'ico', text: '⚙' }),
             h('span', { class: 'nl', text: 'Settings' }),
           ),

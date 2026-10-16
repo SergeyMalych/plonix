@@ -6,13 +6,17 @@ Callbacks is a tool from the [Market](market.md) (under **Tools**) that comes sw
 
 ## Set up
 
-Callbacks use [interactsh](https://github.com/projectdiscovery/interactsh), the open-source callback tool by ProjectDiscovery (MIT license). Install its client once in Terminal:
+Callbacks use [interactsh](https://github.com/projectdiscovery/interactsh), the open-source callback tool by ProjectDiscovery (MIT license). The first time you open the Callbacks tab, press **Download interactsh** (about 10 MB). Plonix fetches the client from its GitHub release, checks it against the release's published SHA-256 checksums, and keeps it in the `tools` folder of your Plonix data. Nothing else is installed. From a terminal, `plonix callbacks install` does the same.
+
+### Install it yourself
+
+If you prefer to build the client, open **or install it yourself** in the Callbacks tab, or run this in Terminal:
 
 ```sh
 brew install go && go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest
 ```
 
-The Callbacks tab says when the client is missing, with the command to copy, and **Check again** once you have run it.
+On Windows, install Go with `winget install GoLang.Go`, then run the `go install` part in a new terminal. Plonix finds the client in `~/go/bin` or on your PATH; press **Check again** once it is built. A client Plonix downloaded is used first.
 
 ## Using a host
 
@@ -24,3 +28,14 @@ The Callbacks tab says when the client is missing, with the command to copy, and
 From an interaction, **Find the request** shows the captured request that carried the host, and **+ Finding** writes it up with both as evidence. **Find in traffic** searches for a host everywhere it was sent.
 
 Plonix keeps each project's callback session, so hosts handed out earlier keep working after a restart.
+
+## From the terminal
+
+```sh
+plonix callbacks                   # is the client installed, is the listener on
+plonix callbacks install           # download interactsh-client
+plonix callbacks start             # start listening
+plonix callbacks payload -l ssrf   # make a host for a test and print it
+plonix callbacks list --json       # callbacks received, newest first
+plonix callbacks stop
+```

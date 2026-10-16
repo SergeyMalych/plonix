@@ -580,6 +580,7 @@ impl Engine {
                     set_headers,
                     remove_headers: remove_auth.clone(),
                     body: None,
+                    as_user: None,
                 };
                 let cell = match self.replay(replay, initiator).await {
                     Ok(ex) => {
@@ -615,6 +616,7 @@ impl Engine {
                 cells.push(cell);
             }
             let notes = authcheck::notes_for(&cells, &identities);
+            let public = authcheck::is_public(&cells, &identities);
             report.rows.push(authcheck::TargetRow {
                 target_id: tid,
                 method: orig.method,
@@ -622,6 +624,7 @@ impl Engine {
                 path: orig.path,
                 cells,
                 notes,
+                public,
             });
         }
         Ok(report)

@@ -100,6 +100,9 @@ struct ExportParams {
     /// Comma-separated statuses; by default everything but false positives.
     #[serde(default)]
     status: String,
+    /// Keep cookie and token values as captured instead of masking them.
+    #[serde(default)]
+    secrets: bool,
 }
 
 fn default_format() -> String {
@@ -114,10 +117,12 @@ async fn export_findings(State(s): State<AppState>, caller: MaybeCaller, Query(p
         return err(StatusCode::BAD_REQUEST, "bad_request", "format must be md, html or json");
     };
     crate::usage::record("report_exported");
-    let sel = match report::Selection::parse(&p.ids, &p.status) {
+    let mut sel = match report::Selection::parse(&p.ids, &p.status) {
         Ok(sel) => sel,
         Err(e) => return err(StatusCode::BAD_REQUEST, "bad_request", &e),
     };
+    // Agents always get masked values; only the person may ask for them.
+    sel.keep_secrets = p.secrets && is_user(&caller);
     let in_scope_only = agent_in_scope_only(&s, &caller);
     let engine = s.engine.clone();
     let built = tokio::task::spawn_blocking(move || {

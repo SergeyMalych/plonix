@@ -5,8 +5,9 @@
 //! the window. It signs in with the agent token (`$PLONIX_HOME/agent-token`),
 //! so the engine itself limits it to what agents may do (read-only today, see
 //! `plonix_core::access`). Every tool here only reads, except
-//! `propose_bench_edit`, which leaves a suggested edit for a Bench draft for
-//! the user to review (see `plonix_core::proposal`). No tool sends requests,
+//! `propose_bench_edit` and `propose_request`, which leave a suggested edit
+//! or request on the Bench for the user to review (see
+//! `plonix_core::proposal`). No tool sends requests,
 //! applies an edit or changes scope or findings.
 //!
 //! Transport: JSON-RPC 2.0, one message per line on stdin and stdout.
@@ -35,6 +36,8 @@ hosts, endpoints and detected technologies, review scope and its suggestions, an
 as a report. You cannot send or replay requests, change scope or record, edit or delete findings; suggest those steps to the user instead. \
 When the user asks about a request they are editing on the Bench (the question gives a draft id), you can suggest a concrete edited \
 request with `propose_bench_edit`: it only shows the user a diff they can apply or discard, and they send it themselves. \
+To suggest a new request to try (say, a captured request with another id), use `propose_request`; it waits above the Bench and the user sends it. \
+`list_users` names the users the person saved to test as (never their credentials) and `get_access_check` reads their last Access check. \
 The user decides what you can see: by default only hosts accepted into scope, and some tools may be switched off.
 
 The user can install skills: playbooks for a job in Plonix (get to know a host, explain a request, \
@@ -287,6 +290,36 @@ By default false positives are left out; pass ids or statuses (open, confirmed, 
             c.get_text(&format!("/api/findings/export?format=md&ids={}&status={}", encode(&ids.join(",")), encode(status)))
         },
     },
+    Tool {
+        name: "list_users",
+        route: "/api/users/summary",
+        title: "Saved users",
+        description: "The users the person saved to test as (for example an admin and a customer): id, name, note, and which headers and cookies \
+each one carries, by name only. Credential values are never shared. Use the names when you suggest who to compare in an Access check.",
+        schema: no_args,
+        call: |c, _| {
+            let v = c.get("/api/users/summary")?;
+            if v["users"].as_array().is_none_or(Vec::is_empty) {
+                return Ok("No saved users yet. The person can add them on the Users screen.".into());
+            }
+            Ok(pretty(&v))
+        },
+    },
+    Tool {
+        name: "get_access_check",
+        route: "/api/access-check/last",
+        title: "Last Access check",
+        description: "The last Access check the person ran: each request replayed as every saved user (and signed out), with status, size and \
+the notes Plonix made, such as a customer getting the same answer as an admin. Rows marked public answered everyone the same.",
+        schema: no_args,
+        call: |c, _| {
+            let v = c.get("/api/access-check/last")?;
+            if v["report"].is_null() {
+                return Ok("No Access check has been run yet. The person runs one from the Users screen (Access tab).".into());
+            }
+            Ok(pretty(&v["report"]))
+        },
+    },
 ];
 
 /// The route behind `propose_bench_edit`: the one tool that is not a pure
@@ -334,6 +367,86 @@ themselves if they want to. You have no signing key, so a JWT you edit keeps its
     },
 };
 
+const PROPOSE_NEW: Tool = Tool {
+    name: "propose_request",
+    route: PROPOSE_ROUTE,
+    title: "Suggest a request to try",
+    description: "Suggest a new request for the user to try on the Plonix Bench, such as a captured request with an id or a parameter changed. \
+Pass a short summary of what it tests and why, and either base_id (a captured request id: its method, URL, headers and body are used for \
+anything you leave out) or the full request. This sends nothing: Plonix shows the suggestion above the Bench with Open and Discard, and the \
+user reviews it and sends it themselves.",
+    schema: || {
+        json!({
+            "type": "object",
+            "properties": {
+                "summary": { "type": "string", "description": "What the request tests and why, in a sentence or two" },
+                "base_id": { "type": "integer", "description": "A captured request id to start from" },
+                "method": { "type": "string", "description": "HTTP method, e.g. GET" },
+                "url": { "type": "string", "description": "Full URL with query string" },
+                "headers": {
+                    "type": "array",
+                    "description": "Every request header, in order (replaces the base request's headers)",
+                    "items": {
+                        "type": "object",
+                        "properties": { "name": { "type": "string" }, "value": { "type": "string" } },
+                        "required": ["name", "value"],
+                        "additionalProperties": false
+                    }
+                },
+                "body": { "type": "string", "description": "The request body as text" }
+            },
+            "required": ["summary"],
+            "additionalProperties": false
+        })
+    },
+    call: |c, a| {
+        let base = match a.get("base_id").filter(|v| !v.is_null()) {
+            Some(_) => {
+                let id = a["base_id"].as_i64().or_else(|| a["base_id"].as_str().and_then(|s| s.trim_start_matches('#').parse().ok()));
+                let id = id.ok_or_else(|| anyhow!("`base_id` must be a request id number"))?;
+                Some(c.get(&format!("/api/traffic/{id}"))?)
+            }
+            None => None,
+        };
+        let p = c.post(PROPOSE_ROUTE, new_request_body(a, base.as_ref())?)?;
+        Ok(format!(
+            "Suggested request #{} is waiting above the Bench for the user to open and review. Nothing was sent: the user decides whether to send it.",
+            p["id"]
+        ))
+    },
+};
+
+/// The draft id the Bench reads suggested new requests from.
+const NEW_DRAFT: &str = "new";
+
+/// A suggested new request: the tool's arguments over the base request.
+fn new_request_body(a: &Value, base: Option<&Value>) -> Result<Value> {
+    let summary = a["summary"].as_str().map(str::trim).unwrap_or("");
+    if summary.is_empty() {
+        return Err(anyhow!("`summary` is required: say what the request tests"));
+    }
+    let mut args = a.clone();
+    args["draft_id"] = json!(NEW_DRAFT);
+    if let Some(b) = base {
+        for (k, from) in [("method", "method"), ("url", "url")] {
+            if args[k].as_str().is_none_or(|v| v.trim().is_empty()) {
+                args[k] = b[from].clone();
+            }
+        }
+        if args["headers"].is_null() {
+            args["headers"] = b["req_headers"].clone();
+        }
+        if args["body"].is_null() {
+            args["body"] = json!(b["req_text"].as_str().unwrap_or(""));
+        }
+    }
+    let body = proposal_body(&args)?;
+    if body["method"].as_str().is_none_or(str::is_empty) || body["url"].as_str().is_none_or(str::is_empty) {
+        return Err(anyhow!("give a method and url, or a base_id to start from"));
+    }
+    Ok(body)
+}
+
 /// The engine's proposal body from the tool's arguments. Headers may come as
 /// `{name, value}` objects or `[name, value]` pairs.
 fn proposal_body(a: &Value) -> Result<Value> {
@@ -358,7 +471,7 @@ fn proposal_body(a: &Value) -> Result<Value> {
 }
 
 fn all_tools() -> impl Iterator<Item = &'static Tool> {
-    TOOLS.iter().chain(std::iter::once(&PROPOSE))
+    TOOLS.iter().chain([&PROPOSE, &PROPOSE_NEW])
 }
 
 /// The API path that reads a skill with its arguments filled in.
@@ -556,7 +669,7 @@ impl Server {
     fn call(&self, params: &Value) -> Result<Value, (i64, String)> {
         let name = params["name"].as_str().unwrap_or("");
         let Some(tool) = all_tools().find(|t| t.name == name) else {
-            return Err((-32602, format!("unknown tool: {name}. Plonix tools only read (and suggest Bench edits): {}", tool_names().join(", "))));
+            return Err((-32602, format!("unknown tool: {name}. Plonix tools only read (and suggest requests on the Bench): {}", tool_names().join(", "))));
         };
         let args = if params["arguments"].is_object() { params["arguments"].clone() } else { json!({}) };
         let out = self.client().and_then(|c| (tool.call)(&c, &args));
@@ -570,8 +683,8 @@ impl Server {
 }
 
 fn tool_json(t: &Tool) -> Value {
-    // Suggesting a Bench edit stores something, so it is not marked
-    // read-only, but it never reaches the network or changes the project.
+    // Suggesting a Bench edit or a request stores something, so it is not
+    // marked read-only, but it never reaches the network or changes the project.
     let reads = t.route != PROPOSE_ROUTE;
     json!({
         "name": t.name,
@@ -656,9 +769,9 @@ mod tests {
     fn every_tool_reads_except_the_bench_suggestion() {
         let r = server().handle(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list"})).unwrap();
         let tools = r["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), TOOLS.len() + 1);
+        assert_eq!(tools.len(), TOOLS.len() + 2);
         for t in tools {
-            let suggests = t["name"] == "propose_bench_edit";
+            let suggests = t["name"].as_str().unwrap().starts_with("propose_");
             assert_eq!(t["annotations"]["readOnlyHint"], !suggests, "{}", t["name"]);
             assert_eq!(t["annotations"]["destructiveHint"], false, "{}", t["name"]);
             assert_eq!(t["annotations"]["openWorldHint"], false, "{}", t["name"]);
@@ -688,6 +801,17 @@ mod tests {
         assert_eq!(body["body"], "{}");
         assert!(proposal_body(&json!({ "method": "GET", "url": "https://a.test/" })).is_err());
         assert!(proposal_body(&json!({ "draft_id": "d1", "headers": [{ "name": "X" }] })).is_err());
+    }
+
+    #[test]
+    fn a_suggested_request_fills_gaps_from_its_base() {
+        let base = json!({ "method": "GET", "url": "https://a.test/api/orders/7", "req_headers": [["Accept", "*/*"]], "req_text": "" });
+        let body = new_request_body(&json!({ "summary": "another order", "url": "https://a.test/api/orders/8" }), Some(&base)).unwrap();
+        assert_eq!(body["draft"], NEW_DRAFT);
+        assert_eq!((body["method"].as_str(), body["url"].as_str()), (Some("GET"), Some("https://a.test/api/orders/8")));
+        assert_eq!(body["headers"], json!([["Accept", "*/*"]]));
+        assert!(new_request_body(&json!({ "url": "https://a.test/" }), Some(&base)).is_err());
+        assert!(new_request_body(&json!({ "summary": "x" }), None).is_err());
     }
 
     #[test]

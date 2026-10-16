@@ -17,7 +17,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Jost:wght@400..700&display=swap">
-<link rel="stylesheet" href="docs.css?v=f5a15bd6ad">
+<link rel="stylesheet" href="docs.css?v=e0f20326d3">
 <script>try{const r=document.documentElement,t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')r.dataset.theme=t;if(localStorage.getItem('plonix-style')==='classic')r.removeAttribute('data-style')}catch(e){}</script>
 </head>
 <body>
@@ -39,7 +39,7 @@
 <aside class="side">
 <details class="side-menu" open>
 <summary>Documentation</summary>
-<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li class="side-head">Get started</li><li><a href="getting-started.html">Getting started</a></li><li><a href="app.html">The Plonix window</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="setup.html">Setting up capture on any Mac</a></li><li class="side-head">Capture and explore</li><li><a href="traffic.html">Traffic and the Lens</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scope.html">Scope</a></li><li><a href="map.html">The Map</a></li><li><a href="rules.html">Rules</a></li><li class="side-head">Experiment and prove</li><li class="here"><a href="bench.html" aria-current="page">The Bench</a><ul class="toc"><li><a href="#tidy-and-raw">Tidy and Raw</a></li><li><a href="#comparing-sends">Comparing sends</a></li><li><a href="#claudes-suggested-edits">Claude's suggested edits</a></li><li><a href="#payload-runs">Payload runs</a></li><li><a href="#list-packs">List packs</a></li></ul></li><li><a href="users.html">Saved users and the Access check</a></li><li><a href="callbacks.html">Callbacks</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="findings.html">Findings</a></li><li><a href="programs.html">Programs</a></li><li class="side-head">AI and the Market</li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li class="side-head">Your data</li><li><a href="updates.html">Updates</a></li><li><a href="privacy.html">Privacy and usage statistics</a></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="code-signing.html">Code signing policy</a></li><li class="side-head">Contributing</li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li class="side-head">Get started</li><li><a href="getting-started.html">Getting started</a></li><li><a href="app.html">The Plonix window</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="setup.html">Setting up capture on any computer</a></li><li class="side-head">Capture and explore</li><li><a href="traffic.html">Traffic and the Lens</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scope.html">Scope</a></li><li><a href="map.html">The Map</a></li><li><a href="rules.html">Rules</a></li><li class="side-head">Experiment and prove</li><li class="here"><a href="bench.html" aria-current="page">The Bench</a><ul class="toc"><li><a href="#tidy-and-raw">Tidy and Raw</a></li><li><a href="#comparing-sends">Comparing sends</a></li><li><a href="#claudes-suggested-edits">Claude's suggested edits</a></li><li><a href="#payload-runs">Payload runs</a></li><li><a href="#list-packs">List packs</a></li></ul></li><li><a href="users.html">Saved users and the Access check</a></li><li><a href="callbacks.html">Callbacks</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="findings.html">Findings</a></li><li><a href="programs.html">Programs</a></li><li class="side-head">AI and the Market</li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li class="side-head">Your data</li><li><a href="updates.html">Updates</a></li><li><a href="privacy.html">Privacy and usage statistics</a></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="code-signing.html">Code signing policy</a></li><li class="side-head">Contributing</li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
 </details>
 </aside>
 <main class="doc">
@@ -52,7 +52,7 @@ once. Each tab is an experiment. A tab has two panels:</p>
 only ever reach a host that is <strong>accepted into scope</strong>, exactly like a manual
 send. When the host has a <a href="projects.html#client-certificates">client certificate</a>,
 the Bench presents it and marks the response <strong>cert · CN=…</strong>.</p>
-<p><img class="pic-light" src="../assets/studio-bench-light.webp" alt="The Bench: a request on the left, its JSON response on the right, and the send history below with Restore, Branch and Finding buttons" loading="lazy"><img class="pic-dark" src="../assets/studio-bench-dark.webp" alt="The Bench: a request on the left, its JSON response on the right, and the send history below with Restore, Branch and Finding buttons" loading="lazy"></p>
+<p><img class="pic-light" src="../assets/studio-bench-light.webp?v=b3ce6984b8" alt="The Bench: a request on the left, its JSON response on the right, and the send history below with Restore, Branch and Finding buttons" loading="lazy"><img class="pic-dark" src="../assets/studio-bench-dark.webp?v=91bbe2a288" alt="The Bench: a request on the left, its JSON response on the right, and the send history below with Restore, Branch and Finding buttons" loading="lazy"></p>
 <h2 id="tidy-and-raw">Tidy and Raw<a class="anchor" href="#tidy-and-raw" aria-label="Link to this section">#</a></h2>
 <p>The request editor has two views. <strong>Tidy</strong>, the default, reads the request for
 you:</p>
@@ -77,7 +77,7 @@ and <strong>Request</strong> switch what is compared, and <strong>Close</strong>
 <p>Typical uses: the same record read by two users, ids one apart, a header added
 or removed, or a send before and after a change. <strong>Branch</strong> opens any earlier
 send in a new tab, and <strong>Restore</strong> puts it back in the editor.</p>
-<p><img class="pic-light" src="../assets/studio-compare-light.webp" alt="Compare view on the Bench: two order lookups side by side, with the changed lines highlighted" loading="lazy"><img class="pic-dark" src="../assets/studio-compare-dark.webp" alt="Compare view on the Bench: two order lookups side by side, with the changed lines highlighted" loading="lazy"></p>
+<p><img class="pic-light" src="../assets/studio-compare-light.webp?v=3c1d7acea9" alt="Compare view on the Bench: two order lookups side by side, with the changed lines highlighted" loading="lazy"><img class="pic-dark" src="../assets/studio-compare-dark.webp?v=7c43044be5" alt="Compare view on the Bench: two order lookups side by side, with the changed lines highlighted" loading="lazy"></p>
 <h2 id="claudes-suggested-edits">Claude's suggested edits<a class="anchor" href="#claudes-suggested-edits" aria-label="Link to this section">#</a></h2>
 <p>Under the request on the Send panel, <strong>Ask about this request</strong> (or <strong>✦ Ask
 Claude</strong> on selected text, or on a value the Lens spotted) asks Claude Code
@@ -103,6 +103,11 @@ server checks signatures. If Claude made up a signature, Plonix puts the
 original one back and says so. A token Claude deliberately left without a
 signature, or with <code>alg: none</code>, is kept as proposed. To send a validly signed
 token, apply the edit and re-sign the token in the Lens with the key.</p>
+<p>Claude can also suggest a request of its own, not tied to a draft: say, an
+order id it saw in another user's traffic. It waits in a strip above the Bench
+tabs, <strong>Claude suggests trying</strong>, with the method, URL and why. <strong>Open on the
+Bench</strong> puts it in a new tab (named with a ✦) for you to read, edit and send;
+<strong>Discard</strong> drops it.</p>
 <p>Claude can only <em>propose</em>. It cannot apply a proposal, send it, or start a
 run; see <a href="agents.html#suggested-bench-edits">agents.md</a>.</p>
 <h2 id="payload-runs">Payload runs<a class="anchor" href="#payload-runs" aria-label="Link to this section">#</a></h2>
@@ -183,7 +188,7 @@ Plonix are the built-in <code>starter-lists</code> pack.</p>
 <footer>
   <div class="wrap">
     <a class="brand" href="../" aria-label="Plonix home"><svg class="mark-classic" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg><svg class="mark-studio" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#e5401f"/><rect x="7" y="6" width="5" height="20" fill="#1e1c19"/><circle cx="18" cy="13" r="7" fill="#f1b11b"/><path d="M18 6a7 7 0 0 1 0 14z" fill="#1d4fc4"/></svg>Plonix</a>
-    <span>Open-source web security workbench for macOS. Apache-2.0.</span>
+    <span>Open-source, AI-first web security workbench. Apache-2.0.</span>
     <nav aria-label="Footer">
       <a href="https://github.com/SergeyMalych/plonix">GitHub</a>
       <a href="./">Docs</a>

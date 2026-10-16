@@ -549,7 +549,7 @@ function drawInterceptPanel() {
       { class: 'icact' },
       h('button', { class: 'btn sm', text: 'Revert', title: 'Undo your edits', onclick: () => (delete IC.drafts[it.id], (IC.drawn = null), drawInterceptPanel()) }),
       h('button', { class: 'btn sm danger', text: 'Drop', title: 'Stop it here; the browser gets an error page (d)', onclick: () => dropHeld(it.id) }),
-      h('button', { class: 'btn sm primary', text: 'Forward', title: 'Send it on, with your edits (⌘↵, or f)', onclick: () => forwardHeld(it.id) }),
+      h('button', { class: 'btn sm primary', text: 'Forward', title: `Send it on, with your edits (${MOD_KEY}↵, or f)`, onclick: () => forwardHeld(it.id) }),
     ),
   );
   clear(slot, h('div', { class: 'icpanel' }, head, h('div', { class: 'icbody' }, list, editor)));
@@ -1413,7 +1413,7 @@ function harMenu(anchor) {
     h('div', { class: 'msep' }),
     item('Import HAR file…', importHar),
   ];
-  const menu = h('div', { class: 'ctxmenu', role: 'menu' }, items, T.picked.size ? null : h('div', { class: 'mnote', text: '⌘-click or Shift-click rows to pick them for export.' }));
+  const menu = h('div', { class: 'ctxmenu', role: 'menu' }, items, T.picked.size ? null : h('div', { class: 'mnote', text: (ON_WINDOWS ? 'Ctrl' : '⌘') + '-click or Shift-click rows to pick them for export.' }));
   showPopover(menu, anchor.getBoundingClientRect());
 }
 

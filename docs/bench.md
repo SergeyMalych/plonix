@@ -81,6 +81,12 @@ original one back and says so. A token Claude deliberately left without a
 signature, or with `alg: none`, is kept as proposed. To send a validly signed
 token, apply the edit and re-sign the token in the Lens with the key.
 
+Claude can also suggest a request of its own, not tied to a draft: say, an
+order id it saw in another user's traffic. It waits in a strip above the Bench
+tabs, **Claude suggests trying**, with the method, URL and why. **Open on the
+Bench** puts it in a new tab (named with a ✦) for you to read, edit and send;
+**Discard** drops it.
+
 Claude can only *propose*. It cannot apply a proposal, send it, or start a
 run; see [agents.md](agents.md#suggested-bench-edits).
 

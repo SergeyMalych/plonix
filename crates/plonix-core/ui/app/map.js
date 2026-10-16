@@ -182,7 +182,7 @@ async function drawHostDetail() {
       { class: 'toolbar' },
       h('h2', { class: 'mono', text: host }),
       h('span', { class: 'tag ' + scopeTag(d), text: scopeLabel(d) }),
-      h('span', { class: 'count', text: `${hs.requests || 0} requests · ${eps.length} endpoints` }),
+      h('span', { class: 'count', text: `${plural(hs.requests || 0, 'request')} · ${plural(eps.length, 'endpoint')}` }),
       h('span', { class: 'hint' }),
       d !== 'accepted' ? h('button', { class: 'btn sm', text: 'Accept into scope', onclick: async () => (await decideDomain('accept', host)) && (await loadMap()) }) : null,
       M.hidden.includes(host) ? h('button', { class: 'btn sm', text: 'Show on Map', onclick: () => setHostHidden(host, false) }) : null,

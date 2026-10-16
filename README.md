@@ -16,7 +16,7 @@
 [![Last commit](https://img.shields.io/github/last-commit/SergeyMalych/plonix)](https://github.com/SergeyMalych/plonix/commits/main)
 [![Stars](https://img.shields.io/github/stars/SergeyMalych/plonix?style=flat)](https://github.com/SergeyMalych/plonix/stargazers)
 
-**The open-source web security workbench for macOS. Fast, native, and scriptable from day one.**
+**A new era of web assessments. AI-first with Claude Code, driven by you, fast and open source. Runs on macOS and Windows.**
 
 **[Website](https://plonix.io)** · **[Documentation](https://plonix.io/docs/)** · **[Download for Mac or Windows](https://github.com/SergeyMalych/plonix/releases/latest)**
 
@@ -45,7 +45,7 @@ Most of a web assessment is the same loop: capture traffic, figure out what the 
 | --- | --- |
 | A tool you can afford on every machine | Free and open source. No Pro tier holding back the good parts. |
 | Large projects that stay responsive | A Rust engine with one SQLite database per project. Search over captured traffic stays quick as projects grow. |
-| Something you can see and click | Plonix.app: a Mac app with its own window, menu bar and Dock icon. Live traffic, the Bench for branching and comparing requests, adaptive scope, a map of the target and findings. |
+| Something you can see and click | The Plonix app, native on macOS and Windows, with its own windows and menus. Live traffic, the Bench for branching and comparing requests, adaptive scope, a map of the target and findings. |
 | Scope that matches reality | Adaptive scope learns related domains as you browse and shows the evidence for each one. |
 | Filters you can type | A small query language: `host:api.acme.com method:POST status:5xx -logout`. |
 | Automation in any language | Everything goes through a local HTTP API. Use curl, Python, Go, or whatever you already script in. |
@@ -59,7 +59,7 @@ Most of a web assessment is the same loop: capture traffic, figure out what the 
 ## Principles
 
 - **Fast.** A native Rust core. Projects with lots of traffic stay quick to search.
-- **Native.** Built for macOS, not ported to it.
+- **Native.** A real app on macOS and Windows, with the shortcuts each one expects.
 - **Minimal by design.** A few workflows done well: capture, discover, investigate, experiment, validate. No feature you'll never open.
 - **User-friendly first.** From download to captured traffic in under a minute is a release requirement.
 - **Programmable everywhere.** GUI, CLI and MCP are equal clients of the same local API. Anything you can click, you can script.
@@ -234,7 +234,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - **Extensions** are small WebAssembly analyzers the community writes. One reads the traffic Plonix hands it (in-scope hosts only, unless you allow more), adds notes that show in the Lens under its own name, and proposes findings that stay open until you confirm them.
 - They run in a sandbox with no network, files, processes or clock, and a CPU, memory and time budget. One that crashes or runs away is stopped and switched off with a message; Plonix carries on.
 - Install from a file, a folder or the signed Market, after seeing what each one may do. Switch them on and off, run one over traffic you already captured, remove it. See [docs/extensions.md](docs/extensions.md) and the example in [examples/extensions/security-headers](examples/extensions/security-headers).
-- Beyond analyzers there are three more kinds: **scan** (runs a command-line tool you install, on your Mac only, over captured traffic), **enumerate** (a tool you install finds subdomains, added to Scope as suggestions to review; scope never changes on its own) and **probe** (Plonix itself sends a bounded set of candidate inputs through the same scope-gated path as a replay; nothing to install).
+- Beyond analyzers there are three more kinds: **scan** (runs a command-line tool you install, on your computer only, over captured traffic), **enumerate** (a tool you install finds subdomains, added to Scope as suggestions to review; scope never changes on its own) and **probe** (Plonix itself sends a bounded set of candidate inputs through the same scope-gated path as a replay; nothing to install).
 - In the Market today: **secret-sweep** (API keys, tokens and passwords for hundreds of services, using `trufflehog` you install yourself), **js-endpoints** (API paths and URLs referenced in captured JavaScript), **subdomain-discovery** (subdomains of an accepted domain from public sources, using `subfinder` you install), **parameter-probe** (undocumented query parameters on one in-scope endpoint), **graphql-explorer** and **security-headers**.
 
 ### The Market and starter profiles
@@ -249,7 +249,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 
 ### Callbacks
 - **Callbacks** hand out a unique host for each test. Put one in a request (Bench › **Insert callback host** puts it where the cursor is) and every DNS lookup, HTTP request or mail that later reaches it is listed with its time, sender and raw request, next to the test it came from. **Find the request** shows the captured request that carried the host, and **+ Finding** writes it up with both as evidence.
-- Listening starts only when you press **Start listening** and talks only to the callback server: the public servers, or your own with a token. It uses [interactsh](https://github.com/projectdiscovery/interactsh), the open-source callback tool by ProjectDiscovery (MIT license), which you install in Terminal with `brew install go && go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest`. Plonix keeps each project's session so earlier hosts keep working after a restart.
+- Listening starts only when you press **Start listening** and talks only to the callback server: the public servers, or your own with a token. It uses [interactsh](https://github.com/projectdiscovery/interactsh), the open-source callback tool by ProjectDiscovery (MIT license). Plonix downloads its client in one click (about 10 MB, checked against the release's SHA-256 checksums; or `plonix callbacks install`), or you build it yourself with `go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest`. `plonix callbacks` starts, stops and lists callbacks from the terminal. Plonix keeps each project's session so earlier hosts keep working after a restart.
 
 ### Programs
 - **Programs** (a tool in the Market that adds the Programs screen, ⌘9; `plonix program`) bring in a bug bounty or vulnerability disclosure program: connect HackerOne, paste a program's policy, or look up a domain's `security.txt`, then review and follow it.
@@ -270,12 +270,12 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - **Client certificates** (per project): certificates presented to servers that ask for one, and one switch that turns them all off.
 - **Storage** (per project): keep only in-scope traffic, with a count of what it would delete and a button to delete it now.
 - **Interface** (all projects): open projects in a Plonix window or in your web browser.
-- **Appearance** (this Mac): theme (match the system, light or dark) and spacing. **Dense**, the default, fits more on screen; **Roomy** gives rows and panels more air.
+- **Appearance** (this computer): theme (match the system, light or dark) and spacing. **Dense**, the default, fits more on screen; **Roomy** gives rows and panels more air.
 - **Usage statistics** (all projects): share anonymous feature counts once a day, or not. See [Privacy](#privacy).
 - Settings are a registry: a feature adds a section by describing its fields, and the Settings screens draw it with validation and storage included (see [docs/projects.md](docs/projects.md#adding-a-settings-section)).
 
 ### The Plonix app
-- **Plonix.app** is a Mac app: double-click it and the Start screen opens. Pick or create a project and it opens in a window of its own, with capture running. Open more projects and each gets its own window. Closing a project's window closes its session. No terminal needed.
+- **The Plonix app** runs on macOS and Windows: double-click it and the Start screen opens. Pick or create a project and it opens in a window of its own, with capture running. Open more projects and each gets its own window. Closing a project's window closes its session. No terminal needed.
 - With Settings › Interface › **Open projects in: My web browser**, projects open in your default browser instead; View › Open in Browser (⇧⌘B) does it for one window.
 - **Open target** (⌘O, or the button at the top of the sidebar) opens the site you are testing in the capture browser: a separate browser with an isolated profile that routes through Plonix and trusts its certificate. The domain and its subdomains go into scope.
 - **Works on every Mac.** With no Chrome, Brave, Edge or Firefox installed (a Safari-only Mac), Open target offers **Get the Plonix browser**: one click downloads Chromium (Google's Chrome for Testing build, about 150 MB, once) into `~/.plonix/chromium`, with a progress bar and a retry if the download fails, and then opens the target in it. Nothing is bundled with the app, so Plonix.app stays small.
@@ -285,7 +285,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - `plonix` commands in a terminal talk to the same sessions while the app is open (`-p` picks the project), and projects started from a terminal show up on the Start screen. Quitting the app closes the projects it opened.
 - The same window also runs in any browser with `plonix ui`, served by the engine itself.
 - **Updates are your call.** Plonix asks once whether to check for new versions (daily, weekly, at launch or only when you ask) and never installs anything by itself: downloading and installing each need a click, and closing a dialog means no. See [docs/updates.md](docs/updates.md).
-- **Crash reports stay on your Mac.** If Plonix crashes, it saves a report in `~/.plonix/crashes/` with addresses, headers, tokens and your user name removed, and sends nothing. The next launch asks whether to view it, open a pre-filled GitHub issue for you to review and submit, or dismiss it; `plonix` prints where the report is. See [docs/crash-reports.md](docs/crash-reports.md).
+- **Crash reports stay on your computer.** If Plonix crashes, it saves a report in `~/.plonix/crashes/` with addresses, headers, tokens and your user name removed, and sends nothing. The next launch asks whether to view it, open a pre-filled GitHub issue for you to review and submit, or dismiss it; `plonix` prints where the report is. See [docs/crash-reports.md](docs/crash-reports.md).
 
 ### The Plonix window
 - **Sidebar:** navigation, Open target, the scope suggestions waiting on you (accept or reject in one click) and the hosts in scope with their request counts (click one to filter Traffic). Collapse it to icons with ⌃⌘S, or `\` in a browser.
@@ -312,7 +312,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - `plonix connect claude` adds Plonix to Claude Code as an MCP server. From then on Claude Code can search your captured traffic, read requests and responses, see hosts, endpoints and detected technologies, review scope suggestions, and read findings or export them as a report, on the live project.
 - Access is **read-only and enforced by the engine**: agents sign in with their own token (`~/.plonix/agent-token`), and anything but reading (sending or replaying requests, changing scope, recording, editing or deleting findings) is refused. The one thing an agent can leave is a suggested edit to a Bench request, which only you can apply.
 - **Ask Claude** on a request, finding, host or scope suggestion hands Claude Code just that spot's context as a prompt you review first. Plonix clips the bodies, shows what will be shared, and warns before sending more than your context limit.
-- **Answers arrive in the app.** Plonix runs the `claude` command on your Mac, wired to the same read-only MCP server and nothing else (your other MCP servers and Claude Code's shell, file and web tools are switched off for these runs), and shows its progress as it works: the current step, tokens read and written, elapsed time and the answer as it is written, formatted with headings, lists, tables and code blocks you can copy. A run that goes quiet says so and is stopped with a clear message instead of hanging.
+- **Answers arrive in the app.** Plonix runs the `claude` command on your computer, wired to the same read-only MCP server and nothing else (your other MCP servers and Claude Code's shell, file and web tools are switched off for these runs), and shows its progress as it works: the current step, tokens read and written, elapsed time and the answer as it is written, formatted with headings, lists, tables and code blocks you can copy. A run that goes quiet says so and is stopped with a clear message instead of hanging.
 - **Suggested edits on the Bench:** ask Claude about a request you are editing and it can propose a concrete edited request. The Bench shows it as a diff against your draft (request line, headers, body, with query strings, form fields, JSON and JWTs decoded) with **Apply** and **Discard**. Nothing changes until you apply it, applying only changes the draft, and sending stays your click. An edited JWT keeps its original signature and is marked unsigned.
 - Any other MCP client can run `plonix mcp` as a stdio server. Captured data stays on your machine. See [docs/agents.md](docs/agents.md).
 
@@ -558,7 +558,7 @@ Each open project has its own API address. `$PLONIX_HOME/sessions/` lists them, 
           rule packs · Market      untrusted, declarative, verified
 ```
 
-The engine is a headless background process. Every front end talks to it the same way, so the Mac app, your shell scripts and your AI agent always see the same project.
+The engine is a headless background process. Every front end talks to it the same way, so the app, your shell scripts and your AI agent always see the same project.
 
 ```text
 crates/

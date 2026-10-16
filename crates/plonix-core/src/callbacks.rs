@@ -6,7 +6,8 @@
 //! that a server made a call of its own (a fetch, a lookup, a webhook) that
 //! never shows up in the response.
 //!
-//! Plonix drives `interactsh-client`, a tool the user installs, against a
+//! Plonix drives `interactsh-client`, which it downloads when the user asks
+//! (see [`crate::interactsh`]) or the user builds with Go, against a
 //! public callback server or one they host. Nothing starts on its own: the
 //! listener runs only after the user presses Start (or makes a host), and
 //! stops when they press Stop. Closing the project pauses it; a project whose
@@ -36,8 +37,9 @@ use crate::store::Store;
 
 /// The executable Plonix drives.
 pub const PROGRAM: &str = "interactsh-client";
-/// interactsh has no Homebrew formula, so the client is built with Go. It
-/// lands in ~/go/bin, which [`crate::program::locate_exe`] searches.
+/// The other way to get the client, for people who prefer to build it:
+/// with Go. It lands in ~/go/bin, which [`crate::program::locate_exe`]
+/// searches. Plonix can also download it (see [`crate::interactsh`]).
 #[cfg(not(windows))]
 pub const INSTALL: &str = "brew install go && go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest";
 /// On Windows, Go comes from winget; `go` is on the PATH of terminals opened after that.
@@ -61,9 +63,15 @@ const NONCE_LEN: usize = 13;
 /// The alphabet the client draws nonces from.
 const NONCE_ALPHABET: &[u8] = b"ybndrfg8ejkmcpqxot1uwisza345h769";
 
-/// Where the client is installed, if it is.
-pub fn locate() -> Option<PathBuf> {
-    crate::program::locate_exe(PROGRAM)
+/// Where the client is installed, if it is: the copy Plonix downloaded
+/// first, then ~/go/bin and the PATH.
+pub fn locate(home: &Home) -> Option<PathBuf> {
+    crate::interactsh::installed(home).map(|i| i.exe).or_else(|| crate::program::locate_exe(PROGRAM))
+}
+
+/// What to do when the client is missing.
+pub fn not_installed() -> String {
+    format!("{PROGRAM} is not installed. Download it in the Callbacks tab or with `plonix callbacks install`, then start again.")
 }
 
 // ---- configuration ----------------------------------------------------------------
@@ -507,8 +515,8 @@ fn stop_child(g: &mut Inner) {
 
 /// Starts the project's listener with the saved server settings.
 pub fn start_for(cb: &Callbacks, home: &Home, project: &str) -> Result<(), String> {
-    let Some(exe) = locate() else {
-        return Err(format!("{PROGRAM} is not installed. Install it with `{INSTALL}`, then start again."));
+    let Some(exe) = locate(home) else {
+        return Err(not_installed());
     };
     cb.start(&exe, &Config::load(home), &session_path(home, project))
 }

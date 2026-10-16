@@ -717,12 +717,17 @@ impl Store {
     }
 
     /// Endpoints seen on a host, with numeric/UUID path segments folded into `{id}`.
+    ///
+    /// Every request to the host counts, however many there are: a long Run or
+    /// scan must not push older endpoints off the map. Paths, methods, statuses
+    /// and query names come from every request; header and body parameter
+    /// names from the newest few of each endpoint, which keeps this quick on
+    /// large projects.
     pub fn endpoints(&self, host: &str) -> Result<Vec<Endpoint>> {
+        const BODY_SAMPLES: usize = 20;
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, method, path, query, status, req_headers, req_body FROM exchanges WHERE host = ?1 ORDER BY id DESC LIMIT 20000",
-        )?;
-        let mut map: BTreeMap<(String, String), (Endpoint, BTreeSet<u16>, BTreeSet<String>)> = BTreeMap::new();
+        let mut stmt = conn.prepare("SELECT id, method, path, query, status FROM exchanges WHERE host = ?1 ORDER BY id DESC")?;
+        let mut map: BTreeMap<(String, String), (Endpoint, BTreeSet<u16>, BTreeSet<String>, Vec<i64>)> = BTreeMap::new();
         let mut rows = stmt.query([host.to_ascii_lowercase()])?;
         while let Some(r) = rows.next()? {
             let id: i64 = r.get(0)?;
@@ -730,22 +735,36 @@ impl Store {
             let path = fold_path(&r.get::<_, String>(2)?);
             let query: String = r.get(3)?;
             let status: Option<u16> = r.get(4)?;
-            let headers: Headers = serde_json::from_str(&r.get::<_, String>(5)?).unwrap_or_default();
-            let body: Vec<u8> = r.get(6)?;
             let entry = map.entry((path.clone(), method.clone())).or_insert_with(|| {
                 (
                     Endpoint { method, path, requests: 0, statuses: vec![], params: vec![], sample_id: id },
                     BTreeSet::new(),
                     BTreeSet::new(),
+                    Vec::new(),
                 )
             });
             entry.0.requests += 1;
             entry.1.extend(status);
-            entry.2.extend(param_names(&query, &headers, &body));
+            entry.2.extend(param_names(&query, &Headers::new(), &[]));
+            if entry.3.len() < BODY_SAMPLES {
+                entry.3.push(id);
+            }
+        }
+        drop(rows);
+        let mut body = conn.prepare_cached("SELECT req_headers, req_body FROM exchanges WHERE id = ?1")?;
+        for (_, (_, _, params, ids)) in map.iter_mut() {
+            for id in ids.iter() {
+                let mut rows = body.query([id])?;
+                if let Some(r) = rows.next()? {
+                    let headers: Headers = serde_json::from_str(&r.get::<_, String>(0)?).unwrap_or_default();
+                    let b: Vec<u8> = r.get(1)?;
+                    params.extend(param_names("", &headers, &b));
+                }
+            }
         }
         Ok(map
             .into_values()
-            .map(|(mut e, statuses, params)| {
+            .map(|(mut e, statuses, params, _)| {
                 e.statuses = statuses.into_iter().collect();
                 e.params = params.into_iter().collect();
                 e
@@ -1714,6 +1733,18 @@ mod tests {
         assert_eq!(get.statuses, vec![200, 404]);
         assert!(get.params.contains(&"query:page".to_string()));
         assert!(get.params.contains(&"json:password".to_string()));
+    }
+
+    #[test]
+    fn site_map_keeps_endpoints_behind_a_long_run() {
+        let s = Store::open_in_memory().unwrap();
+        s.insert_exchange(&sample("api.example.com", "GET", "/admin/users", 200, "")).unwrap();
+        for _ in 0..20_005 {
+            s.insert_exchange(&sample("api.example.com", "GET", "/search", 200, "")).unwrap();
+        }
+        let eps = s.endpoints("api.example.com").unwrap();
+        assert_eq!(eps.len(), 2, "the endpoint seen before the run is still on the map");
+        assert_eq!(eps.iter().find(|e| e.path == "/search").unwrap().requests, 20_005);
     }
 
     #[test]

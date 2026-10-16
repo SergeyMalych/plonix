@@ -784,7 +784,7 @@ function userDetail(u) {
 
 /* ---- the Access check screen ---- */
 
-const AC = { host: null, prefix: '/', targets: [], sourceLabel: '', anon: true, picks: null, running: false, report: null, err: null };
+const AC = { host: null, prefix: '/', targets: [], sourceLabel: '', anon: true, unsafe: false, picks: null, running: false, report: null, err: null };
 
 /** Opens the Access check on a selection from Traffic or the Map. */
 function startAccessCheck({ targets = [], host = null, prefix = '/', sourceLabel = '', onlyAnon = false, users = null } = {}) {
@@ -837,6 +837,13 @@ function drawAccess(body, main) {
       h('div', { class: 'aclbl', text: 'A branch of an application' }),
       h('div', { class: 'acsource' }, hostSel, h('span', { class: 'muted', text: 'path starts with' }), prefix),
       h('div', { class: 'mnote', text: 'One captured request is checked for each endpoint on that branch. Or pick rows in Traffic, or a host in the Map, and choose "Check access".' }),
+      h(
+        'label',
+        { class: 'acid acunsafe', title: 'Off: only requests that read (GET, HEAD, OPTIONS) are replayed, so nothing is created, changed or deleted.' },
+        h('input', { type: 'checkbox', checked: AC.unsafe, onchange: (e) => (AC.unsafe = e.target.checked) }),
+        h('span', { class: 'acname', text: 'Also requests that change data' }),
+        h('span', { class: 'achdr', text: 'POST, PUT, PATCH, DELETE: replayed once per identity' }),
+      ),
     );
   }
 
@@ -877,6 +884,7 @@ async function runAccessCheck(body, main) {
   else {
     req.host = AC.host;
     req.prefix = AC.prefix;
+    req.include_unsafe = AC.unsafe;
   }
   try {
     AC.report = await api('/api/access-check', { method: 'POST', body: req });
@@ -893,17 +901,22 @@ function drawAccessReport(box) {
   const r = AC.report;
   if (!r) return clear(box);
   if (!r.rows.length) return clear(box, h('div', { class: 'empty', text: 'Nothing was checked. Pick some requests and run again.' }));
-  const flagged = r.rows.filter((row) => row.notes && row.notes.length).length;
+  const look = (row) => row.notes && row.notes.length && !row.public;
+  const flagged = r.rows.filter(look).length;
+  const skipped = r.skipped || [];
   const head = h(
     'div',
     { class: 'aclead' },
     `Checked ${r.rows.length} request${r.rows.length === 1 ? '' : 's'} as ${r.identities.length} identit${r.identities.length === 1 ? 'y' : 'ies'}` + (r.truncated ? ` (stopped at the ${r.sent}-request limit)` : '') + '.',
     flagged ? h('b', { class: 'acflag', text: ` ${flagged} to look at.` }) : h('span', { class: 'muted', text: ' Nothing stood out.' }),
+    skipped.length ? h('span', { class: 'muted', title: skipped.join('\n'), text: ` Left out ${skipped.length} that change${skipped.length === 1 ? 's' : ''} data.` }) : null,
   );
   const headCells = [h('th', { class: 'actarget', text: 'Request' })];
   for (const id of r.identities) headCells.push(h('th', { class: 'acidcol' + (id.anon ? ' anon' : ''), text: id.label, title: id.label }));
   const rows = [];
-  for (const row of r.rows) {
+  // Rows to look at first, then the rest, public pages last; otherwise as checked.
+  const rank = (row) => (look(row) ? 0 : row.public ? 2 : 1);
+  for (const row of [...r.rows].sort((a, b) => rank(a) - rank(b))) {
     const byId = {};
     for (const c of row.cells) byId[c.identity] = c;
     const tds = [h('td', { class: 'actarget' }, h('div', { class: 'acreq' }, h('span', { class: 'meth m-' + row.method, text: row.method }), h('span', { class: 'mono acpath', text: row.path, title: row.host + row.path })))];
@@ -924,12 +937,12 @@ function drawAccessReport(box) {
         ),
       );
     }
-    rows.push(h('tr', { class: row.notes && row.notes.length ? 'acnote' : '' }, tds));
+    rows.push(h('tr', { class: look(row) ? 'acnote' : '' }, tds));
     if (row.notes && row.notes.length) {
       rows.push(
         h(
           'tr',
-          { class: 'acnoterow' },
+          { class: 'acnoterow' + (row.public ? ' public' : '') },
           h('td', { colspan: String(r.identities.length + 1) }, h('div', { class: 'acnotes' }, row.notes.map((n) => h('span', { class: 'acnotechip' }, h('span', { class: 'acnoteico', text: '⚑' }), h('span', { text: n }))))),
         ),
       );
@@ -1033,16 +1046,88 @@ async function callbacksToggle(stop) {
   drawCallbacks();
 }
 
+/** interactsh-client is missing: offers to download it, with the Go route for people who prefer to build it. */
 function callbacksInstallCard() {
-  const cmd = CB.data.install;
-  return h(
+  const d = CB.data;
+  const cmd = d.install;
+  const fill = h('div', { class: 'pbar-fill' });
+  const bar = h('div', { class: 'pbar', hidden: true }, fill);
+  const line = h('div', { class: 'muted fine cbline' });
+  const fail = h('div', { class: 'rerr', hidden: true });
+  const btn = h('button', { class: 'btn primary', text: `Download interactsh (${d.download_size || 'about 10 MB'})`, onclick: () => start() });
+  const card = h(
     'div',
     { class: 'empty cbinstall' },
-    h('h3', { text: 'One thing to install' }),
-    h('p', { class: 'mnote', text: `Callbacks are collected by interactsh, the open-source callback tool by ProjectDiscovery, which runs on ${THIS_COMPUTER}. Install it once in a terminal. It builds with Go in a minute or so, and Plonix finds it in ~/go/bin:` }),
-    h('div', { class: 'cbcmd' }, h('code', { text: cmd }), h('button', { class: 'btn sm', text: 'Copy', onclick: () => copyText(cmd) })),
-    h('div', { class: 'cbacts' }, h('button', { class: 'btn primary', text: 'Check again', onclick: () => renderCallbacks($('#main')) })),
+    h('h3', { text: 'Get interactsh' }),
+    h('p', {
+      class: 'mnote',
+      text: d.can_download
+        ? `Callbacks are collected by interactsh, the open-source callback tool by ProjectDiscovery. Plonix downloads it once from its GitHub release, checks it and keeps it with your Plonix data on ${THIS_COMPUTER}.`
+        : `Callbacks are collected by interactsh, the open-source callback tool by ProjectDiscovery. There is no download for ${THIS_COMPUTER}, so build it with Go in a terminal.`,
+    }),
+    d.can_download ? h('div', { class: 'cbacts' }, btn) : null,
+    bar,
+    line,
+    fail,
+    h(
+      'details',
+      { class: 'cbown', open: !d.can_download },
+      h('summary', { text: 'or install it yourself' }),
+      h('p', { class: 'mnote muted', text: 'Build it with Go in a terminal. Plonix finds it in ~/go/bin:' }),
+      h('div', { class: 'cbcmd' }, h('code', { text: cmd }), h('button', { class: 'btn sm', text: 'Copy', onclick: () => copyText(cmd) })),
+      h('div', { class: 'cbacts' }, h('button', { class: 'btn sm', text: 'Check again', onclick: () => renderCallbacks($('#main')) })),
+    ),
   );
+  const mb = (n) => (n / 1048576).toFixed(1);
+  const stages = { looking: 'Reading the release’s checksums…', unpacking: 'Unpacking…', verifying: 'Checking it…' };
+  const show = (p) => {
+    bar.hidden = false;
+    fill.style.width = (p.total ? Math.min(100, (p.received * 100) / p.total) : 0) + '%';
+    bar.classList.toggle('busy', p.stage !== 'downloading');
+    line.textContent = p.stage === 'downloading' ? `Downloading interactsh ${p.version} · ${mb(p.received)}${p.total ? ' of ' + mb(p.total) : ''} MB` : stages[p.stage] || '';
+  };
+  const follow = async () => {
+    while (card.isConnected) {
+      let p;
+      try {
+        p = (await loadCallbacks()).download || {};
+      } catch (e) {
+        p = { stage: 'failed', error: e.message };
+      }
+      if (p.stage === 'failed') {
+        bar.hidden = true;
+        line.textContent = '';
+        fail.hidden = false;
+        fail.textContent = 'Could not download interactsh: ' + (p.error || 'unknown error');
+        btn.textContent = 'Try again';
+        btn.disabled = false;
+        return;
+      }
+      if (p.stage === 'done' || CB.data.installed) return card.isConnected && drawCallbacks();
+      show(p);
+      await new Promise((ok) => setTimeout(ok, 400));
+    }
+  };
+  const start = async () => {
+    btn.disabled = true;
+    fail.hidden = true;
+    try {
+      show((await api('/api/callbacks/install', { method: 'POST' })).download || {});
+    } catch (e) {
+      btn.disabled = false;
+      fail.hidden = false;
+      fail.textContent = e.message;
+      return;
+    }
+    follow();
+  };
+  // A download started earlier keeps going in the background; pick it up.
+  if (d.download && ['looking', 'downloading', 'unpacking', 'verifying'].includes(d.download.stage)) {
+    btn.disabled = true;
+    show(d.download);
+    setTimeout(follow);
+  }
+  return card;
 }
 
 function drawCallbackHosts(box) {

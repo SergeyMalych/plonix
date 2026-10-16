@@ -102,7 +102,7 @@ const BUILTIN_TOOLS: &[(&str, &[&str])] = &[
         &[
             "Adds a Callbacks screen. Make a host for each test, put it in a request (a URL parameter, a header, a webhook field), and see every DNS lookup, HTTP request or mail that later reaches it, with the time, the address it came from and the raw request.",
             "Each host carries its own name, so a callback points straight at the test it came from. Insert one from the Bench in a click, find the request that carried it, and turn a callback into a finding.",
-            "Nothing runs on its own: listening starts when you press Start and registers only with the callback server. It uses interactsh, the open-source callback tool by ProjectDiscovery (MIT license), which you install in Terminal with `brew install go && go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest`. Use the public servers or your own, with a token.",
+            "Nothing runs on its own: listening starts when you press Start and registers only with the callback server. It uses interactsh, the open-source callback tool by ProjectDiscovery (MIT license): Plonix downloads its client in one click (about 10 MB, checked against the release's checksums), or you build it yourself with Go. Use the public servers or your own, with a token.",
         ],
     ),
     (
@@ -1034,7 +1034,7 @@ pub const SANDBOX_NOTE: &str = "Its code runs in the Plonix sandbox: no network,
 pub fn program_note(program: Option<&str>) -> &'static str {
     match program.and_then(crate::program::get).map(|p| p.kind) {
         Some(crate::program::Kind::Enumerate) => {
-            "The program runs on this Mac and gets only the domains you accepted in Scope, never your captured traffic. \
+            "The program runs on this computer and gets only the domains you accepted in Scope, never your captured traffic. \
              It asks public sources on the internet which subdomains they know of. Nothing joins your scope until you accept it."
         }
         Some(crate::program::Kind::Probe) => {
@@ -1042,7 +1042,7 @@ pub fn program_note(program: Option<&str>) -> &'static str {
              you pick, and each one shows in Traffic. Findings it proposes stay unconfirmed until you confirm them."
         }
         _ => {
-            "The program runs on this Mac only, over copies of captured requests and responses that are deleted when it \
+            "The program runs on this computer only, over copies of captured requests and responses that are deleted when it \
              finishes. It works offline: Plonix tells it not to check what it finds with outside services and not to update itself."
         }
     }
