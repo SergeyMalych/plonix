@@ -1500,6 +1500,9 @@ tr.acnote > td { border-bottom: none; }
 .acnotes { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 6px 10px 8px; background: var(--warn-soft); border-bottom: 1px solid var(--line-2); }
 .acnotechip { display: inline-flex; align-items: center; gap: 5px; color: var(--warn); font-size: 12px; }
 .acnotechip .acnoteico { font-size: 11px; opacity: 0.9; }
+.acnoterow.public .acnotes { background: transparent; padding-top: 0; }
+.acnoterow.public .acnotechip { color: var(--fg-3); }
+.acid.acunsafe { margin-top: 10px; align-self: flex-start; }
 
 /* ---- Callbacks ---- */
 .cbstate { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }

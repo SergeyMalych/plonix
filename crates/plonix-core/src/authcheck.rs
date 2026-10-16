@@ -80,6 +80,9 @@ pub struct TargetRow {
     /// Plain-language observations about this row, e.g. that a signed-out
     /// request still succeeded. Never a verdict.
     pub notes: Vec<String>,
+    /// Everyone, signed out too, got the same successful page: a public
+    /// page, noted but not counted among the rows to look at.
+    pub public: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -91,6 +94,22 @@ pub struct AuthCheckReport {
     /// How many it sent (the plan, capped at [`MAX_REQUESTS`]).
     pub sent: usize,
     pub truncated: bool,
+    /// Requests on the branch that change data (POST, PUT, PATCH, DELETE…),
+    /// left out unless the person asked for them, as "METHOD /path".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<String>,
+}
+
+/// Methods a branch check replays without asking: ones that only read.
+pub fn reads_only(method: &str) -> bool {
+    matches!(method.to_ascii_uppercase().as_str(), "GET" | "HEAD" | "OPTIONS")
+}
+
+/// Whether every identity, the signed-out one included, got the same
+/// successful response: a public page rather than an access question.
+pub fn is_public(cells: &[Cell], identities: &[Identity]) -> bool {
+    let anon_ok = cells.iter().any(|c| ok(c.status) && identities.iter().any(|i| i.anon && i.id == c.identity));
+    anon_ok && cells.len() > 1 && cells.iter().all(|c| ok(c.status) && c.sig == cells[0].sig)
 }
 
 /// Whether a status is a success, which is what "the identity was let in"
@@ -107,6 +126,9 @@ pub fn notes_for(cells: &[Cell], identities: &[Identity]) -> Vec<String> {
         identities.iter().find(|i| i.id == id).map(|i| i.label.as_str()).unwrap_or("that identity")
     }
     let is_anon = |id: &str| identities.iter().find(|i| i.id == id).is_some_and(|i| i.anon);
+    if is_public(cells, identities) {
+        return vec!["Public: everyone got the same page, signed out too.".into()];
+    }
     let mut notes = Vec::new();
 
     // A signed-out request that still came back as a success.
@@ -175,6 +197,22 @@ mod tests {
     fn quiet_when_each_identity_differs() {
         let cells = vec![cell("alice", 200, 500, "a"), cell("bob", 200, 480, "b"), cell("anon", 401, 0, "c")];
         assert!(notes_for(&cells, &idents()).is_empty());
+    }
+
+    #[test]
+    fn public_pages_get_one_quiet_note() {
+        let cells = vec![cell("alice", 200, 300, "p"), cell("bob", 200, 300, "p"), cell("anon", 200, 300, "p")];
+        assert!(is_public(&cells, &idents()));
+        assert_eq!(notes_for(&cells, &idents()), vec!["Public: everyone got the same page, signed out too.".to_string()]);
+        // A user seeing the admin's response while signed-out is refused is not public.
+        let cells = vec![cell("alice", 200, 300, "p"), cell("bob", 200, 300, "p"), cell("anon", 401, 10, "x")];
+        assert!(!is_public(&cells, &idents()));
+    }
+
+    #[test]
+    fn only_reads_are_replayed_by_default() {
+        assert!(reads_only("get") && reads_only("HEAD") && reads_only("OPTIONS"));
+        assert!(!reads_only("POST") && !reads_only("DELETE") && !reads_only("PATCH") && !reads_only("PUT"));
     }
 
     #[test]

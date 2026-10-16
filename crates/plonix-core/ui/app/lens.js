@@ -78,9 +78,9 @@ function corsIssue(ex) {
   try {
     originHost = new URL(origin).hostname;
   } catch (_) {}
-  if (acao === '*' && creds) return { severity: 'medium', note: 'The response sets Access-Control-Allow-Origin to * while allowing credentials, so any site could read it on behalf of a signed-in user.' };
   if (origin && acao === origin && creds && site(originHost) !== site(ex.host)) return { severity: 'medium', note: `The response echoes the request Origin (${origin}) into Access-Control-Allow-Origin with credentials allowed, so an attacker-chosen origin may be trusted.` };
-  if (acao === '*') return { severity: 'low', note: 'The response sets Access-Control-Allow-Origin to *, so any site can read it.' };
+  // Browsers never send cookies to a * origin, even with Allow-Credentials, so * only exposes what a signed-out visitor could read.
+  if (acao === '*') return { severity: 'low', note: 'The response sets Access-Control-Allow-Origin to *, so any site can read it without the user\'s cookies. Browsers refuse * together with credentials, so signed-in data is not exposed this way.' };
   return null;
 }
 

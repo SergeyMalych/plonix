@@ -784,7 +784,7 @@ function userDetail(u) {
 
 /* ---- the Access check screen ---- */
 
-const AC = { host: null, prefix: '/', targets: [], sourceLabel: '', anon: true, picks: null, running: false, report: null, err: null };
+const AC = { host: null, prefix: '/', targets: [], sourceLabel: '', anon: true, unsafe: false, picks: null, running: false, report: null, err: null };
 
 /** Opens the Access check on a selection from Traffic or the Map. */
 function startAccessCheck({ targets = [], host = null, prefix = '/', sourceLabel = '', onlyAnon = false, users = null } = {}) {
@@ -837,6 +837,13 @@ function drawAccess(body, main) {
       h('div', { class: 'aclbl', text: 'A branch of an application' }),
       h('div', { class: 'acsource' }, hostSel, h('span', { class: 'muted', text: 'path starts with' }), prefix),
       h('div', { class: 'mnote', text: 'One captured request is checked for each endpoint on that branch. Or pick rows in Traffic, or a host in the Map, and choose "Check access".' }),
+      h(
+        'label',
+        { class: 'acid acunsafe', title: 'Off: only requests that read (GET, HEAD, OPTIONS) are replayed, so nothing is created, changed or deleted.' },
+        h('input', { type: 'checkbox', checked: AC.unsafe, onchange: (e) => (AC.unsafe = e.target.checked) }),
+        h('span', { class: 'acname', text: 'Also requests that change data' }),
+        h('span', { class: 'achdr', text: 'POST, PUT, PATCH, DELETE: replayed once per identity' }),
+      ),
     );
   }
 
@@ -877,6 +884,7 @@ async function runAccessCheck(body, main) {
   else {
     req.host = AC.host;
     req.prefix = AC.prefix;
+    req.include_unsafe = AC.unsafe;
   }
   try {
     AC.report = await api('/api/access-check', { method: 'POST', body: req });
@@ -893,17 +901,22 @@ function drawAccessReport(box) {
   const r = AC.report;
   if (!r) return clear(box);
   if (!r.rows.length) return clear(box, h('div', { class: 'empty', text: 'Nothing was checked. Pick some requests and run again.' }));
-  const flagged = r.rows.filter((row) => row.notes && row.notes.length).length;
+  const look = (row) => row.notes && row.notes.length && !row.public;
+  const flagged = r.rows.filter(look).length;
+  const skipped = r.skipped || [];
   const head = h(
     'div',
     { class: 'aclead' },
     `Checked ${r.rows.length} request${r.rows.length === 1 ? '' : 's'} as ${r.identities.length} identit${r.identities.length === 1 ? 'y' : 'ies'}` + (r.truncated ? ` (stopped at the ${r.sent}-request limit)` : '') + '.',
     flagged ? h('b', { class: 'acflag', text: ` ${flagged} to look at.` }) : h('span', { class: 'muted', text: ' Nothing stood out.' }),
+    skipped.length ? h('span', { class: 'muted', title: skipped.join('\n'), text: ` Left out ${skipped.length} that change${skipped.length === 1 ? 's' : ''} data.` }) : null,
   );
   const headCells = [h('th', { class: 'actarget', text: 'Request' })];
   for (const id of r.identities) headCells.push(h('th', { class: 'acidcol' + (id.anon ? ' anon' : ''), text: id.label, title: id.label }));
   const rows = [];
-  for (const row of r.rows) {
+  // Rows to look at first, then the rest, public pages last; otherwise as checked.
+  const rank = (row) => (look(row) ? 0 : row.public ? 2 : 1);
+  for (const row of [...r.rows].sort((a, b) => rank(a) - rank(b))) {
     const byId = {};
     for (const c of row.cells) byId[c.identity] = c;
     const tds = [h('td', { class: 'actarget' }, h('div', { class: 'acreq' }, h('span', { class: 'meth m-' + row.method, text: row.method }), h('span', { class: 'mono acpath', text: row.path, title: row.host + row.path })))];
@@ -924,12 +937,12 @@ function drawAccessReport(box) {
         ),
       );
     }
-    rows.push(h('tr', { class: row.notes && row.notes.length ? 'acnote' : '' }, tds));
+    rows.push(h('tr', { class: look(row) ? 'acnote' : '' }, tds));
     if (row.notes && row.notes.length) {
       rows.push(
         h(
           'tr',
-          { class: 'acnoterow' },
+          { class: 'acnoterow' + (row.public ? ' public' : '') },
           h('td', { colspan: String(r.identities.length + 1) }, h('div', { class: 'acnotes' }, row.notes.map((n) => h('span', { class: 'acnotechip' }, h('span', { class: 'acnoteico', text: '⚑' }), h('span', { text: n }))))),
         ),
       );
