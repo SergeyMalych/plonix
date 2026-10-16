@@ -1046,16 +1046,88 @@ async function callbacksToggle(stop) {
   drawCallbacks();
 }
 
+/** interactsh-client is missing: offers to download it, with the Go route for people who prefer to build it. */
 function callbacksInstallCard() {
-  const cmd = CB.data.install;
-  return h(
+  const d = CB.data;
+  const cmd = d.install;
+  const fill = h('div', { class: 'pbar-fill' });
+  const bar = h('div', { class: 'pbar', hidden: true }, fill);
+  const line = h('div', { class: 'muted fine cbline' });
+  const fail = h('div', { class: 'rerr', hidden: true });
+  const btn = h('button', { class: 'btn primary', text: `Download interactsh (${d.download_size || 'about 10 MB'})`, onclick: () => start() });
+  const card = h(
     'div',
     { class: 'empty cbinstall' },
-    h('h3', { text: 'One thing to install' }),
-    h('p', { class: 'mnote', text: `Callbacks are collected by interactsh, the open-source callback tool by ProjectDiscovery, which runs on ${THIS_COMPUTER}. Install it once in a terminal. It builds with Go in a minute or so, and Plonix finds it in ~/go/bin:` }),
-    h('div', { class: 'cbcmd' }, h('code', { text: cmd }), h('button', { class: 'btn sm', text: 'Copy', onclick: () => copyText(cmd) })),
-    h('div', { class: 'cbacts' }, h('button', { class: 'btn primary', text: 'Check again', onclick: () => renderCallbacks($('#main')) })),
+    h('h3', { text: 'Get interactsh' }),
+    h('p', {
+      class: 'mnote',
+      text: d.can_download
+        ? `Callbacks are collected by interactsh, the open-source callback tool by ProjectDiscovery. Plonix downloads it once from its GitHub release, checks it and keeps it with your Plonix data on ${THIS_COMPUTER}.`
+        : `Callbacks are collected by interactsh, the open-source callback tool by ProjectDiscovery. There is no download for ${THIS_COMPUTER}, so build it with Go in a terminal.`,
+    }),
+    d.can_download ? h('div', { class: 'cbacts' }, btn) : null,
+    bar,
+    line,
+    fail,
+    h(
+      'details',
+      { class: 'cbown', open: !d.can_download },
+      h('summary', { text: 'or install it yourself' }),
+      h('p', { class: 'mnote muted', text: 'Build it with Go in a terminal. Plonix finds it in ~/go/bin:' }),
+      h('div', { class: 'cbcmd' }, h('code', { text: cmd }), h('button', { class: 'btn sm', text: 'Copy', onclick: () => copyText(cmd) })),
+      h('div', { class: 'cbacts' }, h('button', { class: 'btn sm', text: 'Check again', onclick: () => renderCallbacks($('#main')) })),
+    ),
   );
+  const mb = (n) => (n / 1048576).toFixed(1);
+  const stages = { looking: 'Reading the release’s checksums…', unpacking: 'Unpacking…', verifying: 'Checking it…' };
+  const show = (p) => {
+    bar.hidden = false;
+    fill.style.width = (p.total ? Math.min(100, (p.received * 100) / p.total) : 0) + '%';
+    bar.classList.toggle('busy', p.stage !== 'downloading');
+    line.textContent = p.stage === 'downloading' ? `Downloading interactsh ${p.version} · ${mb(p.received)}${p.total ? ' of ' + mb(p.total) : ''} MB` : stages[p.stage] || '';
+  };
+  const follow = async () => {
+    while (card.isConnected) {
+      let p;
+      try {
+        p = (await loadCallbacks()).download || {};
+      } catch (e) {
+        p = { stage: 'failed', error: e.message };
+      }
+      if (p.stage === 'failed') {
+        bar.hidden = true;
+        line.textContent = '';
+        fail.hidden = false;
+        fail.textContent = 'Could not download interactsh: ' + (p.error || 'unknown error');
+        btn.textContent = 'Try again';
+        btn.disabled = false;
+        return;
+      }
+      if (p.stage === 'done' || CB.data.installed) return card.isConnected && drawCallbacks();
+      show(p);
+      await new Promise((ok) => setTimeout(ok, 400));
+    }
+  };
+  const start = async () => {
+    btn.disabled = true;
+    fail.hidden = true;
+    try {
+      show((await api('/api/callbacks/install', { method: 'POST' })).download || {});
+    } catch (e) {
+      btn.disabled = false;
+      fail.hidden = false;
+      fail.textContent = e.message;
+      return;
+    }
+    follow();
+  };
+  // A download started earlier keeps going in the background; pick it up.
+  if (d.download && ['looking', 'downloading', 'unpacking', 'verifying'].includes(d.download.stage)) {
+    btn.disabled = true;
+    show(d.download);
+    setTimeout(follow);
+  }
+  return card;
 }
 
 function drawCallbackHosts(box) {

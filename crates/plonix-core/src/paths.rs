@@ -13,6 +13,7 @@
 //! ├── settings.json          settings shared by all projects
 //! ├── logs/engine.log
 //! ├── crashes/               crash reports, never sent (see crate::crash)
+//! ├── tools/                 helper programs Plonix downloaded (see crate::interactsh)
 //! └── projects/              default place for new projects (see below)
 //! ```
 //!
@@ -99,6 +100,10 @@ impl Home {
     /// Crash reports, see [`crate::crash`].
     pub fn crashes_dir(&self) -> PathBuf {
         self.root.join("crashes")
+    }
+    /// Helper programs Plonix downloaded for the user, see [`crate::interactsh`].
+    pub fn tools_dir(&self) -> PathBuf {
+        self.root.join("tools")
     }
     pub fn browser_profile(&self) -> PathBuf {
         self.root.join("browser")

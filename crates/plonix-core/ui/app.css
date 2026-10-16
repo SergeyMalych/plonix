@@ -1577,6 +1577,13 @@ tr.acnote > td { border-bottom: none; }
 .cbcmd { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 14px 0; }
 .cbcmd code { font-size: 12px; padding: 7px 10px; text-align: left; line-height: 1.5; overflow-wrap: anywhere; }
 .cbacts { display: flex; justify-content: center; }
+.cbinstall .pbar { margin: 14px auto 0; max-width: 320px; }
+.cbinstall .cbline { margin-top: 6px; min-height: 17px; }
+.cbinstall .rerr { padding: 8px 0 0; }
+.cbown { margin-top: 18px; font-size: 12px; }
+.cbown summary { cursor: pointer; color: var(--fg-2); }
+.cbown .mnote { margin-top: 10px; }
+.cbown .cbcmd { margin: 10px 0; }
 
 /* manage-users sheet */
 .usersheet { width: min(520px, 86vw); display: flex; flex-direction: column; gap: 10px; }

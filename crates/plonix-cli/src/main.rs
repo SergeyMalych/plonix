@@ -4,6 +4,7 @@
 //! local API (see `client`), exactly like the GUI. The MCP server (`mcp`) is
 //! another front end over the same `client` and `render` modules.
 
+mod callbacks;
 mod client;
 mod community;
 mod connect;
@@ -55,6 +56,7 @@ Get started:
   plonix certs add api.example.com --cert c.pem --key k.pem   a client certificate (mutual TLS)
   plonix tech                      technologies detected on each host
   plonix findings                  what you found; `plonix findings export -o report.html` for a report
+  plonix callbacks payload -l ssrf a host that reports every DNS lookup or HTTP request reaching it
   plonix store                     community detection rule packs
   plonix extensions                sandboxed extensions: list, add, switch on and off, run
   plonix connect claude            let Claude Code read this project (read-only MCP)
@@ -196,6 +198,11 @@ enum Cmd {
     Bench {
         #[command(subcommand)]
         cmd: bench::BenchCmd,
+    },
+    /// Callbacks: hosts that tell you when a server reaches out (out-of-band checks)
+    Callbacks {
+        #[command(subcommand)]
+        cmd: Option<callbacks::CallbacksCmd>,
     },
     /// Detection rule packs: list, add from a file or URL, remove, check
     Rules {
@@ -554,6 +561,7 @@ fn dispatch(ctx: Ctx, command: Cmd) -> Result<ExitCode> {
         Cmd::Crawl(a) => scan::crawl_cmd(&ctx, a)?,
         Cmd::Findings { cmd } => findings::findings_cmd(&ctx, cmd.unwrap_or(findings::FindingsCmd::List { status: None }))?,
         Cmd::Bench { cmd } => bench::bench_cmd(&ctx, cmd)?,
+        Cmd::Callbacks { cmd } => callbacks::callbacks_cmd(&ctx, cmd.unwrap_or(callbacks::CallbacksCmd::Status))?,
         Cmd::Intercept { cmd } => intercept::intercept_cmd(&ctx, cmd.unwrap_or(intercept::InterceptCmd::Status))?,
         Cmd::Replace { cmd } => replace::replace_cmd(&ctx, cmd.unwrap_or(replace::ReplaceCmd::List))?,
         Cmd::Program { cmd } => program::program_cmd(&ctx, cmd.unwrap_or(program::ProgramCmd::Show))?,

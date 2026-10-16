@@ -153,15 +153,17 @@ pub fn stable_download(list: &Value, platform: &str) -> Result<(String, String)>
     Ok((version.to_string(), url.to_string()))
 }
 
-fn agent() -> Result<ureq::Agent> {
+/// An HTTP client for downloads from `url`'s host, through `HTTPS_PROXY`
+/// when one is set. Also used for other downloads (see [`crate::interactsh`]).
+pub(crate) fn agent(url: &str) -> Result<ureq::Agent> {
     let mut b = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(15)).timeout_read(Duration::from_secs(60)).redirects(3);
-    if let Some(p) = crate::registry::env_proxy(VERSIONS_URL)? {
+    if let Some(p) = crate::registry::env_proxy(url)? {
         b = b.proxy(p);
     }
     Ok(b.build())
 }
 
-fn get(agent: &ureq::Agent, url: &str) -> Result<ureq::Response> {
+pub(crate) fn get(agent: &ureq::Agent, url: &str) -> Result<ureq::Response> {
     agent.get(url).call().map_err(|e| match e {
         ureq::Error::Status(code, _) => anyhow!("{url}: HTTP {code}"),
         ureq::Error::Transport(t) => anyhow!("could not download it ({t}); check your internet connection and try again"),
@@ -175,7 +177,7 @@ pub fn install(home: &Home, on: &dyn Fn(&Progress)) -> Result<Installed> {
     let platform = platform().ok_or_else(|| anyhow!("the Plonix browser is available for macOS and 64-bit Linux only"))?;
     let mut p = Progress { stage: Stage::Looking, ..Progress::default() };
     on(&p);
-    let agent = agent()?;
+    let agent = agent(VERSIONS_URL)?;
     let list: Value = get(&agent, VERSIONS_URL)?.into_json().context("reading the Chrome for Testing version list")?;
     let (version, url) = stable_download(&list, platform)?;
     p.version = version.clone();
@@ -188,33 +190,7 @@ pub fn install(home: &Home, on: &dyn Fn(&Progress)) -> Result<Installed> {
     let result = (|| -> Result<Installed> {
         p.stage = Stage::Downloading;
         on(&p);
-        let resp = get(&agent, &url)?;
-        p.total = resp.header("content-length").and_then(|v| v.parse().ok()).unwrap_or(0);
-        if p.total > MAX_DOWNLOAD {
-            bail!("the download is unexpectedly large ({} bytes); refusing it", p.total);
-        }
-        let mut reader = resp.into_reader().take(MAX_DOWNLOAD + 1);
-        let mut file = std::fs::File::create(&zip).with_context(|| format!("creating {}", zip.display()))?;
-        let mut buf = vec![0u8; 256 * 1024];
-        let mut told = Instant::now();
-        loop {
-            let n = reader.read(&mut buf).context("downloading the browser")?;
-            if n == 0 {
-                break;
-            }
-            file.write_all(&buf[..n]).context("saving the download")?;
-            p.received += n as u64;
-            if told.elapsed() > Duration::from_millis(150) {
-                on(&p);
-                told = Instant::now();
-            }
-        }
-        file.flush()?;
-        drop(file);
-        if p.received > MAX_DOWNLOAD || (p.total > 0 && p.received != p.total) {
-            bail!("the download was cut off ({} of {} bytes); try again", p.received, p.total);
-        }
-        on(&p);
+        save(get(&agent, &url)?, &zip, MAX_DOWNLOAD, &mut p, on, &mut |_| {})?;
 
         p.stage = Stage::Unpacking;
         on(&p);
@@ -260,9 +236,44 @@ pub fn install(home: &Home, on: &dyn Fn(&Progress)) -> Result<Installed> {
     }
 }
 
+/// Saves a download to `dest`, telling `on` how far it has come and handing
+/// every chunk to `sink` (to hash it on the way). Refuses anything over `max`
+/// bytes and a download that was cut off.
+pub(crate) fn save(resp: ureq::Response, dest: &Path, max: u64, p: &mut Progress, on: &dyn Fn(&Progress), sink: &mut dyn FnMut(&[u8])) -> Result<()> {
+    p.received = 0;
+    p.total = resp.header("content-length").and_then(|v| v.parse().ok()).unwrap_or(0);
+    if p.total > max {
+        bail!("the download is unexpectedly large ({} bytes); refusing it", p.total);
+    }
+    let mut reader = resp.into_reader().take(max + 1);
+    let mut file = std::fs::File::create(dest).with_context(|| format!("creating {}", dest.display()))?;
+    let mut buf = vec![0u8; 256 * 1024];
+    let mut told = Instant::now();
+    loop {
+        let n = reader.read(&mut buf).context("downloading")?;
+        if n == 0 {
+            break;
+        }
+        file.write_all(&buf[..n]).context("saving the download")?;
+        sink(&buf[..n]);
+        p.received += n as u64;
+        if told.elapsed() > Duration::from_millis(150) {
+            on(p);
+            told = Instant::now();
+        }
+    }
+    file.flush()?;
+    drop(file);
+    if p.received > max || (p.total > 0 && p.received != p.total) {
+        bail!("the download was cut off ({} of {} bytes); try again", p.received, p.total);
+    }
+    on(p);
+    Ok(())
+}
+
 /// Unpacks a zip with the system's own tool, which keeps the symlinks and
 /// permissions a macOS app bundle relies on.
-fn unzip(zip: &Path, dest: &Path) -> Result<()> {
+pub(crate) fn unzip(zip: &Path, dest: &Path) -> Result<()> {
     let mut cmd = if cfg!(target_os = "macos") {
         let mut c = Command::new("/usr/bin/ditto");
         c.args(["-x", "-k"]).arg(zip).arg(dest);
@@ -279,17 +290,17 @@ fn unzip(zip: &Path, dest: &Path) -> Result<()> {
     };
     let out = cmd.stdin(Stdio::null()).output().map_err(|e| match e.kind() {
         std::io::ErrorKind::NotFound => anyhow!("`unzip` is not installed; install it and try again"),
-        _ => anyhow!("unpacking the browser: {e}"),
+        _ => anyhow!("unpacking the download: {e}"),
     })?;
     if !out.status.success() {
-        bail!("unpacking the browser failed: {}", String::from_utf8_lossy(&out.stderr).trim());
+        bail!("unpacking the download failed: {}", String::from_utf8_lossy(&out.stderr).trim());
     }
     Ok(())
 }
 
 /// macOS refuses to open downloaded apps that carry the quarantine mark
 /// without asking the user; this copy was fetched on purpose.
-fn unquarantine(dir: &Path) {
+pub(crate) fn unquarantine(dir: &Path) {
     if cfg!(target_os = "macos") {
         let _ = Command::new("/usr/bin/xattr").args(["-dr", "com.apple.quarantine"]).arg(dir).stdin(Stdio::null()).stderr(Stdio::null()).status();
     }
