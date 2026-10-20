@@ -14,7 +14,7 @@ On Windows, use Ctrl where the Mac uses ⌘.
 
 | Shortcut | What it does |
 |---|---|
-| ⌘1 to ⌘9 | Traffic, Bench, Scope, Map, Findings, Agents, Market, Scans, Programs |
+| ⌘1 to ⌘9 | Traffic, Bench, Scope, Map, Users, Access, Findings, Agents, Callbacks, top to bottom as the sidebar lists them |
 | ⌘O | Open target in the capture browser |
 | ⌘N | New project |
 | ⇧⌘P | The Start screen |

@@ -72,9 +72,10 @@ function useTool(id, action) {
   });
 }
 
-/** Screens with a number key (⌘1-⌘9 in the app), in the order of the app's
- * View menu (plonix-app/src/main.rs), so a hint always names the right key. */
-const SHORTCUTS = ['traffic', 'bench', 'scope', 'map', 'findings', 'agents', 'market', 'scans', 'programs'];
+/** Screens with a number key (⌘1-⌘9 in the app), top to bottom as the sidebar
+ * lists them, and in the order of the app's View menu (plonix-app/src/main.rs),
+ * so a hint always names the right key. */
+const SHORTCUTS = ['traffic', 'bench', 'scope', 'map', 'users', 'access', 'findings', 'agents', 'callbacks'];
 const shownView = (key) => !!VIEWS[key] && !VIEWS[key].footer && (!VIEWS[key].tool || toolOn(VIEWS[key].tool));
 
 /** Screens that sit under "More tools" until opened, so a new project starts
@@ -223,8 +224,60 @@ function railShade() {
 }
 window.addEventListener('resize', railShade);
 
+/** Folded to icons, the sidebar names a button the moment the pointer is on it,
+ *  beside the icon, rather than after the browser's slow title delay. The title
+ *  is lifted off while the name shows, so the two never appear together. */
+let railTipOn = null;
+function hideRailTip() {
+  $('#railtip')?.remove();
+  const b = railTipOn;
+  railTipOn = null;
+  if (b && !b.title && b.dataset.tip) b.title = b.dataset.tip;
+}
+function showRailTip(b) {
+  const text = b.title || b.dataset.tip;
+  if (!text) return;
+  b.dataset.tip = text;
+  b.removeAttribute('title');
+  railTipOn = b;
+  const m = text.match(/^(.*?)\s{2}\((.+)\)$/);
+  const note = b.querySelector('.ct.hot')?.title;
+  const tip = h(
+    'div',
+    { class: 'railtip', id: 'railtip', role: 'tooltip' },
+    h('span', { class: 'rtname' }, m ? m[1] : text, m ? h('kbd', { text: m[2] }) : null),
+    note ? h('span', { class: 'rtnote', text: note }) : null,
+  );
+  document.body.append(tip);
+  const r = b.getBoundingClientRect();
+  const half = tip.offsetHeight / 2;
+  const mid = Math.max(6 + half, Math.min(innerHeight - 6 - half, r.top + r.height / 2));
+  tip.style.left = Math.round(r.right + 8) + 'px';
+  tip.style.top = Math.round(mid - half) + 'px';
+  tip.style.setProperty('--arrow', Math.round(r.top + r.height / 2 - (mid - half)) + 'px');
+}
+const railTipTarget = (el) => el?.closest?.('.rail.collapsed button:not(.railmore)') || null;
+document.addEventListener('mouseover', (e) => {
+  const b = railTipTarget(e.target);
+  if (b === railTipOn) return;
+  hideRailTip();
+  if (b) showRailTip(b);
+});
+document.addEventListener('mouseout', (e) => {
+  if (!e.relatedTarget) hideRailTip();
+});
+document.addEventListener('focusin', (e) => {
+  const b = railTipTarget(e.target);
+  if (b === railTipOn) return;
+  hideRailTip();
+  if (b && b.matches(':focus-visible')) showRailTip(b);
+});
+document.addEventListener('focusout', () => hideRailTip());
+document.addEventListener('scroll', () => hideRailTip(), true);
+
 function toggleSidebar() {
   S.railCollapsed = !S.railCollapsed;
+  hideRailTip();
   store('plonix.rail', S.railCollapsed ? 'collapsed' : null);
   const rail = $('#rail');
   if (rail) rail.classList.toggle('collapsed', S.railCollapsed);
@@ -248,6 +301,7 @@ function setRailCollapsed(on) {
   if (S.railCollapsed === on) return;
   S.railCollapsed = on;
   store('plonix.rail', on ? 'collapsed' : null);
+  hideRailTip();
   $('#rail')?.classList.toggle('collapsed', on);
   updateToggle();
 }

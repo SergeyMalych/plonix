@@ -63,11 +63,11 @@ const VIEW_ITEMS: [(&str, &str, &str, &str); 9] = [
     ("go-bench", "Bench", "CmdOrCtrl+2", "window.plonix && plonix.go('bench')"),
     ("go-scope", "Scope", "CmdOrCtrl+3", "window.plonix && plonix.go('scope')"),
     ("go-map", "Map", "CmdOrCtrl+4", "window.plonix && plonix.go('map')"),
-    ("go-findings", "Findings", "CmdOrCtrl+5", "window.plonix && plonix.go('findings')"),
-    ("go-agents", "Agents", "CmdOrCtrl+6", "window.plonix && plonix.go('agents')"),
-    ("go-market", "Market", "CmdOrCtrl+7", "window.plonix && plonix.go('market')"),
-    ("go-scans", "Scans", "CmdOrCtrl+8", "window.plonix && plonix.go('scans')"),
-    ("go-programs", "Programs", "CmdOrCtrl+9", "window.plonix && plonix.go('programs')"),
+    ("go-users", "Users", "CmdOrCtrl+5", "window.plonix && plonix.go('users')"),
+    ("go-access", "Access", "CmdOrCtrl+6", "window.plonix && plonix.go('access')"),
+    ("go-findings", "Findings", "CmdOrCtrl+7", "window.plonix && plonix.go('findings')"),
+    ("go-agents", "Agents", "CmdOrCtrl+8", "window.plonix && plonix.go('agents')"),
+    ("go-callbacks", "Callbacks", "CmdOrCtrl+9", "window.plonix && plonix.go('callbacks')"),
 ];
 const OPEN_TARGET_SCRIPT: &str = "window.plonix && plonix.openTarget()";
 const TOGGLE_SIDEBAR_SCRIPT: &str = "window.plonix && plonix.toggleSidebar()";
