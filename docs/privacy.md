@@ -90,6 +90,8 @@ The counted features are a fixed list:
 - Anything you type: searches, payloads, prompts, notes
 - Your name, email, user name, computer name or hardware identifiers
 
+The one-time "Star Plonix on GitHub" card is counted separately and only on your computer: `star.json` in the Plonix folder keeps how many days you used Plonix and whether you answered the card. It is never sent, whether usage statistics are on or off.
+
 ## On the server
 
 The endpoint is a small function on the Plonix website (`functions/api/usage.js` in this repository). It accepts only the fields above and treats every one of them as untrusted: names must come from the fixed lists above (any other feature, screen, kind, range or domain is dropped), the version must look like `1.2.3`, the OS and CPU type must be known ones (anything else is stored as `other`), the OS release keeps digits only, and every number is a capped whole number. Nothing is stored as free text, and stores one row per install per day: the date, the fields above, and nothing else. It never reads or stores your IP address or request headers, the User-Agent included. A failed send is silent: Plonix never waits on it or retries more than once a day.

@@ -143,6 +143,7 @@ function exportMenu(anchor) {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
       toast(`Exported ${name}`, 'ok');
+      starMoment('finished');
     } catch (e) {
       toast(e.message, 'err');
     }
@@ -252,6 +253,7 @@ function findingForm(f, ids = [], title = '', hint = null) {
       S.findingsCount = (S.findingsCount || 0) + 1;
       updateChrome();
       if (S.view === 'findings') loadFindings();
+      starMoment('finished');
     } catch (e) {
       m.err.textContent = e.message;
     }

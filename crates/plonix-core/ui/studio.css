@@ -130,3 +130,8 @@
 [data-style="studio"] .usst.warn { background: var(--st-yellow); color: #1e1c19; }
 [data-style="studio"] .usst.crit { background: var(--st-red); color: #fff; }
 [data-style="studio"] :is(.usgchip, .usseen) { border-radius: 999px; }
+
+/* the star card: a flat yellow disc with an ink star */
+[data-style="studio"] .starcard { border-radius: 14px; }
+[data-style="studio"] .starcard .starmark { background: var(--st-yellow); color: #1e1c19; }
+[data-style="studio"] .starcard .starx { border-radius: 999px; }

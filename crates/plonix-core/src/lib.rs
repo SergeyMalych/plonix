@@ -67,6 +67,7 @@ pub mod scan;
 pub mod scope;
 pub mod shelf;
 pub mod skill;
+pub mod star;
 pub mod session;
 pub mod settings;
 pub mod store;

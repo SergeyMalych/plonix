@@ -888,6 +888,7 @@ async function runAccessCheck(body, main) {
   }
   try {
     AC.report = await api('/api/access-check', { method: 'POST', body: req });
+    starMoment('finished');
   } catch (e) {
     AC.err = e.message;
   }

@@ -239,6 +239,7 @@ function renderBench(main) {
       });
       tab.history = tab.history.slice(0, 100);
       tab.cur = ex.id;
+      if (!ex.error) starMoment('sent');
     } catch (e) {
       tab.error = { code: e.code, message: e.message, host: hostOf(tab.url) };
       tab.cur = null;

@@ -10,6 +10,7 @@ What changed in each Plonix release. The newest release is at the top.
 - **Users and the Access check in the terminal.** `plonix users`, `plonix access <ids>` or `plonix access --host … --prefix …` (a table with the rows worth a look marked), and `plonix replay <id> --as <user>`.
 - **Callbacks without Go.** One click (or `plonix callbacks install`) downloads interactsh-client from its GitHub release, checks its checksum and keeps it with your Plonix data. The new `plonix callbacks` command starts, stops and lists callbacks and makes hosts.
 - **Two new walkthrough stops**: the Access check and Callbacks.
+- **A one-time "Star Plonix on GitHub" card.** It shows only from your third day of use, right after you save a finding, finish an Access check or save a report (after a week, a Bench send that comes back counts too). Never on first launch, in the demo, or over a dialog. **Maybe later** asks again in two weeks, once; **No thanks** or a star ends it. Counted on your computer only.
 
 ### Changed
 - **A new era of web assessments.** The website and README lead with what Plonix is for, on macOS and Windows alike, with a phone menu and fresh window screenshots.
