@@ -108,6 +108,12 @@ code, .mono { font-family: var(--mono); }
 .rail.collapsed .nl, .rail.collapsed .railsecs, .rail.collapsed .nav button .ct:not(.hot) { display: none; }
 .rail.collapsed .nav button, .rail.collapsed .opentarget, .rail.collapsed .railtoggle { justify-content: center; position: relative; padding: 7px 0; }
 .rail.collapsed .nav button .ct.hot { position: absolute; top: 1px; right: 1px; font-size: 9px; padding: 0 4px; }
+/* folded sidebar: a button's name, shown at once beside its icon */
+.railtip { position: fixed; z-index: 90; pointer-events: none; display: flex; flex-direction: column; gap: 2px; max-width: 260px; background: var(--fg); color: var(--surface); border-radius: 7px; padding: 5px 9px; font-size: 12px; font-weight: 500; line-height: 1.35; white-space: nowrap; box-shadow: 0 2px 10px rgba(0, 0, 0, .18); }
+.railtip::before { content: ''; position: absolute; left: -4px; top: calc(var(--arrow, 50%) - 4px); width: 8px; height: 8px; background: inherit; transform: rotate(45deg); border-radius: 1px; }
+.railtip .rtname { display: flex; align-items: center; gap: 8px; }
+.railtip kbd { color: inherit; opacity: .7; border-color: currentColor; font-size: 10px; line-height: 14px; }
+.railtip .rtnote { font-weight: 400; font-size: 11px; opacity: .75; white-space: normal; }
 
 /* main */
 .main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--surface); }

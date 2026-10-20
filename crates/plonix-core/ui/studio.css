@@ -59,6 +59,8 @@
 [data-style="studio"] .rail .nav button:hover, [data-style="studio"] .rail .railtoggle:hover { background: #ffffff1f; color: #fff; }
 [data-style="studio"] .rail .nav button.on { background: #f1b11b; color: #1e1c19; font-weight: 600; --st-ink: #1e1c19; --st-blue: #1d4fc4; }
 [data-style="studio"] .rail .nav button.on .ct { color: #1e1c19b0; }
+[data-style="studio"] .railtip { background: var(--st-ink); color: var(--surface); border-radius: 999px; padding: 5px 12px; box-shadow: none; font-weight: 600; }
+[data-style="studio"] .railtip:has(.rtnote) { border-radius: 12px; }
 [data-style="studio"] .rail .nav button .ct.hot { background: #e5401f; color: #fff; }
 [data-style="studio"] .rail .opentarget { color: #fff; border: 1.5px solid #ffffff70; border-radius: 999px; background: transparent; }
 [data-style="studio"] .rail .opentarget .ico { color: #fff; }
