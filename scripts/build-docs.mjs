@@ -24,7 +24,7 @@ const RAW = 'https://raw.githubusercontent.com/SergeyMalych/plonix/main';
 
 // Sidebar sections, in order; docs not listed here go under "More", by name.
 const GROUPS = [
-  ['Get started', ['getting-started', 'app', 'projects', 'setup']],
+  ['Get started', ['getting-started', 'install', 'app', 'projects', 'setup']],
   ['Capture and explore', ['traffic', 'filters', 'scope', 'map', 'rules']],
   ['Experiment and prove', ['bench', 'users', 'callbacks', 'scanning', 'findings', 'programs']],
   ['AI and the Market', ['agents', 'market', 'detection-rules', 'extensions']],

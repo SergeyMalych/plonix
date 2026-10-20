@@ -6,9 +6,9 @@ Plonix captures the traffic between your browser and the application you are tes
 
 ## Install
 
-**Mac.** Download [Plonix for Mac](https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-macOS.dmg) (Apple silicon and Intel, macOS 11 or later), open it and drag Plonix to Applications. Releases are not notarized by Apple yet, so macOS asks before opening Plonix the first time: open it, click **Done**, then go to **System Settings › Privacy & Security** and click **Open Anyway** next to Plonix. Or run `xattr -dr com.apple.quarantine /Applications/Plonix.app` once.
+**Mac.** Download [Plonix for Mac](https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-macOS.dmg) (Apple silicon and Intel, macOS 11 or later), open it and drag Plonix to Applications. Releases are not notarized by Apple yet, so macOS asks before opening Plonix the first time: open it, click **Done**, then go to **System Settings › Privacy & Security** and click **Open Anyway** next to Plonix. Or run `xattr -dr com.apple.quarantine /Applications/Plonix.app` once. [Install and open Plonix](install.md) shows each step with pictures.
 
-**Windows.** Download [Plonix for Windows](https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-Windows-setup.exe) (64-bit Windows 10 or 11) and run it. The installer is not code-signed yet, so SmartScreen may say it protected your PC: click **More info**, then **Run anyway**. Plonix keeps its data in `%USERPROFILE%\.plonix`.
+**Windows.** Download [Plonix for Windows](https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-Windows-setup.exe) (64-bit Windows 10 or 11) and run it. The installer is not code-signed yet, so SmartScreen may say it protected your PC: click **More info**, then **Run anyway** ([with pictures](install.md#on-windows)). Plonix keeps its data in `%USERPROFILE%\.plonix`.
 
 Every release is on the [releases page](https://github.com/SergeyMalych/plonix/releases), with what changed in [CHANGELOG.md](../CHANGELOG.md). To build Plonix yourself, see [Build from source](../README.md#build-from-source) in the README.
 
