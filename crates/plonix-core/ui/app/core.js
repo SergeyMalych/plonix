@@ -112,6 +112,7 @@ async function boot() {
   renderShell();
   poll();
   if (LENS_WINDOW) return openInspector(LENS_WINDOW);
+  starOpen();
   if (S.status.demo && !pstore('plonix.demoTourSeen')) autoTour();
 }
 

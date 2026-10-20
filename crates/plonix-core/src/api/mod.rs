@@ -122,6 +122,7 @@ pub fn router(engine: Arc<Engine>, tokens: Tokens, api_addr: SocketAddr, home: H
         .route("/ui/session", post(ui_session))
         .route("/api/ui/launch", post(ui_launch))
         .route("/api/ui/style", get(ui_style).put(put_ui_style))
+        .route("/api/ui/star", post(ui_star))
         .route("/api/status", get(status))
         .route("/api/usage", get(usage_preview).post(usage_screen))
         .route("/api/usage/reset", post(usage_reset))
@@ -245,6 +246,23 @@ async fn put_ui_style(State(s): State<AppState>, Json(b): Json<Value>) -> Respon
     match crate::settings::set_look(&s.home, &b) {
         Ok(()) => Json(crate::settings::look(&s.home)).into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, "bad_style", &e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct StarBody {
+    event: String,
+}
+
+/// The "Star Plonix on GitHub" card: the window reports an event and hears
+/// whether to show the card now. Counted on this computer only.
+async fn ui_star(State(s): State<AppState>, Json(b): Json<StarBody>) -> Response {
+    let Some(event) = crate::star::Event::parse(&b.event) else {
+        return err(StatusCode::BAD_REQUEST, "bad_event", "event must be open, finished, sent, later, never or starred");
+    };
+    match crate::star::note(&s.home, event) {
+        Ok(ask) => Json(json!({ "ask": ask })).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, "star_failed", &e.to_string()),
     }
 }
 

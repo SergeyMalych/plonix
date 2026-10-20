@@ -2003,3 +2003,14 @@ iframe.tourreport { display: block; width: 100%; height: min(52vh, 440px); borde
 }
 :root[data-density="roomy"] .usrow { padding: 5px 14px; }
 :root[data-density="roomy"] .usrow input { height: 30px; }
+
+/* the one-time "Star Plonix on GitHub" card (app/star.js), above any toasts */
+.starcard { position: relative; display: flex; gap: 11px; align-items: flex-start; width: 364px; max-width: 100%; box-sizing: border-box; background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); padding: 12px 34px 11px 12px; animation: tourin 0.18s ease; }
+.starcard .starmark { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-size: 16px; line-height: 1; }
+.starcard .starbody { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.starcard b { font-size: 13px; }
+.starcard p { margin: 0; font-size: 12px; line-height: 1.45; color: var(--fg-2); }
+.starcard .staracts { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.starcard .staracts a.btn { text-decoration: none; }
+.starcard .starx { position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--fg-3); font-size: 11px; }
+.starcard .starx:hover { color: var(--fg); background: var(--surface-2); }
