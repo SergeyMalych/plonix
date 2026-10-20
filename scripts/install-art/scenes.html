@@ -1,0 +1,190 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face { font-family: Jost; src: url(../../crates/plonix-core/ui/fonts/jost.woff2) format("woff2"); font-weight: 100 900; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+:root {
+  --bg: #ece5d6; --bg2: #e4dccb; --red: #e5401f; --blue: #1d4fc4; --yellow: #f1b11b; --green: #16875a; --ink: #1e1c19;
+  --win: #ffffff; --win-2: #f5f5f7; --win-line: #d9d9de; --win-fg: #1d1d1f; --win-muted: #6e6e73; --side: #ececef; --sel: #0a63d8;
+  --label-bg: #1e1c19; --label-fg: #faf6ee;
+}
+.dark {
+  --bg: #13120f; --bg2: #1c1a17; --red: #ff5a36; --blue: #5a86ff; --yellow: #ffc533; --green: #3dbb83; --ink: #efe8da;
+  --win: #2a2a2c; --win-2: #232325; --win-line: #3d3d40; --win-fg: #f2f2f4; --win-muted: #a1a1a6; --side: #212123; --sel: #0a63d8;
+  --label-bg: #faf6ee; --label-fg: #1e1c19;
+}
+#stage { position: relative; width: 960px; height: 540px; overflow: hidden; background: var(--bg); font-family: Inter, sans-serif; color: var(--win-fg); }
+.geo { position: absolute; border-radius: 50%; }
+.g1 { width: 380px; height: 380px; right: -120px; top: -150px; background: var(--yellow); }
+.g2 { width: 260px; height: 130px; border-radius: 260px 260px 0 0; left: 40px; bottom: 0; background: var(--green); }
+.g3 { width: 64px; height: 64px; border-radius: 0; right: 70px; bottom: 56px; background: var(--blue); }
+.step { position: absolute; left: 34px; top: 30px; display: flex; align-items: center; gap: 12px; font: 600 22px/1 Jost, sans-serif; color: var(--ink); z-index: 3; }
+.step b { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--red); color: #fff; font-size: 24px; }
+.ring { position: absolute; border: 4px solid var(--red); border-radius: 14px; z-index: 4; pointer-events: none; }
+.tag { position: absolute; z-index: 5; background: var(--red); color: #fff; font: 600 19px/1 Jost, sans-serif; padding: 10px 16px; border-radius: 999px; white-space: nowrap; }
+.shadow { box-shadow: 0 30px 70px -20px rgba(30, 20, 5, .45), 0 0 0 1px rgba(0,0,0,.08); }
+.dark .shadow { box-shadow: 0 30px 70px -20px rgba(0,0,0,.8), 0 0 0 1px rgba(255,255,255,.08); }
+
+/* macOS alert */
+.alert { position: absolute; width: 400px; background: var(--win); border-radius: 22px; padding: 26px 26px 22px; z-index: 2; }
+.alert .help { position: absolute; right: 18px; top: 18px; width: 30px; height: 30px; border-radius: 50%; border: 1.5px solid var(--win-line); display: grid; place-items: center; color: var(--win-muted); font-weight: 600; font-size: 17px; }
+.alert h3 { margin: 18px 0 10px; font-size: 21px; font-weight: 700; }
+.alert p { margin: 0 0 20px; font-size: 17px; line-height: 1.38; }
+.mbtn { display: block; text-align: center; padding: 11px; border-radius: 11px; font-size: 17px; font-weight: 500; background: var(--win-2); border: 1px solid var(--win-line); }
+.mbtn.blue { background: #0a7aff; border-color: #0a7aff; color: #fff; }
+.mbtn + .mbtn { margin-top: 10px; }
+.gk { position: relative; width: 74px; height: 74px; }
+.gk .body { position: absolute; inset: 0; border-radius: 18px; background: linear-gradient(#b8bcc4, #7f848d); }
+.gk .dial { position: absolute; left: 13px; top: 13px; width: 48px; height: 48px; border-radius: 50%; background: radial-gradient(circle at 50% 50%, #e9ebee 0 9px, #5d636c 9px 12px, #c9ccd2 12px 22px, #6a7079 22px); }
+.gk .warn { position: absolute; right: -10px; bottom: -6px; width: 36px; height: 32px; }
+
+/* windows: mac frame */
+.mwin { position: absolute; background: var(--win); border-radius: 14px; overflow: hidden; z-index: 2; }
+.tbar { height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 16px; background: var(--win-2); border-bottom: 1px solid var(--win-line); font-size: 15px; font-weight: 600; color: var(--win-muted); }
+.tbar i { width: 13px; height: 13px; border-radius: 50%; background: #ff5f57; }
+.tbar i:nth-child(2) { background: #febc2e; } .tbar i:nth-child(3) { background: #28c840; }
+.tbar span { margin-left: auto; margin-right: auto; transform: translateX(-30px); }
+
+/* settings */
+.set { display: grid; grid-template-columns: 220px 1fr; height: calc(100% - 44px); }
+.side { background: var(--side); padding: 14px 10px; font-size: 15px; }
+.side div { padding: 7px 10px; border-radius: 8px; display: flex; gap: 10px; align-items: center; color: var(--win-fg); }
+.side div::before { content: ""; width: 20px; height: 20px; border-radius: 6px; background: var(--c, #8e8e93); flex: none; }
+.side .sel { background: var(--sel); color: #fff; }
+.pane { padding: 20px 26px; }
+.pane h4 { margin: 0 0 16px; font-size: 20px; }
+.pane .sec { font-size: 14px; font-weight: 700; color: var(--win-muted); margin: 16px 0 8px; }
+.card { background: var(--win-2); border: 1px solid var(--win-line); border-radius: 10px; }
+.row { display: flex; align-items: center; justify-content: space-between; padding: 13px 16px; font-size: 15px; gap: 16px; }
+.row + .row { border-top: 1px solid var(--win-line); }
+.pop { padding: 5px 12px; border-radius: 7px; background: var(--win); border: 1px solid var(--win-line); font-size: 14px; }
+.pbtn { padding: 6px 14px; border-radius: 7px; background: var(--win); border: 1px solid var(--win-line); font-size: 14px; font-weight: 500; white-space: nowrap; }
+.faded { opacity: .45; }
+
+/* dmg */
+.dmg { display: flex; align-items: center; justify-content: space-around; height: calc(100% - 44px); padding: 0 40px; font-size: 16px; }
+.icon { display: grid; justify-items: center; gap: 12px; }
+.arrow { width: 120px; height: 30px; }
+
+/* terminal */
+.term { background: #13141f; }
+.term .tbar { background: #1d1f2a; border-color: #2a2c3a; color: #a2a5bb; }
+.term pre { margin: 0; padding: 22px 24px; font: 17px/1.6 "JetBrains Mono", monospace; color: #d5d7ea; white-space: pre-wrap; }
+.term .p { color: #8b93ff; } .term .c { color: #7c7f99; }
+
+/* windows smartscreen */
+.ss { position: absolute; width: 560px; height: 380px; background: #0067c0; color: #fff; z-index: 2; font-family: Inter, sans-serif; padding: 34px 40px; }
+.ss .x { position: absolute; right: 16px; top: 10px; font-size: 22px; font-weight: 300; }
+.ss h3 { margin: 0 0 22px; font-size: 32px; font-weight: 300; letter-spacing: -.01em; }
+.ss p { margin: 0 0 14px; font-size: 16px; line-height: 1.45; }
+.ss u { font-size: 16px; }
+.ss dl { display: grid; grid-template-columns: 90px 1fr; gap: 6px 10px; font-size: 16px; margin: 4px 0 0; }
+.ss dt { opacity: .85; } .ss dd { margin: 0; }
+.ss .btns { position: absolute; right: 26px; bottom: 22px; display: flex; gap: 10px; }
+.ss .btns span { min-width: 120px; text-align: center; padding: 9px 18px; border: 2px solid rgba(255,255,255,.85); font-size: 16px; }
+.ss ~ .ring.y { border-color: #ffc533; }
+.ss .btns .solid { background: rgba(255,255,255,.18); }
+</style></head>
+<body>
+<div id="stage">
+  <i class="geo g1"></i><i class="geo g2"></i><i class="geo g3"></i>
+  <div id="scene"></div>
+</div>
+<script>
+const q = new URLSearchParams(location.search);
+if (q.get('theme') === 'dark') document.documentElement.classList.add('dark');
+const S = document.getElementById('scene');
+const GK = `<div class="gk"><div class="body"></div><div class="dial"></div><svg class="warn" viewBox="0 0 36 32"><path d="M18 2 L34 30 H2 Z" fill="#ffcc00" stroke="#fff" stroke-width="2.5" stroke-linejoin="round"/><path d="M18 11v9" stroke="#1d1d1f" stroke-width="3.2" stroke-linecap="round"/><circle cx="18" cy="25" r="1.9" fill="#1d1d1f"/></svg></div>`;
+const MARK = `<svg width="96" height="96" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#e5401f"/><rect x="7" y="6" width="5" height="20" fill="#1e1c19"/><circle cx="18" cy="13" r="7" fill="#f1b11b"/><path d="M18 6a7 7 0 0 1 0 14z" fill="#1d4fc4"/></svg>`;
+const FOLDER = `<svg width="104" height="96" viewBox="0 0 52 48"><path d="M2 8a4 4 0 0 1 4-4h13l5 5h22a4 4 0 0 1 4 4v29a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4z" fill="#3b9cf5"/><path d="M2 15h48v27a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4z" fill="#62b3ff"/><path d="M18 32 l8 -12 l8 12 z M22 32 h8" stroke="#fff" stroke-width="2.4" fill="none" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+const step = (n, t) => `<div class="step"><b>${n}</b>${t}</div>`;
+const scenes = {
+  'mac-1': () => `${step(1, 'Open the .dmg')}
+    <div class="mwin shadow" style="left:190px;top:120px;width:580px;height:330px">
+      <div class="tbar"><i></i><i></i><i></i><span>Plonix</span></div>
+      <div class="dmg"><div class="icon">${MARK}Plonix</div>
+        <svg class="arrow" viewBox="0 0 120 30"><path d="M4 15h100" stroke="var(--win-muted)" stroke-width="4" stroke-linecap="round" stroke-dasharray="2 10"/><path d="M98 5l14 10-14 10" fill="none" stroke="var(--win-muted)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div class="icon">${FOLDER}Applications</div></div>
+    </div>
+    <div class="tag" style="left:356px;top:470px">Drag Plonix to Applications</div>`,
+  'mac-2': () => `${step(2, 'Open Plonix, then click Done')}
+    <div class="alert shadow" style="left:280px;top:96px">
+      <div class="help">?</div>${GK}
+      <h3>“Plonix” Not Opened</h3>
+      <p>Apple could not verify “Plonix” is free of malware that may harm your Mac or compromise your privacy.</p>
+      <span class="mbtn blue" data-hit="right" data-tag="Click Done">Done</span>
+    </div>`,
+  'mac-3': () => `${step(3, 'System Settings › Privacy & Security')}
+    <div class="mwin shadow" style="left:70px;top:96px;width:820px;height:420px">
+      <div class="tbar"><i></i><i></i><i></i></div>
+      <div class="set">
+        <div class="side">
+          <div style="--c:#8e8e93" class="faded">General</div><div style="--c:#1c1c1e" class="faded">Appearance</div><div style="--c:#0a84ff" class="faded">Accessibility</div><div style="--c:#5e5ce6" class="faded">Control Center</div><div style="--c:#ff9f0a" class="faded">Desktop &amp; Dock</div><div style="--c:#30b0c7" class="faded">Displays</div>
+          <div class="sel" style="--c:#0a84ff">Privacy &amp; Security</div>
+          <div style="--c:#ff453a" class="faded">Notifications</div>
+        </div>
+        <div class="pane">
+          <h4>Privacy &amp; Security</h4>
+          <div class="sec">Security</div>
+          <div class="card">
+            <div class="row"><span>Allow applications from</span><span class="pop">App Store &amp; Known Developers ⌄</span></div>
+            <div class="row"><span>“Plonix” was blocked to protect your Mac.</span><span class="pbtn" data-hit="below" data-tag="Scroll down, click Open Anyway">Open Anyway</span></div>
+          </div>
+          <div class="sec faded">FileVault</div>
+          <div class="card faded"><div class="row"><span>FileVault</span><span class="pop">Turn On…</span></div></div>
+        </div>
+      </div>
+    </div>`,
+  'mac-4': () => `${step(4, 'Confirm, then enter your password')}
+    <div class="alert shadow" style="left:280px;top:84px">
+      <div class="help">?</div>${GK}
+      <h3>Open “Plonix”?</h3>
+      <p>Apple is not able to verify that “Plonix” is free of malware. Open it only if you trust where it came from.</p>
+      <span class="mbtn blue" data-hit="right" data-tag="Click Open Anyway">Open Anyway</span><span class="mbtn">Done</span>
+    </div>
+    <div class="tag" style="left:330px;top:478px;background:var(--label-bg);color:var(--label-fg)">Then your password or Touch ID</div>`,
+  'mac-terminal': () => `${step('⌘', 'Or: one command in Terminal')}
+    <div class="mwin term shadow" style="left:110px;top:150px;width:740px;height:176px">
+      <div class="tbar"><i></i><i></i><i></i><span>Terminal</span></div>
+      <pre><span class="p">$ </span>xattr -dr com.apple.quarantine /Applications/Plonix.app
+<span class="p">$ </span>open /Applications/Plonix.app
+<span class="c"># Plonix opens. macOS won't ask again.</span></pre>
+    </div>`,
+  'win-1': () => `${step(1, 'Run the installer, click More info')}
+    <div class="ss shadow" style="left:200px;top:110px">
+      <div class="x">✕</div>
+      <h3>Windows protected your PC</h3>
+      <p>SmartScreen prevented an unrecognized app from starting. Running this app might put your PC at risk.</p>
+      <u data-hit="below" data-tag="Click More info">More info</u>
+      <div class="btns"><span>Don't run</span></div>
+    </div>`,
+  'win-2': () => `${step(2, 'Click Run anyway')}
+    <div class="ss shadow" style="left:200px;top:110px">
+      <div class="x">✕</div>
+      <h3>Windows protected your PC</h3>
+      <p>SmartScreen prevented an unrecognized app from starting. Running this app might put your PC at risk.</p>
+      <dl><dt>App:</dt><dd>Plonix-Windows-setup.exe</dd><dt>Publisher:</dt><dd>Unknown publisher</dd></dl>
+      <div class="btns"><span class="solid" data-hit="below" data-tag="Click Run anyway">Run anyway</span><span>Don't run</span></div>
+    </div>`,
+};
+S.innerHTML = scenes[q.get('scene')]();
+document.fonts.ready.then(() => {
+  const st = document.getElementById('stage').getBoundingClientRect();
+  for (const el of document.querySelectorAll('[data-hit]')) {
+    const r = el.getBoundingClientRect(), pad = 7;
+    const ring = document.createElement('div'); ring.className = el.closest('.ss') ? 'ring y' : 'ring';
+    Object.assign(ring.style, { left: r.left - st.left - pad + 'px', top: r.top - st.top - pad + 'px', width: r.width + pad * 2 + 'px', height: r.height + pad * 2 + 'px' });
+    S.appendChild(ring);
+    const tag = document.createElement('div'); tag.className = 'tag'; tag.textContent = el.dataset.tag; S.appendChild(tag);
+    const t = tag.getBoundingClientRect();
+    let x, y;
+    if (el.dataset.hit === 'right') { x = r.right - st.left + 26; y = r.top - st.top + r.height / 2 - t.height / 2; }
+    else { x = r.left - st.left + r.width / 2 - t.width / 2; y = r.bottom - st.top + 18; }
+    x = Math.max(16, Math.min(x, st.width - t.width - 16));
+    Object.assign(tag.style, { left: x + 'px', top: y + 'px' });
+  }
+  document.body.dataset.ready = '1';
+});
+</script>
+</body></html>

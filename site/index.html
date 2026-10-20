@@ -392,6 +392,32 @@ footer nav { display: flex; flex-wrap: wrap; gap: 22px; margin-left: auto; }
 footer a { text-decoration: none; color: var(--muted); }
 footer a:hover { color: var(--fg); }
 
+/* ---- after a download: how to open Plonix the first time ---- */
+.next { width: min(980px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 1px solid var(--line); border-radius: 20px; background: var(--ink-2); color: var(--fg); overflow: auto; box-shadow: 0 40px 120px -20px rgba(0,0,0,.5); }
+.next::backdrop { background: rgba(9, 10, 16, .6); backdrop-filter: blur(4px); }
+.next-in { padding: 30px 32px 26px; }
+.next-head { display: grid; justify-items: start; gap: 16px; padding-right: 40px; }
+.next .next-head h2 { font-size: clamp(1.5rem, 3vw, 2.1rem); }
+.next .lead { margin: 8px 0 0; color: var(--muted); font-size: 1rem; max-width: 64ch; }
+.next-tabs { display: inline-flex; gap: 4px; padding: 4px; border-radius: 999px; background: var(--ink-3); }
+.next-tabs button { border: 0; border-radius: 999px; padding: 7px 16px; background: transparent; color: var(--muted); font: 600 .92rem var(--body); cursor: pointer; }
+.next-tabs button[aria-selected="true"] { background: var(--ink-2); color: var(--fg); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.next-steps { list-style: none; margin: 22px 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 20px; }
+.next-steps li { margin: 0; }
+.next-steps img { width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; border: 1px solid var(--line); }
+.next-steps p { margin: 10px 2px 0; font-size: .95rem; color: var(--muted); }
+.next-steps p b { color: var(--fg); }
+.next-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-top: 22px; color: var(--faint); font-size: .92rem; }
+.next-foot code { font: 500 .85rem var(--mono); background: var(--ink-3); padding: 2px 6px; border-radius: 6px; color: var(--fg); overflow-wrap: anywhere; }
+.next-foot .btn { margin-left: auto; }
+.next-close { position: absolute; top: 14px; right: 14px; width: 36px; height: 36px; border-radius: 999px; border: 1px solid var(--line); background: var(--ink-2); color: var(--fg); font: 500 20px/1 var(--body); cursor: pointer; }
+.next-close:hover { border-color: var(--fg); }
+.next [hidden] { display: none; }
+@media (max-width: 700px) { .next-in { padding: 24px 18px 20px; } .next-steps { grid-template-columns: minmax(0, 1fr); } .next-foot .btn { margin-left: 0; } }
+[data-style="studio"] .next { border-radius: 8px; }
+[data-style="studio"] .next-steps img { border: 0; border-radius: 4px; }
+[data-style="studio"] .next-tabs button[aria-selected="true"] { background: var(--st-red); color: #fff; box-shadow: none; }
+
 .reveal { transition: opacity .7s ease, transform .7s ease; }
 .reveal.pre { opacity: .001; transform: translateY(18px); }
 @media (prefers-reduced-motion: reduce) { .reveal, .reveal.pre { opacity: 1; transform: none; transition: none; } }
@@ -848,7 +874,7 @@ footer a:hover { color: var(--fg); }
             <a class="btn primary" data-os="mac" href="https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-macOS.dmg">Download for Mac</a>
             <a class="btn" data-os="windows" href="https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-Windows-setup.exe">Download for Windows</a>
           </div>
-          <p class="note">Mac: Apple silicon and Intel, macOS 11 or later. Plonix is in early development and not notarized by Apple yet: the first time, open it from <b>System Settings › Privacy &amp; Security › Open Anyway</b>. Windows: 64-bit Windows 10 or 11; the installer is not code-signed yet, so click <b>More info › Run anyway</b> if SmartScreen asks. <a href="https://github.com/SergeyMalych/plonix#quickstart">Quickstart</a> · <a href="https://github.com/SergeyMalych/plonix/releases">All releases</a></p>
+          <p class="note">Mac: Apple silicon and Intel, macOS 11 or later. Plonix is in early development and not notarized by Apple yet: the first time, open it from <b>System Settings › Privacy &amp; Security › Open Anyway</b>. Windows: 64-bit Windows 10 or 11; the installer is not code-signed yet, so click <b>More info › Run anyway</b> if SmartScreen asks. <a href="docs/install.html">How to open it the first time, with pictures</a> · <a href="https://github.com/SergeyMalych/plonix/releases">All releases</a></p>
         </div>
         <div class="term">
           <div class="bar"><i></i><i></i><i></i><span>Build from source</span></div>
@@ -888,6 +914,30 @@ footer a:hover { color: var(--fg); }
     </nav>
   </div>
 </footer>
+
+<dialog class="next" id="next" aria-labelledby="nexttitle">
+  <button type="button" class="next-close" id="nextclose" aria-label="Close">×</button>
+  <div class="next-in">
+    <div class="next-head">
+      <div>
+        <h2 id="nexttitle">Your download has started. Next: open Plonix.</h2>
+        <p class="lead">Plonix is not signed by Apple or Microsoft yet, so the first time your computer asks whether you trust it. Here is what to click. You only do this once.</p>
+      </div>
+      <div class="next-tabs" role="tablist" aria-label="Your system">
+        <button type="button" role="tab" id="nexttab-mac" aria-controls="nextpane-mac" aria-selected="true" data-os="mac">Mac</button>
+        <button type="button" role="tab" id="nexttab-windows" aria-controls="nextpane-windows" aria-selected="false" data-os="windows">Windows</button>
+      </div>
+    </div>
+    <div role="tabpanel" id="nextpane-mac" aria-labelledby="nexttab-mac">
+      <ol class="next-steps"><li><img class="shot-light" src="assets/install-mac-1-light.webp" loading="lazy" width="1920" height="1080" alt="A Plonix disk image window: drag the Plonix icon onto the Applications folder."><img class="shot-dark" src="assets/install-mac-1-dark.webp" loading="lazy" width="1920" height="1080" alt="A Plonix disk image window: drag the Plonix icon onto the Applications folder."><p><b>1.</b> Open <b>Plonix-macOS.dmg</b> and drag Plonix to Applications.</p></li><li><img class="shot-light" src="assets/install-mac-2-light.webp" loading="lazy" width="1920" height="1080" alt="The macOS dialog: “Plonix” Not Opened, with a Done button."><img class="shot-dark" src="assets/install-mac-2-dark.webp" loading="lazy" width="1920" height="1080" alt="The macOS dialog: “Plonix” Not Opened, with a Done button."><p><b>2.</b> Open Plonix. macOS says it could not verify the app: click <b>Done</b>.</p></li><li><img class="shot-light" src="assets/install-mac-3-light.webp" loading="lazy" width="1920" height="1080" alt="System Settings, Privacy &amp; Security: “Plonix” was blocked to protect your Mac, with an Open Anyway button."><img class="shot-dark" src="assets/install-mac-3-dark.webp" loading="lazy" width="1920" height="1080" alt="System Settings, Privacy &amp; Security: “Plonix” was blocked to protect your Mac, with an Open Anyway button."><p><b>3.</b> Open <b>System Settings › Privacy &amp; Security</b>, scroll down and click <b>Open Anyway</b>.</p></li><li><img class="shot-light" src="assets/install-mac-4-light.webp" loading="lazy" width="1920" height="1080" alt="The macOS dialog: Open “Plonix”? with an Open Anyway button."><img class="shot-dark" src="assets/install-mac-4-dark.webp" loading="lazy" width="1920" height="1080" alt="The macOS dialog: Open “Plonix”? with an Open Anyway button."><p><b>4.</b> Click <b>Open Anyway</b> and enter your password. That’s it: from now on Plonix opens normally.</p></li></ol>
+      <div class="next-foot"><span>Or in Terminal: <code>xattr -dr com.apple.quarantine /Applications/Plonix.app</code></span><a class="btn small" href="docs/install.html">Full guide</a></div>
+    </div>
+    <div role="tabpanel" id="nextpane-windows" aria-labelledby="nexttab-windows" hidden>
+      <ol class="next-steps"><li><img class="shot-light" src="assets/install-win-1-light.webp" loading="lazy" width="1920" height="1080" alt="The SmartScreen dialog: Windows protected your PC, with a More info link."><img class="shot-dark" src="assets/install-win-1-dark.webp" loading="lazy" width="1920" height="1080" alt="The SmartScreen dialog: Windows protected your PC, with a More info link."><p><b>1.</b> Run <b>Plonix-Windows-setup.exe</b>. If SmartScreen says it protected your PC, click <b>More info</b>.</p></li><li><img class="shot-light" src="assets/install-win-2-light.webp" loading="lazy" width="1920" height="1080" alt="The SmartScreen dialog after More info: app Plonix-Windows-setup.exe, unknown publisher, with a Run anyway button."><img class="shot-dark" src="assets/install-win-2-dark.webp" loading="lazy" width="1920" height="1080" alt="The SmartScreen dialog after More info: app Plonix-Windows-setup.exe, unknown publisher, with a Run anyway button."><p><b>2.</b> Click <b>Run anyway</b>. The installer starts, and Plonix opens from the Start menu.</p></li></ol>
+      <div class="next-foot"><span>Plonix keeps its data in <code>%USERPROFILE%\.plonix</code>.</span><a class="btn small" href="docs/install.html#on-windows">Full guide</a></div>
+    </div>
+  </div>
+</dialog>
 
 <dialog class="tour" id="tour" aria-label="Plonix in one minute">
   <button type="button" class="tour-close" id="tourclose" aria-label="Close">×</button>
@@ -1157,6 +1207,30 @@ footer a:hover { color: var(--fg); }
   document.getElementById('tourclose').addEventListener('click', () => dlg.close());
   dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
   dlg.addEventListener('close', () => vid.pause());
+})();
+// After a download starts: show how to open Plonix the first time.
+(() => {
+  const dlg = document.getElementById('next');
+  if (!dlg || typeof dlg.showModal !== 'function') return;
+  const tabs = [...dlg.querySelectorAll('[role="tab"]')];
+  const pick = (os) => tabs.forEach((t) => {
+    const on = t.dataset.os === os;
+    t.setAttribute('aria-selected', on);
+    document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+  });
+  tabs.forEach((t) => t.addEventListener('click', () => pick(t.dataset.os)));
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest('a[href]');
+    if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const href = a.getAttribute('href');
+    const os = /\.dmg$/.test(href) ? 'mac' : /\.exe$/.test(href) ? 'windows' : '';
+    if (!os) return;
+    pick(os);
+    // Let the download start first; the page stays where it is.
+    setTimeout(() => dlg.showModal(), 250);
+  });
+  document.getElementById('nextclose').addEventListener('click', () => dlg.close());
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
 })();
 </script>
 </body>

@@ -265,6 +265,8 @@ jobs:
           3. Open **System Settings › Privacy & Security**, scroll down and click **Open Anyway** next to Plonix, then confirm.
 
           Or, in Terminal: `xattr -dr com.apple.quarantine /Applications/Plonix.app`
+
+          Each step with pictures: https://plonix.io/docs/install.html
           NOTES
           fi
           if [ "$WINDOWS_SIGNED" != true ]; then
@@ -272,7 +274,7 @@ jobs:
 
           ### Installing on Windows
 
-          Run `Plonix-Windows-setup.exe`. The installer is not code-signed yet, so Windows SmartScreen may say it protected your PC: click **More info**, then **Run anyway**.
+          Run `Plonix-Windows-setup.exe`. The installer is not code-signed yet, so Windows SmartScreen may say it protected your PC: click **More info**, then **Run anyway**. With pictures: https://plonix.io/docs/install.html#on-windows
           NOTES
           fi
           cat notes.md

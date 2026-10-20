@@ -18,7 +18,7 @@
 
 **A new era of web assessments. AI-first with Claude Code, driven by you, fast and open source. Runs on macOS and Windows.**
 
-**[Website](https://plonix.io)** · **[Documentation](https://plonix.io/docs/)** · **[Download for Mac or Windows](https://github.com/SergeyMalych/plonix/releases/latest)**
+**[Website](https://plonix.io)** · **[Documentation](https://plonix.io/docs/)** · **[Download for Mac or Windows](https://github.com/SergeyMalych/plonix/releases/latest)** · **[How to open it the first time](docs/install.md)**
 
 </div>
 
@@ -344,6 +344,10 @@ claude                       # then ask:
 Download **[Plonix for Mac](https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-macOS.dmg)** (Apple silicon and Intel, macOS 11 or later), open it and drag Plonix to Applications. Every release is listed on the [releases page](https://github.com/SergeyMalych/plonix/releases), with what changed in [CHANGELOG.md](CHANGELOG.md).
 
 Releases are not notarized by Apple yet, so macOS asks before opening Plonix the first time: open it, click **Done**, then go to **System Settings › Privacy & Security** and click **Open Anyway** next to Plonix. Or run `xattr -dr com.apple.quarantine /Applications/Plonix.app` once.
+
+**[Install and open Plonix, step by step with pictures](docs/install.md)** (also at [plonix.io/docs/install](https://plonix.io/docs/install.html)) walks through each prompt on Mac and Windows.
+
+<a href="docs/install.md"><img src="site/assets/install-mac-3-light.webp" width="560" alt="System Settings, Privacy &amp; Security: click Open Anyway next to “Plonix” was blocked to protect your Mac"></a>
 
 On Windows, download **[Plonix for Windows](https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-Windows-setup.exe)** (64-bit Windows 10 or 11) and run it. The installer is not code-signed yet, so Windows SmartScreen may say it protected your PC: click **More info**, then **Run anyway**. Plonix keeps its data in `%USERPROFILE%\.plonix`, opens targets in Chrome, Edge, Brave or Firefox, and adds its certificate to your own trusted root certificates when Firefox needs it.
 

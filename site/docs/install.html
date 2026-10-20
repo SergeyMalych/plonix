@@ -1,0 +1,144 @@
+<!doctype html>
+<!-- Generated from docs/install.md by scripts/build-docs.mjs. Edit the Markdown, not this file. -->
+<html lang="en" data-style="studio">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Install and open Plonix · Plonix docs</title>
+<meta name="description" content="Plonix is not signed by Apple or Microsoft yet, so the first time you open it, your computer asks whether you trust it. This page shows what you see and what to click, step by…">
+<meta property="og:title" content="Install and open Plonix · Plonix docs">
+<meta property="og:description" content="Plonix is not signed by Apple or Microsoft yet, so the first time you open it, your computer asks whether you trust it. This page shows what you see and what to click, step by…">
+<meta property="og:url" content="https://plonix.io/docs/install">
+<meta property="og:image" content="https://plonix.io/assets/studio-window-light.webp">
+<link rel="canonical" href="https://plonix.io/docs/install">
+<meta name="theme-color" content="#ece5d6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#13120f" media="(prefers-color-scheme: dark)">
+<link rel="icon" id="favicon" href="../assets/studio-mark.svg?v=2" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Jost:wght@400..700&display=swap">
+<link rel="stylesheet" href="docs.css?v=e0f20326d3">
+<script>try{const r=document.documentElement,t=localStorage.getItem('plonix-theme');if(t==='light'||t==='dark')r.dataset.theme=t;if(localStorage.getItem('plonix-style')==='classic')r.removeAttribute('data-style')}catch(e){}</script>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg class="mark-classic" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg><svg class="mark-studio" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#e5401f"/><rect x="7" y="6" width="5" height="20" fill="#1e1c19"/><circle cx="18" cy="13" r="7" fill="#f1b11b"/><path d="M18 6a7 7 0 0 1 0 14z" fill="#1d4fc4"/></svg>Plonix</a>
+    <nav class="nav-links" aria-label="Site">
+      <a href="../">Home</a>
+      <a href="./" aria-current="page">Docs</a>
+      <a href="../analytics">Analytics</a>
+      <a href="privacy.html">Privacy</a>
+    </nav>
+    <button type="button" class="theme-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button>
+    <button type="button" class="style-btn" id="style" aria-pressed="true"><svg viewBox="0 0 22 14" aria-hidden="true"><circle cx="5" cy="7" r="5" fill="#e5401f"/><path d="M8 14a5 5 0 0 1 10 0z" fill="#f1b11b"/><circle cx="17" cy="7" r="5" fill="#1d4fc4"/></svg><span>Try classic</span></button>
+    <a class="btn small" href="https://github.com/SergeyMalych/plonix"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+  </div>
+</header>
+<div class="wrap docs">
+<aside class="side">
+<details class="side-menu" open>
+<summary>Documentation</summary>
+<nav aria-label="Documentation"><ul class="side-list"><li><a href="./">Overview</a></li><li class="side-head">Get started</li><li><a href="getting-started.html">Getting started</a></li><li class="here"><a href="install.html" aria-current="page">Install and open Plonix</a><ul class="toc"><li><a href="#on-a-mac">On a Mac</a></li><li><a href="#on-windows">On Windows</a></li><li><a href="#if-something-else-goes-wrong">If something else goes wrong</a></li><li><a href="#why-this-happens">Why this happens</a></li></ul></li><li><a href="app.html">The Plonix window</a></li><li><a href="projects.html">Projects, sessions and settings</a></li><li><a href="setup.html">Setting up capture on any computer</a></li><li class="side-head">Capture and explore</li><li><a href="traffic.html">Traffic and the Lens</a></li><li><a href="filters.html">Named filters and filter packs</a></li><li><a href="scope.html">Scope</a></li><li><a href="map.html">The Map</a></li><li><a href="rules.html">Rules</a></li><li class="side-head">Experiment and prove</li><li><a href="bench.html">The Bench</a></li><li><a href="users.html">Saved users and the Access check</a></li><li><a href="callbacks.html">Callbacks</a></li><li><a href="scanning.html">Scanning</a></li><li><a href="findings.html">Findings</a></li><li><a href="programs.html">Programs</a></li><li class="side-head">AI and the Market</li><li><a href="agents.html">Agents and MCP</a></li><li><a href="market.html">The Market and skills</a></li><li><a href="detection-rules.html">Detection rules</a></li><li><a href="extensions.html">Extensions</a></li><li class="side-head">Your data</li><li><a href="updates.html">Updates</a></li><li><a href="privacy.html">Privacy and usage statistics</a></li><li><a href="crash-reports.html">Crash reports</a></li><li><a href="code-signing.html">Code signing policy</a></li><li class="side-head">Contributing</li><li><a href="releasing.html">Releasing Plonix</a></li></ul></nav>
+</details>
+</aside>
+<main class="doc">
+<article>
+<h1 id="install-and-open-plonix">Install and open Plonix</h1>
+<p>Plonix is not signed by Apple or Microsoft yet, so the first time you open it, your computer asks whether you trust it. This page shows what you see and what to click, step by step. You only do it once: after that Plonix opens like any other app, updates included.</p>
+<ul><li><a href="#on-a-mac">On a Mac</a>: macOS 15 Sequoia and later, older macOS, and a one-line Terminal alternative.</li><li><a href="#on-windows">On Windows</a>: the SmartScreen prompt.</li><li><a href="#if-something-else-goes-wrong">If something else goes wrong</a>.</li></ul>
+<h2 id="on-a-mac">On a Mac<a class="anchor" href="#on-a-mac" aria-label="Link to this section">#</a></h2>
+<p>Download <a href="https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-macOS.dmg" rel="noopener">Plonix for Mac</a>. It runs on Apple silicon and Intel Macs with macOS 11 or later.</p>
+<h3 id="1-drag-plonix-to-applications">1. Drag Plonix to Applications<a class="anchor" href="#1-drag-plonix-to-applications" aria-label="Link to this section">#</a></h3>
+<p>Open <code>Plonix-macOS.dmg</code> from your Downloads folder and drag Plonix onto the Applications folder.</p>
+<p><img class="pic-light" src="../assets/install-mac-1-light.webp?v=5a4d2bc464" alt="A Plonix disk image window: drag the Plonix icon onto the Applications folder" loading="lazy"><img class="pic-dark" src="../assets/install-mac-1-dark.webp?v=dc930f23d9" alt="A Plonix disk image window: drag the Plonix icon onto the Applications folder" loading="lazy"></p>
+<h3 id="2-open-plonix-then-click-done">2. Open Plonix, then click Done<a class="anchor" href="#2-open-plonix-then-click-done" aria-label="Link to this section">#</a></h3>
+<p>Open Plonix from Applications or Launchpad. macOS says <strong>“Plonix” Not Opened</strong> because Apple has not checked the app yet. Click <strong>Done</strong>. Do not move it to the Trash.</p>
+<p><img class="pic-light" src="../assets/install-mac-2-light.webp?v=0a79a33bf5" alt="The macOS dialog: &quot;Plonix&quot; Not Opened. Apple could not verify &quot;Plonix&quot; is free of malware that may harm your Mac or compromise your privacy. Click Done." loading="lazy"><img class="pic-dark" src="../assets/install-mac-2-dark.webp?v=0b20f6a76f" alt="The macOS dialog: &quot;Plonix&quot; Not Opened. Apple could not verify &quot;Plonix&quot; is free of malware that may harm your Mac or compromise your privacy. Click Done." loading="lazy"></p>
+<h3 id="3-click-open-anyway-in-privacy--security">3. Click Open Anyway in Privacy &amp; Security<a class="anchor" href="#3-click-open-anyway-in-privacy--security" aria-label="Link to this section">#</a></h3>
+<p>Open <strong>System Settings</strong> (Apple menu › System Settings), choose <strong>Privacy &amp; Security</strong> in the sidebar and scroll down to <strong>Security</strong>. Next to <strong>“Plonix” was blocked to protect your Mac</strong>, click <strong>Open Anyway</strong>.</p>
+<p><img class="pic-light" src="../assets/install-mac-3-light.webp?v=0f9f456507" alt="System Settings, Privacy &amp; Security: under Security, &quot;Plonix&quot; was blocked to protect your Mac, with an Open Anyway button" loading="lazy"><img class="pic-dark" src="../assets/install-mac-3-dark.webp?v=5eedfe34bc" alt="System Settings, Privacy &amp; Security: under Security, &quot;Plonix&quot; was blocked to protect your Mac, with an Open Anyway button" loading="lazy"></p>
+<p>The button shows up only after step 2, and only for about an hour. If you don't see it, open Plonix once more, click Done, and come back.</p>
+<h3 id="4-confirm-with-your-password">4. Confirm with your password<a class="anchor" href="#4-confirm-with-your-password" aria-label="Link to this section">#</a></h3>
+<p>macOS asks once more. Click <strong>Open Anyway</strong>, then enter your Mac password or use Touch ID. Plonix opens, and from now on it opens with a normal double-click.</p>
+<p><img class="pic-light" src="../assets/install-mac-4-light.webp?v=04cc9bafa3" alt="The macOS dialog: Open &quot;Plonix&quot;? Click Open Anyway, then enter your password or use Touch ID" loading="lazy"><img class="pic-dark" src="../assets/install-mac-4-dark.webp?v=942ead948c" alt="The macOS dialog: Open &quot;Plonix&quot;? Click Open Anyway, then enter your password or use Touch ID" loading="lazy"></p>
+<h3 id="on-macos-14-sonoma-and-earlier">On macOS 14 Sonoma and earlier<a class="anchor" href="#on-macos-14-sonoma-and-earlier" aria-label="Link to this section">#</a></h3>
+<p>You can skip System Settings: in Applications, <strong>right-click</strong> (or Control-click) Plonix, choose <strong>Open</strong>, then click <strong>Open</strong> in the dialog. Steps 2 to 4 above work there too.</p>
+<h3 id="or-one-command-in-terminal">Or: one command in Terminal<a class="anchor" href="#or-one-command-in-terminal" aria-label="Link to this section">#</a></h3>
+<p>If you are comfortable with Terminal, this does all of the above in one go. It tells macOS that you downloaded Plonix on purpose, for this copy of the app only:</p>
+<pre><code class="language-sh">xattr -dr com.apple.quarantine /Applications/Plonix.app
+open /Applications/Plonix.app</code></pre>
+<p><img class="pic-light" src="../assets/install-mac-terminal-light.webp?v=d7de343b0a" alt="Terminal: xattr -dr com.apple.quarantine /Applications/Plonix.app, then open /Applications/Plonix.app" loading="lazy"><img class="pic-dark" src="../assets/install-mac-terminal-dark.webp?v=0bacb43c5b" alt="Terminal: xattr -dr com.apple.quarantine /Applications/Plonix.app, then open /Applications/Plonix.app" loading="lazy"></p>
+<h2 id="on-windows">On Windows<a class="anchor" href="#on-windows" aria-label="Link to this section">#</a></h2>
+<p>Download <a href="https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-Windows-setup.exe" rel="noopener">Plonix for Windows</a>. It runs on 64-bit Windows 10 and 11.</p>
+<h3 id="1-run-the-installer-then-click-more-info">1. Run the installer, then click More info<a class="anchor" href="#1-run-the-installer-then-click-more-info" aria-label="Link to this section">#</a></h3>
+<p>Open <code>Plonix-Windows-setup.exe</code> from your Downloads folder. Windows SmartScreen may say <strong>Windows protected your PC</strong>, because the installer is not code-signed yet. Click <strong>More info</strong>.</p>
+<p><img class="pic-light" src="../assets/install-win-1-light.webp?v=c17a923695" alt="The SmartScreen dialog: Windows protected your PC. Click More info." loading="lazy"><img class="pic-dark" src="../assets/install-win-1-dark.webp?v=98eb9c7985" alt="The SmartScreen dialog: Windows protected your PC. Click More info." loading="lazy"></p>
+<h3 id="2-click-run-anyway">2. Click Run anyway<a class="anchor" href="#2-click-run-anyway" aria-label="Link to this section">#</a></h3>
+<p>The dialog now names the app, <code>Plonix-Windows-setup.exe</code>, with an unknown publisher. Click <strong>Run anyway</strong> and the installer starts. Plonix then opens from the Start menu like any other app, and keeps its data in <code>%USERPROFILE%\.plonix</code>.</p>
+<p><img class="pic-light" src="../assets/install-win-2-light.webp?v=93dec7d89c" alt="The SmartScreen dialog after More info: App Plonix-Windows-setup.exe, Publisher Unknown publisher. Click Run anyway." loading="lazy"><img class="pic-dark" src="../assets/install-win-2-dark.webp?v=3f104b2786" alt="The SmartScreen dialog after More info: App Plonix-Windows-setup.exe, Publisher Unknown publisher. Click Run anyway." loading="lazy"></p>
+<p>If your browser holds the download back as uncommon, open the browser's downloads list and choose <strong>Keep</strong>.</p>
+<h2 id="if-something-else-goes-wrong">If something else goes wrong<a class="anchor" href="#if-something-else-goes-wrong" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>“Plonix is damaged and can't be opened”</strong> on a Mac: the app is fine, this is the same check worded differently. Run the <a href="#or-one-command-in-terminal">Terminal command</a> above.</li><li><strong>No Open Anyway button:</strong> open Plonix again, click <strong>Done</strong>, and look again in <strong>Privacy &amp; Security</strong> within the hour.</li><li><strong>Your Mac is managed by an organization:</strong> its settings may not allow apps from outside the App Store. Ask your IT team, or <a href="https://github.com/SergeyMalych/plonix/blob/main/README.md#build-from-source" rel="noopener">build Plonix from source</a>.</li><li><strong>Still stuck?</strong> <a href="https://github.com/SergeyMalych/plonix/issues/new/choose" rel="noopener">Open an issue</a> with your macOS or Windows version and what you see.</li></ul>
+<h2 id="why-this-happens">Why this happens<a class="anchor" href="#why-this-happens" aria-label="Link to this section">#</a></h2>
+<p>Apple and Microsoft show these prompts for apps that are not signed with a paid developer certificate. Plonix is open source and free, and signing for both is on the way (see <a href="code-signing.html">Code signing</a>). Until then, every release is built in public by GitHub Actions from the code in this repository and published on the <a href="https://github.com/SergeyMalych/plonix/releases" rel="noopener">releases page</a>.</p>
+<p>Once Plonix opens, head to <a href="getting-started.html">Getting started</a> to capture your first target.</p>
+</article>
+<p class="edit">This page is <a href="https://github.com/SergeyMalych/plonix/blob/main/docs/install.md">docs/install.md</a> in the Plonix repository. Spotted something wrong? <a href="https://github.com/SergeyMalych/plonix/edit/main/docs/install.md">Suggest a change</a>.</p>
+</main>
+</div>
+<footer>
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Plonix home"><svg class="mark-classic" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4b55d6"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M9.5 7v19"/><circle cx="16.6" cy="13.6" r="6.6"/></g><circle cx="16.6" cy="13.6" r="1.9" fill="#fff"/></svg><svg class="mark-studio" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#e5401f"/><rect x="7" y="6" width="5" height="20" fill="#1e1c19"/><circle cx="18" cy="13" r="7" fill="#f1b11b"/><path d="M18 6a7 7 0 0 1 0 14z" fill="#1d4fc4"/></svg>Plonix</a>
+    <span>Open-source, AI-first web security workbench. Apache-2.0.</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/SergeyMalych/plonix">GitHub</a>
+      <a href="./">Docs</a>
+      <a href="https://github.com/SergeyMalych/plonix/releases">Releases</a>
+      <a href="https://github.com/SergeyMalych/plonix/issues">Issues</a>
+      <a href="privacy.html">Privacy</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(() => {
+  const root = document.documentElement, btn = document.getElementById('theme');
+  const sys = matchMedia('(prefers-color-scheme: dark)');
+  const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+  const current = () => root.dataset.theme || (sys.matches ? 'dark' : 'light');
+  const paint = () => { const d = current() === 'dark'; btn.innerHTML = d ? SUN : MOON; btn.setAttribute('aria-label', d ? 'Switch to light mode' : 'Switch to dark mode'); };
+  paint();
+  sys.addEventListener('change', paint);
+  btn.addEventListener('click', () => {
+    const next = current() === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next; paint();
+    try { localStorage.setItem('plonix-theme', next); } catch (e) {}
+  });
+
+  // On a phone the list of docs starts folded, so the page comes first.
+  const menu = document.querySelector('.side-menu');
+  if (menu && matchMedia('(max-width: 900px)').matches) menu.open = false;
+
+  // Studio is the default; Classic is the plainer look. Screenshots and the icon follow.
+  const sbtn = document.getElementById('style');
+  const shots = [...document.querySelectorAll('.doc img')].filter((i) => i.getAttribute('src').startsWith('../assets/studio-'));
+  shots.forEach((i) => { i.dataset.studio = i.getAttribute('src'); });
+  const setStyle = (on) => {
+    if (on) root.dataset.style = 'studio'; else delete root.dataset.style;
+    sbtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    sbtn.querySelector('span').textContent = on ? 'Try classic' : 'I like style';
+    sbtn.title = on ? 'Switch to the Classic look' : 'Back to the Studio look';
+    shots.forEach((i) => { const src = on ? i.dataset.studio : i.dataset.studio.replace('/assets/studio-', '/assets/'); if (i.getAttribute('src') !== src) i.src = src; });
+    document.getElementById('favicon').href = on ? '../assets/studio-mark.svg?v=2' : '../assets/plonix-mark.svg?v=2';
+  };
+  setStyle(root.dataset.style === 'studio');
+  sbtn.addEventListener('click', () => {
+    const on = root.dataset.style !== 'studio';
+    setStyle(on);
+    try { localStorage.setItem('plonix-style', on ? 'studio' : 'classic'); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>
