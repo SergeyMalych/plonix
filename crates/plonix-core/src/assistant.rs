@@ -307,6 +307,12 @@ impl Conversations {
         Some(Usage { running: run.status == Status::Running, used: run.progress.used(), first_call: run.progress.first_in })
     }
 
+    /// How many runs are going now, watcher looks included.
+    pub fn running(&self) -> usize {
+        let runs: Vec<_> = self.runs.lock().unwrap().values().cloned().collect();
+        runs.iter().filter(|r| r.lock().unwrap().status == Status::Running).count()
+    }
+
     /// Stops a running conversation: ends `claude` and whatever it started
     /// (its MCP server, a wrapper's children), not just the task reading it.
     pub fn cancel(&self, id: &str) -> bool {
