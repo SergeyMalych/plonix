@@ -34,7 +34,7 @@ What changed in each Plonix release. The newest release is at the top.
 - The `Proxy-Connection` header is no longer recorded, so replays don't send it.
 - A scope rule for an IP address no longer claims subdomains.
 - **Access check** rows are all the same height, and long user names in the header shorten instead of running into the next column.
-- rustls is updated to 0.23.46 for two security advisories.
+- rustls is updated to 0.23.46, rustls-webpki to 0.103.16 and webpki-roots to 1.0.10 for new security advisories.
 
 ## [0.5.1] - 2026-10-14
 
