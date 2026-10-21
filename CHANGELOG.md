@@ -7,6 +7,7 @@ What changed in each Plonix release. The newest release is at the top.
 ### Added
 - **Tidy view of the Bench request.** The new default view shows each sign-in token as whose it is, such as "JWT of Maya · 8 min left" (matched against saved users and sessions found in traffic), decodes Base64 JSON, and folds the headers every browser adds and tracking cookies into one line each. It stays editable; **Raw** shows the request byte for byte, and Send always sends the real values. A token's card shows its claims and offers Edit claims, another user's value, Show raw here and Copy. The walkthrough has a stop for it with **Test now!**.
 - **An install guide with pictures** at [plonix.io/docs/install](https://plonix.io/docs/install.html): each prompt macOS and Windows show for an app that is not signed yet, in light and dark. After you download Plonix from plonix.io, a **Next: open Plonix** panel shows the steps for your system.
+- **Agents: working or idle, and usage by day.** The Agents screen shows whether an agent is working, idle (and when it was last active) or off, and **Usage by day** lists the tokens Claude used in the project each day, watching and Ask Claude apart.
 - **Claude suggests requests to try.** Besides editing a Bench draft, Claude can now suggest a request of its own (the `propose_request` MCP tool): it waits in a strip above the Bench tabs with what it tests, **Open on the Bench** and **Discard**. Nothing is sent until you press Send.
 - **Agents see saved users and the Access check.** `list_users` names the users you saved, with which headers and cookies each carries but never their values, and `get_access_check` reads your last Access check. Both can be switched off in Settings › AI agents.
 - **Users and the Access check in the terminal.** `plonix users`, `plonix access <ids>` or `plonix access --host … --prefix …` (a table with the rows worth a look marked), and `plonix replay <id> --as <user>`.
@@ -28,6 +29,7 @@ What changed in each Plonix release. The newest release is at the top.
 - **Shortcuts follow the sidebar.** 1–9 (⌘1–⌘9 on Mac, Ctrl+1–9 on Windows) now open the screens in sidebar order: Traffic, Bench, Scope, Map, Users, Access, Findings, Agents, Callbacks.
 
 ### Fixed
+- **Agents no longer spend tokens on old traffic when a project reopens.** Watching starts from the moment a project opens, and each pause gets one look at the newest requests instead of several looks working through a backlog. "Today" in the token meter is now your local day.
 - **The Map, `list_endpoints`, the Access check and Ask Claude keep every endpoint** after a big run or scan; they used to see only a host's newest 20,000 requests.
 - **Fewer CORS false alarms.** `Access-Control-Allow-Origin: *` is no longer flagged as reflecting your origin (browsers refuse it with credentials), and origins on the same site are not flagged.
 - Ask Claude shows only Plonix steps in its progress line, not Claude Code's own housekeeping.

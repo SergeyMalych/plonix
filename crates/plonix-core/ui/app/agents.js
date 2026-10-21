@@ -29,7 +29,12 @@ const STARTER_QUESTIONS = [
 // sel: the inbox item opened in place; side: what the right column shows ('claude':
 // asking and conversations, 'traffic': what agents read); ex: request summaries, so
 // leads and the feed can name requests by method and path.
-const AG = { chat: null, cv: null, setup: null, chats: [], policy: null, hits: [], skills: [], watch: null, inboxAll: false, lookAsked: 0, sel: null, side: 'claude', ex: {}, opened: new Set() };
+// usage: the day-by-day usage table is open (usageAll: all days, not just the last two weeks).
+const AG = { chat: null, cv: null, setup: null, chats: [], policy: null, hits: [], skills: [], watch: null, inboxAll: false, lookAsked: 0, sel: null, side: 'claude', ex: {}, opened: new Set(), usage: false, usageAll: false };
+// An outside agent that read the project this recently counts as working.
+const AGENT_WORKING_MS = 15000;
+// Days of usage shown before "Show all".
+const USAGE_DAYS = 14;
 
 function renderAgents(main) {
   AG.cv = null;
@@ -40,7 +45,7 @@ function renderAgents(main) {
     h(
       'div',
       { class: 'view' },
-      h('div', { class: 'toolbar' }, h('h2', { text: 'Agents' }), h('span', { class: 'hint', text: 'Ask Claude about this project, pick up past conversations, and see what agents looked at.' }), setupBtn),
+      h('div', { class: 'toolbar' }, h('h2', { text: 'Agents' }), h('span', { class: 'agstate', id: 'agstate' }), h('span', { class: 'hint', text: 'Ask Claude about this project, pick up past conversations, and see what agents looked at.' }), setupBtn),
       h(
         'div',
         { class: 'pane' },
@@ -84,7 +89,7 @@ async function loadAgents(first) {
   S.agentsAt = Date.now();
   let a, act, list, watch;
   try {
-    [a, act, list, watch] = await Promise.all([api('/api/agents'), api('/api/agents/activity?limit=200'), api('/api/agents/chats'), api('/api/agents/watch')]);
+    [a, act, list, watch] = await Promise.all([api('/api/agents'), api('/api/agents/activity?limit=200'), api('/api/agents/chats'), api('/api/agents/watch?tz=' + -new Date().getTimezoneOffset())]);
   } catch (e) {
     return toast(e.message, 'err');
   }
@@ -103,6 +108,83 @@ async function loadAgents(first) {
   drawAgentInbox();
   drawAgentSide();
   if (!AG.chat) drawAgentBody();
+}
+
+/** Whether agents are working right now, idle, or off, with what is going on. */
+function agentState() {
+  const a = AG.policy;
+  const w = AG.watch;
+  if (a && !a.enabled) return { cls: 'off', label: 'Off', detail: 'Agent access is off in Settings' };
+  const now = Date.now();
+  const looking = w && (w.running || (AG.lookAsked && now - AG.lookAsked < 30000 && !(w.state.last_look_at >= AG.lookAsked)));
+  const answering = (AG.cv && AG.cv.isRunning()) || AG.chats.some((c) => c.running);
+  const outside = AG.hits.find((x) => !x.client.startsWith('plonix-') && now - x.at < AGENT_WORKING_MS);
+  const others = w ? w.busy - (w.running ? 1 : 0) : 0;
+  if (looking) return { cls: 'busy', label: 'Working', detail: 'Claude is looking at your traffic' };
+  if (answering || others > 0) return { cls: 'busy', label: 'Working', detail: 'Claude is answering' };
+  if (outside) return { cls: 'busy', label: 'Working', detail: outside.client.split('/')[0] + ' is reading the project' };
+  const last = Math.max((w && w.state.last_look_at) || 0, ...AG.chats.map((c) => c.updated_at || 0), ...AG.hits.map((x) => x.at || 0));
+  const parts = [w && w.settings.enabled ? (w.capped ? 'watching paused until tomorrow' : 'watching for new traffic') : 'nothing running'];
+  if (last > 0) parts.push('last active ' + agoText(last));
+  return { cls: 'idle' + (w && w.settings.enabled && !w.capped ? ' on' : ''), label: 'Idle', detail: parts.join(' · ') };
+}
+
+function drawAgentState() {
+  const box = $('#agstate');
+  if (!box || !AG.policy) return;
+  const st = agentState();
+  box.className = 'agstate ' + st.cls;
+  box.title = st.detail;
+  clear(box, h('i'), h('b', { text: st.label }), h('span', { text: st.detail }));
+}
+
+/** "Today", "Yesterday", or the date, for a local day number. */
+function dayLabel(day, today) {
+  if (day === today) return 'Today';
+  if (day === today - 1) return 'Yesterday';
+  // Day numbers count local days; read them back in UTC so the date does not shift.
+  return new Date(day * 86400000).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+}
+
+/** Tokens used per day, watching and Ask Claude, newest first. */
+function usageTable(w) {
+  const days = (w.history || []).slice();
+  // Today always shows, so a quiet day reads as zero, not as missing.
+  if (days.length && days[0].day !== w.today) days.unshift({ day: w.today, watch: 0, looks: 0, ask: 0, asks: 0 });
+  if (!days.length) return h('div', { class: 'agusage' }, h('div', { class: 'muted fine', text: 'No tokens used yet. Each day Claude works in this project shows here.' }));
+  const shown = AG.usageAll ? days : days.slice(0, USAGE_DAYS);
+  const top = Math.max(...shown.map((d) => d.watch + d.ask), 1);
+  const plural = (n, one) => n + ' ' + one + (n === 1 ? '' : 's');
+  return h(
+    'div',
+    { class: 'agusage' },
+    h(
+      'table',
+      { class: 'agutable' },
+      h('thead', {}, h('tr', {}, h('th', { text: 'Day' }), h('th', { class: 'n' }, h('i', { class: 'key w' }), 'Watching'), h('th', { class: 'n' }, h('i', { class: 'key a' }), 'Ask Claude'), h('th', { class: 'n', text: 'Total' }), h('th', { class: 'agubar' }))),
+      h(
+        'tbody',
+        {},
+        shown.map((d) =>
+          h(
+            'tr',
+            { class: d.day === w.today ? 'today' : '' },
+            h('td', { text: dayLabel(d.day, w.today) }),
+            h('td', { class: 'n', title: plural(d.looks, 'look'), text: d.watch ? fmtTok(d.watch) : '–' }),
+            h('td', { class: 'n', title: plural(d.asks, 'question'), text: d.ask ? fmtTok(d.ask) : '–' }),
+            h('td', { class: 'n', text: d.watch + d.ask ? fmtTok(d.watch + d.ask) : '0' }),
+            h('td', { class: 'agubar' }, h('span', { class: 'bar' }, h('i', { class: 'w', style: { width: (d.watch / top) * 100 + '%' } }), h('i', { class: 'a', style: { width: (d.ask / top) * 100 + '%' } }))),
+          ),
+        ),
+      ),
+    ),
+    h(
+      'div',
+      { class: 'agufoot muted fine' },
+      h('span', { text: 'Days are your local days. The daily limit counts watching only.' }),
+      days.length > USAGE_DAYS ? h('button', { class: 'link', text: AG.usageAll ? 'Show fewer' : `Show all ${days.length} days`, onclick: () => ((AG.usageAll = !AG.usageAll), drawAgentInbox()) }) : null,
+    ),
+  );
 }
 
 /* ---- the ask box ---- */
@@ -387,6 +469,7 @@ function drawAgentInbox() {
         : w.waiting
           ? `${w.waiting} new request${w.waiting === 1 ? '' : 's'} waiting; Claude looks when you pause`
           : 'Watching your traffic';
+  drawAgentState();
   const toggle = h('input', { type: 'checkbox', checked: st.enabled, onchange: () => saveWatch({ enabled: toggle.checked }) });
   const budget = budgetPicker(w);
   const head = h(
@@ -484,19 +567,23 @@ function drawAgentInbox() {
     box,
     head,
     body,
-    st.enabled || used
-      ? h(
-          'div',
-          { class: 'agfoot' },
-          h(
-            'div',
-            { class: 'askmeter agmeter' },
-            h('span', { text: `${fmtTok(used)} of ${fmtTok(st.daily_tokens)} tokens today` + (w.state.looks_today ? ` · ${w.state.looks_today} look${w.state.looks_today === 1 ? '' : 's'}` : '') }),
-            h('div', { class: 'bar' + (w.capped ? ' over' : ''), title: pct + '% of today’s tokens used' }, h('i', { style: { width: pct + '%' } })),
-          ),
-          budget,
-        )
-      : null,
+    h(
+      'div',
+      { class: 'agfoot' },
+      st.enabled || used
+        ? [
+            h(
+              'div',
+              { class: 'askmeter agmeter' },
+              h('span', { text: `Watching: ${fmtTok(used)} of ${fmtTok(st.daily_tokens)} tokens today` + (w.state.looks_today ? ` · ${w.state.looks_today} look${w.state.looks_today === 1 ? '' : 's'}` : '') }),
+              h('div', { class: 'bar' + (w.capped ? ' over' : ''), title: pct + '% of today’s tokens used' }, h('i', { style: { width: pct + '%' } })),
+            ),
+            budget,
+          ]
+        : h('span', { class: 'sp' }),
+      h('button', { class: 'btn sm ghost agusebtn' + (AG.usage ? ' on' : ''), text: 'Usage by day', title: 'Tokens Claude used in this project, day by day', onclick: () => ((AG.usage = !AG.usage), drawAgentInbox()) }),
+    ),
+    AG.usage ? usageTable(w) : null,
   );
 }
 
@@ -518,7 +605,7 @@ function openAgentChat(chat, ask) {
   const sub = chat && chat.subject ? h('button', { class: 'chip', title: 'Open it', onclick: () => openSubject(chat.subject) }, h('span', { text: subjectLabel(chat.subject) })) : null;
   const cv = claudeConvo({
     tall: true,
-    onRunning: (on) => (stopBtn.hidden = !on),
+    onRunning: (on) => ((stopBtn.hidden = !on), drawAgentState()),
     onChat: (id) => {
       AG.chat = id;
       delBtn.hidden = false;

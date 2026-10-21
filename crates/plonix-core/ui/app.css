@@ -991,6 +991,32 @@ button.agfhit:hover { background: var(--surface-2); color: var(--accent); }
 .agbudget { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .agbudgetin { width: 64px; font: 11.5px var(--mono); border: 1px solid var(--line-2); background: var(--surface); border-radius: 6px; padding: 2px 6px; text-align: right; }
 .agbudgetin.bad { border-color: var(--crit); }
+.agusebtn.on { background: var(--surface); border-color: var(--line-2); color: var(--fg); }
+.agusage { padding: 6px 14px 10px; border-top: 1px solid var(--line-2); }
+.agutable { width: 100%; border-collapse: collapse; font-size: 12px; }
+.agutable th { text-align: left; white-space: nowrap; font-size: 11px; font-weight: 600; color: var(--fg-3); padding: 3px 8px 3px 0; border-bottom: 1px solid var(--line-2); }
+.agutable td { padding: 3px 8px 3px 0; border-bottom: 1px solid var(--line-2); white-space: nowrap; }
+.agutable tr:last-child td { border-bottom: 0; }
+.agutable .n { text-align: right; padding-left: 12px; }
+.agutable td.n { font-family: var(--mono); font-size: 11.5px; }
+.agutable tr.today td:first-child { font-weight: 650; }
+.agutable .agubar { width: 40%; padding-right: 0; }
+.agutable .bar { display: flex; height: 6px; border-radius: 3px; background: var(--line-2); overflow: hidden; }
+.agutable .bar i { display: block; height: 100%; }
+.agutable .bar i.w, .agutable .key.w { background: var(--accent); }
+.agutable .bar i.a, .agutable .key.a { background: var(--ok); }
+.agutable .key { display: inline-block; width: 7px; height: 7px; border-radius: 2px; margin-right: 5px; vertical-align: 0; }
+.agufoot { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding-top: 6px; }
+/* agents: working / idle / off, next to the screen's title */
+.agstate { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--fg-2); border: 1px solid var(--line-2); border-radius: 999px; padding: 2px 10px 2px 8px; }
+.agstate:empty { display: none; }
+.agstate i { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--fg-3); }
+.agstate b { font-weight: 650; color: var(--fg); }
+.agstate span { color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agstate.busy { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.agstate.busy i { background: var(--accent); animation: cblink 1.2s infinite ease-in-out both; }
+.agstate.idle.on i { background: var(--ok); }
+.agstate.off i { background: transparent; border: 1.5px solid var(--fg-3); }
 .aghead .agstop { font-weight: 600; }
 .aglist .agitem:last-of-type { border-bottom: 0; }
 .agitem { cursor: pointer; }

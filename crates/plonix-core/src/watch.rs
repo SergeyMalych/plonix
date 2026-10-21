@@ -12,7 +12,9 @@
 //! asks it to look now), and never past the daily token limit the user set:
 //! a look that would go past it is not started, and one that reaches it is
 //! stopped. The user can stop a look at any time.
-//! Its settings, counters and inbox are stored per project.
+//! Its settings, counters and inbox are stored per project, with a short
+//! history of the tokens Claude used each day (looks and Ask Claude), where
+//! a day is the user's local day as their window reports it.
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
@@ -39,6 +41,8 @@ const MAX_PER_LOOK: usize = 6;
 const MAX_DISMISSED: usize = 20;
 const TICK: Duration = Duration::from_secs(10);
 const DAY_MS: i64 = 86_400_000;
+/// Days of usage history kept.
+const MAX_DAYS: usize = 90;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -114,7 +118,7 @@ pub struct Item {
 pub struct WatchState {
     /// The newest exchange already looked at.
     pub last_id: i64,
-    /// The day (days since 1970, UTC) `tokens_today` counts.
+    /// The local day (days since 1970) `tokens_today` counts.
     pub day: i64,
     pub tokens_today: u64,
     pub looks_today: u64,
@@ -134,6 +138,24 @@ struct Data {
     items: Vec<Item>,
     /// Titles the user dismissed, newest last.
     dismissed: Vec<String>,
+    /// Minutes east of UTC of the user's clock, so "today" is their day.
+    tz_min: i32,
+    /// Tokens used per day, oldest first, at most [`MAX_DAYS`].
+    history: Vec<DayUse>,
+}
+
+/// What Claude used on one day in this project.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct DayUse {
+    /// Local days since 1970.
+    pub day: i64,
+    /// Tokens the watcher's looks used, and how many looks there were.
+    pub watch: u64,
+    pub looks: u64,
+    /// Tokens Ask Claude conversations used, and how many questions.
+    pub ask: u64,
+    pub asks: u64,
 }
 
 /// What the Agents screen shows: settings, progress and the inbox.
@@ -148,6 +170,12 @@ pub struct View {
     pub capped: bool,
     /// New in-scope requests waiting for the next look.
     pub waiting: usize,
+    /// Claude runs going now in this project: looks and Ask Claude answers.
+    pub busy: usize,
+    /// Today, in local days since 1970.
+    pub today: i64,
+    /// Tokens used per day, newest first.
+    pub history: Vec<DayUse>,
     pub unread: usize,
     pub items: Vec<Item>,
     pub budgets: &'static [u64],
@@ -175,17 +203,22 @@ const OFF: &str = "Stopped: watching was turned off.";
 const AGENTS_OFF: &str = "Stopped: agent access was turned off in Settings.";
 const CAPPED: &str = "Stopped: today’s token limit was reached. Looks resume tomorrow, or raise the limit.";
 
-fn today() -> i64 {
-    now_ms() / DAY_MS
+fn today(tz_min: i32) -> i64 {
+    (now_ms() + tz_min as i64 * 60_000).div_euclid(DAY_MS)
 }
 
 impl Watch {
     pub fn new(engine: Arc<Engine>, home: Home, conversations: Arc<Conversations>) -> Arc<Self> {
         let mut data: Data = engine.store.view_state(KEY).ok().flatten().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
         data.settings = data.settings.clean();
-        // A new project starts watching from what is already captured.
-        if data.state.last_id == 0 {
-            data.state.last_id = engine.store.max_id().unwrap_or(0);
+        // Watching starts from what is already captured when the project
+        // opens: traffic left from an earlier session is not read in the
+        // background, so reopening a project does not spend tokens on its own.
+        // Look now still reads the latest of it.
+        data.state.last_id = engine.store.max_id().unwrap_or(data.state.last_id);
+        // Counts from before the history was kept become its first day.
+        if data.history.is_empty() && data.state.tokens_today > 0 {
+            data.history.push(DayUse { day: data.state.day, watch: data.state.tokens_today, looks: data.state.looks_today, ..Default::default() });
         }
         Arc::new(Watch { engine, home, conversations, data: Mutex::new(data), running: Mutex::new(None), seen: Mutex::new((0, now_ms())), asked: Mutex::new(false), stopped: Mutex::new(None) })
     }
@@ -203,7 +236,7 @@ impl Watch {
     }
 
     fn roll_day(data: &mut Data) {
-        let day = today();
+        let day = today(data.tz_min);
         if data.state.day != day {
             data.state.day = day;
             data.state.tokens_today = 0;
@@ -211,13 +244,53 @@ impl Watch {
         }
     }
 
-    /// New in-scope requests after `after`, oldest first, at most [`MAX_LISTED`].
+    /// Adds to today's line of the history.
+    fn record(data: &mut Data, add: DayUse) {
+        let day = data.state.day;
+        if data.history.last().is_none_or(|d| d.day != day) {
+            data.history.push(DayUse { day, ..Default::default() });
+        }
+        let d = data.history.last_mut().unwrap();
+        d.watch += add.watch;
+        d.looks += add.looks;
+        d.ask += add.ask;
+        d.asks += add.asks;
+        let extra = data.history.len().saturating_sub(MAX_DAYS);
+        data.history.drain(..extra);
+    }
+
+    /// Remembers the user's clock, in minutes east of UTC.
+    pub fn set_tz(&self, tz_min: i32) {
+        let tz_min = tz_min.clamp(-14 * 60, 14 * 60);
+        let mut data = self.data.lock().unwrap();
+        if data.tz_min != tz_min {
+            data.tz_min = tz_min;
+            Self::roll_day(&mut data);
+            self.save(&data);
+        }
+    }
+
+    /// Counts the tokens of one Ask Claude answer toward today.
+    pub fn add_ask(&self, tokens: u64) {
+        if tokens == 0 {
+            return;
+        }
+        let mut data = self.data.lock().unwrap();
+        Self::roll_day(&mut data);
+        Self::record(&mut data, DayUse { ask: tokens, asks: 1, ..Default::default() });
+        self.save(&data);
+    }
+
+    /// The newest in-scope requests after `after`, oldest first, at most
+    /// [`MAX_LISTED`]. Older ones past that are skipped, not saved for later
+    /// looks: one look covers one pause, however much came in before it.
     fn new_requests(&self, after: i64) -> Vec<crate::model::ExchangeSummary> {
         let Ok(q) = Query::parse("scope:in") else { return vec![] };
         let Ok((items, _)) = self.engine.store.search_sorted(&q, &self.engine.rules(), None, MAX_LISTED * 3, 0) else { return vec![] };
         let mut v: Vec<_> = items.into_iter().filter(|x| x.id > after).collect();
         v.sort_by_key(|x| x.id);
-        v.truncate(MAX_LISTED);
+        let skip = v.len().saturating_sub(MAX_LISTED);
+        v.drain(..skip);
         v
     }
 
@@ -229,6 +302,9 @@ impl Watch {
             capped: Self::capped(&data),
             running: self.running.lock().unwrap().is_some(),
             waiting,
+            busy: self.conversations.running(),
+            today: data.state.day,
+            history: data.history.iter().rev().cloned().collect(),
             unread: data.items.iter().filter(|i| !i.read).count(),
             settings: data.settings,
             state: data.state,
@@ -355,10 +431,7 @@ impl Watch {
     }
 
     fn latest(&self) -> Vec<crate::model::ExchangeSummary> {
-        let mut v = self.new_requests(0);
-        let skip = v.len().saturating_sub(MAX_LISTED);
-        v.drain(..skip);
-        v
+        self.new_requests(0)
     }
 
     async fn look(&self, list: Vec<crate::model::ExchangeSummary>, again: bool, agents_on: &impl Fn() -> bool) -> Result<()> {
@@ -405,6 +478,7 @@ impl Watch {
             data.state.call_tokens = usage.first_call;
         }
         data.state.looks_today += 1;
+        Self::record(&mut data, DayUse { watch: usage.used, looks: 1, ..Default::default() });
         data.state.last_look_at = Some(now_ms());
         data.state.last_id = data.state.last_id.max(newest);
         data.state.last_error.clear();
@@ -581,6 +655,37 @@ mod tests {
         assert!(Watch::capped(&d));
         d.state.call_tokens = 40_000;
         assert!(!Watch::capped(&d));
+    }
+
+    #[test]
+    fn a_new_day_starts_at_zero_and_the_history_keeps_the_old_one() {
+        let mut d = Data::default();
+        // A week ago: 159k used by looks, 20k by Ask Claude.
+        d.state.day = today(0) - 7;
+        Watch::record(&mut d, DayUse { watch: 159_000, looks: 3, ..Default::default() });
+        Watch::record(&mut d, DayUse { ask: 20_000, asks: 1, ..Default::default() });
+        d.state.tokens_today = 159_000;
+        d.state.looks_today = 3;
+        Watch::roll_day(&mut d);
+        assert_eq!((d.state.tokens_today, d.state.looks_today, d.state.day), (0, 0, today(0)));
+        assert!(!Watch::capped(&d));
+        Watch::record(&mut d, DayUse { ask: 5_000, asks: 1, ..Default::default() });
+        assert_eq!(d.history.len(), 2);
+        assert_eq!(d.history[0], DayUse { day: today(0) - 7, watch: 159_000, looks: 3, ask: 20_000, asks: 1 });
+        assert_eq!((d.history[1].day, d.history[1].ask, d.history[1].watch), (today(0), 5_000, 0));
+    }
+
+    #[test]
+    fn today_follows_the_users_clock() {
+        // Whatever the time in UTC, 28 hours apart is another day.
+        assert!((1..=2).contains(&(today(14 * 60) - today(-14 * 60))));
+        let mut d = Data::default();
+        for day in 0..(MAX_DAYS as i64 + 5) {
+            d.state.day = day;
+            Watch::record(&mut d, DayUse { watch: 1, ..Default::default() });
+        }
+        assert_eq!(d.history.len(), MAX_DAYS);
+        assert_eq!(d.history[0].day, 5, "the oldest days are dropped");
     }
 
     #[test]
