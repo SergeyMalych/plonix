@@ -5,6 +5,7 @@ What changed in each Plonix release. The newest release is at the top.
 ## [Unreleased]
 
 ### Added
+- **Agents: working or idle, and usage by day.** The Agents screen shows whether an agent is working, idle (and when it was last active) or off, and **Usage by day** lists the tokens Claude used in the project each day, watching and Ask Claude apart.
 - **Claude suggests requests to try.** Besides editing a Bench draft, Claude can now suggest a request of its own (the `propose_request` MCP tool): it waits in a strip above the Bench tabs with what it tests, **Open on the Bench** and **Discard**. Nothing is sent until you press Send.
 - **Agents see saved users and the Access check.** `list_users` names the users you saved, with which headers and cookies each carries but never their values, and `get_access_check` reads your last Access check. Both can be switched off in Settings › AI agents.
 - **Users and the Access check in the terminal.** `plonix users`, `plonix access <ids>` or `plonix access --host … --prefix …` (a table with the rows worth a look marked), and `plonix replay <id> --as <user>`.
@@ -23,6 +24,7 @@ What changed in each Plonix release. The newest release is at the top.
 - Keyboard hints read Ctrl on Windows.
 
 ### Fixed
+- **Agents no longer spend tokens on old traffic when a project reopens.** Watching starts from the moment a project opens, and each pause gets one look at the newest requests instead of several looks working through a backlog. "Today" in the token meter is now your local day.
 - **The Map, `list_endpoints`, the Access check and Ask Claude keep every endpoint** after a big run or scan; they used to see only a host's newest 20,000 requests.
 - **Fewer CORS false alarms.** `Access-Control-Allow-Origin: *` is no longer flagged as reflecting your origin (browsers refuse it with credentials), and origins on the same site are not flagged.
 - Ask Claude shows only Plonix steps in its progress line, not Claude Code's own housekeeping.

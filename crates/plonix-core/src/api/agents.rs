@@ -150,6 +150,7 @@ async fn agent_run(State(s): State<AppState>, Json(b): Json<RunBody>) -> Respons
     let resume = b.resume.or_else(|| saved.as_ref().and_then(|c| c.session_id.clone()));
     match s.conversations.start(&s.home, b.prompt, resume) {
         Ok(id) => {
+            tokio::spawn(count_when_done(s.clone(), id.clone()));
             let Some(ask) = ask else { return Json(json!({ "id": id })).into_response() };
             let _guard = s.chats_lock.lock().await;
             match chats::begin(&s.engine.store, saved.as_ref().map(|c| c.id.as_str()), b.title.as_deref(), b.subject, &ask, &id) {
@@ -179,6 +180,19 @@ async fn agent_run_poll(State(s): State<AppState>, Path(id): Path<String>, Query
     match s.conversations.poll(&id, q.since) {
         Some(snap) => Json(snap).into_response(),
         None => err(StatusCode::NOT_FOUND, "not_found", "no such conversation"),
+    }
+}
+
+/// Waits for a run to finish and counts its tokens in the day's usage.
+async fn count_when_done(s: AppState, run: String) {
+    loop {
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        match s.conversations.usage(&run) {
+            Some(u) if u.running => continue,
+            Some(u) => s.watch.add_ask(u.used),
+            None => {}
+        }
+        return;
     }
 }
 
@@ -212,8 +226,18 @@ async fn agent_activity(State(s): State<AppState>, Query(q): Query<ActivityQuery
     Json(json!({ "hits": s.agents.hits(q.since, q.limit.unwrap_or(200).min(access::MAX_HITS)), "clients": s.agents.clients() })).into_response()
 }
 
-/// The watcher: its settings, today's use and the inbox. User-only.
-async fn watch_view(State(s): State<AppState>) -> Response {
+#[derive(Deserialize)]
+struct WatchQuery {
+    /// The window's clock, in minutes east of UTC, so "today" is the user's day.
+    #[serde(default)]
+    tz: Option<i32>,
+}
+
+/// The watcher: its settings, today's use, the usage history and the inbox. User-only.
+async fn watch_view(State(s): State<AppState>, Query(q): Query<WatchQuery>) -> Response {
+    if let Some(tz) = q.tz {
+        s.watch.set_tz(tz);
+    }
     Json(s.watch.view()).into_response()
 }
 
