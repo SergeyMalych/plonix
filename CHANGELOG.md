@@ -2,9 +2,11 @@
 
 What changed in each Plonix release. The newest release is at the top.
 
-## [Unreleased]
+## [0.5.2] - 2026-10-21
 
 ### Added
+- **Tidy view of the Bench request.** The new default view shows each sign-in token as whose it is, such as "JWT of Maya · 8 min left" (matched against saved users and sessions found in traffic), decodes Base64 JSON, and folds the headers every browser adds and tracking cookies into one line each. It stays editable; **Raw** shows the request byte for byte, and Send always sends the real values. A token's card shows its claims and offers Edit claims, another user's value, Show raw here and Copy. The walkthrough has a stop for it with **Test now!**.
+- **An install guide with pictures** at [plonix.io/docs/install](https://plonix.io/docs/install.html): each prompt macOS and Windows show for an app that is not signed yet, in light and dark. After you download Plonix from plonix.io, a **Next: open Plonix** panel shows the steps for your system.
 - **Claude suggests requests to try.** Besides editing a Bench draft, Claude can now suggest a request of its own (the `propose_request` MCP tool): it waits in a strip above the Bench tabs with what it tests, **Open on the Bench** and **Discard**. Nothing is sent until you press Send.
 - **Agents see saved users and the Access check.** `list_users` names the users you saved, with which headers and cookies each carries but never their values, and `get_access_check` reads your last Access check. Both can be switched off in Settings › AI agents.
 - **Users and the Access check in the terminal.** `plonix users`, `plonix access <ids>` or `plonix access --host … --prefix …` (a table with the rows worth a look marked), and `plonix replay <id> --as <user>`.
@@ -21,6 +23,9 @@ What changed in each Plonix release. The newest release is at the top.
 - The Start screen keeps **Start your first project** and the profile picker until you have a project of your own, with the demo listed under it.
 - `plonix market install` shows what an extension may do and asks before switching it on; `--yes` skips the question in scripts.
 - Keyboard hints read Ctrl on Windows.
+- **Bench**: the handle that sets History's height now sits between the Request and Response columns and History (drag it, double-click to reset; the size is remembered). Compare no longer has a bottom handle; its texts scroll in a fixed height.
+- **Folded sidebar names at once.** With the sidebar folded to icons, a button's name and shortcut show beside it the moment the pointer is on it.
+- **Shortcuts follow the sidebar.** 1–9 (⌘1–⌘9 on Mac, Ctrl+1–9 on Windows) now open the screens in sidebar order: Traffic, Bench, Scope, Map, Users, Access, Findings, Agents, Callbacks.
 
 ### Fixed
 - **The Map, `list_endpoints`, the Access check and Ask Claude keep every endpoint** after a big run or scan; they used to see only a host's newest 20,000 requests.
@@ -28,6 +33,8 @@ What changed in each Plonix release. The newest release is at the top.
 - Ask Claude shows only Plonix steps in its progress line, not Claude Code's own housekeeping.
 - The `Proxy-Connection` header is no longer recorded, so replays don't send it.
 - A scope rule for an IP address no longer claims subdomains.
+- **Access check** rows are all the same height, and long user names in the header shorten instead of running into the next column.
+- rustls is updated to 0.23.46 for two security advisories.
 
 ## [0.5.1] - 2026-10-14
 
@@ -229,6 +236,7 @@ The first public release of Plonix for Mac.
 - Crash reports stay on your Mac; Plonix offers to open a prefilled GitHub issue and never sends anything on its own.
 - Documentation at plonix.io/docs.
 
+[0.5.2]: https://github.com/SergeyMalych/plonix/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/SergeyMalych/plonix/compare/v0.1.5...v0.5.1
 [0.1.5]: https://github.com/SergeyMalych/plonix/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/SergeyMalych/plonix/compare/v0.1.3...v0.1.4
