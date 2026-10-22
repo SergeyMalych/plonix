@@ -349,7 +349,7 @@ Releases are not notarized by Apple yet, so macOS asks before opening Plonix the
 
 <a href="docs/install.md"><img src="site/assets/install-mac-3-light.webp" width="560" alt="System Settings, Privacy &amp; Security: click Open Anyway next to “Plonix” was blocked to protect your Mac"></a>
 
-On Windows, download **[Plonix for Windows](https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-Windows-setup.exe)** (64-bit Windows 10 or 11) and run it. The installer is not code-signed yet, so Windows SmartScreen may say it protected your PC: click **More info**, then **Run anyway**. Plonix keeps its data in `%USERPROFILE%\.plonix`, opens targets in Chrome, Edge, Brave or Firefox, and adds its certificate to your own trusted root certificates when Firefox needs it.
+On Windows, download **[Plonix for Windows](https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-Windows-setup.exe)** (64-bit Windows 10 or 11) and run it. The installer is not code-signed yet, so Windows SmartScreen may say it protected your PC: click **More info**, then **Run anyway**. Plonix keeps its data in `%USERPROFILE%\.plonix`, opens targets in Chrome, Edge, Brave or Firefox, and adds its certificate to your own trusted root certificates when Firefox needs it. How the Windows installer is signed is in the [code signing policy](docs/code-signing.md).
 
 ### Build from source
 
