@@ -29,7 +29,7 @@ const GROUPS = [
   ['Experiment and prove', ['bench', 'users', 'callbacks', 'scanning', 'findings', 'programs']],
   ['AI and the Market', ['agents', 'market', 'detection-rules', 'extensions']],
   ['Your data', ['updates', 'privacy', 'crash-reports', 'code-signing']],
-  ['Contributing', ['releasing']],
+  ['Contributing', ['feedback', 'releasing']],
 ];
 const ORDER = GROUPS.flatMap(([, names]) => names);
 

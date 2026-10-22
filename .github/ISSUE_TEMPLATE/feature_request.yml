@@ -21,6 +21,11 @@ body:
     attributes:
       label: What you do now
       description: Any workaround you use today.
+  - type: input
+    id: version
+    attributes:
+      label: Plonix version
+      description: Filled in when you suggest it from Plonix.
   - type: checkboxes
     id: scope
     attributes:

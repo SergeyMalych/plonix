@@ -179,6 +179,12 @@ function renderShell() {
           { class: 'nav navfoot' },
           h(
             'button',
+            { id: 'fbbtn', title: 'Feedback: report a bug or suggest a feature', 'aria-haspopup': 'menu', onclick: openFeedback },
+            h('span', { class: 'ico', text: '✎\uFE0E' }),
+            h('span', { class: 'nl', text: 'Feedback' }),
+          ),
+          h(
+            'button',
             { 'data-v': 'settings', title: `Settings: proxy, storage and more${IN_APP ? `  (${MOD_KEY},)` : ''}`, onclick: () => go('settings') },
             h('span', { class: 'ico', text: '⚙' }),
             h('span', { class: 'nl', text: 'Settings' }),

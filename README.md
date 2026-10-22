@@ -286,6 +286,7 @@ You accept or reject each suggestion (`*.example.com` covers all subdomains). Ac
 - The same window also runs in any browser with `plonix ui`, served by the engine itself.
 - **Updates are your call.** Plonix asks once whether to check for new versions (daily, weekly, at launch or only when you ask) and never installs anything by itself: downloading and installing each need a click, and closing a dialog means no. See [docs/updates.md](docs/updates.md).
 - **Crash reports stay on your computer.** If Plonix crashes, it saves a report in `~/.plonix/crashes/` with addresses, headers, tokens and your user name removed, and sends nothing. The next launch asks whether to view it, open a pre-filled GitHub issue for you to review and submit, or dismiss it; `plonix` prints where the report is. See [docs/crash-reports.md](docs/crash-reports.md).
+- **Report a bug or suggest a feature** from **Feedback** at the foot of the sidebar, or Help › Report a Bug… and Suggest a Feature…. Each opens a new GitHub issue with only your Plonix version and system filled in, for you to finish and submit. See [docs/feedback.md](docs/feedback.md).
 
 ### The Plonix window
 - **Sidebar:** navigation, Open target, the scope suggestions waiting on you (accept or reject in one click) and the hosts in scope with their request counts (click one to filter Traffic). Collapse it to icons with ⌃⌘S, or `\` in a browser.
@@ -634,7 +635,7 @@ Deliberately out of scope: scans that run unattended or reach beyond accepted sc
 
 ## Contributing
 
-Plonix is early, and this is a good time to shape it. Issues and discussions about workflows, pain points and design are as valuable as code. The easiest way to contribute is a **detection rule pack**: no Rust needed.
+Plonix is early, and this is a good time to shape it. Issues and discussions about workflows, pain points and design are as valuable as code: use **Feedback** in the app or [open an issue](https://github.com/SergeyMalych/plonix/issues/new/choose). The easiest way to contribute is a **detection rule pack**: no Rust needed.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test and send changes, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for how we work together. Found a security problem in Plonix itself? Please report it privately as described in [SECURITY.md](SECURITY.md), not in a public issue.
 

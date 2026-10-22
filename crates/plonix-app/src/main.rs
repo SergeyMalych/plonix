@@ -494,6 +494,8 @@ fn on_menu(app: &AppHandle, id: &str) {
             }
         }
         "show-projects" => show_launcher(app),
+        "report-bug" => open_externally(&plonix_core::feedback::issue_url(plonix_core::feedback::Kind::Bug)),
+        "suggest-feature" => open_externally(&plonix_core::feedback::issue_url(plonix_core::feedback::Kind::Feature)),
         "settings" => match win {
             Some(w) if in_project => {
                 let _ = w.eval(PROJECT_SETTINGS_SCRIPT);
@@ -550,8 +552,8 @@ fn open_in_browser(w: &WebviewWindow) {
 
 /// The platform's standard menu, plus File › New Project…, Projects and
 /// Open Target…, Import HAR… and Export Traffic as HAR…, Settings…, Install
-/// Command Line Tool… (macOS), the update items, and the Plonix screens and
-/// text sizes in View.
+/// Command Line Tool… (macOS), the update items, Report a Bug… and Suggest a
+/// Feature… in Help, and the Plonix screens and text sizes in View.
 fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let menu = Menu::default(app)?;
     let new_project = MenuItem::with_id(app, "new-project", "New Project…", true, Some("CmdOrCtrl+N"))?;
@@ -586,6 +588,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         file.append_items(&[&PredefinedMenuItem::separator(app)?, &settings])?;
     }
     add_update_items(app, &menu)?;
+    add_feedback_items(app, &menu)?;
 
     let view = find_or_add_submenu(app, &menu, "View", 3)?;
     let mut items: Vec<MenuItem<Wry>> = Vec::new();
@@ -633,6 +636,19 @@ fn add_update_items(app: &AppHandle, menu: &Menu<Wry>) -> tauri::Result<()> {
         help.append(&sep)?;
     }
     help.append_items(&[&check_now, &auto])?;
+    Ok(())
+}
+
+/// Report a Bug… and Suggest a Feature… in Help: each opens a new GitHub
+/// issue in the browser with the version and system filled in.
+fn add_feedback_items(app: &AppHandle, menu: &Menu<Wry>) -> tauri::Result<()> {
+    let bug = MenuItem::with_id(app, "report-bug", "Report a Bug…", true, None::<&str>)?;
+    let feature = MenuItem::with_id(app, "suggest-feature", "Suggest a Feature…", true, None::<&str>)?;
+    let help = find_or_add_submenu(app, menu, "Help", usize::MAX)?;
+    if !help.items()?.is_empty() {
+        help.append(&PredefinedMenuItem::separator(app)?)?;
+    }
+    help.append_items(&[&bug, &feature])?;
     Ok(())
 }
 

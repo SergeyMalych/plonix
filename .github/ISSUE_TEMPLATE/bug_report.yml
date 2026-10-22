@@ -30,7 +30,7 @@ body:
       label: Where did you see it?
       multiple: true
       options:
-        - Plonix.app
+        - The Plonix app (Mac or Windows)
         - The Plonix window in a browser (plonix ui)
         - The plonix CLI
         - An AI agent over MCP
@@ -42,14 +42,15 @@ body:
     id: version
     attributes:
       label: Plonix version or commit
-      description: "`plonix --version`, the app's About box, or the commit you built."
+      description: "Filled in when you report from Plonix. Otherwise `plonix --version`, the app's About box, or the commit you built."
     validations:
       required: true
   - type: input
     id: os
     attributes:
-      label: macOS version and Mac
-      placeholder: macOS 15.1, Apple silicon
+      label: System
+      description: Filled in when you report from Plonix.
+      placeholder: macOS 15.1 (Apple silicon), or Windows 11 (build 22631, x86_64)
   - type: textarea
     id: logs
     attributes:
