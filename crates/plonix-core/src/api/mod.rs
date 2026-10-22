@@ -349,6 +349,12 @@ async fn status(State(s): State<AppState>, caller: MaybeCaller) -> Response {
         // Unread notes and leads in the Agents inbox, for the sidebar badge.
         "agent_inbox_unread": s.watch.unread(),
         "ca_fingerprint": s.engine.ca.fingerprint(),
+        // New-issue links with the version and system filled in, for Feedback.
+        "feedback": {
+            "bug": crate::feedback::issue_url(crate::feedback::Kind::Bug),
+            "feature": crate::feedback::issue_url(crate::feedback::Kind::Feature),
+            "issues": crate::feedback::ISSUES_URL,
+        },
         // Which built-in tools the Market has switched on (see crate::tool),
         // so the window shows the Access check tab and the Bench user
         // switcher only once they are installed.

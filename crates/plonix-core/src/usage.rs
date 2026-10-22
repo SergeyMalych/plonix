@@ -475,12 +475,27 @@ fn payload(home: &Home, f: &File) -> Value {
 
 /// The OS release, such as 15.1 on macOS. Only digits, letters and dots.
 fn os_version() -> String {
+    // Major and minor release only, such as 15.1 or 10.0.
+    os_release().split('.').take(2).collect::<Vec<_>>().join(".")
+}
+
+/// The full OS release, such as 15.1.1 on macOS or 10.0.22631.4317 on
+/// Windows. Only digits, letters and dots.
+pub(crate) fn os_release() -> String {
     let raw = if cfg!(target_os = "macos") {
         std::process::Command::new("sw_vers").arg("-productVersion").output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default()
     } else if cfg!(windows) {
         // "Microsoft Windows [Version 10.0.22631.4317]"
-        let out = std::process::Command::new("cmd").args(["/C", "ver"]).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
-        out.rsplit(' ').next().unwrap_or("").trim().trim_end_matches(']').to_string()
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/C", "ver"]);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        let out = cmd.output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+        out.trim().rsplit(' ').next().unwrap_or("").trim_end_matches(']').to_string()
     } else {
         std::fs::read_to_string("/etc/os-release")
             .unwrap_or_default()
@@ -490,9 +505,7 @@ fn os_version() -> String {
             .trim_matches('"')
             .to_string()
     };
-    // Major and minor release only, such as 15.1 or 10.0.
-    let clean: String = raw.trim().chars().filter(|c| c.is_ascii_alphanumeric() || *c == '.').take(24).collect();
-    clean.split('.').take(2).collect::<Vec<_>>().join(".")
+    raw.trim().chars().filter(|c| c.is_ascii_alphanumeric() || *c == '.').take(24).collect()
 }
 
 /// Whether statistics are on, and the report as it would be sent now.

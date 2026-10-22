@@ -1867,6 +1867,12 @@ tr.acnote > td { border-bottom: none; }
 .ctxmenu button.rlmenuitem { display: flex; align-items: center; gap: 8px; }
 .ctxmenu button.rlctx { display: flex; flex-direction: column; gap: 1px; padding: 6px 10px; }
 .ctxmenu button.rlctx span { font-size: 11px; color: var(--fg-2); }
+.fbmenu { width: 264px; }
+.ctxmenu button.fbitem { display: flex; flex-direction: column; gap: 1px; padding: 6px 10px; white-space: normal; }
+.ctxmenu button.fbitem b { font-weight: 600; }
+.ctxmenu button.fbitem span { font-size: 11px; color: var(--fg-2); }
+.ctxmenu button.fbitem:hover span, .ctxmenu button.fbitem:focus span { color: inherit; opacity: .85; }
+.fbmenu .mnote { max-width: none; padding: 4px 10px 6px; line-height: 1.4; }
 .ctxmenu button.rlctx:hover span, .ctxmenu button.rlctx:focus span { color: inherit; opacity: .85; }
 .rlcmpgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .rlcmpgrid > div { min-width: 0; }

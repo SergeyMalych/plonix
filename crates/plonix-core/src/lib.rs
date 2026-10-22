@@ -38,6 +38,7 @@ pub mod intercept;
 pub mod market;
 pub mod mcp;
 pub mod extension;
+pub mod feedback;
 pub mod github;
 pub mod detectorpack;
 pub mod filterpack;
