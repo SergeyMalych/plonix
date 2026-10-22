@@ -9,6 +9,7 @@ Free code signing provided by [SignPath.io](https://about.signpath.io), certific
 - Only builds made by the [release workflow](https://github.com/SergeyMalych/plonix/blob/main/.github/workflows/release.yml) on GitHub-hosted runners, from a version tag on this repository, are sent for signing. Nothing built on a personal computer is signed.
 - Every signing request is approved by a maintainer before the certificate is used.
 - What is signed is built only from the source in this repository and the open-source dependencies listed in `Cargo.lock`.
+- On Windows the installer, `Plonix-Windows-setup.exe`, is the file that is signed.
 - The Mac app is signed separately, with the maintainers' Apple certificate.
 
 Updates are signed a second time with the Plonix update key, and Plonix refuses an update whose signature does not match. See [Updates](updates.md).
@@ -17,10 +18,11 @@ Updates are signed a second time with the Plonix update key, and Plonix refuses 
 
 | Role | Who |
 | --- | --- |
-| Committers and reviewers | [Members of the Plonix team](https://github.com/SergeyMalych/plonix/graphs/contributors) with write access to the repository |
+| Authors and committers | [Sergey Malych](https://github.com/SergeyMalych), and anyone the maintainers give write access to the repository |
+| Reviewers | [Sergey Malych](https://github.com/SergeyMalych) |
 | Approvers | [Sergey Malych](https://github.com/SergeyMalych) |
 
-Every change reaches `main` through a reviewed pull request with passing checks; `main` is protected. Maintainers use multi-factor authentication for GitHub and SignPath.
+Outside contributions arrive as pull requests from forks and are reviewed by a maintainer before they are merged. Every change reaches `main` through a pull request with passing checks, and `main` is protected. Maintainers use multi-factor authentication for GitHub and SignPath.
 
 ## Privacy
 

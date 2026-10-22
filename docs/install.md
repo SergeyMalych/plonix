@@ -63,7 +63,7 @@ Open `Plonix-Windows-setup.exe` from your Downloads folder. Windows SmartScreen 
 
 ### 2. Click Run anyway
 
-The dialog now names the app, `Plonix-Windows-setup.exe`, with an unknown publisher. Click **Run anyway** and the installer starts. Plonix then opens from the Start menu like any other app, and keeps its data in `%USERPROFILE%\.plonix`.
+The dialog now names the app, `Plonix-Windows-setup.exe`, with an unknown publisher. Click **Run anyway** and the installer starts. Plonix then opens from the Start menu like any other app, and keeps its data in `%USERPROFILE%\.plonix`. The [code signing policy](code-signing.md) says how the installer will be signed.
 
 ![The SmartScreen dialog after More info: App Plonix-Windows-setup.exe, Publisher Unknown publisher. Click Run anyway.](../site/assets/install-win-2-light.webp)
 
