@@ -529,12 +529,6 @@ const TOUR_STEPS = [
     text: 'Let an AI agent such as Claude Code work with this project over MCP: ask about the traffic, the map and the findings, and see what each answer was based on. When Claude watches your traffic, you set how many tokens it may use a day, and Stop ends a look at once.',
   },
   {
-    target: '#fbbtn',
-    title: 'Feedback',
-    test: 'feedback',
-    text: 'Found a bug, or missing something? Feedback, at the foot of the sidebar, opens a new GitHub issue with your Plonix version and system filled in, and nothing else. You write the rest and press Submit. It is in the Help menu too.',
-  },
-  {
     title: 'That’s the tour',
     text: 'Press Open target to capture a site of your own. The demo stays on the Start screen, where ⋯ › Start demo over puts it back as it shipped, and you can take this walk again with Take the tour in the demo strip.',
     view: 'traffic',
@@ -731,15 +725,6 @@ async function tourSaveDraft(t) {
 }
 
 const TOUR_TESTS = {
-  feedback: {
-    run: async (t) => {
-      await t.press($('#fbbtn'));
-      if (!(await t.until(() => $('.fbmenu'), 2000))) return 'The Feedback menu did not open.';
-      t.ring('.fbmenu');
-      return 'Pick Report a bug or Suggest a feature, and GitHub opens a new issue with Plonix ' + (S.status?.version || '') + ' and your system filled in. Nothing is sent until you press Submit there.';
-    },
-    undo: () => closePopover(),
-  },
   mrid: mindTest(/across users/, async (t) => {
     const btn = await t.until(() => $('#main .acpane .btn.primary:not([disabled])'));
     if (!btn) return 'The Access check did not open.';
