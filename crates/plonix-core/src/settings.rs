@@ -417,7 +417,11 @@ pub fn set_style(home: &Home, style: &str) -> Result<()> {
 }
 
 /// Text sizes, in percent, that ⌘+ and ⌘− step through. 100 is the default.
-pub const TEXT_SIZES: [u32; 7] = [80, 90, 100, 110, 120, 135, 150];
+pub const TEXT_SIZES: [u32; 8] = [70, 80, 90, 100, 110, 120, 135, 150];
+
+/// How much the desktop app zooms a window at 100%: 100% shows text as big
+/// as 110% did up to 0.5.2.
+const BASE_ZOOM: f64 = 1.1;
 
 /// Style, theme, spacing and text size, shared by the Start screen and every
 /// project window. Each window has a browser storage of its own, so the look
@@ -429,11 +433,14 @@ pub fn look(home: &Home) -> Value {
         let v = saved.and_then(|v| v.get(key)).and_then(Value::as_str);
         allowed.iter().copied().find(|a| Some(*a) == v).unwrap_or(allowed[0])
     };
+    let text = saved.and_then(|v| v.get("text_size")).and_then(Value::as_u64).and_then(text_size);
+    // Up to 0.5.2 "text" was the zoom itself; take the size that looks the same.
+    let older = || saved.and_then(|v| v.get("text")).and_then(Value::as_u64).map(from_older_text);
     json!({
         "style": pick("style", &["studio", "classic"]),
         "theme": pick("theme", &["auto", "light", "dark"]),
         "density": pick("density", &["dense", "roomy"]),
-        "text": saved.and_then(|v| v.get("text")).and_then(Value::as_u64).and_then(text_size).unwrap_or(100),
+        "text": text.or_else(older).unwrap_or(100),
     })
 }
 
@@ -442,14 +449,25 @@ fn text_size(v: u64) -> Option<u32> {
     TEXT_SIZES.iter().copied().find(|s| u64::from(*s) == v)
 }
 
+/// The size whose zoom is nearest to a zoom saved before 0.5.2 (in percent).
+fn from_older_text(zoom: u64) -> u32 {
+    let gap = |s: &u32| ((zoom_for(*s) * 100.0) - zoom as f64).abs();
+    TEXT_SIZES.iter().copied().min_by(|a, b| gap(a).total_cmp(&gap(b))).unwrap_or(100)
+}
+
 /// The saved text size in percent; the desktop app zooms every window to it.
 pub fn text(home: &Home) -> u32 {
     look(home)["text"].as_u64().and_then(text_size).unwrap_or(100)
 }
 
+/// How much the desktop app zooms a window for a text size: 1.1 at 100%.
+pub fn zoom_for(size: u32) -> f64 {
+    f64::from(size) / 100.0 * BASE_ZOOM
+}
+
 /// The next text size up (`step` 1), down (-1), or back to 100% (0).
 pub fn step_text(current: u32, step: i32) -> u32 {
-    let i = TEXT_SIZES.iter().position(|s| *s == current).unwrap_or(2) as i32;
+    let i = TEXT_SIZES.iter().position(|s| *s == current).unwrap_or(3) as i32;
     match step {
         0 => 100,
         _ => TEXT_SIZES[(i + step.signum()).clamp(0, TEXT_SIZES.len() as i32 - 1) as usize],
@@ -477,6 +495,9 @@ pub fn set_look(home: &Home, changes: &Value) -> Result<()> {
     let _held = GLOBAL_WRITE.lock().unwrap_or_else(|e| e.into_inner());
     crate::paths::set_aside_unreadable::<GlobalFile>(&global_path(home));
     let mut file = read_global(home);
+    // Saved as "text_size": "text" meant the zoom itself up to 0.5.2.
+    let size = next.as_object_mut().and_then(|o| o.remove("text"));
+    next["text_size"] = size.unwrap_or(json!(100));
     file.sections.insert(LOOK.to_string(), next);
     write_atomic(&global_path(home), &serde_json::to_vec_pretty(&file)?)
 }
@@ -796,8 +817,28 @@ mod tests {
         assert_eq!(step_text(100, 1), 110);
         assert_eq!(step_text(100, -1), 90);
         assert_eq!(step_text(150, 1), 150);
-        assert_eq!(step_text(80, -1), 80);
+        assert_eq!(step_text(70, -1), 70);
         assert_eq!(step_text(135, 0), 100);
         assert_eq!(step_text(42, 1), 110, "an unknown size steps from 100%");
+    }
+
+    #[test]
+    fn text_saved_by_older_versions_keeps_its_look() {
+        let home = Home { root: tempfile::tempdir().unwrap().keep() };
+        assert_eq!(text(&home), 100);
+        assert!((zoom_for(100) - 1.1).abs() < 1e-9, "100% is as big as 110% was");
+        for (older, now) in [(7, 70), (999, 150), (80, 70), (90, 80), (100, 90), (110, 100), (120, 110), (135, 120), (150, 135)] {
+            let mut file = read_global(&home);
+            file.sections.insert(LOOK.to_string(), json!({ "style": "studio", "text": older }));
+            write_atomic(&global_path(&home), &serde_json::to_vec_pretty(&file).unwrap()).unwrap();
+            assert_eq!(text(&home), now, "{older}% saved before");
+        }
+        set_look(&home, &json!({ "theme": "dark" })).unwrap();
+        assert_eq!(text(&home), 135, "another change keeps it");
+        let saved = &read_global(&home).sections[LOOK];
+        assert_eq!(saved["text_size"], 135);
+        assert!(saved.get("text").is_none(), "the older key is gone");
+        set_look(&home, &json!({ "text": 100 })).unwrap();
+        assert_eq!(text(&home), 100);
     }
 }

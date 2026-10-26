@@ -2,6 +2,12 @@
 
 What changed in each Plonix release. The newest release is at the top.
 
+## [Unreleased]
+
+### Changed
+- **Bigger text by default.** 100% now shows text as big as 110% did, and sizes go from 70% to 150%. A size you picked before stays as it looked: 110% now reads 100%, 100% reads 90%, and so on.
+- **View menu: − 100% +.** Bigger Text, Smaller Text and Actual Text Size are now −, the current size and +. The size itself puts it back to 100% (⌘0).
+
 ## [0.5.2] - 2026-10-21
 
 ### Added

@@ -592,9 +592,10 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     for (id, label, accel, _) in VIEW_ITEMS {
         items.push(MenuItem::with_id(app, id, label, true, Some(accel))?);
     }
-    let bigger = MenuItem::with_id(app, text_size::BIGGER_ID, "Bigger Text", true, Some("CmdOrCtrl+="))?;
-    let smaller = MenuItem::with_id(app, text_size::SMALLER_ID, "Smaller Text", true, Some("CmdOrCtrl+-"))?;
-    let actual = MenuItem::with_id(app, text_size::ACTUAL_ID, "Actual Text Size", true, Some("CmdOrCtrl+0"))?;
+    // A menu has one item to a row, so text size reads − 100% + top to bottom.
+    let smaller = MenuItem::with_id(app, text_size::SMALLER_ID, "\u{2212}", true, Some("CmdOrCtrl+-"))?;
+    let actual = text_size::size_item(app)?;
+    let bigger = MenuItem::with_id(app, text_size::BIGGER_ID, "+", true, Some("CmdOrCtrl+="))?;
     let toggle = MenuItem::with_id(app, "toggle-sidebar", "Toggle Sidebar", true, Some(TOGGLE_SIDEBAR_KEY))?;
     let in_browser = MenuItem::with_id(app, "open-in-browser", "Open in Browser", true, Some("CmdOrCtrl+Shift+B"))?;
     let sep = PredefinedMenuItem::separator(app)?;
@@ -605,9 +606,9 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     refs.push(&toggle);
     refs.push(&in_browser);
     refs.push(&sep3);
-    refs.push(&bigger);
     refs.push(&smaller);
     refs.push(&actual);
+    refs.push(&bigger);
     if !view.items()?.is_empty() {
         refs.push(&sep2);
     }

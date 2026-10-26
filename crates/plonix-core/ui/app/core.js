@@ -71,7 +71,7 @@ async function boot() {
   applyTheme(store('plonix.theme') || 'auto');
   applyDensity(store('plonix.density') || 'dense');
   applyStyle(store('plonix.style') || 'studio');
-  showTextSize(store('plonix.text'));
+  showTextSize(store('plonix.textSize'));
   const hash = location.hash;
   const code = hash.startsWith('#code=') ? hash.slice(6) : null;
   if (code) {

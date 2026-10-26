@@ -33,7 +33,7 @@ On Windows, use Ctrl where the Mac uses ⌘.
 - **Style.** **Studio**, the standard Plonix look: cream paper, a blue sidebar, round controls and a shape for every tool. **Classic** is the plainer indigo look. Both work in light and dark and with both spacings.
 - **Theme.** Match the system, light or dark.
 - **Spacing.** **Dense**, the default, fits more on screen. **Roomy** gives rows and panels more air.
-- **Text size.** From 80% to 150%. ⌘+ and ⌘− change it from anywhere and ⌘0 puts it back; it is also in the View menu. The window grows its smallest size with the text, so nothing gets cut off.
+- **Text size.** From 70% to 150%. ⌘+ and ⌘− change it from anywhere and ⌘0 puts it back to 100%; it is also in the View menu as − 100% +, where the size itself puts it back. The window grows its smallest size with the text, so nothing gets cut off.
 
 A change reaches every open window at once.
 
