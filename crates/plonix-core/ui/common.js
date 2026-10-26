@@ -115,7 +115,7 @@ function modal(title, body, actions, wide) {
 /* ---------- text size: the same in every window ---------- */
 
 /** The sizes ⌘+ and ⌘− step through, in percent (settings::TEXT_SIZES). */
-const TEXT_SIZES = [80, 90, 100, 110, 120, 135, 150];
+const TEXT_SIZES = [70, 80, 90, 100, 110, 120, 135, 150];
 const MOD_KEY = ON_WINDOWS ? 'Ctrl+' : '⌘';
 let textSize = 100;
 
@@ -126,7 +126,7 @@ function showTextSize(n, step) {
   n = TEXT_SIZES.includes(Number(n)) ? Number(n) : 100;
   const same = n === textSize;
   textSize = n;
-  store('plonix.text', n);
+  store('plonix.textSize', n);
   for (const el of document.querySelectorAll('.tsize')) paintTextSize(el);
   if (step == null) return;
   if (same && step > 0 && n === TEXT_SIZES[TEXT_SIZES.length - 1]) toast('Text is at its largest size.');
@@ -185,7 +185,7 @@ function paintTextSize(el) {
   el.querySelector('.ts-reset').hidden = textSize === 100;
 }
 
-// In the app, View › Bigger Text (⌘=) and Smaller Text (⌘−) are menu
+// In the app, View › + (⌘=) and − (⌘−) are menu
 // items; this catches the other keys people use for them: ⌘+ with Shift and
 // the number pad.
 if (window.__PLONIX_APP__) {

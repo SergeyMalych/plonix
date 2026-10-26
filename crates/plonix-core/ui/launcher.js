@@ -109,7 +109,7 @@ function appearanceSection() {
 }
 
 async function boot() {
-  applyLook({ theme: store('plonix.theme'), style: store('plonix.style'), density: store('plonix.density'), text: store('plonix.text') });
+  applyLook({ theme: store('plonix.theme'), style: store('plonix.style'), density: store('plonix.density'), text: store('plonix.textSize') });
   const hash = location.hash;
   if (hash.startsWith('#code=')) {
     history.replaceState(null, '', location.pathname);

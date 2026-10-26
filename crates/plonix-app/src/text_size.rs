@@ -1,5 +1,5 @@
-//! Text size: Settings › Appearance › Text size, and View › Bigger Text (⌘=),
-//! Smaller Text (⌘−) and Actual Text Size (⌘0).
+//! Text size: Settings › Appearance › Text size, and View › − (⌘−), the size
+//! itself (⌘0 puts it back to 100%) and + (⌘=).
 //!
 //! The size is saved with the look, so every window follows it, the Start
 //! screen and new windows included. Each window is zoomed natively, which
@@ -14,7 +14,8 @@ use std::time::Duration;
 use plonix_core::paths::Home;
 use plonix_core::settings;
 use serde_json::json;
-use tauri::{AppHandle, LogicalSize, Manager, WebviewWindow};
+use tauri::menu::MenuItem;
+use tauri::{AppHandle, LogicalSize, Manager, WebviewWindow, Wry};
 
 pub const BIGGER_ID: &str = "text-bigger";
 pub const SMALLER_ID: &str = "text-smaller";
@@ -23,13 +24,31 @@ pub const ACTUAL_ID: &str = "text-actual";
 static HOME: OnceLock<Home> = OnceLock::new();
 /// Window label → the text size it is zoomed to.
 static SHOWN: OnceLock<Mutex<HashMap<String, u32>>> = OnceLock::new();
-/// The smallest window sizes, in points at 100%.
+/// View › the size between − and +, and the size it says.
+static SIZE_ITEM: OnceLock<(MenuItem<Wry>, Mutex<u32>)> = OnceLock::new();
+/// The smallest window sizes, in points when not zoomed.
 pub const PROJECT_MIN: (f64, f64) = (900.0, 560.0);
 pub const LENS_MIN: (f64, f64) = (480.0, 360.0);
 pub const LAUNCHER_MIN: (f64, f64) = (640.0, 460.0);
 
 fn shown() -> &'static Mutex<HashMap<String, u32>> {
     SHOWN.get_or_init(Mutex::default)
+}
+
+/// View › 100%: says the size, and puts it back to 100% (⌘0).
+pub fn size_item(app: &AppHandle) -> tauri::Result<MenuItem<Wry>> {
+    let size = HOME.get().map(settings::text).unwrap_or(100);
+    let item = MenuItem::with_id(app, ACTUAL_ID, format!("{size}%"), true, Some("CmdOrCtrl+0"))?;
+    let _ = SIZE_ITEM.set((item.clone(), Mutex::new(size)));
+    Ok(item)
+}
+
+fn label_size_item(size: u32) {
+    let Some((item, said)) = SIZE_ITEM.get() else { return };
+    let mut said = said.lock().unwrap();
+    if *said != size && item.set_text(format!("{size}%")).is_ok() {
+        *said = size;
+    }
 }
 
 /// Watches the saved size, which any window or a terminal may change, and
@@ -65,7 +84,7 @@ fn fit_size(w: &WebviewWindow, size: u32) {
     } else {
         PROJECT_MIN
     };
-    let zoom = f64::from(size).max(100.0) / 100.0;
+    let zoom = settings::zoom_for(size).max(1.0);
     let (mut min_w, mut min_h) = (base_w * zoom, base_h * zoom);
     if let Ok(Some(m)) = w.current_monitor() {
         let area = m.work_area().size.to_logical::<f64>(m.scale_factor());
@@ -87,7 +106,7 @@ fn fit_size(w: &WebviewWindow, size: u32) {
 pub fn fit(w: &WebviewWindow) {
     let Some(home) = HOME.get() else { return };
     let size = settings::text(home);
-    if w.set_zoom(f64::from(size) / 100.0).is_ok() {
+    if w.set_zoom(settings::zoom_for(size)).is_ok() {
         shown().lock().unwrap().insert(w.label().to_string(), size);
     }
 }
@@ -114,6 +133,7 @@ pub fn on_menu_event(app: &AppHandle, id: &str, focused: Option<&WebviewWindow>)
 /// show it. `told` is the window whose keys asked for `step`: it says what
 /// happened, also when the size was already at its end.
 fn apply(app: &AppHandle, size: u32, told: Option<(&str, i32)>) {
+    label_size_item(size);
     let windows = app.webview_windows();
     let mut shown = shown().lock().unwrap();
     shown.retain(|label, _| windows.contains_key(label));
@@ -122,7 +142,7 @@ fn apply(app: &AppHandle, size: u32, told: Option<(&str, i32)>) {
         if shown.get(&label) == Some(&size) && step.is_none() {
             continue;
         }
-        if w.set_zoom(f64::from(size) / 100.0).is_ok() {
+        if w.set_zoom(settings::zoom_for(size)).is_ok() {
             shown.insert(label, size);
         }
         let script = match step {
