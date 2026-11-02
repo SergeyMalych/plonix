@@ -147,7 +147,10 @@ enum Cmd {
     /// Re-send a captured request, optionally modified (a Bench send; accepted hosts only)
     Replay(ReplayArgs),
     /// Saved users to test as, and which credentials each carries (never the values)
-    Users,
+    Users {
+        #[command(subcommand)]
+        cmd: Option<users::UsersCmd>,
+    },
     /// Access check: replay requests as every saved user and signed out, and compare
     Access(users::AccessArgs),
     /// Hold requests (and responses) in the proxy to forward, edit or drop them
@@ -569,7 +572,7 @@ fn dispatch(ctx: Ctx, command: Cmd) -> Result<ExitCode> {
         Cmd::Crawl(a) => scan::crawl_cmd(&ctx, a)?,
         Cmd::Findings { cmd } => findings::findings_cmd(&ctx, cmd.unwrap_or(findings::FindingsCmd::List { status: None }))?,
         Cmd::Bench { cmd } => bench::bench_cmd(&ctx, cmd)?,
-        Cmd::Users => users::users_cmd(&ctx)?,
+        Cmd::Users { cmd } => users::users_cmd(&ctx, cmd)?,
         Cmd::Access(a) => users::access_cmd(&ctx, a)?,
         Cmd::Callbacks { cmd } => callbacks::callbacks_cmd(&ctx, cmd.unwrap_or(callbacks::CallbacksCmd::Status))?,
         Cmd::Intercept { cmd } => intercept::intercept_cmd(&ctx, cmd.unwrap_or(intercept::InterceptCmd::Status))?,
@@ -814,10 +817,34 @@ fn replay_cmd(ctx: &Ctx, a: ReplayArgs) -> Result<()> {
     }
     match &a.as_user {
         Some(u) => println!("Replayed #{} as {} → #{}\n", a.id, render::safe(u), v["id"]),
-        None => println!("Replayed #{} as #{}\n", a.id, v["id"]),
+        None => println!("Sent #{} again → #{}\n", a.id, v["id"]),
     }
     print!("{}", render::exchange(&v, if a.full { usize::MAX } else { 4000 }));
+    if a.as_user.is_none()
+        && let Some(kept) = mixed_identity(&set_headers, &a.remove_headers, &v["req_headers"])
+    {
+        println!(
+            "\nNote: you set a new credential, but this still sent the captured {kept}, so the reply may be from two people at once. \
+             Use --as <user>, or add --remove-header {kept}."
+        );
+    }
     Ok(())
+}
+
+/// When `-H` set a credential and the request still carried another one from
+/// the capture: the header the person may not mean to keep.
+fn mixed_identity(set: &[(String, String)], removed: &[String], sent: &Value) -> Option<String> {
+    const CREDENTIALS: [&str; 4] = ["authorization", "cookie", "x-api-key", "x-auth-token"];
+    let is_cred = |n: &str| CREDENTIALS.contains(&n.to_ascii_lowercase().as_str());
+    let set_names: Vec<String> = set.iter().map(|(k, _)| k.to_ascii_lowercase()).collect();
+    if !set_names.iter().any(|n| is_cred(n)) {
+        return None;
+    }
+    sent.as_array()?.iter().filter_map(|p| p[0].as_str()).find(|n| {
+        let low = n.to_ascii_lowercase();
+        is_cred(n) && !set_names.contains(&low) && !removed.iter().any(|r| r.eq_ignore_ascii_case(n))
+    })
+    .map(String::from)
 }
 
 fn scope_cmd(ctx: &Ctx, cmd: ScopeCmd) -> Result<()> {
@@ -957,6 +984,12 @@ fn open_cmd(ctx: &Ctx, a: OpenArgs) -> Result<()> {
             println!("  ✓ {label:<13}{text}");
         }
     };
+    // A step that did not work gets a warning mark, never a check mark.
+    let warn = |label: &str, text: &str| {
+        if !ctx.json {
+            println!("  ! {label:<13}{text}");
+        }
+    };
     if !ctx.json {
         println!("Plonix · {}\n", target.url);
     }
@@ -993,7 +1026,7 @@ fn open_cmd(ctx: &Ctx, a: OpenArgs) -> Result<()> {
             }
             None => {
                 needs_trust = true;
-                say("Browser", "none found to launch");
+                warn("Browser", "none found to launch");
                 if !ctx.json {
                     let get = if chromium::platform().is_some() { "Run `plonix browser install` to get the Plonix browser, install" } else { "Install" };
                     println!(
@@ -1011,7 +1044,7 @@ fn open_cmd(ctx: &Ctx, a: OpenArgs) -> Result<()> {
         let url = ui_link(&c.client)?;
         match open::open_url(&url) {
             Ok(()) => say("Window", &format!("http://{}  (opened in your default browser)", c.status["api"].as_str().unwrap_or(""))),
-            Err(e) => say("Window", &format!("could not open it ({e}); run `plonix ui`")),
+            Err(e) => warn("Window", &format!("could not open it ({e}); run `plonix ui`")),
         }
         ui_url = Value::from(url);
     }
@@ -1172,11 +1205,12 @@ fn ca_cmd(ctx: &Ctx, cmd: CaCmd) -> Result<()> {
 }
 
 fn trust(home: &Home) -> Result<()> {
+    let system = open::System::current();
     if plonix_core::trust::supported() {
-        println!("Adding {} to your login keychain as a trusted root. macOS will ask you to confirm.", home.ca_cert().display());
+        println!("{}", system.trust_line(&home.ca_cert().display().to_string()));
     }
     plonix_core::trust::trust(home)?;
-    println!("✓ Trusted. Safari, Firefox, curl and other apps now accept HTTPS through the Plonix proxy.");
+    println!("✓ Trusted. {} now accept HTTPS through the Plonix proxy.", system.trusted_apps());
     Ok(())
 }
 
@@ -1303,5 +1337,14 @@ mod tests {
         assert_eq!(exit_code(&api("bad_query")), 2);
         assert_eq!(exit_code(&anyhow::Error::from(NotRunning)), 3);
         assert_eq!(exit_code(&anyhow::anyhow!("boom")), 1);
+    }
+
+    #[test]
+    fn a_new_credential_with_the_old_cookie_is_pointed_out() {
+        let sent = serde_json::json!([["host", "a"], ["cookie", "sid=bob"], ["Authorization", "Bearer alice"]]);
+        let set = vec![("Authorization".to_string(), "Bearer alice".to_string())];
+        assert_eq!(mixed_identity(&set, &[], &sent).as_deref(), Some("cookie"));
+        assert_eq!(mixed_identity(&set, &["Cookie".into()], &sent), None);
+        assert_eq!(mixed_identity(&[("X-Debug".into(), "1".into())], &[], &sent), None);
     }
 }

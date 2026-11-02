@@ -121,9 +121,35 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 15
         run: bash .github/scripts/windows-cli-smoke.sh "$LOCALAPPDATA/Plonix/plonix-cli.exe"
+      # The installer also put `plonix` on the user's PATH (windows/hooks.nsh),
+      # and the certificate wording is the Windows one.
+      - name: Check plonix is on the user PATH
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          $bin = Join-Path $env:LOCALAPPDATA 'Plonix\bin'
+          if (-not (Test-Path (Join-Path $bin 'plonix.exe'))) { throw "no plonix.exe in $bin" }
+          $path = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (($path -split ';') -notcontains $bin) { throw "user Path lacks $bin : $path" }
+          $env:Path = "$bin;$env:Path"
+          $env:PLONIX_ACCEPT_TERMS = '1'
+          $env:PLONIX_HOME = Join-Path $env:RUNNER_TEMP 'plonix-path-home'
+          plonix --version
+          $ca = plonix ca | Out-String
+          Write-Output $ca
+          if ($ca -match 'keychain|macOS|Safari') { throw 'macOS wording on Windows' }
+          if ($ca -notmatch 'Windows certificates') { throw 'no Windows wording' }
       - name: Uninstall
         if: ${{ !cancelled() }}
         run: '"$LOCALAPPDATA/Plonix/uninstall.exe" /S'
+      - name: Check uninstall took plonix off PATH
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          Start-Sleep -Seconds 5
+          $bin = Join-Path $env:LOCALAPPDATA 'Plonix\bin'
+          $path = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (($path -split ';') -contains $bin) { throw "user Path still has $bin" }
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:

@@ -6,10 +6,15 @@ Agents get **read-only** access. They can look at everything the project holds a
 
 ## Connect Claude Code
 
+In the Plonix window, open **Agents › Setup** and press **Connect Claude Code**. Plonix adds itself to Claude Code for all your projects; there is nothing to install or put on your PATH first. The button shows when Claude Code is installed on this computer.
+
+From a terminal, the same in one command:
+
 ```sh
-cargo install --path crates/plonix-cli   # once, if you don't have the `plonix` command yet
 plonix connect claude
 ```
+
+The `plonix` command comes with the app: on a Mac choose **Plonix › Install Command Line Tool…** once; on Windows the installer puts it on your PATH (open a new terminal after installing). If you build from source, `cargo install --path crates/plonix-cli` installs it.
 
 ```text
 Plonix · connect Claude Code
@@ -44,7 +49,7 @@ Then start capturing (`plonix open <target>`, or open Plonix.app) and ask Claude
 
 > Look at Plonix scope suggestions and explain which ones really belong to the target and why.
 
-The **Agents** screen in the Plonix window (⌘6) shows what each agent reads as it works, and its **Setup** panel lists which agents are connected and what they are allowed to do (see [The Agents screen](#the-agents-screen)).
+The **Agents** screen in the Plonix window (⌘8) shows what each agent reads as it works, and its **Setup** panel lists which agents are connected and what they are allowed to do (see [The Agents screen](#the-agents-screen)).
 
 ## Other MCP clients
 

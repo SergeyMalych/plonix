@@ -48,8 +48,10 @@
 <p>Plonix lets an AI agent work with your live project: the traffic you captured, the map of the target, detected technologies, scope and findings. It does this through MCP, the protocol coding agents such as Claude Code use for tools.</p>
 <p>Agents get <strong>read-only</strong> access. They can look at everything the project holds and cannot send requests, change scope or record, edit or delete findings. The one thing they can leave behind is a <em>suggested edit</em> to a request you are editing on the Bench, which you review and apply yourself (see <a href="#suggested-bench-edits">Suggested Bench edits</a>). The engine enforces this, not the agent.</p>
 <h2 id="connect-claude-code">Connect Claude Code<a class="anchor" href="#connect-claude-code" aria-label="Link to this section">#</a></h2>
-<pre><code class="language-sh">cargo install --path crates/plonix-cli   # once, if you don't have the `plonix` command yet
-plonix connect claude</code></pre>
+<p>In the Plonix window, open <strong>Agents › Setup</strong> and press <strong>Connect Claude Code</strong>. Plonix adds itself to Claude Code for all your projects; there is nothing to install or put on your PATH first. The button shows when Claude Code is installed on this computer.</p>
+<p>From a terminal, the same in one command:</p>
+<pre><code class="language-sh">plonix connect claude</code></pre>
+<p>The <code>plonix</code> command comes with the app: on a Mac choose <strong>Plonix › Install Command Line Tool…</strong> once; on Windows the installer puts it on your PATH (open a new terminal after installing). If you build from source, <code>cargo install --path crates/plonix-cli</code> installs it.</p>
 <pre><code class="language-text">Plonix · connect Claude Code
 
   ✓ Agent token  ~/.plonix/agent-token  (read-only)
@@ -72,7 +74,7 @@ Not allowed:
 <blockquote><p>Use Plonix to find in-scope API endpoints that returned errors, then read the most interesting request and tell me what stands out.</p></blockquote>
 <blockquote><p>Using Plonix, list every endpoint on the target that takes an id parameter and group them by host.</p></blockquote>
 <blockquote><p>Look at Plonix scope suggestions and explain which ones really belong to the target and why.</p></blockquote>
-<p>The <strong>Agents</strong> screen in the Plonix window (⌘6) shows what each agent reads as it works, and its <strong>Setup</strong> panel lists which agents are connected and what they are allowed to do (see <a href="#the-agents-screen">The Agents screen</a>).</p>
+<p>The <strong>Agents</strong> screen in the Plonix window (⌘8) shows what each agent reads as it works, and its <strong>Setup</strong> panel lists which agents are connected and what they are allowed to do (see <a href="#the-agents-screen">The Agents screen</a>).</p>
 <h2 id="other-mcp-clients">Other MCP clients<a class="anchor" href="#other-mcp-clients" aria-label="Link to this section">#</a></h2>
 <p>Any MCP client can run Plonix as a stdio server:</p>
 <pre><code class="language-json">{

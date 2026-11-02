@@ -99,3 +99,7 @@ The endpoint is a small function on the Plonix website (`functions/api/usage.js`
 ## The public totals
 
 [plonix.io/analytics](https://plonix.io/analytics) shows totals over the last 30 days, built by `functions/api/stats.js`: downloads (from the GitHub release files), active and new installs, hours of use, which features and screens are used, kinds of work, versions, systems, project size ranges, the most rejected well-known domains, and the most used kinds of filter. No group of fewer than five installs is ever shown: it is folded into "other", or left out. Single reports and install ids are never published.
+
+## The website
+
+The Plonix website, plonix.io, counts page views with Cloudflare Web Analytics, which its host adds to every page. Cloudflare says this sets no cookies and does not track you across sites. The website has no other trackers and no ads. The [public totals](https://plonix.io/analytics) above come only from Plonix itself, never from the website.

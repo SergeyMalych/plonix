@@ -593,6 +593,7 @@ mod tests {
             ("DELETE", "/api/bench/proposals/1"),
             ("POST", "/api/bench/proposals/1/apply"),
             ("POST", "/api/run"),
+            ("POST", "/api/agents/connect"),
         ] {
             assert!(!allowed(m, method, path), "{method} {path} should be refused");
         }

@@ -190,7 +190,7 @@ without it.
 
 ## UX: the Scans area
 
-A **Scans** screen (⌘8), with a simple left-to-right flow:
+A **Scans** screen (under More tools in the sidebar), with a simple left-to-right flow:
 
 1. **Target** — pick from in-scope hosts/endpoints only (out-of-scope targets
    are not selectable). Shows the fingerprint for context.

@@ -66,6 +66,29 @@ function reflectedValues(ex) {
   return hits.slice(0, 3);
 }
 
+/** An error response that quotes a value the request sent: the input reached
+ * something that failed on it, which is worth varying by hand. */
+function inputInError(ex) {
+  if (!(ex.status >= 400)) return null;
+  const body = ex.resp_text || '';
+  if (!body || body.length > 200_000 || !/error|exception|syntax|unexpected|invalid|near|failed|traceback/i.test(body)) return null;
+  const pairs = [...queryPairsOf(ex).map(([k, v]) => [k, v, 'query'])];
+  const rb = ex.req_text || '';
+  if (rb.length < 100_000 && /[=&]/.test(rb) && !/^[[{]/.test(rb.trim())) {
+    const dec = (x) => { try { return decodeURIComponent(x.replace(/\+/g, ' ')); } catch (_) { return x; } };
+    for (const part of rb.split('&')) {
+      const i = part.indexOf('=');
+      if (i > 0) pairs.push([dec(part.slice(0, i)), dec(part.slice(i + 1)), 'body']);
+    }
+  }
+  for (const [name, value, where] of pairs) {
+    const v = (value || '').trim();
+    if (v.length < 2 || v.length > 200 || /^[\d.]+$/.test(v)) continue;
+    if (body.includes(v)) return { name, value: v, where };
+  }
+  return null;
+}
+
 /** A permissive cross-origin policy on the response. */
 function corsIssue(ex) {
   const acao = (header(ex.resp_headers, 'access-control-allow-origin') || '').trim();
@@ -537,8 +560,13 @@ async function drawLensSuggestions(slot, ex, list) {
     if (authHeadersOf(ex.req_headers || []).length && ex.status >= 200 && ex.status < 300) {
       chips.push(h('button', { class: 'chip k-access', title: 'Replay this request with your login removed, to see whether it needs you signed in at all.', onclick: () => replaySignedOut(ex) }, h('span', { text: 'Replay signed out' })));
     }
+    // An error that quotes what was sent — the input reached something that broke on it.
+    const err = inputInError(ex);
+    if (err) {
+      chips.push(h('button', { class: 'chip k-bench', title: `This ${ex.status} response quotes the ${err.where} value “${err.value.slice(0, 32)}” you sent. Open the request on the Bench with “${err.name}” marked, to vary it by hand and compare.`, onclick: () => benchWithNote(ex.id, `The error quotes “${err.name}” — vary it and compare the responses.`, err.where === 'query' ? err.name : null) }, h('span', { text: 'Error quotes your input → Bench' })));
+    }
     // A value that comes straight back — set it up as a Bench experiment.
-    const refl = reflectedValues(ex);
+    const refl = err ? [] : reflectedValues(ex);
     if (refl.length) {
       const r = refl[0];
       chips.push(h('button', { class: 'chip k-bench', title: `The ${r.where} value “${r.value.slice(0, 32)}” comes back unescaped in the response. Open this request on the Bench to vary it and compare.`, onclick: () => benchWithNote(ex.id, `“${r.name}” is reflected in the response — vary it and compare.`, r.where === 'query' ? r.name : null) }, h('span', { text: 'Reflected value → Bench' })));

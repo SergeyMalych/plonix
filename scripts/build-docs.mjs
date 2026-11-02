@@ -749,7 +749,30 @@ ${sections}`;
   return out;
 }
 
+/** Lines in the README, docs and homepage that give a screen's shortcut (⌘N)
+ * without naming the screen that ⌘N opens (SHORTCUTS in ui/app/shell.js). */
+function staleShortcuts() {
+  const shell = fs.readFileSync(path.join(ROOT, 'crates/plonix-core/ui/app/shell.js'), 'utf8');
+  const keys = JSON.parse(shell.match(/const SHORTCUTS = (\[[^\]]*\])/)[1].replace(/'/g, '"'));
+  const label = (k) => k[0].toUpperCase() + k.slice(1);
+  const files = ['README.md', 'site/index.html', ...fs.readdirSync(path.join(ROOT, 'docs')).filter((f) => f.endsWith('.md')).map((f) => `docs/${f}`)];
+  const bad = [];
+  for (const f of files) {
+    fs.readFileSync(path.join(ROOT, f), 'utf8').split('\n').forEach((line, i) => {
+      for (const m of line.replace(/⌘1 to ⌘9/g, '').matchAll(/⌘([1-9])(?![0-9])/g)) {
+        if (!line.includes(label(keys[Number(m[1]) - 1]))) bad.push(`${f}:${i + 1}: ⌘${m[1]} opens ${label(keys[Number(m[1]) - 1])}`);
+      }
+    });
+  }
+  return bad;
+}
+
 const check = process.argv.includes('--check');
+const shortcuts = staleShortcuts();
+if (shortcuts.length) {
+  console.error(`Shortcut numbers that no longer match the sidebar:\n${shortcuts.join('\n')}`);
+  process.exit(1);
+}
 const pages = build();
 const stale = [];
 const existing = fs.existsSync(OUT) ? fs.readdirSync(OUT) : [];

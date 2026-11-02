@@ -163,6 +163,10 @@ pub(crate) fn whoami(ex: &Exchange) -> Option<(String, String)> {
         return None;
     }
     let v: serde_json::Value = serde_json::from_slice(&ex.resp_body).ok()?;
+    // `{"user": "alice"}`: the name itself.
+    if let Some(name) = v.get("user").and_then(|u| u.as_str()).map(str::trim).filter(|n| !n.is_empty()) {
+        return Some((name.chars().take(80).collect(), v.get("role").and_then(|r| r.as_str()).unwrap_or_default().to_string()));
+    }
     let v = v.get("user").filter(|u| u.is_object()).unwrap_or(&v);
     let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(String::from);
     let label = s("email").or_else(|| s("username")).or_else(|| s("login")).or_else(|| s("name"))?;
@@ -773,6 +777,10 @@ mod tests {
         assert_eq!(user_name(&f("sam.ortiz@shop.test", "support"), &[]), "Sam Ortiz (support)");
         assert_eq!(user_name(&f("", ""), &[]), "User 1");
         assert_eq!(preview("Bearer eyJhbGciOiJIUzI1NiJ9.x.y"), "Bearer e….x.y");
+        let me = |body: &str| Exchange { resp_body: body.as_bytes().to_vec(), ..ex(1, "api.shop.test", "/api/me", &[]) };
+        assert_eq!(whoami(&me(r#"{"user":"alice"}"#)), Some(("alice".into(), String::new())));
+        assert_eq!(whoami(&me(r#"{"user":{"email":"a@shop.test","role":"admin"}}"#)), Some(("a@shop.test".into(), "admin".into())));
+        assert_eq!(whoami(&me(r#"{"user":null}"#)), None);
     }
 
     #[test]

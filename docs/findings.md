@@ -1,6 +1,6 @@
 # Findings
 
-**Findings** (⌘5) are what you found, each with the requests that prove it attached as evidence. Plonix suggests; you decide what becomes a finding.
+**Findings** (⌘7) are what you found, each with the requests that prove it attached as evidence. Plonix suggests; you decide what becomes a finding.
 
 ## Recording one
 

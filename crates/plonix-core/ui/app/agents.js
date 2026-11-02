@@ -898,6 +898,31 @@ function agentFeedBody() {
 
 /* ---- setup: connecting agents, what they may do, skills ---- */
 
+/** Where the `plonix` command comes from on this system. */
+function cliWhere() {
+  if (ON_WINDOWS) return 'The Plonix installer puts the plonix command on your PATH; open a new terminal to use it.';
+  if (IN_APP) return 'To get the plonix command, choose Plonix › Install Command Line Tool… in the menu bar.';
+  return '';
+}
+
+/** The Connect Claude Code button's outcome, kept across redraws. */
+const CONNECT = { done: false, note: '' };
+
+/** One click: Plonix adds itself to Claude Code, with nothing on PATH. */
+async function connectClaude() {
+  const b = $('#connectclaude');
+  if (b) b.disabled = true;
+  try {
+    await api('/api/agents/connect', { method: 'POST' });
+    Object.assign(CONNECT, { done: true, note: 'Connected. Start Claude Code in any folder and ask it about this project.' });
+    toast('Claude Code can now read this project');
+  } catch (e) {
+    CONNECT.note = e.message;
+  }
+  drawAgentSetup();
+}
+
+
 function drawAgentSetup() {
   const box = $('#agentsbody');
   const a = AG.policy;
@@ -949,18 +974,23 @@ function drawAgentSetup() {
       h(
         'div',
         { class: 'ab' },
-        h('p', null, 'Run this once in a terminal. It adds Plonix to Claude Code for all your projects:'),
+        a.ask_in_app
+          ? h(
+              'div',
+              { class: 'connectrow' },
+              h('button', { class: 'btn', id: 'connectclaude', text: CONNECT.done ? 'Connected ✓' : 'Connect Claude Code', disabled: CONNECT.done, onclick: connectClaude }),
+              h('span', { class: 'muted', id: 'connectnote', text: CONNECT.note || 'Adds Plonix to Claude Code for all your projects. Nothing to install.' }),
+            )
+          : h('p', null, 'Install ', h('a', { href: 'https://claude.com/claude-code', target: '_blank', rel: 'noopener', text: 'Claude Code' }), `, then come back here to connect it with one click.`),
+        h('p', { class: 'muted' }, 'Or run this once in a terminal:'),
         h('div', { class: 'cmdline' }, h('code', { text: cmd }), h('button', { class: 'btn sm', text: 'Copy', onclick: () => copyText(cmd) })),
         h(
           'p',
           { class: 'muted' },
-          'Any other MCP client can run ',
+          cliWhere(),
+          ' Any other MCP client can run ',
           h('code', { text: 'plonix mcp' }),
-          ' as a stdio server. The ',
-          h('code', { text: 'plonix' }),
-          ' command comes from ',
-          h('code', { text: 'cargo install --path crates/plonix-cli' }),
-          '. The agent reads whichever engine is running, including this one.',
+          ' as a stdio server. The agent reads whichever engine is running, including this one.',
         ),
       ),
     ),

@@ -292,7 +292,7 @@ function foundItem(f) {
 function foundDetail(f) {
   const owner = f.user && userById(f.user);
   const others = (S.users || []).filter((u) => u.id !== f.user);
-  const when = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const when = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
   const pick = h(
     'select',
     { class: 'fdpick', title: 'Add this session to another saved user', onchange: (e) => e.target.value && applyFound(f, e.target.value) },
@@ -406,7 +406,7 @@ function stateTag(st, cls = '') {
 /** "GET /v1/me". */
 const answerText = (a) => `${a.method} ${a.path}`;
 /** "10:42", or a date for older ones. */
-const whenText = (ms) => (Date.now() - ms < 20 * 3600e3 ? new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }));
+const whenText = (ms) => (Date.now() - ms < 20 * 3600e3 ? new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }));
 const credLabel = (c) => (c.kind === 'cookie' ? `the ${c.name} cookie` : /^authorization$/i.test(c.name) ? 'the Authorization token' : `the ${c.name} header`);
 const SOURCE_TEXT = { 'exp claim': 'its exp claim', 'cookie expiry': 'the cookie’s expiry', expires_in: 'expires_in in the answer that handed it out' };
 
@@ -487,7 +487,7 @@ function standingSection(u) {
       { class: 'uslife' + (c.expired ? ' dead' : '') },
       h('span', { class: 'mono', text: c.name }),
       h('span', { class: 'muted', text: c.place || (c.kind === 'cookie' ? 'any in-scope host' : 'every in-scope host') }),
-      h('span', { class: 'usexp' + (c.expired ? ' dead' : ''), title: new Date(c.expires * 1000).toLocaleString(), text: expiryText(c.expires) }),
+      h('span', { class: 'usexp' + (c.expired ? ' dead' : ''), title: new Date(c.expires * 1000).toLocaleString([], { hour12: false }), text: expiryText(c.expires) }),
       h('span', { class: 'muted', text: SOURCE_TEXT[c.source] ? 'from ' + SOURCE_TEXT[c.source] : '' }),
     );
 
@@ -664,7 +664,7 @@ function userDetail(u) {
       field('mono', c.name, 'name', (v) => (c.name = v)),
       field('mono', c.value, 'value', (v) => (c.value = v)),
       field('mono', c.domain || '', 'any in-scope host', (v) => (c.domain = v)),
-      h('span', { class: 'usexp' + (live ? '' : ' dead'), title: c.expires != null ? new Date(c.expires * 1000).toLocaleString() : 'Sent until you expire or remove it', text: expiryText(c.expires) }),
+      h('span', { class: 'usexp' + (live ? '' : ' dead'), title: c.expires != null ? new Date(c.expires * 1000).toLocaleString([], { hour12: false }) : 'Sent until you expire or remove it', text: expiryText(c.expires) }),
       live
         ? h('button', { class: 'btn xs', text: 'Expire', title: 'Stop sending this cookie, but keep it here', onclick: () => ((c.expires = now), usersChanged(true)) })
         : h('button', { class: 'btn xs', text: 'Restore', title: 'Send this cookie again, with no expiry', onclick: () => ((c.expires = null), usersChanged(true)) }),
@@ -1280,7 +1280,7 @@ function drawCallbackDetail(box, i) {
   if (!i) return clear(box);
   const p = i.payload && cbHostOf(i.payload);
   const facts = [
-    ['Received', new Date(i.at).toLocaleString()],
+    ['Received', new Date(i.at).toLocaleString([], { hour12: false })],
     ['From', i.remote],
     ['Name', i.full_id],
     p ? ['Host', p.host] : null,

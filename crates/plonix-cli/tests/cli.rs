@@ -258,7 +258,7 @@ fn capture_search_show_scope_and_replay() {
     // Replay, modified.
     let r = p.run(&["replay", &echo_id, "-X", "POST", "-t", "/echo?y=2", "-H", "X-Plonix-Test: yes", "-d", "hello"]);
     let out = r.ok().stdout();
-    assert!(out.contains(&format!("Replayed #{echo_id} as #")), "{out}");
+    assert!(out.contains(&format!("Sent #{echo_id} again → #")), "{out}");
     assert!(out.contains("POST /echo?y=2"), "{out}");
     assert!(out.to_ascii_lowercase().contains("x-plonix-test: yes"), "upstream should echo the header:\n{out}");
     assert!(out.contains("hello"), "{out}");

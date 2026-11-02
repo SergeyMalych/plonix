@@ -82,7 +82,9 @@ path).
 
 ## The plonix command from the app
 
-Plonix.app carries the `plonix` command line tool inside it. To use it in a
+**On Windows** the installer puts the `plonix` command on your PATH: a copy of the tool that comes with the app goes into `bin` in the Plonix folder, and that folder is added to your user Path. Every update refreshes it, and uninstalling Plonix takes both away. Open a new terminal after installing and run `plonix --help`.
+
+**On a Mac**, Plonix.app carries the `plonix` command line tool inside it. To use it in a
 terminal, choose **Plonix › Install Command Line Tool…**:
 
 - Plonix links `/usr/local/bin/plonix` to the tool inside the app, so the

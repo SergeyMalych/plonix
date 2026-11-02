@@ -8,7 +8,10 @@
 
 const T = { text: '', filters: [], items: [], total: 0, sel: null, live: true, maxId: 0, inspH: store('plonix.inspH'), picked: new Set(), pickAnchor: null, group: store('plonix.groupAlike') !== false, shortPath: store('plonix.shortPath') === true, open: new Set(), visible: null };
 
-const sameKey = (ex) => `${ex.method} ${ex.host}:${ex.port} ${target(ex)}`;
+/** What makes two rows "the same" for Grouped: the whole request line, or in
+ *  Short path, the folded path, so look-alikes that differ only in an id or
+ *  token (which Short path hides anyway) fold together too. */
+const sameKey = (ex) => `${ex.method} ${ex.host}:${ex.port} ${T.shortPath ? ex.short_path || ex.path : target(ex)}`;
 
 /** Runs of the same request sent one right after another, in list order.
  *  The same request again after something else starts a new run. */
@@ -67,7 +70,7 @@ function drawGroupToggle() {
   if (!box) return;
   clear(
     box,
-    h('button', { class: T.group ? 'on' : '', text: 'Grouped', title: 'Fold the same request sent several times in a row into one row. Click it to see each one.', onclick: () => setGrouping(true) }),
+    h('button', { class: T.group ? 'on' : '', text: 'Grouped', title: 'Fold the same request sent several times in a row into one row (in Short path, also requests that differ only in an id). Click it to see each one.', onclick: () => setGrouping(true) }),
     h('button', { class: T.group ? '' : 'on', text: 'Every request', title: 'Show every request on its own row', onclick: () => setGrouping(false) }),
   );
 }
@@ -706,23 +709,28 @@ function foldSuggestions(box) {
     toggle.title = 'Show one row of suggestions';
     return;
   }
-  const row = lbl.offsetTop;
-  if (chips[chips.length - 1].offsetTop <= row && toggle.offsetTop <= row) {
+  // Items on one row differ a little in height, so "on a later row" means
+  // clearly lower than the label, not a pixel or two.
+  const row = lbl.offsetTop + lbl.offsetHeight / 2;
+  const below = (el) => el.offsetTop > row;
+  if (!below(chips[chips.length - 1]) && !below(toggle)) {
     toggle.remove();
     return;
   }
   let hidden = 0;
-  for (const c of chips) if (c.offsetTop > row) (c.hidden = true), hidden++;
+  for (const c of chips) if (below(c)) (c.hidden = true), hidden++;
   const label = () => {
     toggle.textContent = 'More… (' + hidden + ')';
     toggle.title = 'Show all ' + chips.length + ' suggestions';
   };
   label();
-  for (let i = chips.length - 1 - hidden; toggle.offsetTop > row && i > 0; i--) {
+  for (let i = chips.length - 1 - hidden; below(toggle) && i > 0; i--) {
     chips[i].hidden = true;
     hidden++;
     label();
   }
+  // Nothing left over: no "More… (0)".
+  if (!hidden) toggle.remove();
 }
 
 window.addEventListener('resize', () => {

@@ -138,13 +138,10 @@ fn indent(s: &str) -> String {
     s.lines().map(|l| format!("  {l}\n")).collect()
 }
 
-/// `$PLONIX_CLAUDE` (for tests), else `claude` on the PATH.
+/// `$PLONIX_CLAUDE` (for tests), else `claude` where Plonix looks for it:
+/// the PATH and the folders its installers use, `.exe` or `.cmd` on Windows.
 fn find_claude() -> Option<std::path::PathBuf> {
-    if let Some(p) = std::env::var_os("PLONIX_CLAUDE") {
-        return Some(p.into());
-    }
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).map(|d| d.join("claude")).find(|p| p.is_file())
+    plonix_core::assistant::find_claude()
 }
 
 /// Replaces any previous "plonix" entry, so re-running picks up a moved binary.
