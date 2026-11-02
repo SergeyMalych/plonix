@@ -141,7 +141,13 @@ jobs:
           if ($ca -notmatch 'Windows certificates') { throw 'no Windows wording' }
       - name: Uninstall
         if: ${{ !cancelled() }}
-        run: '"$LOCALAPPDATA/Plonix/uninstall.exe" /S'
+        shell: pwsh
+        run: |
+          $u = Join-Path $env:LOCALAPPDATA 'Plonix\uninstall.exe'
+          $p = Start-Process $u -ArgumentList '/S' -PassThru
+          $done = $p.WaitForExit(120000)
+          Write-Output "uninstaller returned: $done exit $($p.ExitCode)"
+          Get-Process | Where-Object { $_.Name -match 'Un_|uninstall|powershell|plonix' } | Format-Table Id, Name, Path -AutoSize | Out-String | Write-Output
       - name: Check uninstall took plonix off PATH
         if: ${{ !cancelled() }}
         shell: pwsh
