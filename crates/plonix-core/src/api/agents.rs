@@ -14,6 +14,7 @@ pub(super) fn routes() -> Router<AppState> {
         .route("/api/agents/settings", get(agent_settings).put(put_agent_settings))
         .route("/api/agents/ask", post(agent_ask))
         .route("/api/agents/launch", post(agent_launch))
+        .route("/api/agents/connect", post(agent_connect))
         .route("/api/agents/run", post(agent_run))
         .route("/api/agents/run/{id}", get(agent_run_poll).delete(agent_run_cancel))
         .route("/api/agents/activity", get(agent_activity))
@@ -100,6 +101,19 @@ async fn agent_launch(State(s): State<AppState>, Json(b): Json<LaunchBody>) -> R
         Ok(Ok(_)) => Json(json!({ "ok": true })).into_response(),
         Ok(Err(e)) if format!("{e:#}").starts_with("unsupported") => err(StatusCode::NOT_IMPLEMENTED, "unsupported", &format!("{e:#}")),
         Ok(Err(e)) => internal(e),
+        Err(e) => internal(e.into()),
+    }
+}
+
+/// Adds Plonix to Claude Code for all projects, the same as
+/// `plonix connect claude` but with nothing to install on PATH. Agents cannot
+/// reach this route: it is in no mode's capabilities.
+async fn agent_connect(State(s): State<AppState>) -> Response {
+    let home = s.home.clone();
+    let _ = home.load_or_create_agent_token();
+    match tokio::task::spawn_blocking(move || crate::assistant::connect_claude(&home)).await {
+        Ok(Ok(command)) => Json(json!({ "ok": true, "command": command })).into_response(),
+        Ok(Err(why)) => err(StatusCode::CONFLICT, "not_connected", &why),
         Err(e) => internal(e.into()),
     }
 }

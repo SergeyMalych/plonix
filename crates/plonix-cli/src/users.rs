@@ -1,23 +1,86 @@
 //! `plonix users` and `plonix access`: saved users and the Access check.
 
 use anyhow::{Result, bail};
-use clap::Args;
+use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 
 use crate::Ctx;
 use crate::client::Client;
 use crate::render::{clip, safe};
 
+#[derive(Subcommand)]
+pub enum UsersCmd {
+    /// Sessions found in captured traffic that you can save as users
+    Found,
+    /// Save the session a captured request carries as a new user
+    Save {
+        /// Name for the new user, e.g. alice or "admin (staff)"
+        name: String,
+        /// A request id (from `plonix search`) that carries the session
+        #[arg(long, value_name = "ID")]
+        from: i64,
+    },
+}
+
 /// Prints the saved users: name, id and which credentials each carries.
 /// Values stay in the project; add or edit users on the Users screen.
-pub fn users_cmd(ctx: &Ctx) -> Result<()> {
+pub fn users_cmd(ctx: &Ctx, cmd: Option<UsersCmd>) -> Result<()> {
+    match cmd {
+        None => list_users(ctx),
+        Some(UsersCmd::Found) => found_cmd(ctx),
+        Some(UsersCmd::Save { name, from }) => save_cmd(ctx, &name, from),
+    }
+}
+
+/// One found session in a line or two: who, what it carries (names only).
+fn print_found(f: &Value) {
+    let label = f["label"].as_str().filter(|l| !l.is_empty()).unwrap_or("Unnamed session");
+    let creds: Vec<String> = f["credentials"].as_array().into_iter().flatten().map(|c| format!("{} {}", c["kind"].as_str().unwrap_or(""), safe(c["name"].as_str().unwrap_or(""))).trim().to_string()).collect();
+    let saved = f["user"].as_str().map(|u| format!("  (saved as {})", safe(u))).unwrap_or_default();
+    println!("{}{saved}", safe(label));
+    println!("  carries {} · in {} request(s), e.g. #{}", creds.join(", "), f["requests"], f["sample"]);
+}
+
+fn found_cmd(ctx: &Ctx) -> Result<()> {
+    let v = ctx.client()?.get("/api/users/found")?;
+    if ctx.json {
+        return ctx.print_json(&v);
+    }
+    let found = v["sessions"].as_array().cloned().unwrap_or_default();
+    if found.is_empty() {
+        println!("No sessions found in captured traffic yet. Sign in to the target in the capture browser, then look again.");
+        return Ok(());
+    }
+    for f in &found {
+        print_found(f);
+    }
+    println!("\nSave one as a user with `plonix users save <name> --from <request id>`.");
+    Ok(())
+}
+
+fn save_cmd(ctx: &Ctx, name: &str, from: i64) -> Result<()> {
+    let client = ctx.client()?;
+    let v = client.get(&format!("/api/users/found?exchange={from}"))?;
+    let Some(f) = v["sessions"].as_array().and_then(|a| a.first()).cloned() else {
+        bail!("request #{from} carries no session Plonix recognises; `plonix users found` lists the ones it does");
+    };
+    let out = client.post("/api/users/found/apply", json!({ "key": f["key"], "name": name }))?;
+    if ctx.json {
+        return ctx.print_json(&out);
+    }
+    println!("Saved {} as user {}, with {} credential(s).", safe(name), safe(out["user"].as_str().unwrap_or("")), out["added"]);
+    println!("Replay a request as them with `plonix replay <id> --as {}`.", safe(out["user"].as_str().unwrap_or("")));
+    Ok(())
+}
+
+fn list_users(ctx: &Ctx) -> Result<()> {
     let v = ctx.client()?.get("/api/users/summary")?;
     if ctx.json {
         return ctx.print_json(&v);
     }
     let users = v["users"].as_array().cloned().unwrap_or_default();
     if users.is_empty() {
-        println!("No saved users yet. Add them on the Users screen (`plonix ui`), or pick one found in traffic there.");
+        println!("No saved users yet. `plonix users found` lists sessions found in captured traffic to save; or add them on the Users screen (`plonix ui`).");
         return Ok(());
     }
     let acting = v["acting"].as_str().unwrap_or("");

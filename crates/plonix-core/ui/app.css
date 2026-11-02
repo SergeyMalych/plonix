@@ -301,6 +301,8 @@ code, .mono { font-family: var(--mono); }
 /* the slot is only a mount point: the Lens sizes against the screen, and gives way on a short window */
 #inspslot { display: contents; }
 .inspector { flex: 0 1 auto; height: 48%; min-height: 120px; overflow: hidden; display: flex; flex-direction: column; background: var(--surface-2); }
+/* In a short window the list keeps a few rows and the Lens gets the room to read (a dragged height still wins). */
+@media (max-height: 700px) { .inspector { height: 64%; } }
 /* The Lens filling the window (⤢), and the request window (⧉) that is only a Lens. */
 .inspector.max { position: fixed; inset: 0; z-index: 30; height: auto !important; min-height: 0; }
 .insp-head .lensctl { display: inline-flex; gap: 2px; margin-left: auto; }
@@ -872,6 +874,7 @@ mark.hit { background: var(--warn-soft); color: inherit; outline: 1px solid var(
 .ab p { margin: 0 0 10px; }
 .ab p:last-child { margin-bottom: 0; }
 .ab code { font-family: var(--mono); font-size: 11.5px; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 5px; padding: 0 5px; }
+.connectrow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .cmdline { display: flex; align-items: center; gap: 10px; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 8px; padding: 7px 8px 7px 12px; margin-bottom: 10px; }
 .cmdline code { flex: 1; border: 0; background: transparent; padding: 0; font-size: 12.5px; color: var(--fg); }
 .capgrid { display: grid; grid-template-columns: 1fr 1fr; }

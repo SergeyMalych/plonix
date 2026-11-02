@@ -4,9 +4,29 @@ What changed in each Plonix release. The newest release is at the top.
 
 ## [Unreleased]
 
+### Added
+- **Connect Claude Code in one click.** Agents › Setup has a **Connect Claude Code** button: Plonix adds itself to Claude Code for all your projects, with nothing to put on your PATH first.
+- **`plonix` on PATH on Windows.** The Windows installer now puts the `plonix` command on your PATH (open a new terminal after installing), and uninstalling takes it away again.
+- **Errors that quote your input.** When an error response repeats a value you sent, the Lens suggests opening the request on the Bench with that value marked.
+- **Save users from the terminal.** `plonix users found` lists the sessions found in captured traffic, and `plonix users save <name> --from <request id>` saves one as a user.
+
 ### Changed
+- **Ask Claude stays on your project.** Claude is told it is working inside Plonix and looks at the project before it answers, and your own Claude Code notes, settings and hooks no longer steer these answers.
+- **Windows wording for the certificate.** `plonix open`, `plonix ca` and `plonix ca trust` on Windows talk about your Windows certificates, not the macOS keychain.
+- **Grouped in Short path** also folds look-alike requests in a row that differ only in an id or token.
+- **Times are 24-hour everywhere**, as Traffic already showed them.
+- **`plonix replay -H`** points out when it still sent a captured cookie or token next to the one you set; it now says "Sent #12 again → #13".
+- **Found in traffic** names a session from a "who am I" answer like `{"user": "alice"}`.
+- **plonix.io** has a page for addresses that do not exist, and short links /privacy and /install. The Privacy page says what the website itself counts.
 - **Bigger text by default.** 100% now shows text as big as 110% did, and sizes go from 70% to 150%. A size you picked before stays as it looked: 110% now reads 100%, 100% reads 90%, and so on.
 - **View menu: − 100% +.** Bigger Text, Smaller Text and Actual Text Size are now −, the current size and +. The size itself puts it back to 100% (⌘0).
+
+### Fixed
+- **The Bench icon** no longer disappears when Bench is the open screen in Studio.
+- **Short windows** give the Lens more room under the list.
+- **Traffic** no longer shows "More… (0)" when every suggestion fits.
+- **`plonix open`** marks a step that did not work with "!" instead of a check mark.
+- **Shortcut numbers** in the README and docs match the sidebar again (⌘7 Findings, ⌘8 Agents); a docs check keeps them in step.
 
 ## [0.5.2] - 2026-10-21
 

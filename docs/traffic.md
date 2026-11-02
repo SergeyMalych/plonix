@@ -31,8 +31,7 @@ Filters sit as chips above the list, under **Show only** and **Hide**. Add one w
 
 ## Reading the list
 
-- **Look-alike grouping** folds requests to the same path with different ids into one row. Click a group to see every request in it, or turn grouping off.
-- **Repeats** of the same request in a row show as one row with a count (×N). Click it to see each one, or pick **Every request** in the toolbar.
+- **Grouped** (the default) shows repeats of the same request in a row as one row with a count (×N). In **Short path**, look-alikes in a row that differ only in an id or token (`/orders/1`, `/orders/2`) fold together too. Click a group to see each request in it, or pick **Every request** in the toolbar.
 - **Full path or Short path:** the toolbar switches between the whole path and a short one where ids and tokens fold into `{id}` and `{token}` and the query hides behind `?…`, so long URLs stay readable.
 - **New domains:** a banner shows each domain [adaptive scope](scope.md) suggests, with its evidence and one-click accept or reject.
 
@@ -46,7 +45,7 @@ The Lens decodes compressed bodies, pretty-prints JSON and lists WebSocket messa
 
 Click one to highlight it in place and see the decoded value, then copy it or find it across all captured traffic. Select any text yourself to decode it, find it across traffic or ask Claude about it. Detection runs locally on traffic you already captured; nothing is flagged unless it is there.
 
-**Suggested** in the Lens offers the one next step that fits what is on screen: a response that sets a session offers **Save login as a user**, an id in the path offers **Check this id across users**, a signed-in request offers **Replay signed out**, a reflected value or a redirect opens on the [Bench](bench.md) ready to vary, and an endpoint with inputs offers [Scans](scanning.md) focused on it. When something stands out, the Lens offers to record a [finding](findings.md), and **Ideas for this endpoint** asks Claude what to try. **Copy as curl** works from the Lens, the right-click menu and the Bench. Nothing is sent until you click.
+**Suggested** in the Lens (the Mind Reader) offers the one next step that fits what is on screen: a response that sets a session offers **Save login as a user**, an id in the path offers **Check this id across users**, a signed-in request offers **Replay signed out**, a reflected value, a redirect, or an error response that quotes a value you sent opens on the [Bench](bench.md) ready to vary, and an endpoint with inputs offers [Scans](scanning.md) focused on it. When something stands out, the Lens offers to record a [finding](findings.md), and **Ideas for this endpoint** asks Claude what to try. **Copy as curl** works from the Lens, the right-click menu and the Bench. Nothing is sent until you click.
 
 ## Intercept
 

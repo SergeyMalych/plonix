@@ -390,9 +390,20 @@ async fn drive(bin: PathBuf, mcp: Value, cwd: PathBuf, prompt: String, resume: O
         // servers, and take away the built-in tools their own settings may allow.
         .arg("--strict-mcp-config")
         .args(["--disallowedTools", "Bash,Edit,Write,MultiEdit,NotebookEdit,Read,Glob,Grep,WebFetch,WebSearch,Task,Agent"]);
+    // Keep Claude on the open project. Without this, the person's own Claude
+    // Code notes (CLAUDE.md, memory) set the context, and a plain question
+    // such as "what next?" gets answered about something else entirely.
+    if supports(&bin, "--append-system-prompt").await {
+        cmd.args(["--append-system-prompt", FRAME]);
+    }
+    // Their settings carry hooks and their notes: neither belongs in a run
+    // that reads captured traffic. Sign-in is not a setting, so it still works.
+    if supports(&bin, "--setting-sources").await {
+        cmd.args(["--setting-sources", ""]);
+    }
     // Token-by-token output, so the panel can show Claude thinking and
     // writing instead of sitting silent until a whole block is done.
-    if partial_messages(&bin).await {
+    if supports(&bin, "--include-partial-messages").await {
         cmd.arg("--include-partial-messages");
     }
     if let Some(sid) = &resume {
@@ -745,20 +756,74 @@ fn is_default_home(home: &Home) -> bool {
     std::env::var_os("PLONIX_HOME").is_none() && crate::paths::user_home().map(|h| h.join(".plonix")) == Some(home.root.clone())
 }
 
-/// Whether this `claude` can stream token by token. Older versions reject the
-/// flag outright, which would fail every run, so ask its help text once.
-async fn partial_messages(bin: &PathBuf) -> bool {
-    static SUPPORTED: tokio::sync::OnceCell<bool> = tokio::sync::OnceCell::const_new();
-    *SUPPORTED
-        .get_or_init(|| async {
-            let mut cmd = Command::new(bin);
-            if let Some(path) = run_path(bin) {
-                cmd.env("PATH", path);
-            }
-            let out = cmd.arg("--help").stdin(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true).output();
-            matches!(tokio::time::timeout(tokio::time::Duration::from_secs(15), out).await, Ok(Ok(o)) if String::from_utf8_lossy(&o.stdout).contains("--include-partial-messages"))
-        })
-        .await
+/// What every run inside Plonix is about, added to Claude Code's own system
+/// prompt.
+pub(crate) const FRAME: &str = "You are running inside Plonix, the person's web security workbench. \
+Every question here is about the Plonix project open right now: the web application they are testing and the traffic Plonix captured from it. \
+You see that project only through the plonix tools. Before you answer, look at it with them (status, search_traffic, list_hosts, list_endpoints, get_request and the rest) and base your answer on what they return, citing request ids. \
+Ignore any other projects, repositories, notes or memories: they are not part of this conversation. \
+You can only read. Suggest any request to send, and the person decides.";
+
+/// Whether this `claude` knows `flag`. Older versions reject flags they do
+/// not know, which would fail every run, so read its help text once.
+async fn supports(bin: &PathBuf, flag: &str) -> bool {
+    static HELP: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
+    HELP.get_or_init(|| async {
+        let mut cmd = Command::new(bin);
+        if let Some(path) = run_path(bin) {
+            cmd.env("PATH", path);
+        }
+        let out = cmd.arg("--help").stdin(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true).output();
+        match tokio::time::timeout(tokio::time::Duration::from_secs(15), out).await {
+            Ok(Ok(o)) => String::from_utf8_lossy(&o.stdout).into_owned(),
+            _ => String::new(),
+        }
+    })
+    .await
+    .contains(flag)
+}
+
+/// Adds Plonix to Claude Code for all the person's projects, as this very
+/// program run as `<exe> mcp`: the app (which serves MCP headless) or the
+/// `plonix` command. Needs nothing on PATH, so it works the same on every
+/// system. Replaces an earlier "plonix" entry, so a moved app is picked up.
+pub fn connect_claude(home: &Home) -> Result<String, String> {
+    let bin = claude_bin().ok_or_else(|| "Claude Code is not installed on this computer. Install it, then try again.".to_string())?;
+    let exe = std::env::current_exe().map_err(|e| format!("Plonix could not find its own location: {e}"))?;
+    let exe = crate::paths::canonical(&exe).unwrap_or(exe);
+    if cfg!(target_os = "macos") && exe.starts_with("/Volumes") {
+        return Err("Move Plonix to Applications and open it from there first: the disk image goes away once it is ejected.".into());
+    }
+    let mut cfg = json!({ "type": "stdio", "command": exe, "args": ["mcp"] });
+    if !is_default_home(home) {
+        cfg["env"] = json!({ "PLONIX_HOME": home.root });
+    }
+    let claude = |args: &[&str]| {
+        let mut cmd = std::process::Command::new(&bin);
+        if let Some(path) = run_path(&bin) {
+            cmd.env("PATH", path);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        cmd.args(args).stdin(Stdio::null()).output()
+    };
+    let _ = claude(&["mcp", "remove", "--scope", "user", "plonix"]);
+    let cfg_text = cfg.to_string();
+    let out = claude(&["mcp", "add-json", "--scope", "user", "plonix", &cfg_text]).map_err(|e| format!("Could not run Claude Code: {e}"))?;
+    if !out.status.success() {
+        let why = format!("{}{}", String::from_utf8_lossy(&out.stderr).trim(), String::from_utf8_lossy(&out.stdout).trim());
+        return Err(format!("Claude Code did not add Plonix: {why}"));
+    }
+    Ok(exe.display().to_string())
+}
+
+/// Where `claude` is: `$PLONIX_CLAUDE` (for tests), else on the PATH or in
+/// the folders its installers use, with `.exe` or `.cmd` on Windows.
+pub fn find_claude() -> Option<PathBuf> {
+    claude_bin()
 }
 
 /// `$PLONIX_CLAUDE` (for tests), else `claude` on the [search path](search_path).
@@ -989,6 +1054,55 @@ mod tests {
         // A run without a limit is never stopped for tokens.
         let free = std::sync::Arc::new(Mutex::new(Run::new(2)));
         assert_eq!(on_line(&free, &call("m1", 900_000)), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn connecting_claude_registers_this_program() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("plonix-connect-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("calls.txt");
+        let bin = dir.join("claude");
+        std::fs::write(&bin, format!("#!/bin/sh\necho \"$*\" >> '{}'\n", log.display())).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // SAFETY: tests that read PLONIX_CLAUDE do not run in this binary's other tests.
+        unsafe { std::env::set_var("PLONIX_CLAUDE", &bin) };
+        let home = Home::resolve(Some(&dir.join("home"))).unwrap();
+        let exe = connect_claude(&home).unwrap();
+        unsafe { std::env::remove_var("PLONIX_CLAUDE") };
+        let calls = std::fs::read_to_string(&log).unwrap();
+        assert!(calls.contains("mcp remove --scope user plonix"), "{calls}");
+        let add = calls.lines().find(|l| l.starts_with("mcp add-json --scope user plonix ")).expect("added");
+        let cfg: Value = serde_json::from_str(add.trim_start_matches("mcp add-json --scope user plonix ")).unwrap();
+        assert_eq!(cfg["command"], json!(exe));
+        assert_eq!(cfg["args"], json!(["mcp"]));
+        assert!(cfg["env"]["PLONIX_HOME"].is_string());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn every_run_is_kept_on_the_open_project() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("plonix-frame-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("args.txt");
+        let bin = dir.join("claude");
+        let script = format!(
+            "#!/bin/sh\nif [ \"$1\" = --help ]; then echo '--append-system-prompt --setting-sources --include-partial-messages'; exit 0; fi\nfor a in \"$@\"; do echo \"$a\"; done > '{}'\n",
+            log.display()
+        );
+        std::fs::write(&bin, script).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let run = std::sync::Arc::new(Mutex::new(Run::new(0)));
+        drive(bin, json!({}), dir.clone(), "What next?".into(), None, run).await;
+        let args: Vec<String> = std::fs::read_to_string(&log).unwrap().lines().map(String::from).collect();
+        let after = |flag: &str| args.iter().position(|a| a == flag).map(|i| args[i + 1].clone());
+        assert!(after("--append-system-prompt").is_some_and(|f| f.starts_with("You are running inside Plonix")), "{args:?}");
+        assert_eq!(after("--setting-sources").as_deref(), Some(""), "{args:?}");
+        assert_eq!(after("-p").as_deref(), Some("What next?"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[cfg(unix)]

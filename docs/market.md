@@ -13,7 +13,7 @@ The Market is where Plonix gets everything modular, in one catalog:
 | **Bundle** | A set of other packages, installed and removed together | `$PLONIX_HOME/market/bundles.json` |
 | **Extension** | Code that runs in the Plonix sandbox: today, passive analyzers ([extensions.md](extensions.md)) | `$PLONIX_HOME/extensions` |
 
-Open it from the sidebar (⌘7 in the app), or use the CLI:
+Open it from the sidebar (under More tools in a new project), or use the CLI:
 
 ```sh
 plonix market                         # everything, with what is installed

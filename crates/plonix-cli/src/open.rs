@@ -37,19 +37,72 @@ pub fn open_url(url: &str) -> Result<()> {
 
 /// One-time guidance for trusting the CA outside the Plonix browser.
 pub fn trust_guidance(home: &Home) -> String {
+    trust_guidance_for(System::current(), &tilde(&home.ca_cert()), &tilde(&home.root))
+}
+
+/// The systems the trust wording differs on.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum System {
+    Mac,
+    Windows,
+    Other,
+}
+
+impl System {
+    pub fn current() -> Self {
+        if cfg!(target_os = "macos") {
+            System::Mac
+        } else if cfg!(windows) {
+            System::Windows
+        } else {
+            System::Other
+        }
+    }
+
+    /// Where `plonix ca trust` puts the certificate, and what the system asks.
+    pub fn trust_line(self, ca: &str) -> String {
+        match self {
+            System::Mac => format!("Adding {ca} to your login keychain as a trusted root. macOS will ask you to confirm."),
+            System::Windows => format!("Adding {ca} to your Windows certificates as a trusted root. Windows will ask you to confirm."),
+            System::Other => format!("Trusting {ca}."),
+        }
+    }
+
+    /// Which apps accept HTTPS through Plonix once it is trusted.
+    pub fn trusted_apps(self) -> &'static str {
+        match self {
+            System::Mac => "Safari, Chrome, curl and other apps",
+            System::Windows => "Edge, Chrome, curl and other apps",
+            System::Other => "Apps that use the system certificates",
+        }
+    }
+}
+
+pub fn trust_guidance_for(system: System, ca: &str, home: &str) -> String {
+    let (apps, store, undo) = match system {
+        System::Mac => (
+            "Safari, curl, your everyday browser",
+            "your login keychain as a trusted root\n(macOS asks for your password or Touch ID)",
+            "Keychain Access",
+        ),
+        System::Windows => (
+            "Edge, curl, your everyday browser",
+            "your Windows certificates as a trusted root\n(Windows asks you to confirm)",
+            "Manage user certificates (certmgr.msc), under Trusted Root Certification Authorities,",
+        ),
+        System::Other => ("curl, your everyday browser", "the trusted certificates of this computer", "your system's certificate settings"),
+    };
     format!(
-        "To capture HTTPS from other apps too (Safari, curl, your everyday browser),
+        "To capture HTTPS from other apps too ({apps}),
 trust the Plonix certificate once:
 
     plonix ca trust
 
-This adds {ca} to your login keychain as a trusted root
-(macOS asks for your password or Touch ID). The certificate was generated on
-this machine and its private key never leaves {home}.
-Undo it any time in Keychain Access by deleting \"Plonix CA\".
-",
-        ca = tilde(&home.ca_cert()),
-        home = tilde(&home.root)
+This adds {ca} to {store}.
+The certificate was generated on this computer and its private key
+never leaves {home}.
+Undo it any time in {undo} by deleting \"Plonix CA\".
+"
     )
 }
 
@@ -63,3 +116,19 @@ pub fn tilde(path: &Path) -> String {
     }
 }
 
+
+#[cfg(test)]
+mod trust_tests {
+    use super::*;
+
+    #[test]
+    fn trust_wording_follows_the_system() {
+        let win = trust_guidance_for(System::Windows, "~/.plonix/ca.pem", "~/.plonix");
+        assert!(win.contains("Windows certificates") && win.contains("certmgr.msc") && win.contains("Edge"), "{win}");
+        assert!(!win.contains("keychain") && !win.contains("macOS") && !win.contains("Safari"), "{win}");
+        let mac = trust_guidance_for(System::Mac, "~/.plonix/ca.pem", "~/.plonix");
+        assert!(mac.contains("login keychain") && mac.contains("Keychain Access"), "{mac}");
+        assert!(System::Windows.trust_line("ca.pem").contains("Windows will ask"));
+        assert!(!System::Windows.trusted_apps().contains("Safari"));
+    }
+}
