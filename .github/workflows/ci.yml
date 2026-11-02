@@ -146,8 +146,11 @@ jobs:
         if: ${{ !cancelled() }}
         shell: pwsh
         run: |
-          Start-Sleep -Seconds 5
+          # The uninstaller runs a copy of itself and returns at once: wait for it.
           $bin = Join-Path $env:LOCALAPPDATA 'Plonix\bin'
+          for ($i = 0; $i -lt 60 -and (Test-Path (Join-Path $env:LOCALAPPDATA 'Plonix\uninstall.exe')); $i++) { Start-Sleep -Seconds 2 }
+          Start-Sleep -Seconds 2
+          Write-Output "Plonix folder left: $(Test-Path (Join-Path $env:LOCALAPPDATA 'Plonix'))  plonix.exe left: $(Test-Path (Join-Path $bin 'plonix.exe'))"
           $path = [Environment]::GetEnvironmentVariable('Path', 'User')
           if (($path -split ';') -contains $bin) { throw "user Path still has $bin" }
       - uses: actions/upload-artifact@v4
