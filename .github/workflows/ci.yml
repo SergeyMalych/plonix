@@ -121,6 +121,24 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 15
         run: bash .github/scripts/windows-cli-smoke.sh "$LOCALAPPDATA/Plonix/plonix-cli.exe"
+      # A clean Windows has no Visual C++ Redistributable, so nothing we ship
+      # may need it (.cargo/config.toml links the C runtime in). The runner has
+      # it installed, which is why the smoke tests alone can't catch this.
+      - name: Check the installed programs need no Visual C++ runtime
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $dumpbin = & $vswhere -latest -products * -find 'VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe' | Select-Object -First 1
+          if (-not $dumpbin) { throw 'dumpbin not found' }
+          $dir = Join-Path $env:LOCALAPPDATA 'Plonix'
+          $bad = @()
+          foreach ($exe in Get-ChildItem $dir -Recurse -Include *.exe, *.dll) {
+            $deps = & $dumpbin /nologo /dependents $exe.FullName | Out-String
+            Write-Output "$($exe.Name):"; Write-Output $deps
+            if ($deps -match '(?i)vcruntime\d+|msvcp\d+') { $bad += $exe.FullName }
+          }
+          if ($bad) { throw "needs the Visual C++ runtime: $($bad -join ', ')" }
       # The installer also put `plonix` on the user's PATH (windows/hooks.nsh),
       # and the certificate wording is the Windows one.
       - name: Check plonix is on the user PATH

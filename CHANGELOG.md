@@ -22,6 +22,7 @@ What changed in each Plonix release. The newest release is at the top.
 - **View menu: − 100% +.** Bigger Text, Smaller Text and Actual Text Size are now −, the current size and +. The size itself puts it back to 100% (⌘0).
 
 ### Fixed
+- **The `plonix` command starts on a clean Windows.** It no longer needs the Visual C++ runtime, which a fresh Windows does not have; before, every command stopped at once with no message.
 - **The Bench icon** no longer disappears when Bench is the open screen in Studio.
 - **Short windows** give the Lens more room under the list.
 - **Traffic** no longer shows "More… (0)" when every suggestion fits.
