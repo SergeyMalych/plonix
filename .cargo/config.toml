@@ -1,0 +1,4 @@
+# Windows: link the C runtime into every program, so plonix.exe and Plonix.exe
+# start on a clean Windows that has no Visual C++ Redistributable installed.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]
