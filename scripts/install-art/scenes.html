@@ -34,6 +34,7 @@ body { margin: 0; }
 .mbtn { display: block; text-align: center; padding: 11px; border-radius: 11px; font-size: 17px; font-weight: 500; background: var(--win-2); border: 1px solid var(--win-line); }
 .mbtn.blue { background: #0a7aff; border-color: #0a7aff; color: #fff; }
 .mbtn + .mbtn { margin-top: 10px; }
+.appicon svg { width: 74px; height: 74px; display: block; }
 .gk { position: relative; width: 74px; height: 74px; }
 .gk .body { position: absolute; inset: 0; border-radius: 18px; background: linear-gradient(#b8bcc4, #7f848d); }
 .gk .dial { position: absolute; left: 13px; top: 13px; width: 48px; height: 48px; border-radius: 50%; background: radial-gradient(circle at 50% 50%, #e9ebee 0 9px, #5d636c 9px 12px, #c9ccd2 12px 22px, #6a7079 22px); }
@@ -144,6 +145,13 @@ const scenes = {
       <span class="mbtn blue" data-hit="right" data-tag="Click Open Anyway">Open Anyway</span><span class="mbtn">Done</span>
     </div>
     <div class="tag" style="left:330px;top:478px;background:var(--label-bg);color:var(--label-fg)">Then your password or Touch ID</div>`,
+  'mac-open': () => `${step(2, 'Open Plonix, then click Open')}
+    <div class="alert shadow" style="left:280px;top:92px">
+      <div class="help">?</div><div class="appicon">${MARK}</div>
+      <h3>“Plonix” is an app downloaded from the Internet. Are you sure you want to open it?</h3>
+      <p class="faded">Apple checked it for malicious software and none was detected.</p>
+      <span class="mbtn blue" data-hit="right" data-tag="Click Open">Open</span><span class="mbtn">Cancel</span>
+    </div>`,
   'mac-terminal': () => `${step('⌘', 'Or: one command in Terminal')}
     <div class="mwin term shadow" style="left:110px;top:150px;width:740px;height:176px">
       <div class="tbar"><i></i><i></i><i></i><span>Terminal</span></div>
