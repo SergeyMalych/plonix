@@ -1,8 +1,10 @@
 name: Release
 
 # Pushing a tag like v0.2.0 builds Plonix.app (a disk image and a zip) and the
-# Windows installer, signs the update packages and publishes a GitHub release
-# with the notes from CHANGELOG.md. Installed copies of Plonix find the release
+# Windows installer, signs the update packages and makes a GitHub release with
+# the notes from CHANGELOG.md. The Mac app is signed and notarized on the
+# maintainer's Mac: the release is a draft until scripts/macos/release.sh has
+# done that and published it (docs/releasing.md). Installed copies of Plonix find the release
 # through latest.json, and only install it when their user says so.
 on:
   push:
@@ -297,4 +299,13 @@ jobs:
         run: |
           files="Plonix-macOS.dmg Plonix-macOS.zip Plonix-Windows-setup.exe"
           if [ "$UPDATER" = true ]; then files="$files Plonix-macOS.app.tar.gz latest.json"; fi
-          gh release create "$GITHUB_REF_NAME" --title "Plonix $VERSION" --notes-file notes.md $files
+          # Without the Developer ID secrets the Mac app is signed on the
+          # maintainer's Mac: the release stays a draft (installed copies and
+          # plonix.io only see published releases) until
+          # scripts/macos/release.sh signs, notarizes and publishes it.
+          draft=""
+          if [ "$NOTARIZED" != true ]; then
+            draft="--draft"
+            echo "::notice::Draft release. On the Mac with the Developer ID certificate run: scripts/macos/release.sh $GITHUB_REF_NAME"
+          fi
+          gh release create "$GITHUB_REF_NAME" $draft --title "Plonix $VERSION" --notes-file notes.md $files

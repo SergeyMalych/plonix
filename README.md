@@ -374,7 +374,7 @@ Drag `Plonix.app` to Applications to keep it. While developing, `cargo run -p pl
 
 Release and CI builds carry the `plonix` command inside the app for **Install Command Line Tool…**: they build it first and put it in `crates/plonix-app/binaries/plonix-cli-<target>` (see `.github/workflows`). A local build without it gets a stand-in, and the menu item then points you to `cargo install --path crates/plonix-cli`. To include it yourself: `cargo build --release -p plonix && mkdir -p crates/plonix-app/binaries && cp target/release/plonix crates/plonix-app/binaries/plonix-cli-$(rustc -vV | sed -n 's/^host: //p')` before `cargo tauri build`.
 
-Each CI run on `main` and on pull requests also builds `Plonix.app` and attaches it as a download (`Plonix-macOS`). Builds from `main` are signed and notarized once the project's signing is set up ([docs/releasing.md](docs/releasing.md)); until then, and for pull requests, they are unsigned: the first time, right-click the app and choose **Open**, or run `xattr -dr com.apple.quarantine Plonix.app`.
+Each CI run on `main` and on pull requests also builds `Plonix.app` and attaches it as a download (`Plonix-macOS`). These builds are unsigned (releases are signed and notarized separately, see [docs/releasing.md](docs/releasing.md)): the first time, right-click the app and choose **Open**, or run `xattr -dr com.apple.quarantine Plonix.app`.
 
 ### The first 60 seconds from a terminal
 
@@ -627,7 +627,7 @@ site/             the plonix.io website; site/docs is generated from docs/ by sc
 
 **Coming**
 - [ ] Opt-in active mode for agents: replay and send within accepted scope, switched on by you ([design](docs/agents.md#later-an-opt-in-active-mode))
-- [ ] Notarized app downloads (releases are signed ad hoc for now; the pipeline is ready, see [docs/releasing.md](docs/releasing.md))
+- [ ] Notarized app downloads (releases are signed ad hoc for now; they are signed and notarized on the maintainer's Mac from the next release, see [docs/releasing.md](docs/releasing.md))
 - [ ] Extensions that add panels and tabs, or send scope-enforced requests ([design](docs/extensions.md))
 
 Deliberately out of scope: scans that run unattended or reach beyond accepted scope. Scanning in Plonix is something you start, against a host you accepted, with checks chosen from what it runs. Plonix stays small on purpose.

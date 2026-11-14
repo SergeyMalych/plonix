@@ -31,6 +31,9 @@
 #   APPLE_ID, APPLE_PASSWORD (an app-specific password), APPLE_TEAM_ID
 #   APPLE_API_KEY (key ID), APPLE_API_ISSUER (issuer ID), APPLE_API_KEY_PATH
 #   (path to the AuthKey_<id>.p8 file)
+#   APPLE_KEYCHAIN_PROFILE  A notarytool profile saved in your keychain with
+#                           `xcrun notarytool store-credentials` (see
+#                           docs/releasing.md), so no secret is in the shell.
 
 set -euo pipefail
 
@@ -168,17 +171,24 @@ sign_app() {
   codesign_one --entitlements "$entitlements" "$app"
 }
 
-notarize_app() {
-  local auth=()
-  # Same order as Tauri: the Apple ID first, then the API key.
+notary_auth() {
+  # Same order as Tauri: the Apple ID first, then the API key, then a profile
+  # saved in the keychain.
   if [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
     auth=(--apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID")
   elif [ -n "${APPLE_API_KEY:-}" ] && [ -n "${APPLE_API_ISSUER:-}" ] && [ -n "${APPLE_API_KEY_PATH:-}" ]; then
     [ -f "$APPLE_API_KEY_PATH" ] || die "APPLE_API_KEY_PATH does not point to a file"
     auth=(--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER")
+  elif [ -n "${APPLE_KEYCHAIN_PROFILE:-}" ]; then
+    auth=(--keychain-profile "$APPLE_KEYCHAIN_PROFILE")
   else
-    die "set APPLE_ID, APPLE_PASSWORD and APPLE_TEAM_ID, or APPLE_API_KEY, APPLE_API_ISSUER and APPLE_API_KEY_PATH, to notarize"
+    die "set APPLE_KEYCHAIN_PROFILE, or APPLE_ID, APPLE_PASSWORD and APPLE_TEAM_ID, or APPLE_API_KEY, APPLE_API_ISSUER and APPLE_API_KEY_PATH, to notarize"
   fi
+}
+
+notarize_app() {
+  local auth=()
+  notary_auth
 
   step "Submitting to Apple's notary service (this can take a few minutes)"
   local upload result
