@@ -2,9 +2,10 @@
 
 What changed in each Plonix release. The newest release is at the top.
 
-## [Unreleased]
+## [0.5.3] - 2026-11-14
 
 ### Added
+- **The Mac app is signed and notarized by Apple.** Plonix opens like any other downloaded app: no Privacy & Security step and no Terminal command the first time.
 - **Connect Claude Code in one click.** Agents › Setup has a **Connect Claude Code** button: Plonix adds itself to Claude Code for all your projects, with nothing to put on your PATH first.
 - **`plonix` on PATH on Windows.** The Windows installer now puts the `plonix` command on your PATH (open a new terminal after installing), and uninstalling takes it away again.
 - **Errors that quote your input.** When an error response repeats a value you sent, the Lens suggests opening the request on the Bench with that value marked.
@@ -265,6 +266,7 @@ The first public release of Plonix for Mac.
 - Crash reports stay on your Mac; Plonix offers to open a prefilled GitHub issue and never sends anything on its own.
 - Documentation at plonix.io/docs.
 
+[0.5.3]: https://github.com/SergeyMalych/plonix/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/SergeyMalych/plonix/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/SergeyMalych/plonix/compare/v0.1.5...v0.5.1
 [0.1.5]: https://github.com/SergeyMalych/plonix/compare/v0.1.4...v0.1.5
