@@ -6,7 +6,7 @@ Plonix captures the traffic between your browser and the application you are tes
 
 ## Install
 
-**Mac.** Download [Plonix for Mac](https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-macOS.dmg) (Apple silicon and Intel, macOS 11 or later), open it and drag Plonix to Applications. Releases are not notarized by Apple yet, so macOS asks before opening Plonix the first time: open it, click **Done**, then go to **System Settings › Privacy & Security** and click **Open Anyway** next to Plonix. Or run `xattr -dr com.apple.quarantine /Applications/Plonix.app` once. [Install and open Plonix](install.md) shows each step with pictures.
+**Mac.** Download [Plonix for Mac](https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-macOS.dmg) (Apple silicon and Intel, macOS 11 or later), open it and drag Plonix to Applications. Plonix is signed and notarized by Apple: the first time you open it, macOS asks whether you want to open an app downloaded from the Internet. Click **Open**. [Install and open Plonix](install.md) shows each step with pictures.
 
 **Windows.** Download [Plonix for Windows](https://github.com/SergeyMalych/plonix/releases/latest/download/Plonix-Windows-setup.exe) (64-bit Windows 10 or 11) and run it. The installer is not code-signed yet, so SmartScreen may say it protected your PC: click **More info**, then **Run anyway** ([with pictures](install.md#on-windows)). Plonix keeps its data in `%USERPROFILE%\.plonix`.
 

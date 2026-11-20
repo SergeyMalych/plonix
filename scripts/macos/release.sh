@@ -17,6 +17,9 @@
 #   --no-publish   Upload the signed files but leave the release a draft.
 #   -h, --help     Show this help.
 #
+# A run that stops part way (for example because the screen locked) keeps its
+# work in ~/Plonix/release-work/<tag>; run the same command again to continue.
+#
 # Settings (environment variables, all optional):
 #   APPLE_SIGNING_IDENTITY   Identity to sign with. Default: the one
 #                            "Developer ID Application" identity in your
@@ -28,6 +31,7 @@
 #                            Default: ~/Plonix/signing-keys/plonix-updater.key
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  Its password, if it has one.
 #   PLONIX_REPO              Default: SergeyMalych/plonix
+#   PLONIX_RELEASE_WORK      Work folder. Default: ~/Plonix/release-work/<tag>
 #
 # Needs: Xcode command line tools, gh (signed in), jq, and npx or cargo tauri.
 
@@ -106,36 +110,62 @@ xcrun notarytool history --keychain-profile "$APPLE_KEYCHAIN_PROFILE" >/dev/null
 [ "$(jq -r .isDraft <<<"$info")" = true ] ||
   echo "Note: $tag is already published. Its Mac files will be replaced."
 
-work="$(mktemp -d "${TMPDIR:-/tmp}/plonix-release.XXXXXX")"
-trap 'rm -rf "$work"' EXIT
+# The work folder is kept until the release is published, so a run that
+# stops (a locked screen hides the notarytool profile, the network drops, the
+# Mac sleeps) picks up where it stopped: a stapled app or disk image is not
+# signed or sent to Apple again.
+work="${PLONIX_RELEASE_WORK:-$HOME/Plonix/release-work/$tag}"
+mkdir -p "$work"
 cd "$work"
+echo "Work folder: $work"
 
-step "Downloading the build from CI"
-gh release download "$tag" --repo "$repo" --pattern Plonix-macOS.zip --pattern latest.json
-ditto -x -k Plonix-macOS.zip unpacked
+# Keep the Mac and its display awake while this runs: a locked screen hides
+# the notarytool profile from the keychain.
+caffeinate -dimsu -w $$ &
+
+notary_ready() {
+  xcrun notarytool history --keychain-profile "$APPLE_KEYCHAIN_PROFILE" >/dev/null 2>&1 ||
+    die "the notarytool profile $APPLE_KEYCHAIN_PROFILE can't be read. Is the screen locked? Unlock the Mac and run this again: it continues from $work"
+}
+
 app="$work/unpacked/Plonix.app"
-[ -d "$app" ] || die "Plonix-macOS.zip has no Plonix.app"
+if [ -d "$app" ] && xcrun stapler validate "$app" >/dev/null 2>&1; then
+  step "Plonix.app is already signed and notarized (from an earlier run)"
+else
+  step "Downloading the build from CI"
+  rm -rf unpacked out dmg Plonix-macOS.zip latest.json
+  gh release download "$tag" --repo "$repo" --pattern Plonix-macOS.zip --pattern latest.json
+  ditto -x -k Plonix-macOS.zip unpacked
+  [ -d "$app" ] || die "Plonix-macOS.zip has no Plonix.app"
 
-step "Signing and notarizing Plonix.app"
-"$here/sign-and-notarize.sh" "$app"
+  step "Signing and notarizing Plonix.app"
+  notary_ready
+  "$here/sign-and-notarize.sh" "$app"
+fi
 
 out="$work/out"
 mkdir -p "$out"
 
-step "Building the disk image"
-stage="$work/dmg"
-mkdir -p "$stage"
-ditto "$app" "$stage/Plonix.app"
-ln -s /Applications "$stage/Applications"
-hdiutil create -volname Plonix -srcfolder "$stage" -fs HFS+ -format UDZO -ov "$out/Plonix-macOS.dmg"
-codesign --force --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$out/Plonix-macOS.dmg"
+if [ -f "$out/Plonix-macOS.dmg" ] && xcrun stapler validate "$out/Plonix-macOS.dmg" >/dev/null 2>&1; then
+  step "The disk image is already notarized (from an earlier run)"
+else
+  step "Building the disk image"
+  rm -rf "$work/dmg" "$out/Plonix-macOS.dmg"
+  stage="$work/dmg"
+  mkdir -p "$stage"
+  ditto "$app" "$stage/Plonix.app"
+  ln -s /Applications "$stage/Applications"
+  hdiutil create -volname Plonix -srcfolder "$stage" -fs HFS+ -format UDZO -ov "$out/Plonix-macOS.dmg"
+  codesign --force --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$out/Plonix-macOS.dmg"
 
-step "Notarizing the disk image"
-xcrun notarytool submit "$out/Plonix-macOS.dmg" --keychain-profile "$APPLE_KEYCHAIN_PROFILE" --wait --output-format json >dmg.json || true
-cat dmg.json
-echo
-[ "$(plutil -extract status raw -o - dmg.json 2>/dev/null)" = Accepted ] || die "the disk image was not accepted"
-xcrun stapler staple "$out/Plonix-macOS.dmg"
+  step "Notarizing the disk image"
+  notary_ready
+  xcrun notarytool submit "$out/Plonix-macOS.dmg" --keychain-profile "$APPLE_KEYCHAIN_PROFILE" --wait --output-format json >dmg.json || true
+  cat dmg.json
+  echo
+  [ "$(plutil -extract status raw -o - dmg.json 2>/dev/null)" = Accepted ] || die "the disk image was not accepted"
+  xcrun stapler staple "$out/Plonix-macOS.dmg"
+fi
 hdiutil verify "$out/Plonix-macOS.dmg"
 spctl --assess --type open --context context:primary-signature -vvv "$out/Plonix-macOS.dmg"
 
@@ -167,6 +197,8 @@ gh release edit "$tag" --repo "$repo" --notes-file notes-signed.md
 if [ "$publish" = true ]; then
   step "Publishing $tag"
   gh release edit "$tag" --repo "$repo" --draft=false --latest
+  cd /
+  rm -rf "$work"
   echo
   echo "Done: https://github.com/$repo/releases/tag/$tag"
 else

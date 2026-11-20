@@ -15,7 +15,7 @@ import pw from 'playwright';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.resolve(HERE, '../../site/assets');
-const SCENES = ['mac-1', 'mac-2', 'mac-3', 'mac-4', 'mac-terminal', 'win-1', 'win-2'];
+const SCENES = ['mac-1', 'mac-open', 'mac-2', 'mac-3', 'mac-4', 'mac-terminal', 'win-1', 'win-2'];
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'install-art-'));
 const browser = await pw.chromium.launch();
