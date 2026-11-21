@@ -128,6 +128,9 @@ async fn put_settings(State(s): State<AppState>, Path(id): Path<String>, Json(b)
     if let Err(e) = saved {
         return internal(e);
     }
+    if id == crate::usage::SECTION {
+        crate::usage::mark_asked(&s.home);
+    }
     Json(json!({ "section": id, "values": values, "applies": section.applies, "proxy": s.proxy_addr() })).into_response()
 }
 
