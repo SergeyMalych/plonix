@@ -2,6 +2,15 @@
 
 What changed in each Plonix release. The newest release is at the top.
 
+## [0.5.4] - 2026-11-21
+
+### Added
+- **A first-run card about usage statistics.** After the terms of use, Plonix asks once, on a card of its own, whether to share anonymous usage statistics. It shows what a report holds and what is never sent, an example report from your computer, and live numbers from plonix.io/analytics. Nothing is counted until you pick **Share Anonymous Stats** or **No Thanks**, and sharing stays off unless you turn it on.
+
+### Changed
+- **Appearance applies on click.** Theme, Spacing and Style in Settings › Appearance change the window and save the moment you pick them, on the Start screen and in project windows. There is no Save button to look for.
+- **Install guide for the notarized Mac app.** plonix.io/docs/install and the "Next: open Plonix" dialog after a download now show the two steps a signed Mac app needs.
+
 ## [0.5.3] - 2026-11-14
 
 ### Added
@@ -266,6 +275,7 @@ The first public release of Plonix for Mac.
 - Crash reports stay on your Mac; Plonix offers to open a prefilled GitHub issue and never sends anything on its own.
 - Documentation at plonix.io/docs.
 
+[0.5.4]: https://github.com/SergeyMalych/plonix/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/SergeyMalych/plonix/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/SergeyMalych/plonix/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/SergeyMalych/plonix/compare/v0.1.5...v0.5.1
