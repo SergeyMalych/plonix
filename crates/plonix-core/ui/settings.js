@@ -106,6 +106,8 @@
     const values = () => Object.fromEntries(Object.entries(controls).map(([k, c]) => [k, c.get()]));
     const dirty = () => !same(values(), saved);
     const changed = () => {
+      // Sections marked instant (Appearance) save on every click: no Save button to find.
+      if (section.instant) return dirty() && save();
       const d = dirty();
       saveBtn.disabled = !d;
       revertBtn.disabled = !d;
@@ -134,15 +136,19 @@
       }
       changed();
     });
-    saveBtn.addEventListener('click', async () => {
+    let busy = false;
+    const save = async () => {
+      if (busy) return;
+      busy = true;
       saveBtn.disabled = true;
       Object.values(controls).forEach((c) => c.error(''));
       status.className = 'fstatus';
       status.textContent = 'Saving…';
       try {
-        const r = await opts.save(section.id, values());
-        saved = { ...(r && r.values ? r.values : values()) };
-        for (const [k, c] of Object.entries(controls)) c.set(saved[k]);
+        const sent = values();
+        const r = await opts.save(section.id, sent);
+        saved = { ...(r && r.values ? r.values : sent) };
+        if (!section.instant) for (const [k, c] of Object.entries(controls)) c.set(saved[k]);
         section.values = saved;
         status.className = 'fstatus ok';
         status.textContent = (r && r.message) || APPLIES[(r && r.applies) || section.applies] || 'Saved.';
@@ -151,16 +157,20 @@
         const problems = (e && e.problems) || [];
         problems.forEach((p) => controls[p.field] && controls[p.field].error(p.message));
         status.textContent = problems.length ? 'Fix the highlighted settings.' : (e && e.message) || 'Could not save.';
+        // Instant sections go back to what is saved, so a failure does not retry forever.
+        if (section.instant) for (const [k, c] of Object.entries(controls)) c.set(saved[k]);
       }
+      busy = false;
       changed();
-    });
+    };
+    saveBtn.addEventListener('click', save);
     const box = h(
       'div',
       { class: 'sform' },
       h('div', { class: 'shead' }, h('h2', { text: section.title }), h('span', { class: 'slevel ' + section.level, text: LEVEL[section.level] || '' })),
       section.description ? h('p', { class: 'sdesc', text: section.description }) : null,
       body,
-      h('div', { class: 'sactions' }, status, revertBtn, saveBtn),
+      h('div', { class: 'sactions' }, status, section.instant ? null : revertBtn, section.instant ? null : saveBtn),
     );
     if (opts.extra) opts.extra(section, box);
     return box;
