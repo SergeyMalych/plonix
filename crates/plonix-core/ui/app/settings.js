@@ -61,6 +61,7 @@ function appearanceSection() {
     level: 'device',
     description: 'How Plonix looks on this computer.',
     applies: 'now',
+    instant: true,
     fields: [
       { key: 'theme', label: 'Theme', type: 'choice', options: [{ value: 'auto', label: 'Match system' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }] },
       { key: 'density', label: 'Spacing', type: 'choice', help: 'Dense fits more on screen. Roomy gives rows and panels more air.', options: [{ value: 'dense', label: 'Dense' }, { value: 'roomy', label: 'Roomy' }] },
