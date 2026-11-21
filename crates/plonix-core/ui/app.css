@@ -1502,6 +1502,53 @@ button.tag.edited { cursor: pointer; }
 .tfoot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--line-2); padding-top: 14px; }
 .tfoot .err { color: var(--crit); font-size: 12px; margin-right: auto; }
 .tfoot .btn { padding: 6px 18px; }
+/* first launch: "Help shape Plonix?" (anonymous usage statistics) */
+.ucard { width: min(760px, 100%); }
+.ushape { flex: 0 0 auto; width: 42px; height: 42px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
+.ushape i { border-radius: 5px; background: var(--accent); }
+.ushape i:nth-child(2) { background: var(--ok); }
+.ushape i:nth-child(3) { background: var(--warn); }
+.ushape i:nth-child(4) { background: var(--crit); }
+.ugrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 14px; }
+.ucol { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.uhd { font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3); margin-top: 4px; }
+.ulist { list-style: none; margin: 0 0 4px; padding: 0; display: flex; flex-direction: column; gap: 5px; line-height: 1.4; }
+.ulist li { display: flex; gap: 8px; align-items: flex-start; }
+.ulist li i { flex: 0 0 auto; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 10px; font-weight: 700; margin-top: 1px; }
+.ulist li.yes i { background: var(--ok-soft); color: var(--ok); }
+.ulist li.no i { background: var(--crit-soft); color: var(--crit); }
+.ucol .linkbtn { align-self: flex-start; color: var(--accent); font-size: 12px; margin-top: 2px; padding: 0; }
+.ulive { border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface-2); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ulivehd { display: flex; align-items: center; gap: 7px; }
+.ulivehd b { font-weight: 650; }
+.ulivehd a { margin-left: auto; color: var(--accent); font-size: 12px; white-space: nowrap; }
+.ulivedot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); flex: 0 0 auto; }
+.ulivebody { display: flex; flex-direction: column; gap: 8px; min-height: 92px; }
+.utiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.utile { background: var(--surface); border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; min-width: 0; }
+.utile b { font-size: 18px; font-weight: 650; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.utile span { font-size: 11px; color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.usbar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--line-2); }
+.usbar .mac { background: var(--accent); }
+.usbar .win { background: var(--ok); }
+.uslbl { display: flex; justify-content: space-between; font-size: 11px; color: var(--fg-3); margin-top: 3px; }
+.ubars { display: flex; flex-direction: column; gap: 4px; }
+.ubar { display: grid; grid-template-columns: 88px minmax(0, 1fr) 42px; gap: 8px; align-items: center; font-size: 12px; }
+.ubar div { height: 8px; border-radius: 4px; background: var(--line-2); overflow: hidden; }
+.ubar div i { display: block; height: 100%; background: var(--accent); }
+.ubar em { font-style: normal; color: var(--fg-3); text-align: right; font-variant-numeric: tabular-nums; }
+.unote { margin: 0; color: var(--fg-3); font-size: 12px; line-height: 1.45; }
+.unote.fine { font-size: 11px; }
+.ujson { margin: 0; max-height: min(30vh, 240px); overflow: auto; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface-2); padding: 10px 14px; font-family: var(--mono); font-size: 11px; line-height: 1.5; color: var(--fg-2); }
+.ucard .tfoot .uhint { margin-right: auto; color: var(--fg-3); font-size: 11.5px; }
+.ucard .tfoot .err:empty { display: none; }
+/* short windows: the answer buttons stay in view while the card scrolls */
+.ucard .tfoot { position: sticky; bottom: -24px; background: var(--surface); padding-bottom: 6px; margin-bottom: -6px; z-index: 1; }
+@media (max-width: 680px) {
+  .ugrid { grid-template-columns: minmax(0, 1fr); }
+  .ucard .tfoot { flex-wrap: wrap; }
+  .ucard .tfoot .uhint { flex: 1 0 100%; }
+}
 
 /* ---- Saved users (Bench switcher) and the Access check ---- */
 .asbox { display: inline-flex; align-items: center; gap: 4px; }

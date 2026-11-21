@@ -346,15 +346,74 @@ fn may_send() -> bool {
     !cfg!(debug_assertions) && std::env::var_os("CI").is_none()
 }
 
-/// Turns statistics on or off (the first-launch screen and `plonix usage`).
+/// Turns statistics on or off (the first-run card and `plonix usage`). This
+/// is the user's answer, so they are not asked again.
 pub fn set_sharing(home: &Home, on: bool) -> Result<()> {
     let Some(sec) = settings::section(SECTION) else { return Ok(()) };
     let values = sec.check(&json!({ "share": on }), &settings::global(home, SECTION)).map_err(|_| anyhow::anyhow!("bad usage setting"))?;
     settings::save_global(home, SECTION, &values)?;
+    mark_asked(home);
     if !on {
         let _ = std::fs::remove_file(path(home));
     }
     Ok(())
+}
+
+fn asked_path(home: &Home) -> std::path::PathBuf {
+    home.root.join("usage-asked")
+}
+
+/// Whether the user has answered "share anonymous usage statistics?" in this
+/// home: on the first-run card, in the CLI, or by changing the setting.
+pub fn asked(home: &Home) -> bool {
+    asked_path(home).exists()
+}
+
+/// Records that the user answered, so the first-run card is not shown again.
+pub fn mark_asked(home: &Home) {
+    let _ = write_atomic(&asked_path(home), format!("{}\n", now()).as_bytes());
+}
+
+/// Whether the Start screen should ask: never asked, not already sharing,
+/// and not turned off for this computer by the environment.
+pub fn should_ask(home: &Home) -> bool {
+    !asked(home) && !sharing(home) && !disabled_by_env()
+}
+
+/// A report as it would look from this computer after a short session: the
+/// real version, OS, CPU type and look, with example counts. Shown on the
+/// first-run card before anything is counted.
+pub fn example(home: &Home) -> Value {
+    let mut f = File { install_id: "(random, made only if you say yes)".to_string(), ..Default::default() };
+    for (k, n) in [("app_launched", 1), ("project_opened", 1), ("capture_started", 1), ("bench_send", 6), ("screen_traffic", 3), ("screen_bench", 2)] {
+        f.counts.insert(k.to_string(), n);
+    }
+    for (k, n) in [("traffic", 14), ("bench", 9), ("scope", 2)] {
+        f.minutes.insert(k.to_string(), n);
+    }
+    for (k, n) in [("host", 3), ("-kind", 1), ("text", 2)] {
+        f.filters.insert(k.to_string(), n);
+    }
+    let mut rejected = std::collections::BTreeSet::new();
+    rejected.insert("google-analytics.com".to_string());
+    f.projects.insert("example".into(), Snapshot { requests: "101-1k".into(), hosts: "6-20".into(), in_scope: "2-5".into(), rejected });
+    payload(home, &f)
+}
+
+/// Where the public totals are read from (the numbers behind plonix.io/analytics).
+pub const STATS_URL: &str = "https://plonix.io/api/stats";
+
+/// The public totals as plonix.io/analytics shows them, read live. Only
+/// fetched when the first-run card asks for it; nothing about this install
+/// goes with the request.
+pub fn public_stats() -> Result<Value> {
+    let v: Value = ureq::get(STATS_URL)
+        .timeout(Duration::from_secs(8))
+        .set("User-Agent", concat!("plonix/", env!("CARGO_PKG_VERSION")))
+        .call()?
+        .into_json()?;
+    anyhow::ensure!(v.is_object(), "unexpected answer");
+    Ok(v)
 }
 
 /// Writes this process's counts to disk. Call before a process exits.
@@ -553,6 +612,20 @@ mod tests {
     }
 
     #[test]
+    fn the_example_is_a_real_report_without_an_id() {
+        let home = Home { root: tempfile::tempdir().unwrap().keep() };
+        let e = example(&home);
+        let f = File { install_id: "x".into(), ..Default::default() };
+        let keys = |v: &Value| v.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
+        assert_eq!(keys(&e), keys(&payload(&home, &f)));
+        assert!(!e["install_id"].as_str().unwrap().chars().all(|c| c.is_ascii_hexdigit()));
+        for k in e["counts"].as_object().unwrap().keys() {
+            assert!(EVENTS.contains(&k.as_str()), "{k}");
+        }
+        assert!(!path(&home).exists(), "showing the example keeps nothing");
+    }
+
+    #[test]
     fn searches_count_kinds_never_values() {
         assert_eq!(filter_kinds(r#"host:secret.example -status:404 "set-cookie: sid" passw is:graphql HOST:x foo:bar"#), ["-status", "host", "is", "text"]);
         assert!(filter_kinds("").is_empty());
@@ -594,11 +667,13 @@ mod tests {
         assert!(!sharing(&home), "terms not accepted");
         crate::terms::accept(&home).unwrap();
         assert!(!sharing(&home), "off until the user turns it on");
+        assert_eq!(should_ask(&home), !disabled_by_env());
         set_sharing(&home, true).unwrap();
         assert_eq!(sharing(&home), !disabled_by_env());
         set_sharing(&home, false).unwrap();
         assert!(!sharing(&home));
         assert!(!path(&home).exists());
+        assert!(asked(&home) && !should_ask(&home), "an answer is never asked again");
         assert!(!may_send(), "test builds never send");
     }
 }

@@ -134,6 +134,12 @@ async function boot() {
     return;
   }
   if (!terms.accepted) return showTerms(terms);
+  if (terms.ask_usage) return showUsageAsk();
+  renderShell();
+  refresh();
+}
+
+function startScreen() {
   renderShell();
   refresh();
 }
@@ -175,18 +181,16 @@ function showTerms(t) {
     h('button', { class: 'segbtn', 'data-v': 'terms', text: 'Terms of use', onclick: () => showDoc('terms') }),
     h('button', { class: 'segbtn', 'data-v': 'license', text: 'License (Apache 2.0)', onclick: () => showDoc('license') }),
   );
-  const off = t.usage_disabled_by_env;
   const go = h('button', { class: 'btn primary', text: 'Continue', disabled: true });
   const accept = h('input', { type: 'checkbox', id: 't-accept', onchange: () => (go.disabled = !accept.checked) });
-  const share = h('input', { type: 'checkbox', id: 't-share', checked: t.share_usage && !off, disabled: off });
   const err = h('span', { class: 'err' });
   go.addEventListener('click', async () => {
     go.disabled = true;
     err.textContent = '';
     try {
-      await api('/api/terms', { method: 'POST', body: { accept: accept.checked, share_usage: share.checked } });
-      renderShell();
-      refresh();
+      const r = await api('/api/terms', { method: 'POST', body: { accept: accept.checked } });
+      if (r.ask_usage) showUsageAsk();
+      else startScreen();
     } catch (e) {
       err.textContent = e.message;
       go.disabled = false;
@@ -207,35 +211,161 @@ function showTerms(t) {
         ),
         tabs,
         doc,
-        h(
-          'div',
-          { class: 'tchecks' },
-          h('label', { class: 'tcheck', for: 't-accept' }, accept, h('span', null, h('b', { text: 'I accept the license and terms' }))),
-          h(
-            'label',
-            { class: 'tcheck', for: 't-share' },
-            share,
-            h(
-              'span',
-              null,
-              h('b', { text: 'Share anonymous usage statistics' }),
-              h(
-                'small',
-                null,
-                off
-                  ? 'Off: PLONIX_NO_ANALYTICS or DO_NOT_TRACK is set on this computer. '
-                  : 'Off unless you tick it. Once a day: how often features and screens are used, sizes as ranges, the Plonix version, OS and CPU type. Never URLs, hosts, traffic, project names or anything you type. Totals are public at plonix.io/analytics. ',
-                h('a', { href: t.privacy_url, target: '_blank', rel: 'noopener', text: 'Exactly what is sent' }),
-              ),
-            ),
-          ),
-        ),
+        h('div', { class: 'tchecks' }, h('label', { class: 'tcheck', for: 't-accept' }, accept, h('span', null, h('b', { text: 'I accept the license and terms' })))),
         h('div', { class: 'tfoot' }, err, go),
       ),
     ),
   );
   showDoc('terms');
   accept.focus();
+}
+
+/* ---------- first launch: anonymous usage statistics ---------- */
+
+const ANALYTICS_URL = 'https://plonix.io/analytics';
+
+/** Screen names as the public page shows them. */
+const SCREEN_NAMES = { traffic: 'Traffic', bench: 'Bench', scope: 'Scope', map: 'Map', users: 'Users', access: 'Access check', callbacks: 'Callbacks', findings: 'Findings', agents: 'Agents', market: 'Store', scans: 'Scans', programs: 'Programs', rules: 'Rules', settings: 'Settings' };
+
+function fmtNum(n) {
+  return n >= 10000 ? Math.round(n / 1000) + 'k' : n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(n);
+}
+
+/** The public totals, read live from plonix.io, drawn small. */
+function drawLive(box, v) {
+  const d = v.downloads || {};
+  const u = v.usage || {};
+  const inst = (u.installs && u.installs.active_30d) || null;
+  const tile = (cls, n, label, title) => h('div', { class: 'utile ' + cls, title }, h('b', { text: typeof n === 'number' ? fmtNum(n) : n }), h('span', { text: label }));
+  const kids = [
+    h(
+      'div',
+      { class: 'utiles' },
+      tile('t1', d.total ?? '–', 'downloads'),
+      tile('t2', inst ?? '<5', 'sharing stats', 'Installs that shared a report in the last 30 days'),
+      tile('t3', (d.releases || []).length || '–', 'releases'),
+    ),
+  ];
+  if (d.total) {
+    const mac = Math.round(((d.macos || 0) / d.total) * 100);
+    kids.push(
+      h(
+        'div',
+        { class: 'usplit', title: `macOS ${d.macos || 0} · Windows ${d.windows || 0}` },
+        h('div', { class: 'usbar' }, h('i', { class: 'mac', style: { width: mac + '%' } }), h('i', { class: 'win', style: { width: 100 - mac + '%' } })),
+        h('div', { class: 'uslbl' }, h('span', { text: `macOS ${mac}%` }), h('span', { text: `Windows ${100 - mac}%` })),
+      ),
+    );
+  }
+  const screens = (u.ready && u.time && Array.isArray(u.time.screens) ? u.time.screens : []).filter((s) => SCREEN_NAMES[s.id]).slice(0, 5);
+  if (screens.length) {
+    const top = Math.max(...screens.map((s) => s.hours || 0), 1);
+    kids.push(
+      h('div', { class: 'uhd', text: 'Time spent per screen' }),
+      h('div', { class: 'ubars' }, ...screens.map((s) => h('div', { class: 'ubar' }, h('span', { text: SCREEN_NAMES[s.id] }), h('div', null, h('i', { style: { width: Math.max(4, ((s.hours || 0) / top) * 100) + '%' } })), h('em', { text: (s.hours || 0) + ' h' })))),
+    );
+  } else {
+    kids.push(h('p', { class: 'unote', text: 'Which screens people use shows once at least 5 installs share. Yours would count toward that.' }));
+  }
+  box.replaceChildren(...kids);
+}
+
+/** "Help shape Plonix": asks once, after the terms. Nothing is counted until the user picks. */
+function showUsageAsk() {
+  clearTimeout(L.timer);
+  const live = h('div', { class: 'ulivebody' }, h('p', { class: 'unote', text: 'Loading the live totals…' }));
+  const pre = h('pre', { class: 'ujson', hidden: true });
+  const seeBtn = h('button', { class: 'linkbtn', text: 'See an example report from this computer', 'aria-expanded': 'false' });
+  seeBtn.addEventListener('click', () => {
+    pre.hidden = !pre.hidden;
+    seeBtn.setAttribute('aria-expanded', String(!pre.hidden));
+    seeBtn.textContent = pre.hidden ? 'See an example report from this computer' : 'Hide the example report';
+  });
+  const err = h('span', { class: 'err' });
+  const no = h('button', { class: 'btn', text: 'No Thanks' });
+  const yes = h('button', { class: 'btn primary', text: 'Share Anonymous Stats' });
+  const choose = async (share) => {
+    no.disabled = yes.disabled = true;
+    err.textContent = '';
+    try {
+      await api('/api/usage/choice', { method: 'POST', body: { share } });
+      startScreen();
+      toast(share ? 'Thank you! Usage statistics are on. Change it any time in Settings.' : 'Nothing will be sent. Change it any time in Settings.');
+    } catch (e) {
+      err.textContent = e.message;
+      no.disabled = yes.disabled = false;
+    }
+  };
+  no.addEventListener('click', () => choose(false));
+  yes.addEventListener('click', () => choose(true));
+  const item = (ok, text) => h('li', { class: ok ? 'yes' : 'no' }, h('i', { 'aria-hidden': 'true', text: ok ? '✓' : '✕' }), h('span', { text }));
+  $('#app').replaceChildren(
+    h(
+      'div',
+      { class: 'terms' },
+      h(
+        'div',
+        { class: 'tcard ucard', role: 'dialog', 'aria-labelledby': 'u-title' },
+        h(
+          'div',
+          { class: 'thead' },
+          h('div', { class: 'ushape', 'aria-hidden': 'true' }, h('i'), h('i'), h('i'), h('i')),
+          h(
+            'div',
+            null,
+            h('h1', { id: 'u-title', text: 'Help shape Plonix?' }),
+            h('p', { text: 'Plonix is free and built in the open. A tiny anonymous report once a day tells us which features people really use, so the next version fixes what matters to you. It stays off unless you say yes.' }),
+          ),
+        ),
+        h(
+          'div',
+          { class: 'ugrid' },
+          h(
+            'div',
+            { class: 'ucol' },
+            h('div', { class: 'uhd', text: 'What a report holds' }),
+            h(
+              'ul',
+              { class: 'ulist' },
+              item(true, 'How often each feature and screen is used'),
+              item(true, 'Sizes as ranges, like “101–1k requests”'),
+              item(true, 'Plonix version, OS and CPU type'),
+              item(true, 'A random id, not tied to you or this computer'),
+            ),
+            h('div', { class: 'uhd', text: 'Never sent' }),
+            h('ul', { class: 'ulist' }, item(false, 'URLs, hosts, requests or responses'), item(false, 'Project names, files or paths'), item(false, 'Anything you type, search or find')),
+            seeBtn,
+          ),
+          h(
+            'div',
+            { class: 'ulive' },
+            h(
+              'div',
+              { class: 'ulivehd' },
+              h('span', { class: 'ulivedot', 'aria-hidden': 'true' }),
+              h('b', { text: 'Live: what everyone sees' }),
+              h('a', { href: ANALYTICS_URL, target: '_blank', rel: 'noopener', text: 'plonix.io/analytics ↗' }),
+            ),
+            live,
+            h('p', { class: 'unote fine', text: 'Only totals from many installs are public. A group smaller than 5 is never shown.' }),
+          ),
+        ),
+        pre,
+        h('div', { class: 'tfoot' }, h('small', { class: 'uhint', text: 'Change it any time in Settings › Usage statistics.' }), err, no, yes),
+      ),
+    ),
+  );
+  api('/api/usage/example')
+    .then((r) => {
+      pre.textContent = JSON.stringify(r.report, null, 2);
+    })
+    .catch(() => {
+      seeBtn.hidden = true;
+    });
+  api('/api/usage/public')
+    .then((v) => drawLive(live, v))
+    .catch(() => live.replaceChildren(h('p', { class: 'unote', text: 'Could not reach plonix.io right now. The totals are always public at plonix.io/analytics.' })));
+  yes.focus();
 }
 
 function showLock(message) {

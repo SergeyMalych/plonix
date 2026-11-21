@@ -271,6 +271,9 @@ fn router(hub: Arc<Hub>) -> Router {
         .route("/api/ui/style", get(ui_style).put(put_ui_style))
         .route("/api/hub", get(about))
         .route("/api/terms", get(terms).post(accept_terms))
+        .route("/api/usage/example", get(usage_example))
+        .route("/api/usage/public", get(usage_public))
+        .route("/api/usage/choice", post(usage_choice))
         .route("/api/starter", get(starter).post(install_starter))
         .route("/api/projects", get(projects).post(create))
         .route("/api/projects/add", post(add_existing))
@@ -363,6 +366,7 @@ async fn terms(State(hub): State<Arc<Hub>>) -> Response {
         "privacy_url": crate::terms::PRIVACY_URL,
         "share_usage": crate::usage::sharing(&hub.home),
         "usage_disabled_by_env": crate::usage::disabled_by_env(),
+        "ask_usage": crate::usage::should_ask(&hub.home),
     }))
     .into_response()
 }
@@ -370,8 +374,9 @@ async fn terms(State(hub): State<Arc<Hub>>) -> Response {
 #[derive(Deserialize)]
 struct AcceptBody {
     accept: bool,
+    /// Left out when the usage question comes on a card of its own.
     #[serde(default)]
-    share_usage: bool,
+    share_usage: Option<bool>,
 }
 
 /// Records the first-launch answer: the terms, and whether to share usage statistics.
@@ -379,11 +384,46 @@ async fn accept_terms(State(hub): State<Arc<Hub>>, Json(b): Json<AcceptBody>) ->
     if !b.accept {
         return err(StatusCode::BAD_REQUEST, "bad_request", "accept the license and terms to continue");
     }
-    let r = crate::usage::set_sharing(&hub.home, b.share_usage).and_then(|_| crate::terms::accept(&hub.home));
-    match r {
+    let r = match b.share_usage {
+        Some(share) => crate::usage::set_sharing(&hub.home, share),
+        None => Ok(()),
+    };
+    match r.and_then(|_| crate::terms::accept(&hub.home)) {
         Ok(()) => {
             crate::usage::flush();
-            Json(json!({ "accepted": true, "share_usage": crate::usage::sharing(&hub.home) })).into_response()
+            Json(json!({ "accepted": true, "share_usage": crate::usage::sharing(&hub.home), "ask_usage": crate::usage::should_ask(&hub.home) })).into_response()
+        }
+        Err(e) => internal(e),
+    }
+}
+
+/// The first-run usage card: an example report from this computer.
+async fn usage_example(State(hub): State<Arc<Hub>>) -> Response {
+    Json(json!({ "report": crate::usage::example(&hub.home), "privacy_url": crate::terms::PRIVACY_URL, "page": "https://plonix.io/analytics" })).into_response()
+}
+
+/// The first-run usage card: the public totals, read live from plonix.io.
+async fn usage_public() -> Response {
+    match tokio::task::spawn_blocking(crate::usage::public_stats).await {
+        Ok(Ok(v)) => Json(v).into_response(),
+        _ => err(StatusCode::BAD_GATEWAY, "offline", "plonix.io could not be reached"),
+    }
+}
+
+#[derive(Deserialize)]
+struct UsageChoice {
+    share: bool,
+}
+
+/// The answer on the first-run usage card.
+async fn usage_choice(State(hub): State<Arc<Hub>>, Json(b): Json<UsageChoice>) -> Response {
+    if b.share && crate::usage::disabled_by_env() {
+        return err(StatusCode::CONFLICT, "disabled_by_env", "PLONIX_NO_ANALYTICS or DO_NOT_TRACK is set on this computer");
+    }
+    match crate::usage::set_sharing(&hub.home, b.share) {
+        Ok(()) => {
+            crate::usage::flush();
+            Json(json!({ "share_usage": crate::usage::sharing(&hub.home) })).into_response()
         }
         Err(e) => internal(e),
     }
@@ -649,7 +689,12 @@ async fn put_global_settings(State(hub): State<Arc<Hub>>, Path(section): Path<St
     };
     match sec.check(&b.values, &settings::global(&hub.home, &section)) {
         Ok(values) => match settings::save_global(&hub.home, &section, &values) {
-            Ok(()) => Json(json!({ "section": section, "values": values, "applies": sec.applies })).into_response(),
+            Ok(()) => {
+                if section == crate::usage::SECTION {
+                    crate::usage::mark_asked(&hub.home);
+                }
+                Json(json!({ "section": section, "values": values, "applies": sec.applies })).into_response()
+            }
             Err(e) => internal(e),
         },
         Err(problems) => bad_settings(problems),

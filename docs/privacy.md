@@ -6,7 +6,8 @@ The one thing Plonix can send on its own is a small, anonymous usage report, if 
 
 ## Your choice
 
-- Statistics are **off** unless you turn them on. On first launch, Plonix shows its license and [terms of use](../TERMS.md) with two checkboxes: **I accept the license and terms** (required) and **Share anonymous usage statistics** (unticked; tick it if you want to help). The CLI asks the same two questions the first time it runs in a terminal, and "no" is the default.
+- Statistics are **off** unless you turn them on. On first launch, Plonix first shows its license and [terms of use](../TERMS.md), then asks once on a card of its own, **Help shape Plonix?**: it lists what a report holds and what is never sent, shows an example report built on your computer (nothing is counted or kept to make it), and shows the live public totals from [plonix.io/analytics](https://plonix.io/analytics). Nothing is counted until you pick **Share Anonymous Stats** or **No Thanks**; if you close Plonix first, it asks again next time. The CLI asks the same question the first time it runs in a terminal, and "no" is the default.
+- To show the live totals, that card reads `https://plonix.io/api/stats`, the same public numbers the page shows. Nothing about your install goes with that request, and it is the only time Plonix reads it.
 - Change it any time: **Settings › Usage statistics** in the app, or `plonix usage on` / `plonix usage off`.
 - **Settings › Usage statistics › Show What Is Sent** and `plonix usage` show the next report exactly as it would be sent.
 - **Reset Install ID** (or `plonix usage reset`) deletes everything kept so far; the next count starts with a new random id.
