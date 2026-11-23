@@ -221,10 +221,10 @@ verify_app() {
   local details
   details="$(codesign --display --verbose=4 "$app" 2>&1)"
   echo "$details" | grep -E '^(Identifier|Authority|TeamIdentifier|Timestamp|flags)=' || true
-  echo "$details" | grep -q '^Authority=Developer ID Application:' ||
+  grep -q '^Authority=Developer ID Application:' <<<"$details" ||
     die "not signed with a Developer ID Application certificate"
-  echo "$details" | grep -Eq 'flags=.*runtime' || die "the hardened runtime is not enabled"
-  echo "$details" | grep -q '^Timestamp=' || die "the signature has no secure timestamp"
+  grep -Eq 'flags=.*runtime' <<<"$details" || die "the hardened runtime is not enabled"
+  grep -q '^Timestamp=' <<<"$details" || die "the signature has no secure timestamp"
 
   step "Checking the notarization ticket"
   if ! xcrun stapler validate "$app"; then
