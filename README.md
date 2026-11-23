@@ -26,10 +26,7 @@ Plonix captures everything your browser does, learns the real shape of the targe
 
 Plonix is an assistant, not an automatic vulnerability finder. It analyzes what you captured and suggests what to look at next; you decide what to send and when. Nothing scans, crawls or fires on its own.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/window-dark.webp">
-  <img src="docs/images/window-light.webp" alt="The Plonix window: live traffic with filter chips and suggestions, a scope decision bar, and the Lens showing a request, its response and one-click suggested next steps">
-</picture>
+<img src="docs/images/plonix-tour.gif" width="960" alt="Plonix in action: typing a host filter narrows the captured traffic, the Lens decodes a request's token, and a one-click suggestion saves a finding">
 
 > **Status: early, and usable today.** [v0.5.4](https://github.com/SergeyMalych/plonix/releases/latest) is out for Mac and Windows. The core engine (proxy, traffic store, search, adaptive scope, local API), the `plonix` CLI, the Plonix app, the Bench with payload runs, the Market, Programs, saved users, Callbacks, scope-gated crawl and scans, and read-only MCP access for AI agents work today and are covered by tests. See [Roadmap](#roadmap).
 >
