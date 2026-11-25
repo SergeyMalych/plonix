@@ -103,4 +103,12 @@ The endpoint is a small function on the Plonix website (`functions/api/usage.js`
 
 ## The website
 
-The Plonix website, plonix.io, counts page views with Cloudflare Web Analytics, which its host adds to every page. Cloudflare says this sets no cookies and does not track you across sites. The website has no other trackers and no ads. The [public totals](https://plonix.io/analytics) above come only from Plonix itself, never from the website.
+The Plonix website, plonix.io, counts its own page views with a small script of its own (`site/assets/count.js`) and a function on the site (`functions/api/hit.js`). It sets no cookies, stores nothing in your browser, and gives you no id, so it cannot tell one visitor from another or follow you between pages or sites. Each page view sends only:
+
+- the page's path, such as `/docs/install` (anything that is not one of the site's own pages is counted as `other`),
+- the name of the site you followed a link from, such as `www.linkedin.com`, never its full address, and a `ref` or `utm_source` tag if the link had one,
+- and, when you click a download button, which download it was.
+
+The function turns these into fixed names (a page, a source such as `linkedin`, `reddit`, `hackernews` or `other`, and the two-letter country Cloudflare reports for the connection) and adds one to a total for that hour. It never stores your IP address, your browser's User-Agent or any other header, and no single visit is ever kept. Requests that look like bots are not counted. If your browser sends Global Privacy Control or Do Not Track, the script sends nothing at all.
+
+These totals are public too: [plonix.io/analytics](https://plonix.io/analytics) shows visits, page views, download clicks, where visits come from, which pages are read and visitors' countries, over the last 24 hours, 7 days and 30 days. The website has no other trackers and no ads. The usage statistics above come only from Plonix itself, never from the website.

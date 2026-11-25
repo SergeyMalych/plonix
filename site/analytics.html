@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Plonix analytics</title>
-<meta name="description" content="Open numbers: how Plonix is used, from anonymous, opt-in usage statistics. Totals only, no URLs, hosts or anything people type.">
+<meta name="description" content="Open numbers: who visits plonix.io and how Plonix is used, from cookieless page counts and anonymous, opt-in usage statistics.">
 <meta property="og:title" content="Plonix analytics">
 <meta property="og:description" content="Open numbers: how Plonix is used, from anonymous, opt-in usage statistics.">
 <meta property="og:url" content="https://plonix.io/analytics">
@@ -161,6 +161,17 @@ footer a:hover { color: var(--fg); }
 #tip { position: fixed; z-index: 30; pointer-events: none; padding: 7px 11px; border-radius: 10px; background: var(--black); color: var(--bg); font: 500 0.82rem var(--mono); opacity: 0; transform: translateY(4px); transition: opacity .1s, transform .1s; white-space: nowrap; }
 #tip.on { opacity: 1; transform: none; }
 @media (prefers-reduced-motion: reduce) { #tip { transition: none; } }
+/* website: range switch */
+.seg { display: inline-flex; padding: 4px; gap: 4px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); }
+.seg button { font: 500 0.86rem var(--display); color: var(--muted); background: none; border: 0; border-radius: 999px; padding: 7px 14px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.kpis.three { grid-template-columns: repeat(3, 1fr); margin-bottom: 16px; }
+@media (max-width: 760px) { .kpis.three { grid-template-columns: repeat(3, 1fr); gap: 10px; } .kpis.three .kpi { min-height: 128px; padding: 16px 14px; border-radius: 20px; } .kpis.three .kpi .shape { display: none; } .kpis.three .kpi .label { padding-right: 0; font-size: 0.86rem; } .kpis.three .kpi .num { font-size: 2.1rem; } .kpis.three .kpi .sub { font-size: 0.78rem; } }
+.cols.views span { background: var(--red); }
+.legend { display: flex; gap: 16px; font-size: 0.86rem; color: var(--muted); margin-bottom: 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
+@media (max-width: 980px) { .grid3 { grid-template-columns: 1fr; } }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 </style>
 </head>
@@ -187,13 +198,26 @@ footer a:hover { color: var(--fg); }
   <div class="wrap">
     <div class="eyebrow"><span class="dots" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Open numbers</div>
     <h1>How Plonix<br>is <span class="hl">used.</span></h1>
-    <p class="lede">Totals from installs that chose to share anonymous statistics. No URLs, hosts or anything people type ever leave their computer, and no group smaller than five installs is shown.</p>
-    <div class="meta"><span class="chip" id="m-window">Last 30 days</span><span class="chip" id="m-updated">Updated hourly</span><span class="chip">Groups under 5 installs hidden</span></div>
+    <p class="lede">Who visits this website, counted without cookies, and totals from installs that chose to share anonymous statistics. No URLs, hosts or anything people type ever leave their computer, and no group smaller than five installs is shown.</p>
+    <div class="meta"><span class="chip" id="m-updated">Updated every 5 minutes</span><span class="chip">No cookies</span><span class="chip">Groups under 5 installs hidden</span></div>
   </div>
 </section>
 
 <div class="wrap">
+  <section id="site">
+    <div class="head"><h2>Who visits.</h2><div class="seg" role="group" aria-label="Time range"><button type="button" data-range="24h" aria-pressed="true">24 hours</button><button type="button" data-range="7d" aria-pressed="false">7 days</button><button type="button" data-range="30d" aria-pressed="false">30 days</button></div></div>
+    <div class="kpis three" id="site-kpis"></div>
+    <div class="card"><div class="legend"><span><i style="background:var(--blue)"></i>Visits</span><span><i style="background:var(--red)"></i>Page views</span></div><div id="site-chart"></div></div>
+    <div class="grid3">
+      <div class="card"><h3>Where visits come from</h3><p class="note">The site a visitor followed a link from. Apps that hide it, like most mobile apps and email, show as Direct.</p><div id="site-sources"></div></div>
+      <div class="card"><h3>Pages read</h3><p class="note">Page views by page</p><div id="site-pages"></div></div>
+      <div class="card"><h3>Countries</h3><p class="note">Visits by country, as Cloudflare sees the connection</p><div id="site-countries"></div></div>
+    </div>
+  </section>
+  <section class="block" id="app">
+    <div class="head"><h2>In the app.</h2><p>From installs that share anonymous statistics, over the last 30 days.</p></div>
   <div class="kpis" id="kpis"></div>
+  </section>
 
   <section class="block" id="daily">
     <div class="head"><h2>Every day.</h2><p>Installs that used Plonix on each day. A striped day had fewer than five, so its number is hidden.</p></div>
@@ -253,6 +277,7 @@ footer a:hover { color: var(--fg); }
 </footer>
 <div id="tip" role="tooltip"></div>
 
+<script src="/assets/count.js?v=1" defer></script>
 <script>
 (() => {
   /* ---- theme switch, shared with the home page ---- */
@@ -330,7 +355,58 @@ footer a:hover { color: var(--fg); }
       `<table class="sr"><caption>Installs per day</caption>${days.map((x) => `<tr><th>${esc(x.day)}</th><td>${num(x.installs) == null ? 'fewer than 5' : fmt(x.installs)}</td></tr>`).join('')}</table>`;
   }
 
+  /* ---- website ---- */
+  const SOURCES = {
+    linkedin: 'LinkedIn', reddit: 'Reddit', hackernews: 'Hacker News', github: 'GitHub', x: 'X', facebook: 'Facebook', bluesky: 'Bluesky',
+    mastodon: 'Mastodon', youtube: 'YouTube', lobsters: 'Lobsters', producthunt: 'Product Hunt', discord: 'Discord', slack: 'Slack',
+    telegram: 'Telegram', whatsapp: 'WhatsApp', ai: 'AI assistants', search: 'Search engines', direct: 'Direct', other: 'Other sites',
+  };
+  const pageName = (id) => id === 'home' ? 'Home' : id === 'analytics' ? 'Analytics' : id === 'docs' ? 'Docs' : id === 'other' ? 'Other' :
+    /^docs\/[a-z-]+$/.test(id) ? 'Docs: ' + id.slice(5).replace(/-/g, ' ') : String(id);
+  let regions = null;
+  try { regions = new Intl.DisplayNames(['en'], { type: 'region' }); } catch (e) {}
+  const countryName = (id) => id === 'XX' ? 'Unknown' : id === 'other' ? 'Other' : (regions && /^[A-Z]{2}$/.test(id) && regions.of(id)) || String(id);
+  let siteRange = '24h';
+  try { const r = localStorage.getItem('plonix-analytics-range'); if (r === '7d' || r === '30d') siteRange = r; } catch (e) {}
+  function site(d) {
+    const all = d.site, s = all && all[siteRange];
+    document.querySelectorAll('.seg button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.range === siteRange));
+    const tile = (shape, label, n, sub) => ((n = num(n)), `<div class="kpi"><i class="shape ${shape}" aria-hidden="true"></i><span class="label">${esc(label)}</span><span class="num${n == null ? ' na' : ''}">${n == null ? '–' : fmt(n)}</span><span class="sub">${esc(sub)}</span></div>`);
+    if (!s) {
+      $('site-kpis').innerHTML = '';
+      for (const id of ['site-chart', 'site-sources', 'site-pages', 'site-countries']) empty($(id), 'Website numbers are unavailable right now.');
+      return;
+    }
+    const dl = s.downloads || {};
+    $('site-kpis').innerHTML =
+      tile('s-blue', 'Visits', s.visits, 'Arrivals from outside the site') +
+      tile('s-red', 'Page views', s.views, s.visits ? `${(s.views / s.visits).toFixed(1)} pages a visit` : 'All pages') +
+      tile('s-green', 'Download clicks', (num(dl.macos) || 0) + (num(dl.windows) || 0), `${fmt(dl.macos || 0)} Mac, ${fmt(dl.windows || 0)} Windows`);
+    const hourly = siteRange === '24h';
+    const when = (t) => { const x = new Date(t); return isNaN(x) ? '' : hourly ? x.toLocaleTimeString('en-US', { hour: 'numeric' }) : x.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }); };
+    const series = Array.isArray(s.series) ? s.series : [];
+    const max = Math.max(...series.map((x) => num(x.views) || 0), 4);
+    const col = (x, key, cls) => `<div class="c" data-tip="${esc(when(x.t))}: ${fmt(num(x.visits) || 0)} visits, ${fmt(num(x.views) || 0)} page views"><span style="height:${((num(x[key]) || 0) / max) * 100}%"></span></div>`;
+    const axis = series.length ? `<div class="axis"><span>${esc(when(series[0].t))}</span><span>${esc(when(series[Math.floor(series.length / 2)].t))}</span><span>${hourly ? 'Now' : esc(when(series[series.length - 1].t))}</span></div>` : '';
+    $('site-chart').innerHTML = `<div class="cols views" style="height:90px">${series.map((x) => col(x, 'views')).join('')}</div><div class="cols" style="height:130px">${series.map((x) => col(x, 'visits')).join('')}</div>${axis}` +
+      `<table class="sr"><caption>Visits and page views</caption>${series.map((x) => `<tr><th>${esc(when(x.t))}</th><td>${fmt(num(x.visits) || 0)} visits</td><td>${fmt(num(x.views) || 0)} views</td></tr>`).join('')}</table>`;
+    const list = (el, items, color, label, what) => items && items.length
+      ? bars(el, items, { color, compact: true, label, value: (x) => x.count, tip: (x) => `${label(x)}: ${fmt(x.count)} ${what}` })
+      : empty(el, 'No visits in this range yet.');
+    list($('site-sources'), s.sources, 'blue', (x) => name(SOURCES, x.id), 'visits');
+    list($('site-pages'), s.pages, 'red', (x) => pageName(x.id), 'page views');
+    list($('site-countries'), s.countries, 'yellow', (x) => countryName(x.id), 'visits');
+  }
+  let last = null;
+  document.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => {
+    siteRange = b.dataset.range;
+    try { localStorage.setItem('plonix-analytics-range', siteRange); } catch (e) {}
+    if (last) site(last);
+  }));
+
   function render(d) {
+    last = d;
+    site(d);
     const u = d.usage;
     if (d.generated_at) $('m-updated').textContent = 'Updated ' + new Date(d.generated_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
     kpis(d);

@@ -1,7 +1,7 @@
 // Tests for the website's functions (functions/api/*.js), which run on Cloudflare Pages with no build step.
 // Node has no Pages runtime, so this loads each file as a module and checks its pure parts:
 //   node scripts/check-functions.mjs
-import { copyFileSync, mkdtempSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
@@ -14,6 +14,7 @@ const load = async (name) => {
 };
 const usage = await load('usage');
 const stats = await load('stats');
+const hit = await load('hit');
 
 // usage.js keeps only known names, whole numbers and allowed values.
 {
@@ -92,6 +93,71 @@ const stats = await load('stats');
   assert.deepEqual(stats.downloads([{ tag_name: '<img>', assets: [{ name: 'a.dmg', download_count: '9' }] }]).releases, []);
   const dl = stats.downloads([{ tag_name: 'v0.1.4', assets: [{ name: 'Plonix-macOS.dmg', download_count: 3 }, { name: 'Plonix-Windows-setup.exe', download_count: 2 }, { name: 'Plonix-macOS.app.tar.gz', download_count: 9 }, { name: 'latest.json', download_count: 50 }] }]);
   assert.deepEqual([dl.total, dl.macos, dl.windows, dl.updates], [5, 3, 2, 9]);
+}
+
+// hit.js counts pages and sources by fixed names only, and keeps nothing about the visitor.
+{
+  const docs = readdirSync(new URL('../site/docs/', import.meta.url)).filter((f) => f.endsWith('.html') && f !== 'index.html').map((f) => f.slice(0, -5)).sort();
+  assert.deepEqual([...hit.DOCS].sort(), docs, 'hit.js DOCS must list every page in site/docs/');
+  assert.equal(hit.page('/'), 'home');
+  assert.equal(hit.page('/index.html'), 'home');
+  assert.equal(hit.page('/analytics'), 'analytics');
+  assert.equal(hit.page('/docs/'), 'docs');
+  assert.equal(hit.page('/docs/install.html'), 'docs/install');
+  assert.equal(hit.page('/docs/install'), 'docs/install');
+  assert.equal(hit.page('/docs/<script>'), 'other');
+  assert.equal(hit.page('/docs/nope'), 'other');
+  assert.equal(hit.page({}), 'other');
+  assert.equal(hit.source('www.linkedin.com'), 'linkedin');
+  assert.equal(hit.source('lnkd.in'), 'linkedin');
+  assert.equal(hit.source('old.reddit.com'), 'reddit');
+  assert.equal(hit.source('news.ycombinator.com'), 'hackernews');
+  assert.equal(hit.source('www.google.co.il'), 'search');
+  assert.equal(hit.source('t.co'), 'x');
+  assert.equal(hit.source(''), 'direct');
+  assert.equal(hit.source('', 'hn'), 'hackernews');
+  assert.equal(hit.source('', '<b>'), 'direct');
+  assert.equal(hit.source('evil.example'), 'other');
+  assert.equal(hit.source('notlinkedin.com'), 'other');
+  assert.equal(hit.source('plonix.io'), null);
+  assert.equal(hit.source('a<b>.com'), 'other');
+  const now = new Date('2026-11-25T15:30:00Z');
+  const entry = hit.rows({ kind: 'view', path: '/', ref: 'www.reddit.com', src: '' }, { country: 'IL', ua: 'Mozilla/5.0', now });
+  assert.deepEqual(entry, [
+    { day: '2026-11-25', hour: 15, page: 'home', source: 'reddit', country: 'IL', kind: 'view' },
+    { day: '2026-11-25', hour: 15, page: 'home', source: 'reddit', country: 'IL', kind: 'visit' },
+  ]);
+  assert.equal(hit.rows({ kind: 'view', path: '/docs/', ref: 'plonix.io' }, { now }).length, 1);
+  assert.equal(hit.rows({ kind: 'visit', path: '/' }, { now }), null);
+  assert.equal(hit.rows({ kind: 'view', path: '/' }, { ua: 'Googlebot/2.1', now }), null);
+  assert.equal(hit.rows({ kind: 'view', path: '/' }, { country: '<x>', now })[0].country, 'XX');
+  assert.deepEqual(hit.rows({ kind: 'download_macos', path: '/', ref: '' }, { now }).map((r) => r.kind), ['download_macos']);
+  for (const id of hit.SOURCE_NAMES) assert.ok(stats.safeId(id));
+
+  // stats.js adds the hourly totals up per range.
+  const rows = [
+    ...entry.map((r) => ({ ...r, n: 3 })),
+    { day: '2026-11-25', hour: 9, kind: 'view', page: 'docs/install', source: 'internal', country: 'IL', n: 2 },
+    { day: '2026-11-25', hour: 9, kind: 'download_windows', page: 'home', source: 'direct', country: 'US', n: 1 },
+    { day: '2026-11-20', hour: 9, kind: 'visit', page: 'home', source: 'linkedin', country: 'US', n: 4 },
+    { day: '2026-11-20', hour: 9, kind: 'view', page: 'home', source: 'linkedin', country: 'US', n: 4 },
+    { day: '2026-10-01', hour: 9, kind: 'view', page: 'home', source: 'linkedin', country: 'US', n: 99 },
+    { day: '2026-11-25', hour: 15, kind: 'view', page: '<b>', source: 'x', country: 'US', n: 1 },
+  ];
+  const site = stats.siteSummary(rows, now);
+  assert.equal(site['24h'].visits, 3);
+  assert.equal(site['24h'].views, 6);
+  assert.equal(site['24h'].downloads.windows, 1);
+  assert.equal(site['24h'].series.length, 24);
+  assert.equal(site['24h'].series[23].visits, 3);
+  assert.deepEqual(site['24h'].sources, [{ id: 'reddit', count: 3 }]);
+  assert.equal(site['7d'].visits, 7);
+  assert.equal(site['7d'].series.length, 7);
+  assert.equal(site['30d'].series.length, 30);
+  assert.equal(site['30d'].views, 10);
+  assert.deepEqual(site['30d'].sources, [{ id: 'linkedin', count: 4 }, { id: 'reddit', count: 3 }]);
+  assert.deepEqual(site['24h'].pages, [{ id: 'home', count: 3 }, { id: 'docs/install', count: 2 }]);
+  assert.ok(!JSON.stringify(site).includes('<'));
 }
 
 console.log('functions ok');

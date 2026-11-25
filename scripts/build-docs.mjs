@@ -462,6 +462,7 @@ ${main}
   </div>
 </footer>
 ${THEME_SCRIPT}
+<script src="/assets/count.js?v=1" defer></script>
 </body>
 </html>
 `;
