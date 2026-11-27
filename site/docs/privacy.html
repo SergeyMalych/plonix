@@ -84,7 +84,10 @@
 <h2 id="the-public-totals">The public totals<a class="anchor" href="#the-public-totals" aria-label="Link to this section">#</a></h2>
 <p><a href="https://plonix.io/analytics" rel="noopener">plonix.io/analytics</a> shows totals over the last 30 days, built by <code>functions/api/stats.js</code>: downloads (from the GitHub release files), active and new installs, hours of use, which features and screens are used, kinds of work, versions, systems, project size ranges, the most rejected well-known domains, and the most used kinds of filter. No group of fewer than five installs is ever shown: it is folded into &quot;other&quot;, or left out. Single reports and install ids are never published.</p>
 <h2 id="the-website">The website<a class="anchor" href="#the-website" aria-label="Link to this section">#</a></h2>
-<p>The Plonix website, plonix.io, counts page views with Cloudflare Web Analytics, which its host adds to every page. Cloudflare says this sets no cookies and does not track you across sites. The website has no other trackers and no ads. The <a href="https://plonix.io/analytics" rel="noopener">public totals</a> above come only from Plonix itself, never from the website.</p>
+<p>The Plonix website, plonix.io, counts its own page views with a small script of its own (<code>site/assets/count.js</code>) and a function on the site (<code>functions/api/hit.js</code>). It sets no cookies, stores nothing in your browser, and gives you no id, so it cannot tell one visitor from another or follow you between pages or sites. Each page view sends only:</p>
+<ul><li>the page's path, such as <code>/docs/install</code> (anything that is not one of the site's own pages is counted as <code>other</code>),</li><li>the name of the site you followed a link from, such as <code>www.linkedin.com</code>, never its full address, and a <code>ref</code> or <code>utm_source</code> tag if the link had one,</li><li>and, when you click a download button, which download it was.</li></ul>
+<p>The function turns these into fixed names (a page, a source such as <code>linkedin</code>, <code>reddit</code>, <code>hackernews</code> or <code>other</code>, and the two-letter country Cloudflare reports for the connection) and adds one to a total for that hour. It never stores your IP address, your browser's User-Agent or any other header, and no single visit is ever kept. Requests that look like bots are not counted. If your browser sends Global Privacy Control or Do Not Track, the script sends nothing at all.</p>
+<p>These totals are public too: <a href="https://plonix.io/analytics" rel="noopener">plonix.io/analytics</a> shows visits, page views, download clicks, where visits come from, which pages are read and visitors' countries, over the last 24 hours, 7 days and 30 days. The website has no other trackers and no ads. The usage statistics above come only from Plonix itself, never from the website.</p>
 </article>
 <p class="edit">This page is <a href="https://github.com/SergeyMalych/plonix/blob/main/docs/privacy.md">docs/privacy.md</a> in the Plonix repository. Spotted something wrong? <a href="https://github.com/SergeyMalych/plonix/edit/main/docs/privacy.md">Suggest a change</a>.</p>
 </main>
@@ -142,5 +145,6 @@
   });
 })();
 </script>
+<script src="/assets/count.js?v=1" defer></script>
 </body>
 </html>

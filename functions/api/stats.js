@@ -4,13 +4,14 @@
 // it is folded into "Other", or left out when "Other" would be smaller than K too. Breakdowns appear only once
 // at least K installs reported in the window. Raw reports never leave the database.
 //
-// Reads the D1 database bound as USAGE (migrations/) and the download counts of the GitHub releases. The
-// answer is cached for an hour, so the page costs at most one query batch an hour.
+// Reads the D1 database bound as USAGE (migrations/): the app's usage reports, and the website's hourly page
+// counts (site_hits, written by functions/api/hit.js), plus the download counts of the GitHub releases. The
+// answer is cached for five minutes, so the page costs at most one query batch every five minutes.
 
 export const K = 5;
 export const WINDOW_DAYS = 30;
 const REPO = 'SergeyMalych/plonix';
-const CACHE_S = 3600;
+const CACHE_S = 300;
 
 const day = (d) => d.toISOString().slice(0, 10);
 const addDays = (d, n) => new Date(d.getTime() + n * 86400000);
@@ -191,6 +192,75 @@ export function downloads(releases) {
   return out;
 }
 
+const RANGES = { '24h': 24, '7d': 7 * 24, '30d': 30 * 24 };
+// Site names: fixed page, source and country names from hit.js, such as docs/install, linkedin or IL.
+const SITE_ID = /^[a-z0-9][a-z0-9/-]{0,63}$/i;
+const top = (map, n) => {
+  const list = [...map].filter(([id]) => typeof id === 'string' && SITE_ID.test(id)).map(([id, count]) => ({ id, count })).sort((a, b) => b.count - a.count || a.id.localeCompare(b.id));
+  if (list.length <= n) return list;
+  const rest = list.slice(n - 1).reduce((t, x) => t + x.count, 0);
+  return [...list.slice(0, n - 1), { id: 'other', count: rest }];
+};
+
+/**
+ * The website's numbers: views, visits and download clicks for the last 24 hours, 7 days and 30 days, with a
+ * chart series (hourly for 24 hours, daily otherwise) and where visits came from, which pages were read and
+ * the visitors' countries. rows: { day, hour, kind, page, source, country, n } from site_hits. These are counts
+ * of page views, not of people, so nothing is hidden for being small.
+ */
+export function siteSummary(rows, now = new Date()) {
+  const hourStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), now.getUTCHours());
+  const stamp = (r) => Date.parse(`${r.day}T00:00:00Z`) + (Number(r.hour) || 0) * 3600000;
+  const out = {};
+  for (const [key, hours] of Object.entries(RANGES)) {
+    const from = hourStart - (hours - 1) * 3600000;
+    const hourly = hours === 24;
+    const slots = hourly ? 24 : hours / 24;
+    const series = [];
+    for (let i = slots - 1; i >= 0; i--) {
+      const t = hourly ? hourStart - i * 3600000 : Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - i * 86400000;
+      series.push({ t: new Date(t).toISOString(), views: 0, visits: 0 });
+    }
+    const slot = (r) => {
+      const at = stamp(r);
+      const base = Date.parse(series[0].t);
+      const i = Math.floor((at - base) / (hourly ? 3600000 : 86400000));
+      return series[i];
+    };
+    const sources = new Map(), pages = new Map(), countries = new Map();
+    const r0 = { views: 0, visits: 0, downloads: { macos: 0, windows: 0 } };
+    for (const r of rows) {
+      const n = Number.isInteger(r.n) && r.n > 0 ? r.n : 0;
+      if (!n || stamp(r) < (hourly ? from : Date.parse(series[0].t)) || stamp(r) > hourStart) continue;
+      const s = slot(r);
+      if (r.kind === 'view') {
+        r0.views += n;
+        if (s) s.views += n;
+        bump(pages, r.page, n);
+      } else if (r.kind === 'visit') {
+        r0.visits += n;
+        if (s) s.visits += n;
+        bump(sources, r.source, n);
+        bump(countries, r.country, n);
+      } else if (r.kind === 'download_macos') r0.downloads.macos += n;
+      else if (r.kind === 'download_windows') r0.downloads.windows += n;
+    }
+    out[key] = { ...r0, series, sources: top(sources, 20), pages: top(pages, 12), countries: top(countries, 12) };
+  }
+  return out;
+}
+
+async function siteFromDatabase(db, now) {
+  const from = day(addDays(now, -31));
+  try {
+    const res = await db.prepare('SELECT day, hour, kind, page, source, country, n FROM site_hits WHERE day >= ?').bind(from).all();
+    return siteSummary(res.results || [], now);
+  } catch (_) {
+    // No hits yet: the table is made on the first one.
+    return siteSummary([], now);
+  }
+}
+
 async function fetchDownloads() {
   try {
     const res = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=100`, {
@@ -226,7 +296,8 @@ export async function onRequestGet({ request, env, waitUntil }) {
       usage = null;
     }
   }
-  const body = { generated_at: new Date().toISOString(), collecting: !!env.USAGE, usage, downloads: await fetchDownloads() };
+  const site = env.USAGE ? await siteFromDatabase(env.USAGE, new Date()) : null;
+  const body = { generated_at: new Date().toISOString(), collecting: !!env.USAGE, usage, site, downloads: await fetchDownloads() };
   const res = new Response(JSON.stringify(body), {
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
